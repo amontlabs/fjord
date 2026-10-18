@@ -197,12 +197,26 @@ private actor SocketRequestTransport {
     func start() {
         guard readerTask == nil else { return }
         let socket = self.socket
+        // The blocking reads on a thread of their own, never on Swift's cooperative pool: it has a thread per core, and one
+        // held in `recv` for the connection's life is one fewer for everything else (on a three-core machine, with two
+        // more held elsewhere, the task that would have answered never ran). The frames come back in order through a stream.
+        let (frames, sink) = AsyncThrowingStream.makeStream(of: Data.self)
+        let reader = Thread {
+            do {
+                while let frame = try socket.readFrame() { sink.yield(frame) }
+                sink.finish(throwing: SocketClientFailure.closed)
+            } catch {
+                sink.finish(throwing: error)
+            }
+        }
+        reader.name = "fjord.silo.socket.reader"
+        reader.qualityOfService = .utility
+        reader.start()
         readerTask = Task.detached(priority: .utility) { [weak self] in
             do {
-                while !Task.isCancelled {
-                    guard let frame = try socket.readFrame() else { throw SocketClientFailure.closed }
-                    await self?.receive(frame)
-                }
+                for try await frame in frames { await self?.receive(frame) }
+                // Cancelled (`close`): the socket is shut down, and the reader ends on its own.
+                throw SocketClientFailure.closed
             } catch {
                 await self?.connectionFailed(error)
             }

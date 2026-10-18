@@ -181,8 +181,9 @@ final class FakeSiloUnixServer: @unchecked Sendable {
 
     private func acceptConnections() async {
         var connectionNumber = 0
+        let listener = self.listener
         while !Task.isCancelled {
-            let descriptor = Darwin.accept(listener, nil, nil)
+            let descriptor = await Self.blocking { Darwin.accept(listener, nil, nil) }
             guard descriptor >= 0 else { return }
             connectionNumber += 1
             var noSigPipe: Int32 = 1
@@ -203,7 +204,10 @@ final class FakeSiloUnixServer: @unchecked Sendable {
 
     private func serve(_ connection: FakeSiloSocket, number: Int) async {
         defer { connection.close() }
-        while !Task.isCancelled, let frame = try? Self.readFrame(connection.descriptor) {
+        let descriptor = connection.descriptor
+        // One frame at a time, the next read only once the read gate lets it: a gate holding it leaves the client's writes
+        // to fill the socket.
+        while !Task.isCancelled, let frame = await Self.blocking({ try? Self.readFrame(descriptor) }) {
             guard let object = try? JSONSerialization.jsonObject(with: frame) as? [String: Any],
                   let id = object["id"] as? String, let method = object["method"] as? String else { return }
             let params = object["params"] as? [String: Any] ?? [:]
@@ -223,6 +227,17 @@ final class FakeSiloUnixServer: @unchecked Sendable {
                 }
             }
             await readGate(request)
+        }
+    }
+
+    /// `work` (an `accept` or a read, which block) on a thread of its own, never on Swift's cooperative pool: that pool has a
+    /// thread per core, and on CI's three-core runner the server's accept and read and the client's reader filled it, so the
+    /// task that would have answered never ran and the suite hung.
+    private static func blocking<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            let thread = Thread { continuation.resume(returning: work()) }
+            thread.qualityOfService = .utility
+            thread.start()
         }
     }
 
