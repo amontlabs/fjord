@@ -1135,6 +1135,9 @@ private struct AccountPausingGuestClient: GuestClient {
         var snapshot = ClaudeSnapshot()
         snapshot.sessions = [mirror]
         snapshot.activity = [desktopID: ClaudeActivity(text: "Reading stale mirror", since: opened)]
+        // A read of the app as the feed makes one, stamped when it is taken: one stamped before a change since would be
+        // dropped for a real read of this machine (none of these sessions).
+        snapshot.stamp = store.claudeStamp
         store.applyClaude(snapshot)
 
         #expect(store.claudeSessions[desktopID]?.running == false)
@@ -1151,6 +1154,7 @@ private struct AccountPausingGuestClient: GuestClient {
         _ = try await guest.filesWrite(.init(computer: computer, path: GuestRouterPaths.join(paths.presence, cliID),
                                               data: presence, mode: 0o600))
         await inaccessible.wait()
+        snapshot.stamp = store.claudeStamp
         store.applyClaude(snapshot)
         #expect(store.claudeSessions[desktopID]?.running == false)
         #expect(store.claudeActivity[desktopID]?.text == "Writing")
