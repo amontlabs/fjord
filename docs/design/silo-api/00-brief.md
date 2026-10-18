@@ -9,7 +9,7 @@ Read [95-decisions.md](95-decisions.md) next. Its §3 amendments override earlie
 - **Silo becomes an engine:**
   - a Rust library;
   - a long-running engine process (called `silod` here) that hosts it. On macOS it runs as a LaunchAgent in the user's GUI login session.
-- **Fjord becomes the main macOS frontend.** Fjord is the Swift app in `/Users/polarzero/code/projects/lookout`, internally still "Fjord Computer". Its tools are the Router and Triage.
+- **Fjord becomes the main macOS frontend.** Fjord is the Swift app in `/Users/polarzero/code/projects/lookout`. Its tools are the Router and Triage.
 - **Silo's current Tauri UI** becomes one more client of the same engine while Fjord progressively rewrites the screens in Swift.
 - **Hosts and controllers are Macs only.** Linux hosts, their engine service, Debian/AppImage updates and headless setup are retired; Macs still run both Linux and macOS computers (95 §3).
 - **Engines on other devices** are reached over SSH, building on Silo's existing Connections bridge.

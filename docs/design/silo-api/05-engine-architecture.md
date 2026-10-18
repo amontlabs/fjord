@@ -455,7 +455,7 @@ pub trait ProcessControl: Send + Sync {
 | — | Window creation | UI windows; the macOS display window is engine-owned AppKit code (§ 3.6), not a Tauri capability | Client, except macOS display |
 | — | Dialogs | 19 lines (§ 2.4 table) | **Client only** |
 | — | Opener | 2 | **Client only** |
-| — | Updater plugin | Tauri updater stays in the Silo UI app; Fjord has its own updater (Fjord: `Sources/FjordComputer/Updater.swift:7-9`) | **Client** (§ 6 handshake) |
+| — | Updater plugin | Tauri updater stays in the Silo UI app; Fjord has its own updater (Fjord: `Sources/Fjord/Updater.swift:7-9`) | **Client** (§ 6 handshake) |
 | — | Tray, menu, theme, status panel, titlebar, material, viewer shortcuts, Url | §§ 2.3-2.4 | **Client only** |
 
 `Audience` (NEW) replaces `emit_to(label, …)`:
@@ -558,7 +558,7 @@ So an engine started from a bare binary is `.prohibited` and cannot show the win
 
 | Who | What | Source |
 | --- | --- | --- |
-| Fjord | Switches between `.accessory` (bar only) and `.regular` while its window is open | Fjord: `Sources/FjordComputer/AppWindow.swift:9-20`; `LSUIElement` set in Fjord: `scripts/build-app.sh:41` |
+| Fjord | Switches between `.accessory` (bar only) and `.regular` while its window is open | Fjord: `Sources/Fjord/AppWindow.swift:9-20`; `LSUIElement` set in Fjord: `scripts/build-app.sh:41` |
 | Lume | `lume run` starts `.accessory` (or `.regular` with a startup window) and "keeps them ready for a later native attach". `VMDisplayPresenter.show` switches to `.regular` when it attaches a VM window. | `cua: libs/lume/src/VM/NativeApplicationLoop.swift:8-46`; `cua: libs/lume/src/VM/VMDisplayPresenter.swift:242-247` |
 | Tart | Chooses once at launch: `.prohibited` plus `NSApplication.run()` for `--no-graphics` (or VNC without graphics), else the UI path, whose app delegate sets `.regular` | https://github.com/cirruslabs/tart/blob/main/Sources/tart/Commands/Run.swift |
 
@@ -1149,7 +1149,7 @@ Writes from two clients are already serialized by one Rust mutex (`src-tauri/src
   8. on failure, reopens macOS admission and restores the running set (`src-tauri/src/updates.rs:838-844`);
   9. on success, `shutdown::begin()`, then `restart()`. Restart skips the Quit flow (`ExitRequest::Restart`, `src-tauri/src/settings.rs:678-697`).
 - **After the update.** At the next start, `update_recovery::recover` resumes exactly that set and deletes the journal. A partial failure keeps the failed entries (`src-tauri/src/runtime/update_recovery.rs:231-310`; `src-tauri/src/startup.rs:227-233`).
-- **Fjord's own updater** waits only for Fjord's own PID, then swaps the whole `.app` bundle and opens it (Fjord: `Sources/FjordComputer/Updater.swift:337-361`).
+- **Fjord's own updater** waits only for Fjord's own PID, then swaps the whole `.app` bundle and opens it (Fjord: `Sources/Fjord/Updater.swift:337-361`).
 
 ### 6.2 Client quit and engine update are separate contracts
 
@@ -1157,7 +1157,7 @@ Writes from two clients are already serialized by one Rust mutex (`src-tauri/src
 
 A Fjord update or Fjord crash only loses that client connection; neither calls `engine.shutdown` nor stops computers (95 A-2). The separate `silod` process continues to own macOS VMs (§1.4). This does not claim VM survival after an engine crash.
 
-**DECIDED (95 A-6):** Replace the engine only when its own version changes. The containing Mac app's installer prepares save-and-resume, waits for preparation to finish, calls `engine.shutdown {reason: "update", stopComputers: false}`, waits for engine exit, replaces its package, then restarts its LaunchAgent. A client-only update skips this handshake. No Debian/AppImage or Linux-service update route exists (95 §3 Linux hosts dropped). The installer never replaces an engine executable while it is serving; Fjord's present updater waits only for its own PID (Fjord: `Sources/FjordComputer/Updater.swift:337-361`), so this coordination is NEW, justified by 95 A-6. The exact package owner and installed paths require packaging research (OQ1/2).
+**DECIDED (95 A-6):** Replace the engine only when its own version changes. The containing Mac app's installer prepares save-and-resume, waits for preparation to finish, calls `engine.shutdown {reason: "update", stopComputers: false}`, waits for engine exit, replaces its package, then restarts its LaunchAgent. A client-only update skips this handshake. No Debian/AppImage or Linux-service update route exists (95 §3 Linux hosts dropped). The installer never replaces an engine executable while it is serving; Fjord's present updater waits only for its own PID (Fjord: `Sources/Fjord/Updater.swift:337-361`), so this coordination is NEW, justified by 95 A-6. The exact package owner and installed paths require packaging research (OQ1/2).
 
 **Qualified macOS saved-state mechanism (B-30).** On host macOS 26.5 / guest 26.6.2, pause → `saveMachineStateTo` → APFS disk/auxiliary clone → host-process SIGKILL → new process with the same VZ configuration → restore → resume preserved `kern.boottime` and the same guest sleep process/PID/start time. Guest uptime advanced 42→44 s while host time advanced about 50 s, so the saved interval is excluded from guest uptime. Follow-up timings were pause 0.007 s, save 2.279 s, clone 0.241 s, restore 6.708 s, resume 0.484 s and SSH readiness 1.184 s ([macos.md Follow-up §B-30](probes/macos.md#b-30--confirmed-for-saved-guest-state)).
 

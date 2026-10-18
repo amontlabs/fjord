@@ -378,7 +378,7 @@ The old command (`settings.rs:813-829`) is not exposed in this API. The Tauri UI
 
 ### 2.3 Canonical settings fields, classified
 
-"Engine reads" lists the Rust reader. "Engine state" means the engine's behaviour depends on the field. "Per-client" means only a frontend uses it. The canonical settings retain these client preferences; the Tauri UI moves to the new contract (95 §3), while Fjord keeps its own equivalents in `AppSettings` (`Sources/FjordComputer/Models.swift:78-101`).
+"Engine reads" lists the Rust reader. "Engine state" means the engine's behaviour depends on the field. "Per-client" means only a frontend uses it. The canonical settings retain these client preferences; the Tauri UI moves to the new contract (95 §3), while Fjord keeps its own equivalents in `AppSettings` (`Sources/Fjord/Models.swift:78-101`).
 
 | Field | Type (Rust `settings.rs:245-283` / TS `features/preferences/model/settings.ts:4-31`) | Default (TS `settings.ts:38-62`) | Engine reads | Class |
 | --- | --- | --- | --- | --- |
@@ -430,7 +430,7 @@ The Tauri commands are `read_system_integrations`, `set_login_item`, `request_no
 Classification: **all client-side, not in the API.**
 
 - Each describes the **calling app's** bundle: `mainAppService`, `UNUserNotificationCenter.current`.
-- Fjord already has its own: login item `Sources/FjordComputer/System.swift:319-328`, notification setup and authorization `Sources/FjordComputer/System.swift:8-31`.
+- Fjord already has its own: login item `Sources/Fjord/System.swift:319-328`, notification setup and authorization `Sources/Fjord/System.swift:8-31`.
 - The Tauri UI moves to the canonical engine methods and owns its own OS integrations, without old-command compatibility paths (95 §3).
 
 `show_integration_error` is also called from engine code paths: startup failures (export/import recovery `startup.rs:164-171`, setup recovery `startup.rs:196-204`, action recovery `startup.rs:219-225`, autostart `startup.rs:258-265`), a failed Quit (`settings.rs:920-935`) and menu open failures (`app_menu.rs:436-444,478-488`). The setup, action and autostart cases also emit a notice (`startup.rs:187-195,210-218,249-257`); the export/import recovery case does not. In the engine those dialogs become the notice stream (§4) or the error of the method concerned. The engine opens no dialogs.
@@ -495,11 +495,11 @@ Classification: **all client-side, not in the API.**
 ### 4.2 Engine shape: retained notices that Fjord renders
 
 Required by: Fjord renders its own notifications from its own model and settings:
-- `Notifier` (`Sources/FjordComputer/System.swift:8-73`)
-- posting gated on Fjord's window, `settings.notifications` and snooze (`Sources/FjordComputer/RouterKeys.swift:165-178`)
-- the `notifications` setting (`Sources/FjordComputer/Models.swift:84`)
+- `Notifier` (`Sources/Fjord/System.swift:8-73`)
+- posting gated on Fjord's window, `settings.notifications` and snooze (`Sources/Fjord/RouterKeys.swift:165-178`)
+- the `notifications` setting (`Sources/Fjord/Models.swift:84`)
 
-Fjord also has a card model for the Router and Triage (`RouterCard`, `Sources/FjordComputer/Router.swift:203`; Triage's `Thing`, `Sources/FjordComputer/InboxModel.swift:533`). Every piece of policy in §4.1 that depends on a window, OS authorization or a client preference therefore moves to the client. The engine retains and emits notices; only Fjord presents them, and the engine posts no OS notifications (95 A-27).
+Fjord also has a card model for the Router and Triage (`RouterCard`, `Sources/Fjord/Router.swift:203`; Triage's `Thing`, `Sources/Fjord/InboxModel.swift:533`). Every piece of policy in §4.1 that depends on a window, OS authorization or a client preference therefore moves to the client. The engine retains and emits notices; only Fjord presents them, and the engine posts no OS notifications (95 A-27).
 
 #### notifications.notice (event)
 - Kind: subscription
@@ -622,7 +622,7 @@ Only Mac engine packages use this save/shutdown/replace/resume handoff (95 A-6 a
 
 `open_update_release` (`updates.rs:866-875`) opens `RELEASE_URL` in the user's chosen browser on the engine's host. **Client-side, not in the API:** `UpdateSnapshot.releaseUrl` carries the URL, and opening a browser is a launch on the user's device (§2.3 `browser*`).
 
-Engine updates are separate from Fjord app updates: compare the engine version and use the save/resume handoff only when it changes (95 A-6). Fjord's existing app swap (`Sources/FjordComputer/Updater.swift:327-360`) must leave the running engine and computers alone when that version is unchanged (95 A-2, A-6). Stable Mac packaging and installer coordination remain B-22/C-9.
+Engine updates are separate from Fjord app updates: compare the engine version and use the save/resume handoff only when it changes (95 A-6). Fjord's existing app swap (`Sources/Fjord/Updater.swift:327-360`) must leave the running engine and computers alone when that version is unchanged (95 A-2, A-6). Stable Mac packaging and installer coordination remain B-22/C-9.
 ---
 
 ## 6. App shell: classification
@@ -696,7 +696,7 @@ Engine calls behind each step, all in other sections. Each current command below
 
 - **Settings calls:** onboarding reads settings (`settings.read`, `settings.changed`) and writes only through client-owned drafts, `settings.update` and `settings.flush` (95 A-5) (`app/SiloUI/src/features/onboarding/onboarding-app.tsx:165,234,273,292,300,309`; `production-onboarding.tsx:200-201,248`).
 - **What the engine keeps:** only `onboardingComplete` matters to it, because autostart waits for it (`startup.rs:18-26`). The draft is per-client UI state (§2.3).
-- **Fjord:** has its own first-launch onboarding (`Sources/FjordComputer/Onboarding.swift:3-9`) and flag (`AppSettings.toolsPicked`, `Sources/FjordComputer/Models.swift:80-81`).
+- **Fjord:** has its own first-launch onboarding (`Sources/Fjord/Onboarding.swift:3-9`) and flag (`AppSettings.toolsPicked`, `Sources/Fjord/Models.swift:80-81`).
 
 ---
 

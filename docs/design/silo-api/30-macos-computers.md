@@ -1175,16 +1175,16 @@ The one method is owned by [40 §clipboard.transfer](40-desktop-display-computer
   - Fjord writes the SSH connection, installs its plugin and hook in the guest, and moves
     message delivery, forms and presence to and from the guest.
   - Today's host-side install:
-    - writes the plugin folder (`Sources/FjordComputer/ClaudePlugin.swift:35-57`);
+    - writes the plugin folder (`Sources/Fjord/ClaudePlugin.swift:35-57`);
     - runs `claude plugin marketplace add`, `plugin install`, `plugin update` and
       `plugin enable` (`ClaudePlugin.swift:818-848`);
     - writes a hook script and `~/.claude/settings.json`
-      (`Sources/FjordComputer/Forms.swift:594-596`, `633-662`).
+      (`Sources/Fjord/Forms.swift:594-596`, `633-662`).
   - In a guest, each of those is a file write or a command as `silo`.
 - **Triage "Run in a computer"** (BRIEF line 22): unattended headless Claude Code runs. The
   `claude -p` runs Fjord already makes are on the host and for the Router only: its
   dispatcher (Haiku, no built-in tools) and its one-message sender
-  (`Sources/FjordComputer/RouterRun.swift:155`, `230`). No Triage `claude` run exists yet. In
+  (`Sources/Fjord/RouterRun.swift:155`, `230`). No Triage `claude` run exists yet. In
   a guest, a headless run would be a long-running command with streamed output.
 
 ### guest.exec (macOS computer)
@@ -1468,7 +1468,7 @@ bridge's `macos.action` fan out by their `action` argument, so they have one row
      ~/.ssh/config".
    - PARTLY B-11: first-party Desktop honored the Linux Silo Include/ProxyCommand with pinned keys and `IdentityAgent none`; Desktop overrode alias BatchMode to `no`. macOS Desktop relay integration and credential/plugin details remain OPEN ([linux.md §B-11](probes/linux.md#b-11--claude-desktop-ssh-alias); 50 Q4).
 2. **DECIDED (95 A-38):** Fjord ships a guest-compatible hook script and plugin installed through `guest.files.*`; no guest component depends on Fjord's macOS binary.
-   - Remaining probe B-15: validate guest paths, form delivery and presence with the new guest artifacts (70); today's hook execs the host binary (`Sources/FjordComputer/Forms.swift:616-626`) and plugin uses host absolute paths (`ClaudePlugin.swift:38-43`).
+   - Remaining probe B-15: validate guest paths, form delivery and presence with the new guest artifacts (70); today's hook execs the host binary (`Sources/Fjord/Forms.swift:616-626`) and plugin uses host absolute paths (`ClaudePlugin.swift:38-43`).
 3. **DECIDED (95 A-20):** A remote macOS screen uses the existing Screen Sharing stream and controller viewer route (§5).
    - Independent per-client viewer connections are NEW, justified by 95 A-28; browser-origin qualification remains a technical probe (40 OQ3/B-21).
 4. **DECIDED (95 A-21):** `silod` appears in the Dock and ⌘-Tab only while a VM window is open; it switches regular/accessory activation as windows open/close (05 §3.6).
