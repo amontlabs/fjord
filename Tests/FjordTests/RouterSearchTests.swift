@@ -85,7 +85,7 @@ import Testing
     @Test func theKeysWalkOnlyWhatTheSearchListsAndAPickItHidesIsDropped() throws {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let open = model.cards(store).filter(\.isOpen)
         try #require(open.count >= 2)
         let kept = open[1], hidden = open[0]
@@ -159,9 +159,8 @@ import Testing
     @Test func commandFOpensThePaletteEscEndsASearchAndTypingStillGoesToTheComposer() {
         let store = demo()
         let model = RouterModel()
-        var closed = false
         var opened = 0
-        let keys = RouterKeys(store: store, model: model) { closed = true }
+        let keys = RouterKeys(store: store, model: model)
         keys.openPalette = { opened += 1 }
         let request = model.search.focusRequest
         #expect(keys.key(key(kVK_ANSI_F, "f", .command), responder: nil))
@@ -174,7 +173,7 @@ import Testing
         #expect(keys.key(key(kVK_DownArrow), responder: field) && model.selection != nil)
         // Esc there ends the search, and doesn't close the window.
         #expect(keys.key(key(kVK_Escape), responder: field))
-        #expect(model.search.query.isEmpty && !model.search.focused && !closed)
+        #expect(model.search.query.isEmpty && !model.search.focused)
         // Off any field, a letter goes to the composer, not the search.
         let composer = model.focusRequest
         #expect(keys.key(key(kVK_ANSI_B, "b"), responder: nil))
@@ -184,7 +183,7 @@ import Testing
         model.search.focused = false
         let reply = model.replyTo
         #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.search.query.isEmpty && model.replyTo == reply && !closed)
+        #expect(model.search.query.isEmpty && model.replyTo == reply)
     }
 
     /// The searched history is worked out once per change of the words or the history, and follows every change that could

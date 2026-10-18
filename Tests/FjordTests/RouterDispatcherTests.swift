@@ -720,7 +720,7 @@ import Testing
         await finish(d, f, asked)
         let options = d.askBacks.last!.options.filter { d.eligible($0.target, store: s) }
         try? #require(options.count >= 2)
-        let keys = RouterKeys(store: s, model: RouterModel()) {}
+        let keys = RouterKeys(store: s, model: RouterModel())
         // By key position: the "2" key (é on AZERTY) with ⌘.
         let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0,
                                      context: nil, characters: "é", charactersIgnoringModifiers: "é", isARepeat: false,
