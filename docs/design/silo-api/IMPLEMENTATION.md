@@ -4,6 +4,8 @@ This is the orchestration tracker, kept by the coordinating agent. The spec is t
 
 ## Status (2026-10-15)
 
+2026-10-18: Fjord now embeds a published engine release (`scripts/silod.release`, downloaded and hash-checked by `build-silod.sh`) instead of building a pinned Silo commit (`scripts/silod.commit`, removed). The signer requirement is written into the engine Info.plist as `SiloEngineCodeRequirement`.
+
 All planned engine and Fjord work is merged. Silo main (3b08abb6) is pushed to GitHub and `scripts/silod.commit` pins it. Live checks pass: macOS (probes/live-final.md), the end-to-end engine and GUI (probes/e2e.md, e2e-gui.md), and Router "Runs on" in a real Claude Desktop SSH session (probes/e2e-router.md).
 
 Triage in a computer no longer runs headless (95-decisions, 2026-10-15 amendment): it starts a Router Desktop SSH session with one Send, so B-17 is not needed.
