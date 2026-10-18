@@ -54,15 +54,19 @@ fi
 RELEASE_DIR="${1%/}"
 
 # A download must be the pinned version; any release must match the schema snapshot Fjord's client is generated from.
-python3 -I - "$RELEASE_DIR/release.json" "$EXPECT_VERSION" "$SCHEMA_SHA256" "${UNIVERSAL:-0}" <<'PY'
+[ -f "$RELEASE_DIR/api/silo-api.schema.json" ] || { echo "Engine release has no api/silo-api.schema.json." >&2; exit 1; }
+ARCHIVE_SCHEMA_SHA256="$(sha256_of "$RELEASE_DIR/api/silo-api.schema.json")"
+python3 -I - "$RELEASE_DIR/release.json" "$EXPECT_VERSION" "$SCHEMA_SHA256" "${UNIVERSAL:-0}" "$ARCHIVE_SCHEMA_SHA256" <<'PY'
 import json
 import sys
 
-path, expect_version, schema_sha256, universal = sys.argv[1:]
+path, expect_version, schema_sha256, universal, file_sha256 = sys.argv[1:]
 with open(path, encoding="utf-8") as handle:
     release = json.load(handle)
 if expect_version and release.get("engineVersion") != expect_version:
     sys.exit(f"Engine release is {release.get('engineVersion')}; scripts/silod.release pins {expect_version}.")
+if release.get("schemaSha256") != file_sha256:
+    sys.exit(f"Engine release api/silo-api.schema.json hashes to {file_sha256}, not the {release.get('schemaSha256')} in its release.json.")
 if release.get("schemaSha256") != schema_sha256:
     sys.exit(
         f"Engine release schemaSha256 {release.get('schemaSha256')} differs from schemas/silo-api/manifest.json "
@@ -122,6 +126,9 @@ cp "$SOURCE_PLIST" "$OUTER_AGENT"
 plutil -replace BundleProgram -string \
   "Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod" \
   "$OUTER_AGENT"
+
+# A tarball made on a Mac can carry com.apple.provenance/FinderInfo, which codesign rejects as detritus.
+xattr -cr "$ENGINE_APP"
 
 # Sign nested code first. Do not use --deep: it would replace the engine's signature.
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \

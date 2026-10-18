@@ -18,6 +18,8 @@ A Swift package (Swift tools 5.10, macOS 14+). The app is built into a bundle, w
 ./scripts/build-app.sh && open "build/Fjord.app"
 ```
 
+Until `scripts/silod.release` has a `SILOD_SHA256`, `build-app.sh` needs `SILOD_ARCHIVE` pointing at a local engine tarball (Silo's `package-engine.py` builds one).
+
 `build-app.sh` needs Xcode's command-line tools (`xcrun actool` compiles the layered icon, `Resources/AppIcon.icon`). It takes:
 
 | Variable | Effect |
