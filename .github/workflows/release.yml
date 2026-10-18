@@ -25,27 +25,10 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
-      - name: Read pinned Silo source revision
-        run: echo "SILOD_SOURCE_COMMIT=$(cat scripts/silod.commit)" >> "$GITHUB_ENV"
-
       # Bounded: a test that hangs can't hold the runner (the slowest full run takes a few minutes).
       - name: Test
         timeout-minutes: 20
         run: ./scripts/test.sh
-
-      - name: Checkout pinned Silo engine source
-        uses: actions/checkout@v5
-        with:
-          repository: amontlabs/silo
-          ref: ${{ env.SILOD_SOURCE_COMMIT }}
-          path: microsandbox-workspaces
-          token: ${{ secrets.SILO_SOURCE_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Install the Silo Rust toolchain and universal targets
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.94.0
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       # One certificate for every release: macOS keeps Accessibility access across updates, and the in-app
       # updater only installs a release signed by the same certificate as the running app.
@@ -70,8 +53,6 @@ jobs:
           echo "SIGN_IDENTITY=${{ vars.SIGN_IDENTITY || 'Fjord Dev' }}" >> "$GITHUB_ENV"
 
       - name: Build universal app
-        env:
-          SILO_REPO_PATH: ${{ github.workspace }}/microsandbox-workspaces
         run: |
           UNIVERSAL=1 ./scripts/build-app.sh
           codesign -dr - "build/Fjord.app"

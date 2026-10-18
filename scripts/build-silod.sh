@@ -1,35 +1,80 @@
 #!/bin/bash
-# Build and sign the pinned Silo engine app embedded by build-app.sh.
+# Assemble and sign the pinned Silo engine app embedded by build-app.sh.
+# The engine is a published Silo release (scripts/silod.release). SILOD_ARCHIVE=/path/to/silo-engine-*.tar.gz
+# uses a local archive instead (no pin check), to try an unreleased build.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FJORD_APP="${1:?usage: build-silod.sh FJORD_APP SIGNING_IDENTITY}"
 SIGNING_IDENTITY="${2:?usage: build-silod.sh FJORD_APP SIGNING_IDENTITY}"
-SILO_REPO="${SILO_REPO_PATH:-$ROOT/../microsandbox-workspaces}"
-SILO_COMMIT="$(tr -d '[:space:]' < "$ROOT/scripts/silod.commit")"
-SILO_ROOT="$SILO_REPO/app/SiloUI"
-SILOD_SOURCE="$SILO_ROOT/src-tauri/silod"
-SILO_TARGET_DIR="${SILO_TARGET_DIR:-$ROOT/build/silod-target}"
+RELEASE_FILE="$ROOT/scripts/silod.release"
+SILOD_VERSION="$(sed -n 's/^SILOD_VERSION=//p' "$RELEASE_FILE" | tr -d '[:space:]')"
+SILOD_SHA256="$(sed -n 's/^SILOD_SHA256=//p' "$RELEASE_FILE" | tr -d '[:space:]')"
+[ -n "$SILOD_VERSION" ] || { echo "scripts/silod.release has no SILOD_VERSION." >&2; exit 1; }
+SCHEMA_SHA256="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["schemaSha256"])' "$ROOT/schemas/silo-api/manifest.json")"
 
-if [ ! -d "$SILO_REPO/.git" ] && [ ! -f "$SILO_REPO/.git" ]; then
-  echo "Silo checkout not found at $SILO_REPO (set SILO_REPO_PATH to its checkout)." >&2
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+sha256_of() { shasum -a 256 "$1" | awk '{ print $1 }'; }
+
+if [ -n "${SILOD_ARCHIVE:-}" ]; then
+  [ -f "$SILOD_ARCHIVE" ] || { echo "SILOD_ARCHIVE not found: $SILOD_ARCHIVE" >&2; exit 1; }
+  ARCHIVE="$SILOD_ARCHIVE"
+  EXPECT_VERSION=""
+else
+  if [ -z "$SILOD_SHA256" ]; then
+    echo "scripts/silod.release has no SILOD_SHA256 yet; publish engine-v$SILOD_VERSION in Silo and pin its tarball hash, or set SILOD_ARCHIVE." >&2
+    exit 1
+  fi
+  EXPECT_VERSION="$SILOD_VERSION"
+  ARCHIVE_NAME="silo-engine-$SILOD_VERSION-macos-universal.tar.gz"
+  CACHE_DIR="$ROOT/build/silod-cache/$SILOD_VERSION"
+  ARCHIVE="$CACHE_DIR/$ARCHIVE_NAME"
+  mkdir -p "$CACHE_DIR"
+  if [ ! -f "$ARCHIVE" ] || [ "$(sha256_of "$ARCHIVE")" != "$SILOD_SHA256" ]; then
+    curl --fail --location --retry 3 --silent --show-error --output "$ARCHIVE.part" \
+      "https://github.com/amontlabs/silo/releases/download/engine-v$SILOD_VERSION/$ARCHIVE_NAME"
+    mv "$ARCHIVE.part" "$ARCHIVE"
+  fi
+  ACTUAL_SHA256="$(sha256_of "$ARCHIVE")"
+  if [ "$ACTUAL_SHA256" != "$SILOD_SHA256" ]; then
+    rm -f "$ARCHIVE"
+    echo "$ARCHIVE_NAME hashes to $ACTUAL_SHA256; scripts/silod.release pins $SILOD_SHA256." >&2
+    exit 1
+  fi
+fi
+
+tar -xzf "$ARCHIVE" -C "$WORK"
+set -- "$WORK"/*/
+if [ "$#" -ne 1 ] || [ ! -f "${1}release.json" ]; then
+  echo "$ARCHIVE is not a Silo engine release (expected one top-level directory with release.json)." >&2
   exit 1
 fi
-ACTUAL_COMMIT="$(git -C "$SILO_REPO" rev-parse HEAD)"
-if [ "$ACTUAL_COMMIT" != "$SILO_COMMIT" ]; then
-  echo "Silo checkout is $ACTUAL_COMMIT; scripts/silod.commit pins $SILO_COMMIT." >&2
-  exit 1
-fi
-if [ -n "$(git -C "$SILO_REPO" status --porcelain --untracked-files=all -- app/SiloUI/Cargo.toml app/SiloUI/Cargo.lock app/SiloUI/api app/SiloUI/src-tauri/engine app/SiloUI/src-tauri/silod)" ]; then
-  echo "The pinned Silo engine sources have local changes; use a clean checkout of $SILO_COMMIT." >&2
-  exit 1
-fi
-for required in \
-  "$SILO_ROOT/Cargo.toml" \
-  "$SILO_ROOT/Cargo.lock" \
-  "$SILOD_SOURCE"; do
-  [ -e "$required" ] || { echo "Missing pinned Silo source: $required" >&2; exit 1; }
-done
+RELEASE_DIR="${1%/}"
+
+# A download must be the pinned version; any release must match the schema snapshot Fjord's client is generated from.
+python3 -I - "$RELEASE_DIR/release.json" "$EXPECT_VERSION" "$SCHEMA_SHA256" "${UNIVERSAL:-0}" <<'PY'
+import json
+import sys
+
+path, expect_version, schema_sha256, universal = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    release = json.load(handle)
+if expect_version and release.get("engineVersion") != expect_version:
+    sys.exit(f"Engine release is {release.get('engineVersion')}; scripts/silod.release pins {expect_version}.")
+if release.get("schemaSha256") != schema_sha256:
+    sys.exit(
+        f"Engine release schemaSha256 {release.get('schemaSha256')} differs from schemas/silo-api/manifest.json "
+        f"({schema_sha256}); update the schema snapshot from the release's api/silo-api.schema.json."
+    )
+if universal == "1":
+    missing = {"aarch64-apple-darwin", "x86_64-apple-darwin"} - set(release.get("targets", []))
+    if missing:
+        sys.exit(f"UNIVERSAL=1 needs both architectures; the engine release lacks {', '.join(sorted(missing))}.")
+PY
+ENGINE_VERSION="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["engineVersion"])' "$RELEASE_DIR/release.json")"
+SOURCE_COMMIT="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["sourceCommit"])' "$RELEASE_DIR/release.json")"
 
 APP_CONTENTS="$FJORD_APP/Contents"
 ENGINE_APP="$APP_CONTENTS/Resources/SiloEngineDistribution/Silo Engine.app"
@@ -37,13 +82,13 @@ ENGINE_CONTENTS="$ENGINE_APP/Contents"
 ENGINE_RESOURCES="$ENGINE_CONTENTS/Resources"
 ENGINE_EXECUTABLE="$ENGINE_CONTENTS/MacOS/silod"
 AGENT_NAME="org.silo.preview.engine.plist"
-SOURCE_PLIST="$SILOD_SOURCE/macos/LaunchAgents/$AGENT_NAME"
-SOURCE_INFO="$SILOD_SOURCE/macos/Info.production.plist"
-SOURCE_MANIFEST="$SILOD_SOURCE/macos/resources/engine-manifest.production.json"
-SOURCE_BINARY="$ROOT/build/silod-bundle/silod"
+SOURCE_BINARY="$RELEASE_DIR/bin/silod"
+SOURCE_PLIST="$RELEASE_DIR/macos/LaunchAgents/$AGENT_NAME"
+SOURCE_INFO="$RELEASE_DIR/macos/Info.production.plist"
+SOURCE_MANIFEST="$RELEASE_DIR/macos/resources/engine-manifest.production.json"
 
-for required in "$SOURCE_PLIST" "$SOURCE_INFO" "$SOURCE_MANIFEST"; do
-  [ -f "$required" ] || { echo "Missing silod packaging input: $required" >&2; exit 1; }
+for required in "$SOURCE_BINARY" "$SOURCE_PLIST" "$SOURCE_INFO" "$SOURCE_MANIFEST"; do
+  [ -f "$required" ] || { echo "Missing silod packaging input in the engine release: $required" >&2; exit 1; }
 done
 
 CODE_REQUIREMENT="${SILOD_PRODUCTION_CODE_REQUIREMENT:-}"
@@ -59,51 +104,15 @@ if [ -z "$CODE_REQUIREMENT" ]; then
   CODE_REQUIREMENT='identifier "org.silo.preview.engine"'
 fi
 
-build_silod() {
-  local target="${1:-}"
-  if [ -z "$target" ]; then
-    SILOD_PRODUCTION_CODE_REQUIREMENT="$CODE_REQUIREMENT" \
-      CARGO_TARGET_DIR="$SILO_TARGET_DIR" \
-      cargo +1.94.0 build --locked --release --manifest-path "$SILO_ROOT/Cargo.toml" -p silod
-  else
-    SILOD_PRODUCTION_CODE_REQUIREMENT="$CODE_REQUIREMENT" \
-      CARGO_TARGET_DIR="$SILO_TARGET_DIR" \
-      cargo +1.94.0 build --locked --release --manifest-path "$SILO_ROOT/Cargo.toml" -p silod --target "$target"
-  fi
-}
-
-if [ "${UNIVERSAL:-0}" = "1" ]; then
-  build_silod aarch64-apple-darwin
-  build_silod x86_64-apple-darwin
-  mkdir -p "$(dirname "$SOURCE_BINARY")"
-  lipo -create \
-    "$SILO_TARGET_DIR/aarch64-apple-darwin/release/silod" \
-    "$SILO_TARGET_DIR/x86_64-apple-darwin/release/silod" \
-    -output "$SOURCE_BINARY"
-else
-  build_silod
-  mkdir -p "$(dirname "$SOURCE_BINARY")"
-  cp "$SILO_TARGET_DIR/release/silod" "$SOURCE_BINARY"
-fi
-[ -x "$SOURCE_BINARY" ] || { echo "Cargo did not produce $SOURCE_BINARY" >&2; exit 1; }
-
 rm -rf "$ENGINE_APP"
 mkdir -p "$ENGINE_CONTENTS/MacOS" "$ENGINE_CONTENTS/Library/LaunchAgents" "$ENGINE_RESOURCES"
 cp "$SOURCE_BINARY" "$ENGINE_EXECUTABLE"
+chmod 755 "$ENGINE_EXECUTABLE"
 cp "$SOURCE_INFO" "$ENGINE_CONTENTS/Info.plist"
 cp "$SOURCE_PLIST" "$ENGINE_CONTENTS/Library/LaunchAgents/$AGENT_NAME"
-python3 - "$SOURCE_MANIFEST" "$ENGINE_RESOURCES/engine-manifest.json" "$SILO_COMMIT" <<'PY'
-import json
-import sys
-
-source, destination, commit = sys.argv[1:]
-with open(source, encoding="utf-8") as handle:
-    manifest = json.load(handle)
-manifest["engineBuild"] = f"silo-{commit}"
-with open(destination, "w", encoding="utf-8") as handle:
-    json.dump(manifest, handle, indent=2)
-    handle.write("\n")
-PY
+cp "$SOURCE_MANIFEST" "$ENGINE_RESOURCES/engine-manifest.json"
+# silod reads its signer from its own Info.plist; the signature below seals it.
+plutil -replace SiloEngineCodeRequirement -string "$CODE_REQUIREMENT" "$ENGINE_CONTENTS/Info.plist"
 
 # SMAppService resolves this plist from Fjord.app. The executable remains in the
 # self-contained Silo Engine.app so silod sees its own bundle identifier and resources.
@@ -123,4 +132,4 @@ codesign --display --entitlements :- "$ENGINE_EXECUTABLE" 2>&1 \
   || { echo "silod is missing com.apple.security.virtualization" >&2; exit 1; }
 plutil -lint "$OUTER_AGENT" "$ENGINE_CONTENTS/Library/LaunchAgents/$AGENT_NAME" >/dev/null
 
-echo "Embedded silod from Silo $SILO_COMMIT in $ENGINE_APP"
+echo "Embedded silod $ENGINE_VERSION (Silo $SOURCE_COMMIT) in $ENGINE_APP"
