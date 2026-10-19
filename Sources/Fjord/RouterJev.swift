@@ -69,6 +69,11 @@ final class RouterLiveTarget {
         return dividing ? "dividing" : prediction?.target
     }
 
+    /// The targets shown or fixed that can be gone with no card or session changing: a project, until a scan finds it gone.
+    var watchedTargets: [String] {
+        (pinned.map { [$0] } ?? []) + (prediction.map { [$0.target] } ?? []) + chips.map(\.target)
+    }
+
     /// A part of the division as the strip shows it.
     struct DivisionChip: Equatable {
         var target: String

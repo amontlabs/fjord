@@ -156,6 +156,28 @@ import Testing
         #expect(model.editing != nil && model.live.recipients.isEmpty)
     }
 
+    @Test func aProjectGoneFromTheCodeFoldersChangesWhatTheWatcherSeesAndTheDivisionGoes() async throws {
+        let w = world()
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "new:/code/app", text: "add the page", waitsFor: nil),
+                                     .init(target: "session:local_c", text: "rerun the build", waitsFor: nil)], sure: false, alternatives: [])
+        w.store.codeFolders.scan = { _ in .init(repos: ["/code/app": []]) }
+        w.store.addCodeFolders(["/code"])
+        await w.store.codeFolders.settled()
+        let model = model()
+        type(both, model, w)
+        await waitUntil { model.live.division != nil }
+        #expect(model.live.watchedTargets.contains("new:/code/app"))
+        let before = RouterModel.targets(w.store, predicted: nil, watching: model.live.watchedTargets)
+        // A scan finds the project gone: no card or session changed, yet what the parts can go to did.
+        w.store.removeCodeFolder("/code")
+        await w.store.codeFolders.settled()
+        #expect(RouterModel.targets(w.store, predicted: nil, watching: model.live.watchedTargets) != before)
+        model.revalidateTarget(store: w.store)
+        #expect(model.live.division == nil && model.live.chips.isEmpty, "the parts are for a place that is gone: dropped")
+        #expect(model.context(w.store).division == nil)
+    }
+
     @Test func aRecipientThatIsGoneIsTakenOff() {
         let w = world()
         let model = model()

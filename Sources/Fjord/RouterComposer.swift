@@ -602,7 +602,8 @@ private struct LiveTargetWatch: View {
         Group {
             if model.live.pinned != nil || model.live.prediction != nil || !model.live.chips.isEmpty || !model.live.recipients.isEmpty {
                 Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
-                    .onChange(of: RouterModel.targets(store, predicted: model.live.prediction?.target)) {
+                    .onChange(of: RouterModel.targets(store, predicted: model.live.prediction?.target,
+                                                      watching: model.live.watchedTargets)) {
                         model.revalidateTarget(store: store)
                     }
             }
@@ -618,6 +619,9 @@ extension RouterModel {
         var cards: [String]
         var working: Set<String>
         var sessions: Set<String>
+        /// The `new:<folder>` targets among the ones the pick, the pin or the parts shown name whose project is still known: a
+        /// code-folder scan that drops one changes this.
+        var projects: Set<String> = []
         /// The words Jev's pick shows for its target, as they would be now (a session renamed changes them).
         var predicted: String? = nil
 
@@ -626,19 +630,27 @@ extension RouterModel {
 
     /// The open cards as stored (the page's order doesn't matter here: no sort of every card), the working rows and the
     /// sessions kept as sets.
-    static func targets(_ store: Store, predicted: String? = nil) -> Targets {
+    static func targets(_ store: Store, predicted: String? = nil, watching: [String] = []) -> Targets {
         let tasks = store.routerTasks
         let words = predicted.flatMap { target in
             store.routerDispatcher.option(target, store: store).map {
                 RouterLiveTarget.title(target, $0) + "\n" + store.routerDispatcher.describe(target, store: store)
             }
         }
+        // `projectFolders` is what a scan changes and the view sees; Scratch ("") is no folder of it.
+        let known = watching.isEmpty ? [] : Set(store.projectFolders)
+        let projects = Set(watching.lazy.filter {
+            guard $0.hasPrefix("new:") else { return false }
+            let folder = String($0.dropFirst(4))
+            return known.contains(folder) || store.isProjectFolder(folder)
+        })
         return Targets(cards: store.router.cards.filter { $0.isOpen && RouterPage.shows($0, tasks: tasks) }.map(\.id),
                        // The Working rows' sessions, as `routerWorkingRows` picks them, unsorted: a set.
                        working: Set(store.allAgentRows.lazy
                            .filter { ($0.session.running && !$0.waitsForYou) || (!$0.session.running && !$0.tasks.isEmpty) }
                            .map { workingID($0.id) }),
                        sessions: Set(store.claudeSessions.values.lazy.filter { !$0.isArchived }.map(\.id)),
+                       projects: projects,
                        predicted: words)
     }
 
