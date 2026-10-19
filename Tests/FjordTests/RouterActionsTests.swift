@@ -302,6 +302,17 @@ extension RouterDispatcherTests {
         #expect(ask?.options.dropFirst().first?.title.hasPrefix("Send to ") == true)
     }
 
+    @Test func anAskTheChecksBuildNeverOffersCompound() async {
+        let (_, d, f) = actionBoard()
+        f.ranked = [.init(target: "compound", p: 0.4), .init(target: "session:local_b", p: 0.35), .init(target: "session:local_c", p: 0.2)]
+        f.reading = reading([.init(kind: .dismiss, card: "local_b#t1", session: "local_b", p: 0.6)])
+        let a = d.submit("and the docs too")
+        await finish(d, f, a)
+        let ask = d.askBacks.first { $0.id == a }
+        #expect(ask?.options.first?.title == "Archive “Update the docs”" && ask?.options.count ?? 0 >= 2)
+        #expect(ask?.options.contains { $0.target == "compound" || $0.title == "Change Fjord" } == false)
+    }
+
     @Test func withNoCheckInDoubtTheRouteGoesAsItDid() async {
         let (s, d, f) = actionBoard()
         f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]

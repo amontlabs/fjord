@@ -1727,7 +1727,7 @@ struct RouterAskBack: Identifiable, Equatable {
         let room = chooseFolder || whole ? 3 : 4
         if let acts {
             // The checks' ask: typed actions, each a verb on its target (`RouterActionChecks.decideAction` chose and ordered them).
-            for act in acts where options.count < room {
+            for act in acts where options.count < room && act.target != RouteLabel.compound.rawValue {
                 guard let option = option(act.target, store: store, tools: job.tools, verb: true), seen.insert(option.id).inserted else { continue }
                 options.append(option)
             }

@@ -438,7 +438,7 @@ enum RouterActionChecks {
         info.routeAsks = !(found.sure && found.top != nil)
         if !info.routeAsks, let top = found.top { info.routeAct = RouterAct.routing(canon(top.target), cards: cards) }
         var card: [RouterAct] = []
-        for target in (found.card ?? []) + found.ranked.map(\.target) where target != "unclear" {
+        for target in (found.card ?? []) + found.ranked.map(\.target) where target != "unclear" && target != RouteLabel.compound.rawValue {
             if let a = RouterAct.routing(canon(target), cards: cards), !card.contains(a) { card.append(a) }
         }
         info.routeOptions = Array(card.prefix(askRoom))
