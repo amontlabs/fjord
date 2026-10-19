@@ -25,11 +25,19 @@ struct SystemEngineAgentService: EngineAgentServicing {
     private let plistName = AppIdentity.engineAgentPlistName()
 
     func status() -> EngineAgentStatus {
-        switch SMAppService.agent(plistName: plistName).status {
+        let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/\(plistName)")
+        return Self.status(SMAppService.agent(plistName: plistName).status,
+                           plistInBundle: FileManager.default.fileExists(atPath: plist.path))
+    }
+
+    /// macOS answers `.notFound` for an agent that was never registered, its plist in the bundle or not; only a plist
+    /// that isn't there is missing.
+    nonisolated static func status(_ status: SMAppService.Status, plistInBundle: Bool) -> EngineAgentStatus {
+        switch status {
         case .notRegistered: .notRegistered
         case .enabled: .enabled
         case .requiresApproval: .requiresApproval
-        case .notFound: .notFound
+        case .notFound: plistInBundle ? .notRegistered : .notFound
         @unknown default: .unknown
         }
     }
