@@ -209,6 +209,12 @@ struct RouterDecision: Identifiable, Equatable {
             self.links = links
         }
 
+        /// Its last send was stopped by a cancel: one that sent its words again since (to another place) isn't cancelled.
+        var endsCancelled: Bool {
+            guard let cancelled = done.lastIndex(where: { if case .cancelled(let how) = $0 { how.stopped } else { false } }) else { return false }
+            return done.lastIndex(where: \.sendsWords).map { $0 < cancelled } ?? true
+        }
+
         /// Adds `done` and the links it implies.
         mutating func add(_ item: Done, session: String? = nil, card: String? = nil) {
             done.append(item)
@@ -419,7 +425,7 @@ struct RouterDecision: Identifiable, Equatable {
         for part in places.map({ $0.parts[0] }) {
             let state: String
             if part.done.contains(where: { if case .failed = $0 { true } else { false } }) { state = "failed" }
-            else if part.delivered?.cancelled?.stopped == true || part.done.contains(where: { if case .cancelled(let how) = $0 { how.stopped } else { false } }) { state = "cancelled" }
+            else if part.delivered?.cancelled?.stopped == true || part.endsCancelled { state = "cancelled" }
             else if part.outcome == .pending, part.waitsFor != nil, part.done.isEmpty { state = "held" }
             else if part.outcome == .pending { state = "working" }
             else if part.done.contains(where: \.sendsWords) { state = "sent" }

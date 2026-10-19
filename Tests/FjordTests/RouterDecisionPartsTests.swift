@@ -280,6 +280,12 @@ import Testing
         }
         s.updateDecision(ids.ci) { $0.delivered?.cancelled = .aborted; $0.add(.cancelled(.aborted)) }
         #expect(entry().summary == "split in 2: 1 cancelled, 1 sent")
+        // Sent elsewhere after the cancel: it is sent, not cancelled.
+        s.updateDecision(ids.ci) { $0.add(.sent(to: "docs", text: "go", original: nil), session: "docs"); $0.delivered = delivered }
+        #expect(entry().summary == "split in 2: 2 sent")
+        // And cancelled again, that send.
+        s.updateDecision(ids.ci) { $0.delivered?.cancelled = .aborted; $0.add(.cancelled(.aborted)) }
+        #expect(entry().summary == "split in 2: 1 cancelled, 1 sent")
     }
 
     @Test func aDividedEntrysContextLineHasOneClausePerPart() {
