@@ -276,6 +276,25 @@ import Testing
         #expect(w.dispatcher.askBacks.first { $0.id == id3 }?.options.map(\.target) == ["session:local_b", "answer:local_a#w1"])
     }
 
+    @Test func aTaggedPlaceTheDestinationLimitLeavesOutIsStillOneOfTheDividersPlaces() async throws {
+        let w = World()
+        // 25 sessions older than the three: the limit keeps the 20 most recent of the idle ones.
+        for n in 0..<25 {
+            w.store.claudeSessions["local_old\(n)"] = ClaudeSession(id: "local_old\(n)", title: "Old \(n)", folder: "/code/old\(n)",
+                                                                    lastActivity: Date().addingTimeInterval(-1000 - Double(n)))
+        }
+        let (text, context) = w.message([.text("tell "), .pointer(.session("local_old24")), .text(" or "), b, .text(" to rebase")])
+        w.f.division = .init(parts: [.init(target: "session:local_old24", text: "rebase", waitsFor: nil),
+                                     .init(target: "session:local_b", text: "rebase", waitsFor: nil)], sure: true, alternatives: [])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let request = try #require(w.f.divideRequests.first)
+        let keys = RouterDivider.keys(request.mode, request.places)
+        let fixed = request.places.filter { keys.contains($0.key) }
+        #expect(Set(fixed.map(\.target)) == ["session:local_old24", "session:local_b"] || Set(fixed.map(\.target)) == ["session:local_old24", "answer:local_b#w1"])
+        #expect(w.entry(id)?.parts.count == 2 && w.words(of: "local_old24") == ["rebase"] && w.words(of: "local_b") == ["rebase"])
+    }
+
     @Test func aDividerThatFailsAsksAmongTheTaggedPlaces() async throws {
         let w = World()
         let (text, context) = w.message([.text("tell "), a, .text(" or "), b, .text(" to rebase")])

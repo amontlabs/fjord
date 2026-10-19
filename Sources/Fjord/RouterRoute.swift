@@ -67,14 +67,20 @@ extension RouterTools {
 
 
     /// What Jev routes among: the sessions (working, then the 20 most recent others), the cards of sessions not among them,
-    /// a new session per project, and the intents. `projects`: folders you tagged; only theirs then.
-    func destinations(_ store: Store, projects: Set<String>? = nil, now: Date = Date()) -> [Destination] {
+    /// a new session per project, and the intents. `projects`: folders you tagged; only theirs then. `including`: targets
+    /// (`session:<id>`, `answer:<card>`, `new:<folder>`) that are there whatever the limits leave out.
+    func destinations(_ store: Store, projects: Set<String>? = nil, including: [String] = [], now: Date = Date()) -> [Destination] {
         let cards = store.routerShownOpenCards.filter {
             projects?.contains(store.routerProjectFolder(sessionID: $0.sessionID, fallback: $0.folder)) ?? true
         }
         let told = store.lastTold()
         let (working, recent) = candidates(store, projects: projects)
-        let sessions = Array((working + recent).prefix(80))
+        var sessions = Array((working + recent).prefix(80))
+        for target in including {
+            guard let id = RouterDispatcher.session(of: target, store: store), !sessions.contains(where: { $0.id == id }),
+                  let session = store.claudeSessions[id], !session.isArchived else { continue }
+            sessions.append(session)
+        }
         var named = Set(Self.intentCriteria.map(\.name))
         func unique(_ base: String) -> String {
             var name = base
@@ -105,7 +111,11 @@ extension RouterTools {
             out.append(Destination(target: "answer:\(card.id)", name: unique(Self.hinted(card.title, 80)), criteria: criteria,
                                    sessionID: card.sessionID))
         }
-        for folder in Self.newSessionFolders(store, projects: projects) {
+        var folders = Self.newSessionFolders(store, projects: projects)
+        for target in including where target.hasPrefix("new:") && !folders.contains(String(target.dropFirst(4))) {
+            folders.append(String(target.dropFirst(4)))
+        }
+        for folder in folders {
             let name = Self.hinted(store.folderName(folder), 80)
             out.append(Destination(target: "new:\(folder)", name: unique("new session in \(name)"),
                                    criteria: ["kind": "new session", "project": name]))

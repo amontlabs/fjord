@@ -147,7 +147,8 @@ extension RouterDispatcher {
         guard let store else { return }
         stage(job, "dividing")
         let projects = Set(job.context.mentions.compactMap { m -> String? in if case .project(let f) = m.pointer { f } else { nil } })
-        let places = RouterDivider.places(job.tools.destinations(store, projects: nil))
+        // Every place you tagged is among them, whatever the limits on the list leave out (an old session, a project's new one).
+        let places = RouterDivider.places(job.tools.destinations(store, projects: nil, including: fixed))
         let request = RouterDivider.Request(message: job.text, places: places, cards: RouterDivider.cardLines(store, places: places),
                                             context: RouterDivider.contextLines(store, job.context, places: places),
                                             mode: .tags(fixed: fixed))
