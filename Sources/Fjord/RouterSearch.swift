@@ -43,7 +43,8 @@ enum RouterSearch {
             .joined(separator: " ").lowercased()
     }
 
-    /// A history line: a card as above; a run by what set it off, what was done and what it said back; a summary by its
+    /// A history line: a card as above; a run by what set it off, what was done and what it said back (each part of a divided one
+    /// by its own words and outcome); a summary by its
     /// session and its text.
     static func key(_ entry: RouterPage.Entry, project: (RouterCard) -> String) -> String {
         switch entry {
@@ -52,6 +53,14 @@ enum RouterSearch {
             var parts = [d.triggerText, d.summary] + d.doneLines
             parts += [d.reply ?? "", d.note ?? "", d.decision.target ?? "", d.decision.label ?? ""]
             parts += (d.mentions ?? []).map(\.name)
+            // A message that went to several places is found by each part's words, place and outcome.
+            if d.isDivided {
+                for place in d.places {
+                    parts += [place.triggerText, place.summary] + place.doneLines
+                    parts += [place.reply ?? "", place.note ?? "", place.decision.target ?? "", place.decision.label ?? ""]
+                    parts += (place.mentions ?? []).map(\.name)
+                }
+            }
             return parts.joined(separator: " ").lowercased()
         case .summary(let s): return [s.title ?? "", s.text].joined(separator: " ").lowercased()
         }

@@ -419,7 +419,7 @@ enum AppWindowShots {
         Shot(name: "router-brief-handled", destination: { _ in .router }, sidebarHidden: true,
              size: CGSize(width: 1600, height: 1420), compose: { model, store in
                  Demo.routerDigest(store); model.pickBrief()
-                 for session in ["local_demo-release", "local_demo-docs"] {
+                 for session in ["local_demo-release", "local_demo-transfer"] {
                      if let card = store.router.cards.last(where: { $0.sessionID == session && $0.isOpen }) {
                          store.setCardAddressed(card.id, true)
                      }
@@ -617,6 +617,23 @@ enum AppWindowShots {
         Shot(name: "router-canvas-flight-dark", destination: { _ in .router }, size: canvasSize, compose: { model, store in
             flight(model, store)
         }, appearance: .darkAqua),
+        // One message that went to several places, its history entry open with a line for each part: sent (with its Cancel),
+        // answered, started, held (Send now, Don't send), failed and cancelled.
+        Shot(name: "router-split-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
+            splitHistory(model, store)
+        }, appearance: .aqua),
+        Shot(name: "router-split-history-dark", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
+            splitHistory(model, store)
+        }, appearance: .darkAqua),
+        // A message that divided into three, a pill for each part over the composer.
+        Shot(name: "router-list-split-pills", destination: { _ in .router }, compose: { model, store in
+            splitPills(store)
+            model.layout = .list
+        }, appearance: .aqua),
+        // The same, two parts held halfway to the two cards they go to.
+        Shot(name: "router-canvas-split-flight", destination: { _ in .router }, size: canvasSize, compose: { model, store in
+            splitFlight(model, store)
+        }, appearance: .aqua),
         Shot(name: "settings") { _ in .settings },
         Shot(name: "categories") { _ in .categories },
         Shot(name: "snippets") { _ in .snippets },
@@ -735,6 +752,106 @@ enum AppWindowShots {
             decisions[i].outcome = .done
             decisions[i].decision.targetID = "session:local_demo-transfer"
             store.router.decisions = decisions
+        }
+    }
+
+    /// Logs a message that divided into `parts` (its words, the place each went to as `session:<id>`, `answer:<card>` or
+    /// `new:<folder>`) and returns the parts' ids.
+    @discardableResult
+    private static func divided(_ store: Store, _ message: String, at: Date, _ parts: [(text: String, place: String, waitsFor: String?)])
+        -> (entry: UUID, parts: [UUID]) {
+        var entry = RouterDecision(at: at, trigger: .you(message))
+        let ids = entry.divide(into: parts.map {
+            RouterDecision.Part(text: $0.text, place: $0.place, waitsFor: $0.waitsFor, decision: .init(intent: "message"))
+        })
+        store.router.decisions.append(entry)
+        return (entry.id, ids)
+    }
+
+    /// One message to six places, each part at a different point: the history entry open, and the first part open with its Cancel.
+    private static func splitHistory(_ model: RouterModel, _ store: Store) {
+        let now = Date()
+        let card = store.router.cards.first { $0.sessionID == "local_demo-linux" }?.id ?? ""
+        let (entry, ids) = divided(store, "rerun the build, approve the Linux plan, add a plugin page in lcu, tell the transfer to use the version CI "
+            + "picked, rebase the games, and drop the calculator run", at: now.addingTimeInterval(-90), [
+                (text: "rerun the build", place: "session:local_demo-ci", waitsFor: nil),
+                (text: "approve the plan", place: "answer:\(card)", waitsFor: nil),
+                (text: "add a plugin page", place: "new:/Users/demo/lcu", waitsFor: nil),
+                (text: "use the version CI picked", place: "session:local_demo-transfer", waitsFor: "session:local_demo-ci"),
+                (text: "rebase the games", place: "session:local_demo-games", waitsFor: nil),
+                (text: "drop the calculator run", place: "session:local_demo-calc", waitsFor: nil),
+            ])
+        func title(_ session: String) -> String { store.claudeSessions[session]?.title ?? session }
+        func delivered(_ session: String, _ cancelled: RouterDecision.Cancelled? = nil) -> RouterDecision.Delivered {
+            RouterDecision.Delivered(session: session, cli: "cli-" + session, nonce: UUID().uuidString, at: now.addingTimeInterval(-80),
+                                     turns: store.claudeSessions[session]?.completedTurns ?? 0, busy: false, abortable: true,
+                                     cancelled: cancelled)
+        }
+        func sent(_ n: Int, _ session: String, cancelled: RouterDecision.Cancelled? = nil) {
+            store.updateDecision(ids[n]) { part in
+                part.decision.targetID = "session:" + session
+                part.add(.sent(to: title(session), text: part.triggerText, original: nil), session: session)
+                if let cancelled { part.add(.cancelled(cancelled)) }
+                part.delivered = delivered(session, cancelled)
+                part.outcome = .done
+            }
+        }
+        sent(0, "local_demo-ci")
+        store.updateDecision(ids[1]) { part in
+            part.decision.targetID = "answer:" + card
+            part.add(.answered(card: card), card: card)
+            part.outcome = .done
+        }
+        store.updateDecision(ids[2]) { part in
+            part.decision.targetID = "new:/Users/demo/lcu"
+            part.add(.started(session: nil, project: "lcu", model: nil, effort: nil))
+            part.outcome = .done
+        }
+        store.updateDecision(ids[3]) { $0.decision.targetID = "session:local_demo-transfer" }
+        store.routerDispatcher.held[ids[3]] = "waits for session “\(title("local_demo-ci"))” in microsandbox; it isn't sent unless you "
+            + "send it, and is dropped after 30 minutes"
+        store.updateDecision(ids[4]) { part in
+            part.decision.targetID = "session:local_demo-games"
+            part.add(.failed("not delivered (the session isn't open in Claude)"))
+            part.outcome = .done
+        }
+        sent(5, "local_demo-calc", cancelled: .aborted)
+        model.pane = .history
+        model.expanded.insert(entry.uuidString)
+        model.expanded.insert(ids[0].uuidString)
+    }
+
+    /// A message divided into three, its parts being sent: a pill each over the composer, two placed and one still looking.
+    private static func splitPills(_ store: Store) {
+        let (_, ids) = divided(store, "rerun the build, add the page, and mute notifications for an hour", at: Date(), [
+            (text: "rerun the build", place: "session:local_demo-ci", waitsFor: nil),
+            (text: "add the page", place: "session:local_demo-transfer", waitsFor: nil),
+            (text: "mute notifications for an hour", place: "change_fjord", waitsFor: nil),
+        ])
+        store.updateDecision(ids[0]) { $0.decision.targetID = "session:local_demo-ci" }
+        store.updateDecision(ids[1]) { $0.decision.targetID = "session:local_demo-transfer" }
+        store.routerDispatcher.preview(progress: Dictionary(uniqueKeysWithValues: ids.map { ($0, "sending") }), flying: ids)
+    }
+
+    /// Two parts of a message flying to the cards they went to, held halfway.
+    private static func splitFlight(_ model: RouterModel, _ store: Store) {
+        let (_, ids) = divided(store, "tell the transfer to remove the old remote, and CI to rerun", at: Date(), [
+            (text: "remove the old remote", place: "session:local_demo-transfer", waitsFor: nil),
+            (text: "rerun", place: "session:local_demo-ci", waitsFor: nil),
+        ])
+        model.pickCanvas()
+        model.canvas.freezeFlight = 0.5
+        model.flights.freezeFlight = 0.5
+        store.routerDispatcher.preview(progress: Dictionary(uniqueKeysWithValues: ids.map { ($0, "sending") }), flying: ids)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1200))
+            for (id, session) in zip(ids, ["local_demo-transfer", "local_demo-ci"]) {
+                store.updateDecision(id) { part in
+                    part.decision.targetID = "session:" + session
+                    part.add(.sent(to: store.claudeSessions[session]?.title ?? session, text: part.triggerText, original: nil), session: session)
+                    part.outcome = .done
+                }
+            }
         }
     }
 
