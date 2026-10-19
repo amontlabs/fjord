@@ -457,7 +457,10 @@ extension RouterDispatcher {
         let context = job.context
         heldTasks[id] = Task { [weak self] in
             guard let self else { return }
-            let released = await waitForRelease(id, place: place)
+            var released = await waitForRelease(id, place: place)
+            releasing.remove(id)
+            // Stopped between "Send now" and here: it is a run under way that Stop stops, not one that goes on.
+            if case .now = released, Task.isCancelled { released = .drop("it was stopped") }
             held[id] = nil
             heldTasks[id] = nil
             heldTools[id] = nil
@@ -500,7 +503,9 @@ extension RouterDispatcher {
 
     /// Ends a held part's wait, once.
     func release(_ id: UUID, _ how: PartRelease) {
-        releases.removeValue(forKey: id)?.resume(returning: how)
+        guard let wait = releases.removeValue(forKey: id) else { return }
+        if case .now = how { releasing.insert(id) }
+        wait.resume(returning: how)
     }
 
     /// "Send now" on a held part: it goes as a message of its own to its place.

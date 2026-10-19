@@ -312,6 +312,8 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var dropped: Set<UUID> = []
     /// Held parts of a divided message (`holdPart`), by their id: what ends the wait, once.
     @ObservationIgnored var releases: [UUID: CheckedContinuation<PartRelease, Never>] = [:]
+    /// Held parts sent now whose task hasn't taken up the release yet: Stop reaches them here, not through `tasks`.
+    @ObservationIgnored var releasing: Set<UUID> = []
     /// How long a part waits for you to send it (`SessionStart.heldWait`); a test gives a shorter one.
     @ObservationIgnored var heldPartWait: TimeInterval = SessionStart.heldWait
 
@@ -569,6 +571,8 @@ struct RouterAskBack: Identifiable, Equatable {
         // Their turns end now, not once each run sees it was stopped: a send on its way is refused at its last gate.
         for (id, tools) in runTools where stopped(id) { tools.endTurn() }
         for ask in askBacks where actions || ask.context.action == nil { dismiss(ask.id, reason: reason) }
+        // A part sent now, not yet running: stopped too, its turn ended and its task told.
+        for id in releasing { heldTools[id]?.endTurn(); heldTasks[id]?.cancel() }
         // A held part of a divided message is kept by Stop, like a held start; the Router switched off drops it.
         if actions { for id in Array(releases.keys) { release(id, .drop("the Router was switched off")) } }
     }

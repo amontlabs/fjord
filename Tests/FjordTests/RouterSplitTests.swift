@@ -619,6 +619,18 @@ import Testing
         #expect(w.record(first)?.delivered != nil)
     }
 
+    @Test func stopRightAfterSendNowStopsThePartBeforeItGoes() async throws {
+        let w = World()
+        let (_, _, second) = try await waiting(w)
+        // Send now, and Stop before the held part has taken up the release: the part is a run under way already.
+        w.dispatcher.sendNow(second)
+        w.dispatcher.stopAll()
+        await waitUntil { w.record(second)?.outcome == .done }
+        #expect(w.words(of: "local_b").isEmpty && w.f.prepared == ["local_c"] && w.record(second)?.delivered == nil)
+        #expect(w.record(second)?.doneLines.last?.hasPrefix("failed: wasn't sent") == true)
+        #expect(w.dispatcher.held.isEmpty && w.dispatcher.heldTasks.isEmpty && w.dispatcher.heldTools.isEmpty)
+    }
+
     @Test func aHeldPartIsDroppedByDontSendTheTimeRunningOutOrTheRouterSwitchedOff() async throws {
         let w = World()
         let (_, _, second) = try await waiting(w)
