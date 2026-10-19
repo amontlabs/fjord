@@ -321,6 +321,18 @@ extension RouterModel {
         if let new { highlighted = new }
     }
 
+    /// A session ⌘-clicked on the Brief: picked as a recipient of the draft, or taken off. Picking one ends an edit, as arming
+    /// another reply does (the draft then goes to the recipients as a message of its own, not to a fork).
+    func toggleRecipient(_ target: String, store: Store) {
+        if let at = live.recipients.firstIndex(of: target) {
+            live.recipients.remove(at: at)
+        } else if store.routerDispatcher.eligible(target, store: store) {
+            editing = nil
+            live.recipients.append(target)
+        }
+        focusRequest &+= 1
+    }
+
     /// The prediction clicked: a card's becomes the reply, anything else the pinned target.
     func pinPrediction(store: Store) {
         // Only a pick for the draft as it is, to a target still there.

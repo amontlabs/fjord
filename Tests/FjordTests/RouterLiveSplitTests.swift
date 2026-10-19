@@ -121,6 +121,20 @@ import Testing
         #expect(model.removeLastChip() && model.replyTo == nil)
     }
 
+    @Test func pickingARecipientEndsAnEditSoTheDraftGoesToTheRecipients() {
+        let w = world()
+        let model = model()
+        model.edit(session: "local_a", message: "use postgres")
+        #expect(model.editing != nil)
+        model.toggleRecipient("session:local_b", store: w.store)
+        #expect(model.editing == nil && model.live.recipients == ["session:local_b"], "the two can't both hold")
+        // Taking it off again edits nothing; a session that can't be sent to is no recipient and ends nothing.
+        model.edit(session: "local_a", message: "use postgres")
+        w.store.claudeSessions["local_c"]?.isArchived = true
+        model.toggleRecipient("session:local_c", store: w.store)
+        #expect(model.editing != nil && model.live.recipients.isEmpty)
+    }
+
     @Test func aRecipientThatIsGoneIsTakenOff() {
         let w = world()
         let model = model()

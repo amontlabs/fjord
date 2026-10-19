@@ -1021,14 +1021,7 @@ private struct DigestSpan: View {
     private var target: String { "session:\(session)" }
 
     /// Picks the session as a recipient of your message, or takes it off; the composer takes the keyboard for the words.
-    private func toggleRecipient() {
-        if let at = model.live.recipients.firstIndex(of: target) {
-            model.live.recipients.remove(at: at)
-        } else if store.routerDispatcher.eligible(target, store: store) {
-            model.live.recipients.append(target)
-        }
-        model.focusRequest &+= 1
-    }
+    private func toggleRecipient() { model.toggleRecipient(target, store: store) }
 
     /// The keys that act on it while the pointer is on it, as they are bound now.
     private var hints: [DigestHint] {
