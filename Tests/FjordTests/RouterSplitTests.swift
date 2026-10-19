@@ -222,6 +222,21 @@ import Testing
         #expect(entry.parts.last.flatMap { w.record($0.id) }?.decision.targetID == "change_fjord")
     }
 
+    @Test func aTagWithNoWordsAfterItIsNotSentAsAPartOfItsOwn() async throws {
+        let w = World()
+        // Docs would be woken with its bare address: it isn't, the words go to the login session as one part.
+        let (text, context) = w.message([a, .text(" fix the build. "), b])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.said.map(\.session) == ["local_a"] && w.entry(id)?.parts.count == 1)
+        // With another place that has words, the parts are theirs alone.
+        let (text2, context2) = w.message([a, .text(" fix the build. "), b, .text(" add the page. "), c])
+        let id2 = try #require(w.dispatcher.submit(text2, context: context2))
+        await w.finishAll(id2)
+        #expect(w.entry(id2)?.parts.map(\.text) == ["@Fix the login bug fix the build.", "@Update the docs add the page."])
+        #expect(w.said.map(\.session) == ["local_a", "local_a", "local_b"] && w.words(of: "local_c").isEmpty)
+    }
+
     @Test func aLoneTagWithASecondSentenceForItsPlaceIsOnePartAndAsksNothingElse() async throws {
         let w = World()
         w.f.same = ["Then add a test.": 0.9]

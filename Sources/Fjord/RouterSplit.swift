@@ -140,6 +140,13 @@ extension RouterDispatcher {
             piece.part.pills = built.pills
             parts.append(piece.part)
         }
+        // A tag with no words after it ("@A fix the build. @B") has nothing to send, unless no place has any (a lone "@B" is
+        // sent as it always was).
+        let said = parts.filter { part in
+            let c = Array(part.text)
+            return !c.indices.filter { i in !part.pills.contains { $0.contains(i) } }.map { c[$0] }.allSatisfy(\.isWhitespace)
+        }
+        if !said.isEmpty { parts = said }
         let targets = (pieces.map(\.part.target) + parts.map(\.target)).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         try await go(job, parts, path: parts.first.map(Self.pathName) ?? "tagged", sure: !unsure) {
             self.ask(job, targets: targets, doubt: doubt)
