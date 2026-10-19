@@ -14,6 +14,10 @@ single-place messages:
   only when Jev's compound gates say several places (gate_compound ≥ 0.75, gate_compound2 ≥ 0.5) one Haiku call
   divides the text. On single-place messages B is exactly the shipped Router (checked decision for decision).
 - **S, Sonnet alone**: A with Sonnet, a reference ceiling.
+- `hybrid`, `hybrid-lazy` (exploratory, dev only): B's structure and Jev for where a message goes, Haiku alone for
+  whether it splits and how.
+
+Results: [REPORT.md](REPORT.md).
 
 Every model gets the same instruction for the words: the user's own words, only what isn't for that place removed,
 a sentence several places need may be copied.
@@ -55,4 +59,9 @@ python3 -m v2.multi.score single haiku pipeline
 python3 -m v2.multi.score multi dev haiku pipeline
 python3 -m v2.multi.seal haiku pipeline sonnet   # once, after dev
 python3 -m v2.multi.blind make
+python3 -m v2.multi.blind read                   # after ticking blind.md
 ```
+
+Claude-family writing and labelling go through `claude -p` (Sonnet); with `MULTI_CLAUDE_VIA=agent` they leave prompts
+in `v2/data/multi/agent/<tag>/` for Claude Code subagents to answer instead (used on 2026-10-19 while `claude -p` was
+logged out). `write.py` regenerates `written.jsonl` from new prompts if rerun.
