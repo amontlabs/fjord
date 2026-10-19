@@ -159,6 +159,10 @@ struct RouterAskBack: Identifiable, Equatable {
             return g >= RouterTools.gateSure && g2 >= RouterTools.compound2Sure
         }
 
+        /// The divider is asked of the message (the benchmark's `Ship3`): both gates are up, or Jev's top pick is compound anyway.
+        /// What a send does, and so what the draft's live division is read on.
+        var divides: Bool { dividesNow || top?.target == RouteLabel.compound.rawValue }
+
         init(ranked: [Scored], sure: Bool, assisted: Bool) {
             self.ranked = ranked
             self.sure = sure
@@ -1472,7 +1476,7 @@ struct RouterAskBack: Identifiable, Equatable {
         Self.keep(&found, world: world, unattended: unattended, store: store)
         // Both compound gates up, or Jev's top pick is compound anyway (the benchmark's `Ship3`): the divider is asked once, and
         // the message may be for several places. A pick shown over the composer stays one pick.
-        if divisible, !carriedPick, found.dividesNow || found.top?.target == RouteLabel.compound.rawValue,
+        if divisible, !carriedPick, found.divides,
            try await byGates(job, &found, projects: narrowed) { return }
         // A compound pick is never one to act on, whatever came of the divider (or where it isn't asked: an action's message, a
         // part, words wholly for the Router): it goes from the ranking, and the rest is asked among.

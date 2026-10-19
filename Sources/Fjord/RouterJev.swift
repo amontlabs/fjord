@@ -51,7 +51,7 @@ final class RouterLiveTarget {
     private(set) var division: RouterDivision?
     /// What the strip shows for each part of `division`.
     private(set) var chips: [DivisionChip] = []
-    /// Jev's read has both compound gates up and the divider is being asked: the strip says so.
+    /// Jev's read divides (both compound gates up, or compound his top pick) and the divider is being asked: the strip says so.
     private(set) var dividing = false
     /// Sessions ⌘-clicked on the Brief (`session:<id>`): each gets the whole message, whatever else fixes where it goes.
     var recipients: [String] = []
@@ -106,8 +106,8 @@ final class RouterLiveTarget {
 
     /// The draft (as it will be sent) changed, or what fixes its target did. Nothing is asked while a reply, a pinned target,
     /// recipients or a lone @project fixes where it goes, nor for a few characters. A pick for other words goes at once; only
-    /// an answer for the draft as it is when it lands is shown. With both compound gates up in his read, the divider is asked
-    /// once, after the same stillness (never per keystroke), and its parts replace the pick.
+    /// an answer for the draft as it is when it lands is shown. When his read divides (`Classification.divides`), the divider
+    /// is asked once, after the same stillness (never per keystroke), and its parts replace the pick.
     func update(text: String, context: RouterContext, store: Store) {
         if previewing, Store.isDemo { return }
         // The words as they will be sent (an indented first line kept): what a division is for, to the character.
@@ -135,7 +135,7 @@ final class RouterLiveTarget {
             guard !Task.isCancelled, let store else { return }
             let found = await store.routerDispatcher.predict(text, projects: context.projects, mentions: context.mentions)
             guard !Task.isCancelled, let self, self.current == key else { return }
-            if let found, found.dividesNow {
+            if let found, found.divides {
                 self.dividing = true
                 let division = await store.routerDispatcher.predictDivision(exact, found: found, projects: context.projects,
                                                                             mentions: context.mentions)

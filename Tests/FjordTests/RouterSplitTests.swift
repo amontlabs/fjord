@@ -699,9 +699,10 @@ import Testing
         let id = try #require(w.dispatcher.submit(both))
         await w.finishAll(id)
         #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.count == 2)
-        // Gates down, or one place: no division.
+        // Gates down with a top that isn't compound, or one place: no division.
         var down = found
         down.gates = ["gate_compound": 0.9, "gate_compound2": 0.1]
+        down.ranked.removeAll { $0.target == "compound" }
         #expect(await w.dispatcher.predictDivision("something else", found: down, projects: []) == nil && w.f.divideRequests.count == 1)
         w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: true, alternatives: [])
         #expect(await w.dispatcher.predictDivision(both + "!", found: found, projects: []) == nil && w.f.divideRequests.count == 2)

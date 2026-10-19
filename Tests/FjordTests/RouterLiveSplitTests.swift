@@ -54,6 +54,28 @@ import Testing
         #expect(w.f.ranks == 1 && w.f.divideRequests.count == 1 && model.live.division != nil)
     }
 
+    @Test func aCompoundTopWithOneGateDownIsDividedLiveAsTheSendDivides() async throws {
+        let w = world()
+        gatesUp(w)
+        // Not both gates, but his top pick is compound: the send asks the divider, so what is shown is what it asks.
+        w.f.gates = ["gate_compound": 0.9, "gate_compound2": 0.2]
+        let model = model()
+        type(both, model, w)
+        await waitUntil { model.live.division != nil }
+        #expect(model.live.chips.map(\.words) == ["add the page", "rerun the build"] && w.f.divideRequests.count == 1)
+        var context = model.context(w.store)
+        context.flies = false
+        let id = try #require(w.dispatcher.submit(both, context: context))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.count == 2, "sent as shown: the divider was not asked again")
+        // A top that isn't compound, with one gate down, is neither shown nor sent as parts.
+        w.f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]
+        let other = self.model()
+        type(both + "!", other, w)
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(other.live.division == nil && w.f.divideRequests.count == 1)
+    }
+
     @Test func changedWordsTakeTheDivisionAway() async {
         let w = world()
         gatesUp(w)

@@ -301,11 +301,11 @@ extension RouterDispatcher {
         return part
     }
 
-    /// The parts a draft would be sent as, while you type: the divider asked of the draft once Jev's read of it has both gates
-    /// up, kept by its words and projects for `liveFor` so that sending them asks nothing again. Nil when it isn't several
-    /// places, can't be asked, or Jev may not read what you type.
+    /// The parts a draft would be sent as, while you type: the divider asked of the draft once Jev's read of it divides
+    /// (`divides`: both gates up, or compound his top pick), kept by its words and projects for `liveFor` so that sending them
+    /// asks nothing again. Nil when it isn't several places, can't be asked, or Jev may not read what you type.
     func predictDivision(_ text: String, found: Classification, projects: [String], mentions: [RouterMention] = []) async -> RouterDivision? {
-        guard let store, store.jevAllows(.drafts), found.dividesNow else { return nil }
+        guard let store, store.jevAllows(.drafts), found.divides else { return nil }
         let text = RouterModel.sendable(text)
         var tagged = RouterContext(projects: projects)
         tagged.mentions = mentions
