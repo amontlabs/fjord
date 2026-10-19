@@ -908,9 +908,10 @@ final class RouterModel {
 
     // MARK: Chips and @
 
-    /// Backspace at the start of the composer: the pinned target's chip goes, then the reply chip.
+    /// Backspace at the start of the composer: the last recipient's chip goes, then the pinned target's, then the reply chip.
     @discardableResult
     func removeLastChip() -> Bool {
+        if !live.recipients.isEmpty { live.recipients.removeLast(); return true }
         if live.pinned != nil { live.reset(); return true }
         if replyTo != nil { replyTo = nil; return true }
         if editing != nil { editing = nil; return true }

@@ -634,6 +634,26 @@ enum AppWindowShots {
         Shot(name: "router-canvas-split-flight", destination: { _ in .router }, size: canvasSize, compose: { model, store in
             splitFlight(model, store)
         }, appearance: .aqua),
+        // Typing paused with Jev's read for several places: the divider's parts under the composer, each place with its words,
+        // the last one held for another place's answer.
+        Shot(name: "router-split-live", destination: { _ in .router }, compose: { model, store in
+            splitLive(model, store)
+        }, appearance: .aqua),
+        Shot(name: "router-split-live-dark", destination: { _ in .router }, compose: { model, store in
+            splitLive(model, store)
+        }, appearance: .darkAqua),
+        // The same, while the divider is still being asked.
+        Shot(name: "router-split-dividing", destination: { _ in .router }, compose: { model, store in
+            model.draft = "rerun the build, add the page, and mute notifications for an hour"
+            model.live.previewDividing()
+        }, appearance: .aqua),
+        // Two sessions ⌘-clicked on the Brief: marked in the text, a chip each over the composer, the message going to both whole.
+        Shot(name: "router-brief-recipients", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 1600, height: 1420),
+             compose: { model, store in
+                 Demo.routerDigest(store); model.pickBrief()
+                 model.live.recipients = ["session:local_demo-silo-guest", "session:local_demo-api"]
+                 model.draft = "pull main before you go on"
+             }, appearance: .aqua),
         Shot(name: "settings") { _ in .settings },
         Shot(name: "categories") { _ in .categories },
         Shot(name: "snippets") { _ in .snippets },
@@ -819,6 +839,17 @@ enum AppWindowShots {
         model.pane = .history
         model.expanded.insert(entry.uuidString)
         model.expanded.insert(ids[0].uuidString)
+    }
+
+    /// A draft for three places, the divider's parts shown under the composer, one of them waiting for another's answer.
+    private static func splitLive(_ model: RouterModel, _ store: Store) {
+        let text = "rerun the build, tell the transfer to use the version CI picked, and mute notifications for an hour"
+        model.draft = text
+        model.live.preview(division: RouterDivision(text: text, parts: [
+            RouterDivider.Part(target: "session:local_demo-ci", text: "rerun the build", waitsFor: nil),
+            RouterDivider.Part(target: "session:local_demo-transfer", text: "use the version CI picked", waitsFor: "session:local_demo-ci"),
+            RouterDivider.Part(target: "change_fjord", text: "mute notifications for an hour", waitsFor: nil),
+        ]), store: store)
     }
 
     /// A message divided into three, its parts being sent: a pill each over the composer, two placed and one still looking.

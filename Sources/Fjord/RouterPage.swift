@@ -1211,7 +1211,10 @@ private struct HistoryDecisionLine: View, Equatable {
         } else if let held {
             // A start whose first message waits for the Claude app to run the session: started, and what it waits for. A part
             // held for another place's answer: held, and what it waits for.
-            read = ((RouterFlights.holds(decision) ? "held" : decision.summary) + " · " + held, true)
+            // The line names just the place it waits for; the rest is in its details.
+            let holding = RouterFlights.holds(decision)
+            let waitsFor = holding ? RouterFlights.destination(decision.parts.first?.waitsFor, store: store) : nil
+            read = (holding ? "held" + (waitsFor.map { " · waits for \($0)" } ?? " · " + held) : decision.summary + " · " + held, true)
         } else {
             read = (decision.summary, false)
         }
@@ -1229,7 +1232,8 @@ private struct HistoryDecisionLine: View, Equatable {
                     trigger
                         .cdsText(CDS.Transcript.text, .regular, hovered || open ? CDS.Text.secondary : CDS.Text.muted)
                         .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-                    Text("· \(status)").cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1)
+                    // A held part's line gives its words up before what it waits for.
+                    Text("· \(status)").cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).layoutPriority(held ? 2 : 0)
                     // A part held for another place's answer: sent when you say so.
                     if held, RouterFlights.holds(decision) {
                         Button("Send now") { store.routerDispatcher.sendNow(decision.id) }

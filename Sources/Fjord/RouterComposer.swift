@@ -50,7 +50,8 @@ struct RouterComposer: View {
             FlightStack(store: store, flights: model.flights, showsOtherAsks: model.layout == .canvas)
                 .padding(.bottom, model.flights.pills.isEmpty && (model.layout != .canvas || store.routerDispatcher.askBacks.isEmpty) ? 0 : C.dockGap)
             // Who your words go to, as the Code tab's strip over its composer: the card's session, the projects you tagged.
-            if model.replyTo != nil || model.live.pinned != nil || model.live.prediction != nil || model.editing != nil {
+            if model.replyTo != nil || model.live.pinned != nil || model.live.prediction != nil || model.editing != nil
+                || !model.live.recipients.isEmpty || !model.live.chips.isEmpty || model.live.dividing {
                 strip.padding(.bottom, C.dockGap)
             }
             card(on: on, working: working)
@@ -72,7 +73,7 @@ struct RouterComposer: View {
             LiveTargetWatch(store: store, model: model)
         }
         .motion(.fade, value: suggestions.map(\.id))
-        .motion(.fade, value: model.live.prediction?.target)
+        .motion(.fade, value: model.live.shown)
         // Jev's pick follows the draft and what fixes its target; the page marks its card or row while it shows.
         .onChange(of: model.draft) { model.predictTarget(store: store) }
         .onChange(of: model.pointers) { model.predictTarget(store: store) }
@@ -151,9 +152,22 @@ struct RouterComposer: View {
                 ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.accent,
                              removeLabel: "Let the Router decide where this goes") { model.live.reset() }
             }
+            // Items ⌘-clicked on the Brief: each gets the whole message.
+            ForEach(model.live.recipients, id: \.self) { target in
+                let title = RouterFlights.destination(target, store: store) ?? "a session"
+                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.accent,
+                             removeLabel: "Don't send it to \(title)") { model.live.recipients.removeAll { $0 == target } }
+            }
             // While editing, the draft goes to a fork: no pick of Jev's is offered for it.
-            if model.editing == nil, let prediction = model.live.prediction {
-                PredictionChip(prediction: prediction) { model.pinPrediction(store: store) }
+            if model.editing == nil {
+                if !model.live.chips.isEmpty {
+                    // Several places: each with its words, in place of the one chip.
+                    DivisionChips(chips: model.live.chips)
+                } else if model.live.dividing {
+                    DividingChip()
+                } else if let prediction = model.live.prediction {
+                    PredictionChip(prediction: prediction) { model.pinPrediction(store: store) }
+                }
             }
         }
         .padding(CDS.Density.compact.pad.md)
@@ -368,6 +382,57 @@ private struct PredictionChip: View {
     }
 }
 
+/// The draft divided into several places, while you type: a ghost chip for each part (its place, then its words), not clickable;
+/// Return sends them as shown. A part that waits for another place's answer is marked, and is held until you send it.
+private struct DivisionChips: View {
+    let chips: [RouterLiveTarget.DivisionChip]
+
+    var body: some View {
+        ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+            let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
+            HStack(spacing: 4) {
+                Image(systemName: chip.waits ? "pause.circle" : Self.glyph(chip.target)).font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(CDS.Text.muted).accessibilityHidden(true)
+                Text(chip.title).font(CDS.mono(13).weight(.medium)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
+                    .layoutPriority(1)
+                Text(chip.words).font(CDS.mono(13)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
+            }
+            .padding(.horizontal, CDS.Density.compact.pad.md)
+            .frame(maxWidth: 560, alignment: .leading)
+            .frame(height: CDS.Density.compact.control)
+            .overlay(shape.strokeBorder(CDS.border, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+            .tip(chip.waits ? "Held until you send it" : "Jev will send this to \(chip.detail)", chip.words)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(chip.waits ? "Held for" : "Sends to") \(chip.detail): \(chip.words)")
+        }
+    }
+
+    /// The glyph the history gives a message that went to a place like it.
+    static func glyph(_ target: String) -> String {
+        if target.hasPrefix("new:") { return "plus.square" }
+        if target.hasPrefix("answer:") { return "checkmark" }
+        if target.hasPrefix("session:") { return "paperplane" }
+        return target == "question" ? "questionmark.bubble" : "slider.horizontal.3"
+    }
+}
+
+/// The divider being asked of a draft Jev read as for several places: a quiet ghost chip until its parts are in.
+private struct DividingChip: View {
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.triangle.branch").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
+                .accessibilityHidden(true)
+            Text("dividing…").font(CDS.mono(13)).foregroundStyle(CDS.Text.muted)
+        }
+        .padding(.horizontal, CDS.Density.compact.pad.md)
+        .frame(height: CDS.Density.compact.control)
+        .overlay(shape.strokeBorder(CDS.border, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Jev is dividing this between places")
+    }
+}
+
 /// The chip's ×: ghost, muted, primary and white 7.5% on hover.
 struct ChipClose: View {
     let label: String
@@ -534,12 +599,16 @@ private struct LiveTargetWatch: View {
     let model: RouterModel
 
     var body: some View {
-        if model.live.pinned != nil || model.live.prediction != nil {
-            Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
-                .onChange(of: RouterModel.targets(store, predicted: model.live.prediction?.target)) {
-                    model.revalidateTarget(store: store)
-                }
+        Group {
+            if model.live.pinned != nil || model.live.prediction != nil || !model.live.chips.isEmpty || !model.live.recipients.isEmpty {
+                Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+                    .onChange(of: RouterModel.targets(store, predicted: model.live.prediction?.target)) {
+                        model.revalidateTarget(store: store)
+                    }
+            }
         }
+        // The recipients picked on the Brief fix where the message goes: the pick or the parts shown for it go.
+        .onChange(of: model.live.recipients) { model.predictTarget(store: store) }
     }
 }
 
