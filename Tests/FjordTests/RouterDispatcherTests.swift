@@ -1498,16 +1498,25 @@ import Testing
         #expect(plan == .classify)
     }
 
-    @Test func severalSessionsTaggedAreAllTheMessageCanGoTo() async {
+    @Test func severalSessionsTaggedInASentenceAreForTheDividerToPlaceLimitedToThem() async {
         let (s, d, f) = setup()
         s.claudeSessions["local_c"] = ClaudeSession(id: "local_c", title: "Ship it", folder: "/code/ci", lastActivity: Date(), running: true)
         f.ranked = [.init(target: "session:local_c", p: 0.97), .init(target: "unclear", p: 0.03)]
         let (text, context) = tagged(s, [.text("tell "), .pointer(.session("local_a")), .text(" or "), .pointer(.session("local_b")),
                                          .text(" to rebase")])
+        // The divider names one of them, sure: the message goes there. Jev's pick (not tagged) is never used.
+        f.division = .init(parts: [.init(target: "session:local_b", text: "rebase", waitsFor: nil)], sure: true, alternatives: [])
         let a = d.submit(text, context: context)
         await finish(d, f, a)
-        #expect(f.prepared.isEmpty, "Jev's pick wasn't tagged: you pick")
-        let options = Set(d.askBacks.first { $0.id == a }?.options.map(\.target) ?? [])
+        #expect(f.ranks == 0 && f.prepared == ["local_b"] && d.askBacks.isEmpty)
+        #expect(f.divideRequests.first?.mode == .tags(fixed: ["session:local_a", "session:local_b"]))
+        // The divider failing: you pick among the tagged.
+        f.division = nil
+        f.finished = []
+        let b = d.submit(text, context: context)
+        await finish(d, f, b)
+        #expect(f.prepared == ["local_b"], "nothing more was sent")
+        let options = Set(d.askBacks.first { $0.id == b }?.options.map(\.target) ?? [])
         #expect(!options.isEmpty && options.isSubset(of: ["session:local_a", "answer:local_a#w1", "session:local_b"]))
     }
 

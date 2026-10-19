@@ -73,6 +73,8 @@ struct RouterTrace: Codable, Equatable {
     var inputs: Inputs?
     /// `decided`: the checks and what was decided on them, when they were asked.
     var checks: Checks?
+    /// `decided` as `split`: the places the message was divided among (the target of each part), in order.
+    var parts: [String]?
     /// `picked`: the button and its place on the card (0 first); `corrected`: also what was suggested.
     var index: Int?
     var from: String?

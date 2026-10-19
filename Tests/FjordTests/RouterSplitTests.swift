@@ -1,0 +1,448 @@
+import Foundation
+import Testing
+@testable import Fjord
+
+/// A message that goes to several places (docs/design/spec/router.md, "Several places"): the tags cut it, a sentence after a
+/// tag's first is checked by Jev, tags that don't each open a sentence go to the divider, and each part runs as a message of
+/// its own: its words, its tools, its entry. The model, Jev and the sender are stood in for.
+@MainActor
+@Suite(.serialized) struct RouterSplitTests {
+    typealias Fakes = RouterDispatcherTests.Fakes
+
+    /// A store and a dispatcher whose sends are signed as the real ones are (so a part's delivery is known), with each send's
+    /// words recorded as the send gate has them: the turn's, with the addressing taken out.
+    @MainActor final class World {
+        let dir = TempDir()
+        let store: Store
+        let dispatcher: RouterDispatcher
+        let fakes = Fakes()
+        /// What each preparation was for: the session, and the words of its turn.
+        var said: [(session: String, words: String)] = []
+        var cancels: [RouterDecision.Delivered] = []
+
+        init() {
+            let s = InboxFixture.store([])
+            s.categories = [InboxStore.ci]
+            s.router.enabled = true
+            s.agents.enabled = true
+            s.claudeSessions = [
+                "local_a": ClaudeSession(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: Date(), running: true),
+                "local_b": ClaudeSession(id: "local_b", title: "Update the docs", folder: "/code/docs", lastActivity: Date().addingTimeInterval(-60)),
+                "local_c": ClaudeSession(id: "local_c", title: "Ship it", folder: "/code/ci", lastActivity: Date().addingTimeInterval(-120)),
+            ]
+            s.router.cards = [RouterCard(id: "local_a#w1", sessionID: "local_a", kind: .question, title: "Fix the login bug",
+                                         folder: "/code/lookout", text: "Which database?", createdAt: Date())]
+            store = s
+            dispatcher = RouterDispatcher(store: s)
+            fakes.install(dispatcher)
+            fakes.store = s
+            dispatcher.effects.prepare = { [unowned self] tools, session in
+                fakes.prepared.append(session)
+                let turn = tools.turnText ?? ""
+                let words = (try? Addressing.edit(turn, pills: tools.turnPills).text) ?? turn
+                said.append((session, words))
+                let signed = RelaySigner.sign(body: words, target: "cli-\(session)", key: RelaySigning.key)
+                return RouterDispatcher.Delivery(to: "peer-\(session)", text: signed, body: words, original: turn, rephrased: words != turn,
+                                                 session: session, newSessionIn: nil)
+            }
+            dispatcher.effects.abortable = { _ in true }
+            dispatcher.effects.cancel = { [unowned self] sent in
+                cancels.append(sent)
+                return .aborted
+            }
+            dispatcher.traceLog = RouterTraceLog(url: dir.path("router-trace.jsonl"))
+        }
+
+        var f: Fakes { fakes }
+
+        /// The message the composer would send, with its context.
+        func message(_ parts: [RouterMessagePart], replyTo: String? = nil, target: String? = nil) -> (text: String, context: RouterContext) {
+            let (text, mentions) = store.composeForRouter(parts)
+            var context = RouterContext(replyTo: replyTo, target: target)
+            context.tag(mentions)
+            return (text, context)
+        }
+
+        func entry(_ id: UUID?) -> RouterDecision? { store.router.decisions.first { $0.id == id } }
+        func record(_ id: UUID?) -> RouterDecision? { id.flatMap { store.router.record($0) } }
+
+        /// The message's run and every part's are over.
+        func finishAll(_ id: UUID?) async {
+            await waitUntil { id.map { fakes.finished.contains($0) } ?? true }
+            for part in entry(id)?.parts.map(\.id) ?? [] where part != id {
+                await waitUntil { fakes.finished.contains(part) }
+            }
+        }
+
+        /// What the parts said, by session, once the run is over.
+        func words(of session: String) -> [String] { said.filter { $0.session == session }.map(\.words) }
+
+        func trace() -> [RouterTrace] {
+            dispatcher.traceLog.flush()
+            guard let url = dispatcher.traceLog.url, let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return text.split(separator: "\n").compactMap { try? decoder.decode(RouterTrace.self, from: Data($0.utf8)) }
+        }
+
+        /// A form waiting on the card of the login session: "Yes" or "No".
+        func askYesNo() {
+            store.claudeSessions["local_a"]?.cliID = "cli-a"
+            store.router.cards[0].toolUseID = "call-1"
+            store.pendingForms["cli-a"] = PendingForm(id: "f", cliSessionID: "cli-a", transcriptPath: "", questions: [
+                .init(question: "Continue?", header: "Go", multiSelect: false,
+                      options: [.init(label: "Yes", description: ""), .init(label: "No", description: "")]),
+            ], createdAt: Date(), pid: 1, toolUseID: "call-1")
+        }
+    }
+
+    private let a = RouterMessagePart.pointer(.session("local_a"))
+    private let b = RouterMessagePart.pointer(.session("local_b"))
+    private let c = RouterMessagePart.pointer(.session("local_c"))
+
+    // MARK: Tags
+
+    @Test func twoSessionTagsAreTwoPartsEachSentWithItsOwnWords() async throws {
+        let w = World()
+        let (text, context) = w.message([a, .text(" fix the flaky test. "), b, .text(" add the page")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let entry = try #require(w.entry(id))
+        #expect(entry.parts.count == 2 && entry.parts.map(\.text) == ["@Fix the login bug fix the flaky test.", "@Update the docs add the page"])
+        #expect(w.words(of: "local_a") == ["fix the flaky test."] && w.words(of: "local_b") == ["add the page"])
+        #expect(w.f.ranks == 0 && w.f.sameAsked.isEmpty && w.f.divideRequests.isEmpty)
+        // Each part has its own delivery, its place, and is your pick.
+        for part in entry.parts {
+            let record = try #require(w.record(part.id))
+            #expect(record.delivered != nil && record.outcome == .done && record.decision.confirmed == true)
+            #expect(record.done.contains { if case .sent = $0 { true } else { false } })
+        }
+        #expect(entry.parts.map(\.place) == ["session:local_a", "session:local_b"] || entry.parts.map(\.place) == ["answer:local_a#w1", "session:local_b"]
+            || entry.parts.map(\.place) == ["session:local_a", "answer:local_b#w1"])
+        // The log: one decided line, "split", with the places.
+        let line = try #require(w.trace().first { $0.id == id && $0.path == "split" })
+        #expect(line.action == "split" && line.parts?.count == 2)
+        #expect(w.dispatcher.progress.isEmpty && w.dispatcher.flying.isEmpty)
+    }
+
+    @Test func tagsSideBySideShareTheWordsAfterThem() async throws {
+        let w = World()
+        let (text, context) = w.message([a, .text(" "), b, .text(" pull main")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.words(of: "local_a") == ["pull main"] && w.words(of: "local_b") == ["pull main"])
+        #expect(w.entry(id)?.parts.count == 2)
+        // Across a line break the group's pills are left out of the words.
+        let (text2, context2) = w.message([a, .text("\n"), b, .text(" rebase")])
+        let id2 = try #require(w.dispatcher.submit(text2, context: context2))
+        await w.finishAll(id2)
+        #expect(w.entry(id2)?.parts.map(\.text) == ["rebase", "rebase"])
+        #expect(w.words(of: "local_a") == ["pull main", "rebase"] && w.words(of: "local_b") == ["pull main", "rebase"])
+    }
+
+    @Test func anArmedReplyTakesTheTextNoTagAddressesAndTheRestGoesToTheTag() async throws {
+        let w = World()
+        w.askYesNo()
+        let (text, context) = w.message([.text("yes. "), b, .text(" add the page")], replyTo: "local_a#w1")
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        // "yes." answers the form on its own; docs gets only the rest.
+        #expect(w.f.answered.map(\.card) == ["local_a#w1"] && w.f.answered.first?.answers["Continue?"] == "Yes")
+        #expect(w.words(of: "local_a").isEmpty && w.words(of: "local_b") == ["add the page"])
+        let parts = try #require(w.entry(id)?.parts)
+        #expect(parts.map(\.text) == ["yes.", "@Update the docs add the page"])
+        #expect(w.record(parts[0].id)?.done.contains(.answered(card: "Fix the login bug")) == true)
+        #expect(w.f.ranks == 0 && w.f.divideRequests.isEmpty)
+    }
+
+    @Test func aChipsLaterSentenceIsCheckedAgainstItsFirst() async throws {
+        let w = World()
+        w.askYesNo()
+        w.f.same = ["Also mute it.": 0.9]
+        let (text, context) = w.message([.text("yes. Also mute it. "), b, .text(" add the page")], replyTo: "local_a#w1")
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.f.sameAsked.map(\.sentence) == ["Also mute it."] && w.f.sameAsked.map(\.tagged) == ["yes."])
+        #expect(w.entry(id)?.parts.map(\.text) == ["yes. Also mute it.", "@Update the docs add the page"])
+    }
+
+    @Test func aSentenceThatIsNotForTheTagIsRoutedAsAMessageOfItsOwn() async throws {
+        let w = World()
+        w.f.same = ["Mute notifications for an hour.": 0.2]
+        w.f.ranked = [.init(target: "change_fjord", p: 0.97), .init(target: "unclear", p: 0.03)]
+        let (text, context) = w.message([c, .text(" rerun the build. Mute notifications for an hour.")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let entry = try #require(w.entry(id))
+        #expect(entry.parts.count == 2 && entry.parts.map(\.text) == ["@Ship it rerun the build.", "Mute notifications for an hour."])
+        #expect(w.words(of: "local_c") == ["rerun the build."] && w.f.ranks == 1)
+        // The Router's run gets that sentence only: nothing of the rest, nor the message's line in its recent decisions.
+        let input = try #require(w.f.runs.first?.input)
+        #expect(w.f.runs.count == 1 && w.f.runs[0].intent == .changeFjord)
+        #expect(input.hasSuffix("The user's message:\nMute notifications for an hour.") || input.hasSuffix("Mute notifications for an hour."))
+        #expect(!input.contains("rerun the build") && !input.contains("Ship it rerun"))
+        // Jev placed it, you didn't: no example for the next ones.
+        let fjord = try #require(entry.parts.last.flatMap { w.record($0.id) })
+        #expect(fjord.decision.confirmed == nil && fjord.decision.targetID == "change_fjord")
+    }
+
+    @Test func aLoneTagWithASecondSentenceForItsPlaceIsOnePartAndAsksNothingElse() async throws {
+        let w = World()
+        w.f.same = ["Then add a test.": 0.9]
+        let (text, context) = w.message([c, .text(" fix the build. Then add a test.")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let entry = try #require(w.entry(id))
+        #expect(entry.parts.count == 1 && entry.parts[0].id == entry.id && w.f.ranks == 0)
+        #expect(w.f.sameAsked.count == 1 && w.words(of: "local_c") == ["fix the build. Then add a test."])
+        #expect(w.record(id)?.decision.confirmed == true && entry.delivered != nil)
+    }
+
+    @Test func aLoneTagWithASentenceJevDoesntPlaceAsksListingTheTagFirst() async throws {
+        let w = World()
+        w.f.same = ["Then add a test.": 0.2]
+        w.f.ranked = [.init(target: "unclear", p: 1)]
+        let (text, context) = w.message([c, .text(" fix the build. Then add a test.")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let ask = try #require(w.dispatcher.askBacks.first { $0.id == id })
+        #expect(ask.options.first?.target == "session:local_c" && w.f.prepared.isEmpty)
+        // Your pick sends the whole message there.
+        w.f.finished = []
+        #expect(w.dispatcher.pick(id, target: "session:local_c"))
+        await w.finishAll(id)
+        #expect(w.words(of: "local_c") == ["fix the build. Then add a test."])
+    }
+
+    @Test func aSentenceJevCantBeAskedAboutStaysWithItsTag() async throws {
+        let w = World()
+        w.dispatcher.effects.same = { _, _, _, _ in throw RouterTools.Failure("no TypeSafe key is set") }
+        let (text, context) = w.message([c, .text(" fix the build. Then add a test.")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.words(of: "local_c") == ["fix the build. Then add a test."] && w.dispatcher.askBacks.isEmpty)
+    }
+
+    @Test func aLoneTagOnOneSentenceIsTodaysRouteWithJevNeverAsked() async throws {
+        let w = World()
+        let (text, context) = w.message([.text("ask "), c, .text(" about the build")])
+        #expect(RouterDispatcher.plan(text: text, context: context, store: w.store) != .classify)
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.f.ranks == 0 && w.f.sameAsked.isEmpty && w.f.divideRequests.isEmpty && w.words(of: "local_c") == ["ask @Ship it about the build"])
+        #expect(w.entry(id)?.parts.count == 1 && w.record(id)?.decision.confirmed == true)
+        #expect(w.trace().contains { $0.id == id && $0.path == "tagged" && $0.action == "send" && $0.target == "session:local_c" })
+    }
+
+    @Test func tagsThatDontOpenASentenceGoToTheDividerLimitedToTheirPlaces() async throws {
+        let w = World()
+        let (text, context) = w.message([.text("tell "), a, .text(" or "), b, .text(" to rebase")])
+        // One place from the divider, sure: the message goes there as it is.
+        w.f.division = .init(parts: [.init(target: "answer:local_a#w1", text: "rebase", waitsFor: nil)], sure: true, alternatives: [])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let request = try #require(w.f.divideRequests.first)
+        #expect(request.mode == .tags(fixed: ["session:local_a", "session:local_b"]) && request.message == text)
+        #expect(w.f.prepared == ["local_a"] && w.entry(id)?.parts.count == 1)
+        // Two places: two parts, each with the divider's words.
+        w.f.division = .init(parts: [.init(target: "answer:local_a#w1", text: "rebase", waitsFor: nil),
+                                     .init(target: "session:local_b", text: "rebase the docs", waitsFor: nil)], sure: true, alternatives: [])
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id2)
+        #expect(w.entry(id2)?.parts.map(\.text) == ["rebase", "rebase the docs"] && w.words(of: "local_b") == ["rebase the docs"])
+        // Not sure of one place: it asks, that place first, then what the divider thought of.
+        w.f.division = .init(parts: [.init(target: "session:local_b", text: "rebase", waitsFor: nil)], sure: false,
+                             alternatives: ["answer:local_a#w1"])
+        w.f.finished = []
+        let id3 = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id3)
+        #expect(w.dispatcher.askBacks.first { $0.id == id3 }?.options.map(\.target) == ["session:local_b", "answer:local_a#w1"])
+    }
+
+    @Test func aDividerThatFailsAsksAmongTheTaggedPlaces() async throws {
+        let w = World()
+        let (text, context) = w.message([.text("tell "), a, .text(" or "), b, .text(" to rebase")])
+        w.f.divideError = RouterTools.Failure("down")
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let options = w.dispatcher.askBacks.first { $0.id == id }?.options.map(\.target) ?? []
+        #expect(Set(options) == ["session:local_b", "session:local_a"] || Set(options) == ["session:local_b", "answer:local_a#w1"])
+        #expect(w.f.prepared.isEmpty && w.f.ranks == 0)
+    }
+
+    @Test func recipientsEachGetTheWholeMessage() async throws {
+        let w = World()
+        var context = RouterContext()
+        context.recipients = ["session:local_a", "session:local_c"]
+        let id = try #require(w.dispatcher.submit("heads up: main moved", context: context))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.map(\.text) == ["heads up: main moved", "heads up: main moved"])
+        #expect(w.words(of: "local_a") == ["heads up: main moved"] && w.words(of: "local_c") == ["heads up: main moved"])
+        #expect(w.f.ranks == 0)
+    }
+
+    // MARK: Messages the tags don't divide
+
+    @Test func anActionsMessageIsNeverDivided() async throws {
+        let w = World()
+        w.f.ranked = [.init(target: "session:local_b", p: 0.97), .init(target: "unclear", p: 0.03)]
+        let (text, mentions) = w.store.composeForRouter([a, .text(" fix it. "), b, .text(" add the page")])
+        var context = RouterContext()
+        context.tag(mentions)
+        context.action = RouterActionSource(origin: SessionOrigin(category: "Contributions", thing: "o/lookout#7 Login fails",
+                                                                  actionID: "a", runID: "r"),
+                                            title: "o/lookout#7 Login fails", model: nil, effort: nil)
+        #expect(RouterDispatcher.plan(text: text, context: context, store: w.store) == .classify)
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.count == 1 && w.f.divideRequests.isEmpty && w.f.sameAsked.isEmpty)
+        #expect(w.f.ranks == 1 && w.f.prepared == ["local_b"], "Jev picks among the sessions tagged")
+    }
+
+    @Test func aReplyAPinAndALoneProjectAreWhatTheyWereWithoutTags() {
+        let w = World()
+        let card = RouterContext(replyTo: "local_a#w1")
+        #expect(RouterDispatcher.plan(text: "yes", context: card, store: w.store) == .reply(session: "local_a", card: "local_a#w1"))
+        let pinned = RouterContext(target: "session:local_b")
+        #expect(RouterDispatcher.plan(text: "add a note", context: pinned, store: w.store) == .route("session:local_b"))
+        let (text, context) = w.message([.pointer(.project("/code/web")), .text(" add a badge")])
+        #expect(RouterDispatcher.plan(text: text, context: context, store: w.store) == .start(folder: "/code/web"))
+        // A session tag inside code isn't one.
+        var inCode = RouterContext()
+        let code = "run `@Update the docs` again"
+        inCode.mentions = [RouterMention(range: 5..<22, pointer: .session("local_b"), name: "Update the docs")]
+        #expect(RouterDispatcher.plan(text: code, context: inCode, store: w.store) == .classify)
+    }
+
+    // MARK: Held parts
+
+    @Test func aProjectPartTheAppHoldsIsHeldAloneAndDontSendDropsOnlyIt() async throws {
+        let w = World()
+        w.f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "add a badge", project: "web",
+                                          ready: Prepared(text: "add a badge", original: "add a badge", rephrased: false), settings: nil)
+        let (text, context) = w.message([c, .text(" rerun it. "), .pointer(.project("/code/web")), .text(" add a badge")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await waitUntil { w.f.finishHeld != nil }
+        await w.finishAll(id)
+        let parts = try #require(w.entry(id)?.parts)
+        #expect(parts.count == 2 && w.words(of: "local_c") == ["rerun it."])
+        let held = try #require(parts.first { $0.place == "project:/code/web" })
+        #expect(w.dispatcher.held[held.id] == RouterDispatcher.heldWords && w.dispatcher.held.count == 1)
+        #expect(w.record(held.id)?.done == [.started(session: "local_late", project: "web", model: nil, effort: nil)])
+        // Stop leaves it be.
+        w.dispatcher.stopAll()
+        #expect(w.dispatcher.held[held.id] != nil)
+        // Don't send: only that part.
+        w.dispatcher.dropHeld(held.id)
+        w.f.finishHeld?.resume()
+        await waitUntil { w.record(held.id)?.outcome == .done }
+        #expect(w.record(held.id)?.doneLines.last == "failed: its first message wasn't sent: you chose not to send it")
+        let other = try #require(parts.first { $0.id != held.id })
+        #expect(w.record(other.id)?.doneLines.contains { $0.hasPrefix("sent to") } == true && w.f.sent.count == 1)
+    }
+
+    /// A message divided into two parts by hand, the second waiting for the first's place.
+    private func waiting(_ w: World) async throws -> (id: UUID, first: UUID, second: UUID) {
+        let text = "ask CI which version, then tell docs to use it"
+        let id = w.store.logDecision(RouterDecision(trigger: .you(text), decision: .init(intent: "message")))
+        let job = RouterDispatcher.Job(id: id, text: text, context: RouterContext(), tools: w.dispatcher.makeTools(id, text, pills: []))
+        w.dispatcher.dispatch(job, parts: [SplitPart(target: "session:local_c", text: "ask which version"),
+                                           SplitPart(target: "session:local_b", text: "use it", waitsFor: "session:local_c")])
+        w.dispatcher.end(job)
+        await w.finishAll(id)
+        let parts = try #require(w.entry(id)?.parts)
+        return (id, parts[0].id, parts[1].id)
+    }
+
+    @Test func aPartThatWaitsIsHeldUntilYouSendItAndStopLeavesItBe() async throws {
+        let w = World()
+        let (id, first, second) = try await waiting(w)
+        #expect(w.f.prepared == ["local_c"] && w.words(of: "local_c") == ["ask which version"])
+        let line = try #require(w.dispatcher.held[second])
+        #expect(line.hasPrefix("waits for session “Ship it”") && line.contains("dropped after 30 minutes"))
+        #expect(w.record(second)?.outcome == .pending && w.entry(id)?.summary == "split in 2: 1 sent, 1 held")
+        #expect(w.dispatcher.isBusy == false)
+        w.dispatcher.stopAll()
+        #expect(w.dispatcher.held[second] != nil && w.f.prepared == ["local_c"])
+        // Send now: it goes as a message of its own to its place, with its words only.
+        w.f.finished = []
+        w.dispatcher.sendNow(second)
+        await waitUntil { w.f.finished.contains(second) && w.record(second)?.outcome == .done }
+        #expect(w.words(of: "local_b") == ["use it"] && w.dispatcher.held.isEmpty && w.record(second)?.delivered != nil)
+        #expect(w.record(first)?.delivered != nil)
+    }
+
+    @Test func aHeldPartIsDroppedByDontSendTheTimeRunningOutOrTheRouterSwitchedOff() async throws {
+        let w = World()
+        let (_, _, second) = try await waiting(w)
+        w.dispatcher.dropHeld(second)
+        await waitUntil { w.record(second)?.outcome == .done }
+        #expect(w.record(second)?.doneLines.last == "failed: wasn't sent: you chose not to send it" && w.f.prepared == ["local_c"])
+        #expect(w.dispatcher.held.isEmpty && w.dispatcher.releases.isEmpty)
+
+        w.dispatcher.heldPartWait = 0.05
+        let (_, _, late) = try await waiting(w)
+        await waitUntil { w.record(late)?.outcome == .done }
+        #expect(w.record(late)?.doneLines.last?.hasPrefix("failed: wasn't sent: it waited too long for") == true)
+
+        w.dispatcher.heldPartWait = SessionStart.heldWait
+        let (_, _, off) = try await waiting(w)
+        w.dispatcher.stopAll(reason: RouterDispatcher.unlinkedWords, actions: true)
+        await waitUntil { w.record(off)?.outcome == .done }
+        #expect(w.record(off)?.doneLines.last == "failed: wasn't sent: the Router was switched off")
+        #expect(w.f.prepared.filter { $0 == "local_b" }.isEmpty)
+    }
+
+    // MARK: What acts on a part
+
+    @Test func cancellingAPartTakesBackOnlyThatPart() async throws {
+        let w = World()
+        let (text, context) = w.message([a, .text(" fix the flaky test. "), b, .text(" add the page")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let parts = try #require(w.entry(id)?.parts)
+        let docs = try #require(parts.first { w.record($0.id)?.delivered?.session == "local_b" })
+        #expect(await w.dispatcher.cancel(docs.id) == .aborted)
+        #expect(w.cancels.map(\.session) == ["local_b"])
+        let after = try #require(w.entry(id)?.parts)
+        #expect(after.first { $0.id == docs.id }?.delivered?.cancelled == .aborted)
+        #expect(after.first { $0.id != docs.id }?.delivered?.cancelled == nil)
+        #expect(w.entry(id)?.summary == "split in 2: 1 sent, 1 cancelled")
+    }
+
+    @Test func aPartSentElsewhereIsAskedAgainWithOnlyItsWordsAndWithoutItsPlace() async throws {
+        let w = World()
+        let (text, context) = w.message([a, .text(" fix the flaky test. "), b, .text(" add the page")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let docs = try #require(w.entry(id)?.parts.first { w.record($0.id)?.delivered?.session == "local_b" })
+        w.f.ranked = [.init(target: "session:local_b", p: 0.6), .init(target: "session:local_c", p: 0.3), .init(target: "session:local_a", p: 0.1)]
+        w.f.finished = []
+        w.dispatcher.sendElsewhere(docs.id)
+        await w.finishAll(docs.id)
+        let ask = try #require(w.dispatcher.askBacks.first { $0.id == docs.id })
+        #expect(ask.message == "@Update the docs add the page" && ask.context.notTo == "session:local_b")
+        #expect(!ask.options.map(\.target).contains("session:local_b") && w.cancels.map(\.session) == ["local_b"])
+        // Picking sends that part's words to the new place, and only that part changes.
+        w.f.finished = []
+        #expect(w.dispatcher.pick(docs.id, target: "session:local_c"))
+        await w.finishAll(docs.id)
+        #expect(w.words(of: "local_c") == ["@Update the docs add the page"] && w.entry(id)?.parts.count == 2)
+    }
+
+    @Test func aPartsCardsAreJudgedWithTheWordsOfThePartOnly() async throws {
+        let w = World()
+        w.store.router.cards.append(RouterCard(id: "local_b#t1", sessionID: "local_b", kind: .done, title: "Update the docs",
+                                               folder: "/code/docs", text: "Done.", createdAt: Date()))
+        let (text, context) = w.message([a, .text(" fix the flaky test. "), b, .text(" add the page")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let card = try #require(w.store.router.cards.first { $0.id == "local_b#t1" })
+        #expect(card.addressedNote == "@Update the docs add the page")
+        let parts = try #require(w.entry(id)?.parts)
+        let docs = try #require(parts.first { w.record($0.id)?.delivered?.session == "local_b" })
+        #expect(w.record(docs.id)?.done.contains(.resolved(card: "Update the docs", message: "@Update the docs add the page")) == true)
+        #expect(parts.filter { $0.id != docs.id }.allSatisfy { part in !part.done.contains { if case .resolved = $0 { true } else { false } } })
+    }
+}

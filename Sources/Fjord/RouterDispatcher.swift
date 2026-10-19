@@ -193,6 +193,8 @@ struct RouterAskBack: Identifiable, Equatable {
         case fork(SessionFork.Request)
         /// A target you pinned.
         case route(String)
+        /// Tags (or items picked on the Brief) that fix where each part of the message goes (`RouterTagSplit`).
+        case tags(RouterTagSplit.Result)
         case classify
     }
 
@@ -303,13 +305,17 @@ struct RouterAskBack: Identifiable, Equatable {
     private(set) var cancelling: Set<UUID> = []
     /// Starts whose session the Claude app has but doesn't run yet, by their entry: what their first message waits for. Not
     /// a run under way (you may send meanwhile); Stop ends them too.
-    private(set) var held: [UUID: String] = [:]
+    var held: [UUID: String] = [:]
     @ObservationIgnored var heldTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored var heldTools: [UUID: RouterTools] = [:]
     /// Held starts you chose not to send (`dropHeld`): their line says so.
     @ObservationIgnored var dropped: Set<UUID> = []
+    /// Held parts of a divided message (`holdPart`), by their id: what ends the wait, once.
+    @ObservationIgnored var releases: [UUID: CheckedContinuation<PartRelease, Never>] = [:]
+    /// How long a part waits for you to send it (`SessionStart.heldWait`); a test gives a shorter one.
+    @ObservationIgnored var heldPartWait: TimeInterval = SessionStart.heldWait
 
-    @ObservationIgnored private weak var store: Store?
+    @ObservationIgnored weak var store: Store?
     @ObservationIgnored var effects: Effects
     /// Claude Code's binary, as `RouterStatus` found it.
     @ObservationIgnored var claudePath: () -> String? = { nil }
@@ -317,7 +323,7 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var configure: ((RouterTools) -> Void)?
     /// A run is over (tests wait on it).
     @ObservationIgnored var onFinish: ((UUID) -> Void)?
-    @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var tasks: [UUID: Task<Void, Never>] = [:]
     /// Interrupts whose delivery isn't known, by their entry: what is sent again, as it was written, on "Send again".
     @ObservationIgnored private var unconfirmed: [UUID: Unconfirmed] = [:]
     private struct Unconfirmed {
@@ -326,7 +332,7 @@ struct RouterAskBack: Identifiable, Equatable {
         var text: String
         var turn: String?
     }
-    @ObservationIgnored private var runTools: [UUID: RouterTools] = [:]
+    @ObservationIgnored var runTools: [UUID: RouterTools] = [:]
     /// Jev's questions (tests answer for him); else `RouterTools.chooser` for the routing alone, else TypeSafe with your key.
     @ObservationIgnored var asker: JevAsker?
     /// Jev's routing of drafts asked while you typed, by their words and projects, for a while: sending one asks nothing again.
@@ -485,7 +491,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// Whether the ask's decision still exists; a card whose entry is gone is removed, and nothing is sent without a record.
     private func live(_ ask: RouterAskBack, store: Store) -> Bool {
-        if store.router.decisions.contains(where: { $0.id == ask.id }) { return true }
+        if store.router.record(ask.id) != nil { return true }
         askBacks.removeAll { $0.id == ask.id }
         return false
     }
@@ -547,10 +553,10 @@ struct RouterAskBack: Identifiable, Equatable {
     }
 
     /// An action's message moved on: its run says so (`Store.followActionRun`).
-    private func follow(_ id: UUID) { store?.followActionRun(id, dispatcher: self) }
+    func follow(_ id: UUID) { store?.followActionRun(id, dispatcher: self) }
 
     /// Stops every run under way (nothing more is sent by them) and drops the asks waiting for you. A held start's first
-    /// message isn't a run: its own line's "Don't send" drops it (`dropHeld`).
+    /// message isn't a run, nor is a held part of a divided message: its own line's "Don't send" drops it (`dropHeld`).
     /// `reason`: what an action's entry says of it (its run fails with why). `actions`: the inbox's actions' messages too,
     /// their runs and their asks (the Router switched off); Stop is for yours, and leaves those be (they weren't sent by
     /// you, and go on in the background).
@@ -560,6 +566,8 @@ struct RouterAskBack: Identifiable, Equatable {
         // Their turns end now, not once each run sees it was stopped: a send on its way is refused at its last gate.
         for (id, tools) in runTools where stopped(id) { tools.endTurn() }
         for ask in askBacks where actions || ask.context.action == nil { dismiss(ask.id, reason: reason) }
+        // A held part of a divided message is kept by Stop, like a held start; the Router switched off drops it.
+        if actions { for id in Array(releases.keys) { release(id, .drop("the Router was switched off")) } }
     }
 
     // MARK: Runs
@@ -695,6 +703,7 @@ struct RouterAskBack: Identifiable, Equatable {
             trace(job, path: job.context.target == target ? "pinned" : "tagged", action: "send", target: target)
             confirm(job, target)
             try await route(job, to: target)
+        case .tags(let divided): try await split(job, divided)
         case .classify: try await classifyAndAct(job)
         }
     }
@@ -704,7 +713,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// A routing decided: what it was decided on and what it does, as a trace line.
     func trace(_ job: Job, path: String, action: String, target: String?, inputs: RouterTrace.Inputs? = nil,
-                       checks: RouterTrace.Checks? = nil, kind: RouterTrace.Kind = .decided) {
+                       checks: RouterTrace.Checks? = nil, kind: RouterTrace.Kind = .decided, parts: [String]? = nil) {
         let text = job.text
         let pills = job.context.pills.compactMap { range -> String? in
             let chars = Array(text)
@@ -718,7 +727,7 @@ struct RouterAskBack: Identifiable, Equatable {
         traceLog.append(RouterTrace(kind: kind, id: job.id, message: RouterTools.redacted(text),
                                     pills: pills.isEmpty ? nil : pills, pinned: job.context.target, shown: job.context.shown,
                                     notTo: job.context.notTo, replyTo: job.context.replyTo, path: path, action: does,
-                                    target: target, inputs: inputs, checks: checks))
+                                    target: target, inputs: inputs, checks: checks, parts: parts))
     }
 
     /// Where it goes is yours (the card you replied to, the project you tagged to start in).
@@ -737,9 +746,10 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Where a message goes without asking Jev. A reply armed on a card fixes the session, and so does a target you pinned. A
-    /// single typed `@project` fixes a new session there when the message asks for one, or when the project has nothing else
-    /// to be for (no open card, no session). Anything else is for Jev.
+    /// Where a message goes without asking Jev. Tags fix where each part goes (`RouterTagSplit`). Otherwise a reply armed on a
+    /// card fixes the session, and so does a target you pinned. A single typed `@project` fixes a new session there when the
+    /// message asks for one, or when the project has nothing else to be for (no open card, no session). Anything else is for
+    /// Jev.
     static func plan(text: String, context: RouterContext, store: Store) -> Plan {
         // An action's message is never the Router's own, nor a fork: it is sent or starts a session.
         let unattended = context.action != nil
@@ -754,13 +764,21 @@ struct RouterAskBack: Identifiable, Equatable {
                                           store: store) {
             return .fork(fork)
         }
+        // The tags decide where each part goes (the armed reply and the pinned target are fed into them); a message with none
+        // is for the reply, the pin, or Jev. An action's message is never divided, and a part is not divided again.
+        if !unattended, !context.part {
+            let split = RouterTagSplit.plan(text, mentions: context.mentions, replyCard: context.replyTo, pinned: context.target,
+                                            recipients: context.recipients, store: store)
+            if split != .none { return .tags(split) }
+        }
         if let id = context.replyTo, let card = store.router.cards.first(where: { $0.id == id }) {
             return .reply(session: card.sessionID, card: id)
         }
         if let target = context.target { return .route(target) }
-        // A session you tagged is where it goes, while it is there; several tagged, Jev picks among them (`classifyAndAct`).
+        // An action's message goes to the one session it tags, while it is there; several tagged, Jev picks among them
+        // (`classifyAndAct`).
         let tagged = context.sessions.filter { store.claudeSessions[$0].map { !$0.isArchived } == true }
-        if tagged.count == 1 { return .route("session:\(tagged[0])") }
+        if unattended, tagged.count == 1 { return .route("session:\(tagged[0])") }
         if context.projects.count == 1, let folder = context.projects.first {
             if wantsNewSession(text, pills: context.pills) { return .start(folder: folder) }
             let other = store.openRouterCards.contains { store.routerCardMatchesProject($0, folder: folder) }
@@ -938,7 +956,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// (and the trace, `elsewhere` when it is to be sent elsewhere); nil when there's nothing to take back, or it failed.
     @discardableResult
     func cancel(_ id: UUID, elsewhere: Bool = false) async -> RouterDecision.Cancelled? {
-        guard let store, let entry = store.router.decisions.first(where: { $0.id == id }), let sent = entry.delivered,
+        guard let store, let entry = store.router.record(id), let sent = entry.delivered,
               sent.cancelled == nil, sent.abortable, !cancelling.contains(id) else { return nil }
         cancelling.insert(id)
         defer { cancelling.remove(id) }
@@ -1002,7 +1020,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// cancel that fails, or comes too late, sends no second copy (the entry says so, and you can send it again yourself).
     func sendElsewhere(_ id: UUID) {
         guard let store, store.routerOn, progress[id] == nil, !askBacks.contains(where: { $0.id == id }),
-              let entry = store.router.decisions.first(where: { $0.id == id }), case .you(let text) = entry.trigger,
+              let entry = store.router.record(id), case .you(let text) = entry.trigger,
               let sent = entry.delivered else { return }
         let wrong = entry.decision.targetID ?? "session:\(sent.session)"
         var context = RouterContext(notTo: wrong)
@@ -1217,6 +1235,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// "Don't send" on a held start's line: its first message is dropped (the session stays), its turn ended at once so
     /// nothing of it can still go.
     func dropHeld(_ id: UUID) {
+        if releases[id] != nil { return release(id, .drop("you chose not to send it")) }
         guard let task = heldTasks[id] else { return }
         dropped.insert(id)
         heldTools[id]?.endTurn()
@@ -1287,7 +1306,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// What a Revert on a run's change was: traced as the outcome of the action the checks named.
     fileprivate func reverted(_ id: UUID) {
-        guard let entry = store?.router.decisions.first(where: { $0.id == id }), let target = entry.decision.targetID,
+        guard let entry = store?.router.record(id), let target = entry.decision.targetID,
               RouterAct(target: target).isCheckAction else { return }
         traceLog.append(RouterTrace(kind: .reverted, id: id, target: target))
     }
@@ -1426,7 +1445,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     // MARK: Jev
 
-    private func classifyAndAct(_ job: Job) async throws {
+    func classifyAndAct(_ job: Job) async throws {
         guard let store else { return }
         stage(job, "classifying")
         let unattended = job.context.action != nil
@@ -1443,9 +1462,10 @@ struct RouterAskBack: Identifiable, Equatable {
         let inWorld = Self.inWorld(world, unattended: unattended, store: store)
         // The checks (archive, stop) are asked beside the route, at send time only: not when a pick was shown over the composer
         // for these words (you went with it), not for an inbox action's message, which only ever goes to a session.
-        // The sessions you tagged (more than one: one alone was sent to, `plan`): only they, their cards and the Router's own
-        // runs are gone to; a message wholly for the Router has no such bound.
-        let scope = Self.forRouter(job.text, pills: job.context.pills) ? []
+        // An action's message that tags sessions (more than one: one alone was sent to, `plan`): only they, their cards and the
+        // Router's own runs are gone to; a message wholly for the Router has no such bound. The tags of yours are decided by
+        // `RouterTagSplit`, never by Jev.
+        let scope = !unattended || Self.forRouter(job.text, pills: job.context.pills) ? []
             : Set(job.context.sessions.filter { store.claudeSessions[$0].map { !$0.isArchived } == true })
         // The checks are about what the route may go to: the projects it narrows to and the sessions tagged.
         let checkScope = RouterActionChecks.Scope(projects: narrowed.isEmpty ? nil : Set(narrowed), sessions: scope)
@@ -2045,7 +2065,7 @@ extension RouterDispatcher {
     fileprivate var storeForEffects: Store? { store }
     /// An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
     fileprivate func jevForEffects(_ tools: RouterTools) -> JevAsker? {
-        let action = tools.decision.flatMap { id in store?.router.decisions.last { $0.id == id } }?.fromAction != nil
+        let action = tools.decision.flatMap { id in store?.router.record(id) }?.fromAction != nil
         return action ? store?.jevAsker(.actions, base: asker ?? tools.chooser.map(JevClient.asker(choosing:))) : jev(tools)
     }
 
