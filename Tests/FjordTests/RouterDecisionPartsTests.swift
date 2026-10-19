@@ -250,6 +250,23 @@ import Testing
         #expect(entry().triggerText == "tell CI to rerun, and docs to add the page")
     }
 
+    @Test func onlyACancelThatStoppedTheDeliveryCountsAsCancelled() {
+        let s = store()
+        let ids = divided(in: s)
+        let entry = { s.router.decisions[0] }
+        let delivered = RouterDecision.Delivered(session: "ci", cli: "cli", nonce: "n", at: t0, turns: 0, busy: false, abortable: true)
+        for id in [ids.ci, ids.docs] {
+            s.updateDecision(id) { $0.add(.sent(to: "x", text: "go", original: nil), session: "ci"); $0.delivered = delivered; $0.outcome = .done }
+        }
+        for how in [RouterDecision.Cancelled.tooLate, .together, .unknown] {
+            s.updateDecision(ids.ci) { $0.delivered?.cancelled = how; $0.add(.cancelled(how)) }
+            #expect(entry().summary == "split in 2: 2 sent", "\(how) stopped nothing")
+            s.updateDecision(ids.ci) { $0.done.removeLast() }
+        }
+        s.updateDecision(ids.ci) { $0.delivered?.cancelled = .aborted; $0.add(.cancelled(.aborted)) }
+        #expect(entry().summary == "split in 2: 1 cancelled, 1 sent")
+    }
+
     @Test func aDividedEntrysContextLineHasOneClausePerPart() {
         let s = store()
         let ids = divided(in: s)

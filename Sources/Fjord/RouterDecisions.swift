@@ -419,7 +419,7 @@ struct RouterDecision: Identifiable, Equatable {
         for part in places.map({ $0.parts[0] }) {
             let state: String
             if part.done.contains(where: { if case .failed = $0 { true } else { false } }) { state = "failed" }
-            else if part.delivered?.cancelled?.stopped == true || part.done.contains(where: { if case .cancelled = $0 { true } else { false } }) { state = "cancelled" }
+            else if part.delivered?.cancelled?.stopped == true || part.done.contains(where: { if case .cancelled(let how) = $0 { how.stopped } else { false } }) { state = "cancelled" }
             else if part.outcome == .pending, part.waitsFor != nil, part.done.isEmpty { state = "held" }
             else if part.outcome == .pending { state = "working" }
             else if part.done.contains(where: \.sendsWords) { state = "sent" }
