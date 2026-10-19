@@ -15,10 +15,10 @@ enum RouterTagSplit {
     }
 
     /// The words one place gets, as ranges of the message. `keep`: the tag (or the side-by-side group of them) and the
-    /// segment's first sentence, or the lead of the chip or pin. `check`: the later sentences, each for Jev to say whether
-    /// it is for `target`, against `anchor` (the segment's first sentence, past its pills; for a lead with no chip or pin,
-    /// the message from the first tag on). Side-by-side tags have a segment each, all with the same `keep` and `check`:
-    /// a sentence is checked once, and kept for none of them or all of them.
+    /// segment's first sentence, or the first sentence of the lead of the chip or pin. `check`: the later sentences, each
+    /// for Jev to say whether it is for `target`, against `anchor` (the segment's first sentence, past its pills; for a lead
+    /// with no chip or pin, the message from the first tag on). Side-by-side tags have a segment each, all with the same
+    /// `keep` and `check`: a sentence is checked once, and kept for none of them or all of them.
     struct Segment: Equatable {
         var target: String
         var keep: [Range<Int>]
@@ -68,18 +68,26 @@ enum RouterTagSplit {
         let leaders = tags.indices.filter { addresses[$0] && !follows[$0] }
         var segments: [Segment] = []
         let first = tags[leaders[0]].range.lowerBound
-        if c[..<first].contains(where: { !$0.isWhitespace }) {
+        var lead = sentences(c, in: 0..<first, mentions: mentions).filter { !blank(c, $0) }
+        // The only place, named inside its sentence ("ask @B about the build"): what comes before the pill in that sentence is
+        // its words too, not a sentence of its own to check.
+        var from = first
+        if !startsSentence(c, at: first), let fragment = lead.last, fragment.upperBound == first {
+            lead.removeLast()
+            from = fragment.lowerBound
+        }
+        if !lead.isEmpty {
             if let base {
-                segments.append(Segment(target: base, keep: [0..<first], check: [], anchor: ""))
+                // The chip's or the pin's: its first sentence is its words, a later one is checked against it.
+                segments.append(Segment(target: base, keep: [lead[0]], check: Array(lead.dropFirst()), anchor: String(c[lead[0]])))
             } else {
-                let lead = sentences(c, in: 0..<first, mentions: mentions).filter { !blank(c, $0) }
                 segments.append(Segment(target: tags[leaders[0]].target, keep: [], check: lead, anchor: String(c[first...])))
             }
         }
         for (n, leader) in leaders.enumerated() {
             var last = leader
             while last + 1 < tags.count, follows[last + 1] { last += 1 }
-            let start = tags[leader].range.lowerBound, group = tags[last].range.upperBound
+            let start = n == 0 ? from : tags[leader].range.lowerBound, group = tags[last].range.upperBound
             let end = n + 1 < leaders.count ? tags[leaders[n + 1]].range.lowerBound : c.count
             let own = sentences(c, in: group..<end, mentions: mentions).filter { !blank(c, $0) }
             // The tag's own words are its first sentence; a tag with none keeps just itself.
@@ -87,10 +95,10 @@ enum RouterTagSplit {
             // Tags side by side across a line break: `Addressing.withoutLeadingPills` stops at the break and would leave the
             // later pills in the words, so the group's pills and the blanks after them are left out of the words instead.
             if tags[leader...last].indices.dropLast().contains(where: { c[tags[$0].range.upperBound..<tags[$0 + 1].range.lowerBound].contains(where: \.isNewline) }) {
-                var from = group
-                while from < c.count, c[from].isWhitespace { from += 1 }
-                let to = own.first?.upperBound ?? from
-                keep = from < to ? [from..<to] : []
+                var words = group
+                while words < c.count, c[words].isWhitespace { words += 1 }
+                let to = own.first?.upperBound ?? words
+                keep = words < to ? [words..<to] : []
             }
             let check = Array(own.dropFirst())
             let anchor = own.first.map { String(c[$0]) } ?? ""

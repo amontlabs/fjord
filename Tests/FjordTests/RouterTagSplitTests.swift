@@ -138,12 +138,27 @@ import Testing
         #expect(s[0].anchor == " rerun the build. ")
     }
 
-    @Test func aLoneSessionPillInsideASentenceHasALeadToCheck() {
+    @Test func aLoneSessionPillInsideASentenceHasThatSentenceForItsWords() {
         let (r, text, _) = plan([.words("ask "), docs(), .words(" about the build")])
         let s = segments(r)
-        #expect(s.map(\.target) == ["session:docs", "session:docs"])
-        #expect(s[0].keep.isEmpty && said(text, s[0].check) == "ask " && s[0].anchor == "@Docs about the build")
-        #expect(said(text, s[1].keep) == "@Docs about the build")
+        #expect(s.map(\.target) == ["session:docs"] && s[0].check.isEmpty)
+        #expect(said(text, s[0].keep) == "ask @Docs about the build")
+        // Sentences before that one are the lead, to check.
+        let (r2, text2, _) = plan([.words("The build is red. Then ask "), docs(), .words(" about it. And more.")])
+        let s2 = segments(r2)
+        #expect(s2.count == 2 && s2[0].keep.isEmpty && said(text2, s2[0].check) == "The build is red. ")
+        #expect(said(text2, s2[1].keep) == "Then ask @Docs about it. " && said(text2, s2[1].check) == "And more.")
+    }
+
+    @Test func aChipsLeadKeepsItsFirstSentenceAndChecksTheRest() {
+        let (r, text, _) = plan([.words("yes. Also, mute it. "), docs(), .words(" add the page")], reply: "ci#1")
+        let s = segments(r)
+        #expect(s.map(\.target) == ["answer:ci#1", "session:docs"])
+        #expect(said(text, s[0].keep) == "yes. " && said(text, s[0].check) == "Also, mute it. " && s[0].anchor == "yes. ")
+        // A pin's the same.
+        let (r2, text2, _) = plan([.words("check the logs. Then rest. "), docs(), .words(" add the page")], pinned: "new:/code/lookout")
+        let s2 = segments(r2)
+        #expect(said(text2, s2[0].keep) == "check the logs. " && said(text2, s2[0].check) == "Then rest. ")
     }
 
     @Test func theLeadBeforeTheFirstTagIsCheckedAgainstItWhenNothingIsArmed() {
