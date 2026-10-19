@@ -724,6 +724,41 @@ import Testing
         }
     }
 
+    @Test func returnJoinsTheDivisionBeingReadForItsWordsAndAsksTheDividerNothingAgain() async throws {
+        let w = World()
+        gatesUp(w)
+        let gate = gated(w)
+        let found = try await readDraft(w)
+        let reading = Task { await w.dispatcher.predictDivision(both, found: found, projects: []) }
+        await waitUntil { gate.waiting.count == 1 }
+        let id = try #require(w.dispatcher.submit(both))
+        await waitUntil { w.dispatcher.progress[id] == "dividing" }
+        gate.waiting[0].resume(returning: parts(w))
+        await w.finishAll(id)
+        #expect(await reading.value?.parts == parts(w).parts && w.f.divideRequests.count == 1)
+        #expect(w.entry(id)?.parts.map(\.text) == ["add the page", "rerun the build"])
+    }
+
+    @Test func anAnswerOfOnePlaceIsKeptAsAnAnswerSoReturnAsksNothingAgain() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: true, alternatives: [])
+        let found = try await readDraft(w)
+        #expect(await w.dispatcher.predictDivision(both, found: found, projects: []) == nil && w.f.divideRequests.count == 1)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        // The draft's answer is the send's: one place, where Jev's compound pick goes.
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.count == 1 && w.words(of: "local_c") == [both])
+        // So is every part waiting.
+        let waiting = both + " later"
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: "ask", waitsFor: "session:local_b"),
+                                     .init(target: "session:local_b", text: "use it", waitsFor: "session:local_c")], sure: true, alternatives: [])
+        #expect(await w.dispatcher.predictDivision(waiting, found: found, projects: []) == nil && w.f.divideRequests.count == 2)
+        let id2 = try #require(w.dispatcher.submit(waiting))
+        await w.finishAll(id2)
+        #expect(w.f.divideRequests.count == 2 && w.entry(id2)?.parts.count == 1)
+    }
+
     // MARK: Held parts
 
     @Test func aProjectPartTheAppHoldsIsHeldAloneAndDontSendDropsOnlyIt() async throws {

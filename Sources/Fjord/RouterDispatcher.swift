@@ -345,8 +345,10 @@ struct RouterAskBack: Identifiable, Equatable {
     /// Moves on each correction or dismissal (`forgetLive`): an answer asked for before it is neither kept nor used.
     @ObservationIgnored var liveGeneration = 0
     /// The parts a draft would be sent as (`predictDivision`), kept as the pick is, and the ones being read.
-    @ObservationIgnored var divisionCache: [String: (at: Date, division: RouterDivision?, board: String, generation: Int)] = [:]
-    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>, board: String, generation: Int, tools: RouterTools)] = [:]
+    /// What the divider answered, whatever the answer (one place, or every part waiting, is an answer too: a send of the same
+    /// words uses it and doesn't ask again).
+    @ObservationIgnored var divisionCache: [String: (at: Date, answer: RouterDivider.Answer, board: String, generation: Int)] = [:]
+    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivider.Answer?, Never>, board: String, generation: Int, tools: RouterTools)] = [:]
 
     init(store: Store) {
         self.store = store

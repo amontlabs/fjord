@@ -207,9 +207,19 @@ extension RouterDispatcher {
         let place = RouteLabel.compound.rawValue
         let key = Self.liveKey(job.text, projects)
         let answer: RouterDivider.Answer
-        if let hit = shownDivision(key), hit.text == job.text.trimmingCharacters(in: .whitespacesAndNewlines) {
+        if let kept = keptAnswer(key) {
             // Read while you typed: asked of the divider already.
-            answer = .init(parts: hit.parts, sure: true, alternatives: [])
+            answer = kept
+        } else if let reading = pendingAnswer(key) {
+            // Being read while you typed: its answer, not a second call.
+            stage(job, "dividing")
+            let joined = await reading.value
+            try Task.checkCancellation()
+            guard let joined else {
+                ungate(&found)
+                return false
+            }
+            answer = joined
         } else {
             stage(job, "dividing")
             let places = RouterDivider.places(job.tools.destinations(store, projects: projects.isEmpty ? nil : Set(projects)))
@@ -294,14 +304,8 @@ extension RouterDispatcher {
         tagged.mentions = mentions
         let narrowed = Self.repoWorld(tagged, store: store).flatMap { $0.clones.isEmpty ? nil : $0.clones } ?? projects
         let key = Self.liveKey(text, narrowed)
-        if let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor, hit.board == Self.boardRevision(store),
-           hit.generation == liveGeneration, hit.division.map({ reachable($0.parts, store: store) }) ?? true {
-            return hit.division
-        }
-        // Joined only when asked on this board and before no correction or dismissal since: it is not the division of this one.
-        if let pending = divisionPending[key], pending.board == Self.boardRevision(store), pending.generation == liveGeneration {
-            return await pending.task.value
-        }
+        if let kept = keptAnswer(key) { return division(of: kept, text: text) }
+        if let reading = pendingAnswer(key) { return await reading.value.flatMap { division(of: $0, text: text) } }
         let tools = RouterTools(store: store)
         tools.tagged = RouterPointers.context(mentions, store: store)
         configure?(tools)
@@ -314,32 +318,47 @@ extension RouterDispatcher {
         let board = Self.boardRevision(store)
         let generation = liveGeneration
         // Its own task, as Jev's read of a draft is: a draft that changes, or is sent, doesn't stop it.
-        let pending = Task { [weak self] () -> RouterDivision? in
+        let pending = Task { [weak self] () -> RouterDivider.Answer? in
             guard let self else { return nil }
             defer { if self.divisionPending[key]?.id == id { self.divisionPending[key] = nil } }
             guard self.store?.jevAllows(.drafts) == true, let answer = try? await self.effects.divide(tools, request),
                   self.store?.jevAllows(.drafts) == true else { return nil }
-            // Stopped, the board moved on, or a correction or dismissal came, while the divider was read: its answer is for what it was
-            // asked on, and is not used.
+            // Stopped, the board moved on, or a correction or dismissal came, while the divider was read: its answer is for what
+            // it was asked on, and is not used.
             guard !Task.isCancelled, let current = self.store, Self.boardRevision(current) == board, self.liveGeneration == generation else { return nil }
-            // Several places, with a part to send: one that is only one place is the pick Jev's read already shows.
-            let several = Set(answer.parts.map { self.place($0.target) }).count >= 2 && answer.parts.contains { $0.waitsFor == nil }
-                && self.store.map({ self.reachable(answer.parts, store: $0) }) == true
-            let division = several ? RouterDivision(text: text, parts: answer.parts) : nil
             self.divisionCache = self.divisionCache.filter { Date().timeIntervalSince($0.value.at) < Self.liveFor }
-            self.divisionCache[key] = (Date(), division, board, generation)
-            return division
+            self.divisionCache[key] = (Date(), answer, board, generation)
+            return answer
         }
         divisionPending[key] = (id, pending, board, generation, tools)
-        return await pending.value
+        return await pending.value.flatMap { division(of: $0, text: text) }
     }
 
-    /// A division kept from while you typed, while it is fresh and read on this board.
-    private func shownDivision(_ key: String) -> RouterDivision? {
-        guard let store, let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor,
-              hit.board == Self.boardRevision(store), hit.generation == liveGeneration,
-              hit.division.map({ reachable($0.parts, store: store) }) ?? true else { return nil }
-        return hit.division
+    /// The parts of an answer as shown under the composer: several places with a part to send, every place still there. One
+    /// that is only one place is the pick Jev's read already shows.
+    private func division(of answer: RouterDivider.Answer, text: String) -> RouterDivision? {
+        guard let store, Set(answer.parts.map { place($0.target) }).count >= 2, answer.parts.contains(where: { $0.waitsFor == nil }),
+              reachable(answer.parts, store: store) else { return nil }
+        return RouterDivision(text: text, parts: answer.parts)
+    }
+
+    /// An answer kept from while you typed, while it is fresh, read on this board and since no correction or dismissal, and
+    /// every place in it still there.
+    private func keptAnswer(_ key: String) -> RouterDivider.Answer? {
+        guard let store, let hit = divisionCache[key] else { return nil }
+        guard Date().timeIntervalSince(hit.at) < Self.liveFor, hit.board == Self.boardRevision(store), hit.generation == liveGeneration,
+              reachable(hit.answer.parts, store: store) else {
+            divisionCache[key] = nil
+            return nil
+        }
+        return hit.answer
+    }
+
+    /// The read of a draft's division still under way for these words, on this board and since no correction or dismissal.
+    private func pendingAnswer(_ key: String) -> Task<RouterDivider.Answer?, Never>? {
+        guard let store, let pending = divisionPending[key], pending.board == Self.boardRevision(store),
+              pending.generation == liveGeneration else { return nil }
+        return pending.task
     }
 
     /// The parts as they stand: several go as parts; one is the message as it is, to its place (the path of today, when it is
