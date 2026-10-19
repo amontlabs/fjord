@@ -270,6 +270,7 @@ extension RouterDispatcher {
             found.card = single.card
         }
         guard found.top?.target == RouteLabel.compound.rawValue else { return }
+        found.compoundUnresolved = true
         found.ranked.removeAll { $0.target == RouteLabel.compound.rawValue }
         found.card = found.card?.filter { $0 != RouteLabel.compound.rawValue }
         found.sure = false

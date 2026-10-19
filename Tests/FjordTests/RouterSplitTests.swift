@@ -593,6 +593,20 @@ import Testing
         #expect(!ask3.options.contains { $0.target == "compound" || $0.target == "change_fjord" })
     }
 
+    @Test func anUnresolvedCompoundIsAskedEvenWhenYourWordsNameAPlace() async throws {
+        let w = World()
+        gatesUp(w)
+        let ranked: [RouterDispatcher.Scored] = [.init(target: "compound", p: 0.6), .init(target: "question", p: 0.3), .init(target: "session:local_c", p: 0.1)]
+        w.f.ranked = ranked
+        w.f.ungated = .init(ranked: ranked, sure: false, card: nil)
+        w.f.divideError = RouterTools.Failure("down")
+        let id = try #require(w.dispatcher.submit("tell CI to rerun the build, and mute notifications for an hour"))
+        await w.finishAll(id)
+        // "tell CI" names a place, but the message is also for another: the whole of it isn't sent to CI on that.
+        #expect(w.dispatcher.askBacks.contains { $0.id == id } && w.f.prepared.isEmpty && w.f.runs.isEmpty)
+        #expect(w.entry(id)?.parts.count == 1)
+    }
+
     @Test func theYouGateDoesntStopTheDivider() async throws {
         let w = World()
         gatesUp(w, top: "session:local_a", you: 0.9)

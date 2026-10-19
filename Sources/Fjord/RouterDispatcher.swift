@@ -146,6 +146,9 @@ struct RouterAskBack: Identifiable, Equatable {
         /// Jev's answers to the gates (`Ranking.gates`), and the ranking without the compound gates (`Ranking.ungated`).
         var gates: [String: Double] = [:]
         var ungated: Ungated? = nil
+        /// A compound top was taken from the ranking with nothing to replace it (the divider couldn't resolve it): the message is
+        /// for several places, and nothing sends it whole to one (`ungate`).
+        var compoundUnresolved = false
 
         var top: Scored? { ranked.first }
 
@@ -1493,7 +1496,8 @@ struct RouterAskBack: Identifiable, Equatable {
         let unbounded = unattended && world == nil && job.context.projects.isEmpty && scope.isEmpty
         if unbounded { found.sure = false }
         let targets = job.tools.targets(store, projects: narrowed.isEmpty ? nil : Set(narrowed))
-        let named = unbounded || (!unattended && Self.forRouter(job.text, pills: job.context.pills))
+        // A message for several places that couldn't be divided isn't sent whole to the one of them it names: you pick.
+        let named = unbounded || found.compoundUnresolved || (!unattended && Self.forRouter(job.text, pills: job.context.pills))
             ? nil : RouterTools.destination(job.text, targets, store: store, pills: job.context.pills)
         if let named, named != found.top?.target, named != job.context.notTo, inScope(named), inWorld(named),
            eligible(named, store: store) {
@@ -1535,7 +1539,8 @@ struct RouterAskBack: Identifiable, Equatable {
             checksTrace = RouterTrace.Checks(reading, decided)
             switch decided.kind {
             case .act:
-                if let act = decided.act {
+                // Not on part of a message for several places: you pick (the ask below).
+                if let act = decided.act, !found.compoundUnresolved {
                     var acting = job
                     acting.context.turns = reading.turns
                     return try await perform(acting, act, inputs: found.trace, checks: checksTrace, decided: true)
