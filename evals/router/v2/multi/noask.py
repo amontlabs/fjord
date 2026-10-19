@@ -10,7 +10,7 @@ import json
 
 from . import common as C, score
 
-VARIANTS = ("noask1", "noask2", "noask3")
+VARIANTS = ("noask1", "noask2", "noask3", "ship3")
 
 
 def pct(x):
@@ -50,8 +50,13 @@ def main():
         for n in names:
             table[n] = {"value": pct(rep[n][metric]), "ci95": [pct(x) for x in rep[n]["ci95"][metric]]}
             if n != "pipeline":
-                d = rep["paired"][f"pipeline - {n}"][metric]["ci95"]
-                table[n]["vs_B"] = [pct(-d[1]), pct(-d[0])]
+                # score.boot names a pair by alphabetical order: "<later> - <earlier>".
+                if f"pipeline - {n}" in rep["paired"]:
+                    d = rep["paired"][f"pipeline - {n}"][metric]["ci95"]
+                    table[n]["vs_B"] = [pct(-d[1]), pct(-d[0])]
+                else:
+                    d = rep["paired"][f"{n} - pipeline"][metric]["ci95"]
+                    table[n]["vs_B"] = [pct(d[0]), pct(d[1])]
         out["multi"][label] = {"metric": metric, **table}
     (C.DATA / "noask_report.json").write_text(json.dumps(out, indent=1))
     print(json.dumps(out, indent=1))

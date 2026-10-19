@@ -375,7 +375,57 @@ class NoAsk:
                 "error": a.get("error")}
 
 
+class Ship3:
+    """Exploratory (dev only): variant 3 in the form being shipped. No unconditioned Haiku call: only when Jev's two
+    compound gates fire does one Haiku call run, with `waits_for`, every place and no note.
+    - Two places or more, at least one part not waiting: those parts are sent, the waiting ones held.
+    - One place, or every part waits: when B's top is compound, that place goes first in B's ranking, sure only if B
+      and Haiku both are; otherwise B as shipped.
+    - The call fails: B with the gates read as 0 (a compound pick becomes an ask on the rest of the ranking)."""
+    def __init__(self):
+        self.noask = NoAsk(3)
+        self.pipeline = self.noask.pipeline
+
+    def route(self, state, message, context):
+        from v2.run import rules
+        b = self.pipeline.route(state, message, context)
+        if b["path"] in ("tags", "tags-divider", "chip"):
+            return {**b, "sure": b["sure"] or len(b["parts"]) >= 2, "path": "ship3-" + b["path"]}
+        g1, g2 = self.noask.gates(state, message, context)
+        if not (g1 >= 0.75 and g2 >= 0.5):
+            return {**b, "path": "ship3-" + b["path"]}
+        d = self.pipeline.jev(state, message, context)
+        ranked = [r["target"] if isinstance(r, dict) else r for r in d.get("ranked", [])]
+        top = d.get("target") if d["decision"] != "ask" else d.get("top")
+        w = model_route(C.HAIKU, state, message, context, tag="cand-haiku-waits", waits=True)
+        latency = (d.get("latency") or 0.0) + (w.get("latency") or 0.0)
+        cost = (d.get("tokens") or 0) * 0.04e-6 + (w.get("cost") or 0.0)  # Jev, then the one Haiku call
+        if w.get("error") or not w["parts"]:
+            if top == "compound":
+                rest = [t for t in ranked if t and t != "compound"][:4]
+                return {"parts": [], "sure": False, "options": rest, "latency": latency, "cost": cost,
+                        "path": "ship3-failed", "error": w.get("error")}
+            return {**b, "path": "ship3-" + b["path"]}
+        places = {p["place"] for p in w["parts"]}
+        sending = [p for p in w["parts"] if not p.get("waits_for")]
+        if len(places) >= 2 and sending:
+            return {"parts": sending, "held": [p for p in w["parts"] if p.get("waits_for")], "sure": True,
+                    "options": _options(sending, []), "latency": latency, "cost": cost, "path": "ship3-split"}
+        if top == "compound":
+            place = w["parts"][0]["target"]
+            order = list(dict.fromkeys([place] + [t for t in ranked if t and t != "compound"]))[:4]
+            if d["decision"] != "ask" and w["sure"]:
+                text = rules.edit(message, context.get("pills", []))
+                return {"parts": [{"place": C.place_of(place), "target": place, "text": text}], "sure": True,
+                        "options": order, "latency": latency, "cost": cost, "path": "ship3-one"}
+            return {"parts": [], "sure": False, "options": order, "latency": latency, "cost": cost,
+                    "path": "ship3-one-ask"}
+        return {**b, "path": "ship3-" + b["path"]}
+
+
 def make(name):
+    if name == "ship3":
+        return Ship3()
     if name.startswith("noask"):
         return NoAsk(int(name[-1]))
     if name in ("hybrid", "hybrid-lazy"):
