@@ -640,6 +640,50 @@ import Testing
         #expect(await w.dispatcher.predictDivision(both + "!", found: found, projects: []) == nil && w.f.divideRequests.count == 2)
     }
 
+    /// The divider held until the test answers it: the answers' continuations, in the order asked.
+    private final class Gate {
+        var waiting: [CheckedContinuation<RouterDivider.Answer, Error>] = []
+        var tools: [RouterTools] = []
+        var cancelled = false
+    }
+
+    private func gated(_ w: World) -> Gate {
+        let gate = Gate()
+        w.dispatcher.effects.divide = { tools, request in
+            w.f.divideRequests.append(request)
+            gate.tools.append(tools)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { gate.waiting.append($0) }
+            } onCancel: { gate.cancelled = true }
+        }
+        return gate
+    }
+
+    private func readDraft(_ w: World) async throws -> RouterDispatcher.Classification {
+        RouterDispatcher.Classification(try await w.dispatcher.effects.rank(w.dispatcher.makeTools(UUID(), both, pills: []), both, []))
+    }
+
+    @Test func aDivisionReadOnAnEarlierBoardIsNeitherJoinedNorUsed() async throws {
+        let w = World()
+        gatesUp(w)
+        let gate = gated(w)
+        let found = try await readDraft(w)
+        let first = Task { await w.dispatcher.predictDivision(both, found: found, projects: []) }
+        await waitUntil { gate.waiting.count == 1 }
+        // The board changes while it is read: the same words are a new question, not the pending one.
+        w.store.claudeSessions["local_new"] = ClaudeSession(id: "local_new", title: "Brand new", folder: "/code/new", lastActivity: Date().addingTimeInterval(10))
+        let second = Task { await w.dispatcher.predictDivision(both, found: found, projects: []) }
+        await waitUntil { gate.waiting.count == 2 }
+        #expect(w.f.divideRequests.count == 2)
+        gate.waiting[1].resume(returning: parts(w))
+        #expect(await second.value?.parts == parts(w).parts)
+        // The first one's answer is for the old board: nothing of it is returned or kept.
+        gate.waiting[0].resume(returning: .init(parts: [.init(target: "session:local_c", text: "x", waitsFor: nil),
+                                                        .init(target: "session:local_a", text: "y", waitsFor: nil)], sure: true, alternatives: []))
+        #expect(await first.value == nil)
+        #expect(await w.dispatcher.predictDivision(both, found: found, projects: [])?.parts == parts(w).parts && w.f.divideRequests.count == 2)
+    }
+
     // MARK: Held parts
 
     @Test func aProjectPartTheAppHoldsIsHeldAloneAndDontSendDropsOnlyIt() async throws {

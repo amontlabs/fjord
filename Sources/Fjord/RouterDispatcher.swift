@@ -346,7 +346,7 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored private var liveGeneration = 0
     /// The parts a draft would be sent as (`predictDivision`), kept as the pick is, and the ones being read.
     @ObservationIgnored var divisionCache: [String: (at: Date, division: RouterDivision?, board: String)] = [:]
-    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>)] = [:]
+    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>, board: String)] = [:]
 
     init(store: Store) {
         self.store = store

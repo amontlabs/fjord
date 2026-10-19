@@ -298,7 +298,8 @@ extension RouterDispatcher {
            hit.division.map({ reachable($0.parts, store: store) }) ?? true {
             return hit.division
         }
-        if let pending = divisionPending[key] { return await pending.task.value }
+        // Joined only when asked on this board: one asked on an earlier board is not the division of this one.
+        if let pending = divisionPending[key], pending.board == Self.boardRevision(store) { return await pending.task.value }
         let tools = RouterTools(store: store)
         tools.tagged = RouterPointers.context(mentions, store: store)
         configure?(tools)
@@ -315,6 +316,8 @@ extension RouterDispatcher {
             defer { if self.divisionPending[key]?.id == id { self.divisionPending[key] = nil } }
             guard self.store?.jevAllows(.drafts) == true, let answer = try? await self.effects.divide(tools, request),
                   self.store?.jevAllows(.drafts) == true else { return nil }
+            // The board moved on while the divider was read: its answer is for the board it was asked on, and is not used.
+            guard let current = self.store, Self.boardRevision(current) == board else { return nil }
             // Several places, with a part to send: one that is only one place is the pick Jev's read already shows.
             let several = Set(answer.parts.map { self.place($0.target) }).count >= 2 && answer.parts.contains { $0.waitsFor == nil }
                 && self.store.map({ self.reachable(answer.parts, store: $0) }) == true
@@ -323,7 +326,7 @@ extension RouterDispatcher {
             self.divisionCache[key] = (Date(), division, board)
             return division
         }
-        divisionPending[key] = (id, pending)
+        divisionPending[key] = (id, pending, board)
         return await pending.value
     }
 
