@@ -644,6 +644,7 @@ import Testing
     private final class Gate {
         var waiting: [CheckedContinuation<RouterDivider.Answer, Error>] = []
         var tools: [RouterTools] = []
+        var turns: [Int] = []
         var cancelled = false
     }
 
@@ -652,6 +653,7 @@ import Testing
         w.dispatcher.effects.divide = { tools, request in
             w.f.divideRequests.append(request)
             gate.tools.append(tools)
+            gate.turns.append(tools.turn)
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { gate.waiting.append($0) }
             } onCancel: { gate.cancelled = true }
@@ -704,6 +706,22 @@ import Testing
         w.dispatcher.forgetLive()
         gate.waiting[0].resume(returning: parts(w))
         #expect(await reading.value == nil && w.dispatcher.divisionCache[RouterDispatcher.liveKey(both + "?", [])] == nil)
+    }
+
+    @Test func stopAndRouterOffCancelADivisionBeingReadForADraftAndKillItsProgram() async throws {
+        for actions in [false, true] {
+            let w = World()
+            gatesUp(w)
+            let gate = gated(w)
+            let found = try await readDraft(w)
+            let reading = Task { await w.dispatcher.predictDivision(both, found: found, projects: []) }
+            await waitUntil { gate.waiting.count == 1 }
+            w.dispatcher.stopAll(actions: actions)
+            // Its turn ended (the program killed with it) and its task cancelled; nothing it answers is kept.
+            #expect(gate.cancelled && gate.tools[0].turn > gate.turns[0] && w.dispatcher.divisionPending.isEmpty)
+            gate.waiting[0].resume(returning: parts(w))
+            #expect(await reading.value == nil && w.dispatcher.divisionCache.isEmpty)
+        }
     }
 
     // MARK: Held parts

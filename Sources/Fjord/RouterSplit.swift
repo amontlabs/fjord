@@ -319,9 +319,9 @@ extension RouterDispatcher {
             defer { if self.divisionPending[key]?.id == id { self.divisionPending[key] = nil } }
             guard self.store?.jevAllows(.drafts) == true, let answer = try? await self.effects.divide(tools, request),
                   self.store?.jevAllows(.drafts) == true else { return nil }
-            // The board moved on, or a correction or dismissal came, while the divider was read: its answer is for what it was
+            // Stopped, the board moved on, or a correction or dismissal came, while the divider was read: its answer is for what it was
             // asked on, and is not used.
-            guard let current = self.store, Self.boardRevision(current) == board, self.liveGeneration == generation else { return nil }
+            guard !Task.isCancelled, let current = self.store, Self.boardRevision(current) == board, self.liveGeneration == generation else { return nil }
             // Several places, with a part to send: one that is only one place is the pick Jev's read already shows.
             let several = Set(answer.parts.map { self.place($0.target) }).count >= 2 && answer.parts.contains { $0.waitsFor == nil }
                 && self.store.map({ self.reachable(answer.parts, store: $0) }) == true
@@ -330,7 +330,7 @@ extension RouterDispatcher {
             self.divisionCache[key] = (Date(), division, board, generation)
             return division
         }
-        divisionPending[key] = (id, pending, board, generation)
+        divisionPending[key] = (id, pending, board, generation, tools)
         return await pending.value
     }
 

@@ -346,7 +346,7 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var liveGeneration = 0
     /// The parts a draft would be sent as (`predictDivision`), kept as the pick is, and the ones being read.
     @ObservationIgnored var divisionCache: [String: (at: Date, division: RouterDivision?, board: String, generation: Int)] = [:]
-    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>, board: String, generation: Int)] = [:]
+    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>, board: String, generation: Int, tools: RouterTools)] = [:]
 
     init(store: Store) {
         self.store = store
@@ -571,6 +571,9 @@ struct RouterAskBack: Identifiable, Equatable {
         // Their turns end now, not once each run sees it was stopped: a send on its way is refused at its last gate.
         for (id, tools) in runTools where stopped(id) { tools.endTurn() }
         for ask in askBacks where actions || ask.context.action == nil { dismiss(ask.id, reason: reason) }
+        // A division being read for a draft is a run too, Router-off or Stop: its program is killed and its answer never comes.
+        for pending in divisionPending.values { pending.tools.endTurn(); pending.task.cancel() }
+        divisionPending = [:]
         // A part sent now, not yet running: stopped too, its turn ended and its task told.
         for id in releasing { heldTools[id]?.endTurn(); heldTasks[id]?.cancel() }
         // A held part of a divided message is kept by Stop, like a held start; the Router switched off drops it.
