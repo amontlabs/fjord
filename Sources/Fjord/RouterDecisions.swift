@@ -608,7 +608,8 @@ extension RouterState {
                 let held = part.done.contains { if case .started = $0 { true } else { false } }
                 let guestPrepared = part.done.contains { if case .preparedGuest = $0 { true } else { false } }
                 if !guestPrepared {
-                    if let waits = part.waitsFor {
+                    // Held, as against a part sent now (it has its delivery or other lines by then, whatever it waited for).
+                    if let waits = part.waitsFor, part.done.isEmpty {
                         part.add(.failed("wasn't sent: Fjord quit while it waited for \(placeWords(waits))"))
                     } else {
                         part.add(.failed(held ? "its first message wasn't sent: Fjord quit while it waited for the session to run" : "interrupted"))

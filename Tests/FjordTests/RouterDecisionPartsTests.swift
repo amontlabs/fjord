@@ -185,6 +185,21 @@ import Testing
         #expect(state.decisions[0].outcome == .done && state.decisions[1].doneLines == ["failed: interrupted"])
     }
 
+    @Test func aQuitDoesNotCallAPartSentNowUnsent() {
+        var state = RouterState()
+        var entry = RouterDecision(trigger: .you("ask CI, then tell docs"))
+        entry.divide(into: [
+            .init(text: "ask CI", place: "session:ci", outcome: .done),
+            .init(text: "tell docs", place: "session:docs", waitsFor: "session:ci"),
+        ])
+        // Sent now, delivered, its cards still being judged when Fjord quit.
+        entry.parts[1].add(.sent(to: "peer-docs", text: "tell docs", original: nil), session: "docs")
+        state.decisions = [entry]
+        state.settleInterrupted()
+        let docs = state.decisions[0].parts[1]
+        #expect(docs.outcome == .done && !docs.done.contains { if case .failed(let why) = $0 { why.hasPrefix("wasn't sent") } else { false } })
+    }
+
     @Test func aChangeLinksThePartThatMadeItAndRevertingSettlesThatPart() {
         let s = store()
         let ids = divided(in: s)
