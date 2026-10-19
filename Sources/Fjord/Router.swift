@@ -794,11 +794,13 @@ enum RouterFeed {
         // The session's own first message goes out as soon as it is made, before any run links it.
         if let made = state.fjordStarted[session], Stamp.ms(made) - 5_000 <= ms, ms <= Stamp.ms(made) + 300_000 { return true }
         return state.decisions.contains { entry in
-            guard let sent = entry.delivered, sent.session == session else { return false }
-            let at = Stamp.ms(sent.at)
-            guard at - deliveredSlack <= ms else { return false }
-            if ms <= at + deliveredSlack { return true }
-            return sent.busy && turns <= sent.turns + 1 && ms <= at + Int64(RouterDecision.Delivered.window * 1000)
+            entry.parts.contains { part in
+                guard let sent = part.delivered, sent.session == session else { return false }
+                let at = Stamp.ms(sent.at)
+                guard at - deliveredSlack <= ms else { return false }
+                if ms <= at + deliveredSlack { return true }
+                return sent.busy && turns <= sent.turns + 1 && ms <= at + Int64(RouterDecision.Delivered.window * 1000)
+            }
         }
     }
 

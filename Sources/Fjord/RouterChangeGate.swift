@@ -225,7 +225,7 @@ extension Store {
                 return change
             }
         }
-        let decision = router.decisions.first { $0.links.changes.contains(id) }?.id
+        let decision = router.decisions.flatMap(\.places).first { $0.links.changes.contains(id) }?.id
         do {
             try changingInbox(.routerTool(decision: decision)) { try applyPatch(change.patch) }
         } catch {
