@@ -20,12 +20,14 @@ A Swift package (Swift tools 5.10, macOS 14+). The app is built into a bundle, w
 
 Until `scripts/silod.release` has a `SILOD_SHA256`, `build-app.sh` needs `SILOD_ARCHIVE` pointing at a local engine tarball (Silo's `package-engine.py` builds one).
 
+The embedded Silo engine (`silo-engine-<version>-macos-arm64.tar.gz`) runs on Apple Silicon only, like Silo hosts; on an Intel Mac the app starts but the engine can't run.
+
 `build-app.sh` needs Xcode's command-line tools (`xcrun actool` compiles the layered icon, `Resources/AppIcon.icon`). It takes:
 
 | Variable | Effect |
 | --- | --- |
 | `VERSION=1.2.3` | Sets the bundle version (default `0.0.0-dev`). |
-| `UNIVERSAL=1` | Builds for arm64 and x86_64, as releases do. |
+| `UNIVERSAL=1` | Builds the app for arm64 and x86_64, as releases do. The embedded engine is arm64 only either way. |
 | `SIGN_IDENTITY="…"` | Signs with that identity, and fails if it isn't in your keychain. |
 | `SILOD_ARCHIVE=/path/to/silo-engine-*.tar.gz` | Embeds that local engine archive instead of downloading the release pinned in [`scripts/silod.release`](scripts/silod.release); the pin's hash isn't checked, the schema check still applies. For trying an unreleased Silo build. |
 | `SILOD_PRODUCTION_CODE_REQUIREMENT="…"` | Overrides the code requirement written into the engine's Info.plist (`SiloEngineCodeRequirement`); otherwise the build pins the selected signing certificate, or the bundle identifier for ad-hoc builds. |
@@ -142,7 +144,7 @@ Push a version tag:
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-The `Release` workflow runs the tests, downloads the Silo engine release pinned in `scripts/silod.release`, builds a universal app around it and publishes `Fjord-<version>.zip` and its `.sha256` to GitHub Releases. To ship a newer engine, publish its release in Silo, then update the version and tarball SHA-256 in that file.
+The `Release` workflow runs the tests, downloads the Silo engine release pinned in `scripts/silod.release`, builds a universal app around it (the engine inside is arm64 only) and publishes `Fjord-<version>.zip` and its `.sha256` to GitHub Releases. To ship a newer engine, publish its release in Silo, then update the version and tarball SHA-256 in that file.
 
 Once Fjord is installed, it picks up later releases on its own. The updater installs a release only if its checksum matches and it is signed by the same certificate as the running copy.
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assemble and sign the pinned Silo engine app embedded by build-app.sh.
 # The engine is a published Silo release (scripts/silod.release). SILOD_ARCHIVE=/path/to/silo-engine-*.tar.gz
-# uses a local archive instead (no pin check), to try an unreleased build.
+# uses a local archive instead (no pin check), to try an unreleased build. The engine is Apple Silicon only.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,7 +28,7 @@ else
     exit 1
   fi
   EXPECT_VERSION="$SILOD_VERSION"
-  ARCHIVE_NAME="silo-engine-$SILOD_VERSION-macos-universal.tar.gz"
+  ARCHIVE_NAME="silo-engine-$SILOD_VERSION-macos-arm64.tar.gz"
   CACHE_DIR="$ROOT/build/silod-cache/$SILOD_VERSION"
   ARCHIVE="$CACHE_DIR/$ARCHIVE_NAME"
   mkdir -p "$CACHE_DIR"
@@ -56,11 +56,11 @@ RELEASE_DIR="${1%/}"
 # A download must be the pinned version; any release must match the schema snapshot Fjord's client is generated from.
 [ -f "$RELEASE_DIR/api/silo-api.schema.json" ] || { echo "Engine release has no api/silo-api.schema.json." >&2; exit 1; }
 ARCHIVE_SCHEMA_SHA256="$(sha256_of "$RELEASE_DIR/api/silo-api.schema.json")"
-python3 -I - "$RELEASE_DIR/release.json" "$EXPECT_VERSION" "$SCHEMA_SHA256" "${UNIVERSAL:-0}" "$ARCHIVE_SCHEMA_SHA256" <<'PY'
+python3 -I - "$RELEASE_DIR/release.json" "$EXPECT_VERSION" "$SCHEMA_SHA256" "$ARCHIVE_SCHEMA_SHA256" <<'PY'
 import json
 import sys
 
-path, expect_version, schema_sha256, universal, file_sha256 = sys.argv[1:]
+path, expect_version, schema_sha256, file_sha256 = sys.argv[1:]
 with open(path, encoding="utf-8") as handle:
     release = json.load(handle)
 if expect_version and release.get("engineVersion") != expect_version:
@@ -72,10 +72,8 @@ if release.get("schemaSha256") != schema_sha256:
         f"Engine release schemaSha256 {release.get('schemaSha256')} differs from schemas/silo-api/manifest.json "
         f"({schema_sha256}); update the schema snapshot from the release's api/silo-api.schema.json."
     )
-if universal == "1":
-    missing = {"aarch64-apple-darwin", "x86_64-apple-darwin"} - set(release.get("targets", []))
-    if missing:
-        sys.exit(f"UNIVERSAL=1 needs both architectures; the engine release lacks {', '.join(sorted(missing))}.")
+if "aarch64-apple-darwin" not in release.get("targets", []):
+    sys.exit("The engine release lacks aarch64-apple-darwin; Fjord embeds the Apple Silicon engine.")
 PY
 ENGINE_VERSION="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["engineVersion"])' "$RELEASE_DIR/release.json")"
 SOURCE_COMMIT="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["sourceCommit"])' "$RELEASE_DIR/release.json")"
