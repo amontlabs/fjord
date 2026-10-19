@@ -324,6 +324,10 @@ extension RouterDispatcher {
             // A project you tagged: Jev places it there, as a message with a lone @project is.
             job.context.projects = [String(part.target.dropFirst(8))]
             job.context.part = true
+            // The armed reply and the pinned target were the place of the words no tag addressed; with none of them left, they
+            // are not where these go.
+            job.context.replyTo = nil
+            job.context.target = nil
             return try await execute(job)
         }
         trace(job, path: path, action: "send", target: part.target)

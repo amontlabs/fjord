@@ -166,6 +166,22 @@ import Testing
         #expect(w.entry(id)?.parts.map(\.text) == ["yes. Also mute it.", "@Update the docs add the page"])
     }
 
+    @Test func aProjectOnlyResultGoesToTheProjectNotToTheArmedReplyOrThePin() async throws {
+        let w = World()
+        w.askYesNo()
+        // The reply is armed on the login card, but the only words are for the project: nothing answers the card.
+        let (text, context) = w.message([.pointer(.project("/code/web")), .text(" fix the page")], replyTo: "local_a#w1")
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        #expect(w.f.answered.isEmpty && w.f.prepared.isEmpty && w.f.started.map(\.folder) == ["/code/web"])
+        // A pinned session is no more the place of a message that is wholly for a project.
+        let (text2, context2) = w.message([.pointer(.project("/code/web")), .text(" fix the page again")], target: "session:local_b")
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(text2, context: context2))
+        await w.finishAll(id2)
+        #expect(w.f.prepared.isEmpty && w.f.started.map(\.folder) == ["/code/web", "/code/web"])
+    }
+
     @Test func aSentenceThatIsNotForTheTagIsRoutedAsAMessageOfItsOwn() async throws {
         let w = World()
         w.f.same = ["Mute notifications for an hour.": 0.2]
