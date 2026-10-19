@@ -159,3 +159,26 @@ multi-place messages right, at 1.3–2 more wrong sends per 100 everyday message
 one message in eight is meant for several places, and your transcripts and router trace show nothing close to that.
 Variant 3's limit is Jev's gates: it still misses the multi-place messages they don't flag, mostly pronouns and shared
 context. Improving the gates is the lever if those turn out to be common.
+
+### Variant 3 in the form being shipped (dev only)
+
+The ship form (`candidates.Ship3`) drops the unconditioned first Haiku call. Only when Jev's two compound gates fire
+does one Haiku call run, with `waits_for`, every place and no note:
+
+- Its parts name two places or more and at least one doesn't wait: those parts are sent and the waiting ones held.
+- It names one place, or every part waits: when B's top is compound, that place goes first in B's ranking, and the
+  result is sure only if B and Haiku both are. Otherwise it is B as shipped.
+- The call fails: B, with the gates read as 0.
+
+| vs B as shipped | 3 | 3, ship form |
+|---|---|---|
+| everyday messages, extra wrong sends per 100 (B: 2.6) | +0.2 [0.0, +0.5] | +0.1 [0.0, +0.3] |
+| same, real moments (B: 1.5) | +0.3 [0.0, +0.8] | 0 [0.0, 0.0] |
+| everyday click-loss per submit | +0.03 [−0.02, +0.11] | +0.01 [−0.02, +0.06] |
+| look-multi written (52), wrong sends per 100 (B: 9.6 [3.4, 17.5]) | 0 | 0 |
+| look-multi, your real messages in dev (9), wrong sends per 100 (B: 0) | 0 | 0 |
+| several places (80), fully right (B: 62.5% [54.4, 70.1]) | 73.8% [64.6, 81.8] | 73.8% [64.6, 81.8] (CI vs B +4.1 to +18.7) |
+
+The ship form matches variant 3 on every slice and adds even fewer wrong sends on everyday messages. Haiku ran on
+4 of 924 everyday submits, against all of them for variant 3, and on 52 of the 141 multi dev cases. On real moments
+it changed nothing.
