@@ -684,6 +684,28 @@ import Testing
         #expect(await w.dispatcher.predictDivision(both, found: found, projects: [])?.parts == parts(w).parts && w.f.divideRequests.count == 2)
     }
 
+    @Test func aCorrectionOrADismissalMakesEveryDivisionReadBeforeItBeReadAgain() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = parts(w)
+        let found = try await readDraft(w)
+        #expect(await w.dispatcher.predictDivision(both, found: found, projects: [])?.parts == parts(w).parts && w.f.divideRequests.count == 1)
+        w.dispatcher.forgetLive()
+        // Kept no more: the next read asks the divider again, and so does a send.
+        #expect(await w.dispatcher.predictDivision(both, found: found, projects: []) != nil && w.f.divideRequests.count == 2)
+        w.dispatcher.forgetLive()
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 3 && w.entry(id)?.parts.count == 2)
+        // One still being read when it comes never fills the cache.
+        let gate = gated(w)
+        let reading = Task { await w.dispatcher.predictDivision(both + "?", found: found, projects: []) }
+        await waitUntil { gate.waiting.count == 1 }
+        w.dispatcher.forgetLive()
+        gate.waiting[0].resume(returning: parts(w))
+        #expect(await reading.value == nil && w.dispatcher.divisionCache[RouterDispatcher.liveKey(both + "?", [])] == nil)
+    }
+
     // MARK: Held parts
 
     @Test func aProjectPartTheAppHoldsIsHeldAloneAndDontSendDropsOnlyIt() async throws {

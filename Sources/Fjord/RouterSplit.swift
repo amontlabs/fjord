@@ -295,11 +295,13 @@ extension RouterDispatcher {
         let narrowed = Self.repoWorld(tagged, store: store).flatMap { $0.clones.isEmpty ? nil : $0.clones } ?? projects
         let key = Self.liveKey(text, narrowed)
         if let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor, hit.board == Self.boardRevision(store),
-           hit.division.map({ reachable($0.parts, store: store) }) ?? true {
+           hit.generation == liveGeneration, hit.division.map({ reachable($0.parts, store: store) }) ?? true {
             return hit.division
         }
-        // Joined only when asked on this board: one asked on an earlier board is not the division of this one.
-        if let pending = divisionPending[key], pending.board == Self.boardRevision(store) { return await pending.task.value }
+        // Joined only when asked on this board and before no correction or dismissal since: it is not the division of this one.
+        if let pending = divisionPending[key], pending.board == Self.boardRevision(store), pending.generation == liveGeneration {
+            return await pending.task.value
+        }
         let tools = RouterTools(store: store)
         tools.tagged = RouterPointers.context(mentions, store: store)
         configure?(tools)
@@ -310,30 +312,33 @@ extension RouterDispatcher {
                                             context: RouterDivider.contextLines(store, context, places: places), mode: .gates)
         let id = UUID()
         let board = Self.boardRevision(store)
+        let generation = liveGeneration
         // Its own task, as Jev's read of a draft is: a draft that changes, or is sent, doesn't stop it.
         let pending = Task { [weak self] () -> RouterDivision? in
             guard let self else { return nil }
             defer { if self.divisionPending[key]?.id == id { self.divisionPending[key] = nil } }
             guard self.store?.jevAllows(.drafts) == true, let answer = try? await self.effects.divide(tools, request),
                   self.store?.jevAllows(.drafts) == true else { return nil }
-            // The board moved on while the divider was read: its answer is for the board it was asked on, and is not used.
-            guard let current = self.store, Self.boardRevision(current) == board else { return nil }
+            // The board moved on, or a correction or dismissal came, while the divider was read: its answer is for what it was
+            // asked on, and is not used.
+            guard let current = self.store, Self.boardRevision(current) == board, self.liveGeneration == generation else { return nil }
             // Several places, with a part to send: one that is only one place is the pick Jev's read already shows.
             let several = Set(answer.parts.map { self.place($0.target) }).count >= 2 && answer.parts.contains { $0.waitsFor == nil }
                 && self.store.map({ self.reachable(answer.parts, store: $0) }) == true
             let division = several ? RouterDivision(text: text, parts: answer.parts) : nil
             self.divisionCache = self.divisionCache.filter { Date().timeIntervalSince($0.value.at) < Self.liveFor }
-            self.divisionCache[key] = (Date(), division, board)
+            self.divisionCache[key] = (Date(), division, board, generation)
             return division
         }
-        divisionPending[key] = (id, pending, board)
+        divisionPending[key] = (id, pending, board, generation)
         return await pending.value
     }
 
     /// A division kept from while you typed, while it is fresh and read on this board.
     private func shownDivision(_ key: String) -> RouterDivision? {
         guard let store, let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor,
-              hit.board == Self.boardRevision(store), hit.division.map({ reachable($0.parts, store: store) }) ?? true else { return nil }
+              hit.board == Self.boardRevision(store), hit.generation == liveGeneration,
+              hit.division.map({ reachable($0.parts, store: store) }) ?? true else { return nil }
         return hit.division
     }
 

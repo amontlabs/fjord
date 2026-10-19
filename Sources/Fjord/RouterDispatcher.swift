@@ -343,10 +343,10 @@ struct RouterAskBack: Identifiable, Equatable {
     /// Those still being asked, by the same key: a send of the same words waits for the answer instead of asking again.
     @ObservationIgnored private var livePending: [String: (id: UUID, task: Task<Classification?, Never>)] = [:]
     /// Moves on each correction or dismissal (`forgetLive`): an answer asked for before it is neither kept nor used.
-    @ObservationIgnored private var liveGeneration = 0
+    @ObservationIgnored var liveGeneration = 0
     /// The parts a draft would be sent as (`predictDivision`), kept as the pick is, and the ones being read.
-    @ObservationIgnored var divisionCache: [String: (at: Date, division: RouterDivision?, board: String)] = [:]
-    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>, board: String)] = [:]
+    @ObservationIgnored var divisionCache: [String: (at: Date, division: RouterDivision?, board: String, generation: Int)] = [:]
+    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>, board: String, generation: Int)] = [:]
 
     init(store: Store) {
         self.store = store
@@ -1659,6 +1659,8 @@ struct RouterAskBack: Identifiable, Equatable {
     func forgetLive() {
         liveCache = [:]
         livePending = [:]
+        divisionCache = [:]
+        divisionPending = [:]
         liveGeneration &+= 1
     }
 
