@@ -83,7 +83,15 @@ enum RouterTagSplit {
             let end = n + 1 < leaders.count ? tags[leaders[n + 1]].range.lowerBound : c.count
             let own = sentences(c, in: group..<end, mentions: mentions).filter { !blank(c, $0) }
             // The tag's own words are its first sentence; a tag with none keeps just itself.
-            let keep = [start..<(own.first?.upperBound ?? end)]
+            var keep = [start..<(own.first?.upperBound ?? end)]
+            // Tags side by side across a line break: `Addressing.withoutLeadingPills` stops at the break and would leave the
+            // later pills in the words, so the group's pills and the blanks after them are left out of the words instead.
+            if tags[leader...last].indices.dropLast().contains(where: { c[tags[$0].range.upperBound..<tags[$0 + 1].range.lowerBound].contains(where: \.isNewline) }) {
+                var from = group
+                while from < c.count, c[from].isWhitespace { from += 1 }
+                let to = own.first?.upperBound ?? from
+                keep = from < to ? [from..<to] : []
+            }
             let check = Array(own.dropFirst())
             let anchor = own.first.map { String(c[$0]) } ?? ""
             for tag in tags[leader...last] {

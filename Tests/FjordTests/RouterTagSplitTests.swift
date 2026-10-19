@@ -113,6 +113,21 @@ import Testing
         #expect(segments(r2).count == 2 && said(text2, segments(r2)[1].keep) == "@CI, @Docs: pull main")
     }
 
+    @Test func sideBySideTagsAcrossALineBreakShareWordsWithNoPillsLeftInThem() {
+        // The addressing edit stops at a line break, so the group's pills are left out of the words rather than half-stripped.
+        let (r, text, mentions) = plan([ci(), .words("\n"), docs(), .words(" pull main. Then rest.")])
+        let s = segments(r)
+        #expect(s.map(\.target) == ["session:ci", "session:docs"] && s[0].keep == s[1].keep && s[0].check == s[1].check)
+        for segment in s {
+            let part = S.assemble(text, segment.keep, mentions: mentions)
+            #expect(part.text == "pull main." && part.pills.isEmpty && part.mentions.isEmpty)
+            #expect(Addressing.withoutLeadingPills(part.text, part.pills) == nil)
+        }
+        // A group with nothing after it has no words.
+        let (r2, text2, mentions2) = plan([ci(), .words("\n"), docs()])
+        #expect(segments(r2).allSatisfy { S.assemble(text2, $0.keep, mentions: mentions2).text.isEmpty })
+    }
+
     @Test func aLaterSentenceIsForJevToCheckAgainstTheFirst() {
         let (r, text, _) = plan([ci(), .words(" rerun the build. Mute notifications for an hour. And be quick.")])
         let s = segments(r)
