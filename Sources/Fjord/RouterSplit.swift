@@ -225,6 +225,11 @@ extension RouterDispatcher {
             }
             try Task.checkCancellation()
         }
+        // A place gone since the division was read (archived, closed) is no place to send to: as if the gates hadn't fired.
+        guard reachable(answer.parts, store: store) else {
+            ungate(&found)
+            return false
+        }
         let places = Set(answer.parts.map { self.place($0.target) })
         if places.count >= 2, answer.parts.contains(where: { $0.waitsFor == nil }) {
             dispatch(job, parts: answer.parts.map { splitPart($0, in: job, fixed: false) }, inputs: found.trace)
@@ -238,6 +243,12 @@ extension RouterDispatcher {
             found.sure = found.sure && answer.sure
         }
         return false
+    }
+
+    /// Whether every part of a division still has a place to go to: a session archived, or a card closed, since it was read
+    /// isn't one (`eligible`, as for a message to one place).
+    private func reachable(_ parts: [RouterDivider.Part], store: Store) -> Bool {
+        parts.allSatisfy { eligible($0.target, store: store) }
     }
 
     /// The ranking as if the gates hadn't fired. A compound pick that is still there isn't one to act on: it is not sure, and the
@@ -283,7 +294,8 @@ extension RouterDispatcher {
         tagged.mentions = mentions
         let narrowed = Self.repoWorld(tagged, store: store).flatMap { $0.clones.isEmpty ? nil : $0.clones } ?? projects
         let key = Self.liveKey(text, narrowed)
-        if let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor, hit.board == Self.boardRevision(store) {
+        if let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor, hit.board == Self.boardRevision(store),
+           hit.division.map({ reachable($0.parts, store: store) }) ?? true {
             return hit.division
         }
         if let pending = divisionPending[key] { return await pending.task.value }
@@ -305,6 +317,7 @@ extension RouterDispatcher {
                   self.store?.jevAllows(.drafts) == true else { return nil }
             // Several places, with a part to send: one that is only one place is the pick Jev's read already shows.
             let several = Set(answer.parts.map { self.place($0.target) }).count >= 2 && answer.parts.contains { $0.waitsFor == nil }
+                && self.store.map({ self.reachable(answer.parts, store: $0) }) == true
             let division = several ? RouterDivision(text: text, parts: answer.parts) : nil
             self.divisionCache = self.divisionCache.filter { Date().timeIntervalSince($0.value.at) < Self.liveFor }
             self.divisionCache[key] = (Date(), division, board)
@@ -317,7 +330,7 @@ extension RouterDispatcher {
     /// A division kept from while you typed, while it is fresh and read on this board.
     private func shownDivision(_ key: String) -> RouterDivision? {
         guard let store, let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor,
-              hit.board == Self.boardRevision(store) else { return nil }
+              hit.board == Self.boardRevision(store), hit.division.map({ reachable($0.parts, store: store) }) ?? true else { return nil }
         return hit.division
     }
 

@@ -421,6 +421,50 @@ import Testing
         #expect(line.parts?.count == 2)
     }
 
+    @Test func aPartForAPlaceGoneWhileTheDividerWasAskedDropsTheDivisionBackToTheUngatedPick() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = parts(w)
+        // The docs session is archived while the divider is read: it is no place to send to any more.
+        let divide = w.dispatcher.effects.divide
+        w.dispatcher.effects.divide = { tools, request in
+            let answer = try await divide(tools, request)
+            w.store.claudeSessions["local_c"]?.isArchived = true
+            return answer
+        }
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.count == 1 && w.words(of: "local_c").isEmpty && w.dispatcher.askBacks.isEmpty)
+        // Jev's pick as if the gates hadn't fired: the message as it is, to the one place.
+        #expect(w.words(of: "local_b") == [both])
+    }
+
+    @Test func aDivisionKeptFromTheDraftIsNotSentToAPlaceGoneSince() async throws {
+        let w = World()
+        // Five idle sessions: the oldest is outside the latest three the board is read by, so archiving it leaves the board as it was.
+        for n in 0..<5 {
+            w.store.claudeSessions["local_idle\(n)"] = ClaudeSession(id: "local_idle\(n)", title: "Idle \(n)", folder: "/code/idle\(n)",
+                                                                     lastActivity: Date().addingTimeInterval(-300 - Double(n)))
+        }
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "session:local_b", text: "add the page", waitsFor: nil),
+                                     .init(target: "session:local_idle4", text: "rerun the build", waitsFor: nil)], sure: true, alternatives: [])
+        let found = RouterDispatcher.Classification(try await w.dispatcher.effects.rank(w.dispatcher.makeTools(UUID(), both, pills: []), both, []))
+        let board = RouterDispatcher.boardRevision(w.store)
+        #expect(await w.dispatcher.predictDivision(both, found: found, projects: []) != nil)
+        w.store.claudeSessions["local_idle4"]?.isArchived = true
+        #expect(RouterDispatcher.boardRevision(w.store) == board, "the board didn't change")
+        // Not sent as parts, whatever the kept division says (the divider, asked again, has no answer).
+        w.f.division = nil
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.count == 1 && w.words(of: "local_idle4").isEmpty)
+        // Nor shown under the composer: a division with a place that is gone is not a division.
+        w.f.division = .init(parts: [.init(target: "session:local_b", text: "add the page", waitsFor: nil),
+                                     .init(target: "session:local_idle4", text: "rerun the build", waitsFor: nil)], sure: true, alternatives: [])
+        #expect(await w.dispatcher.predictDivision(both + "!", found: found, projects: []) == nil)
+    }
+
     @Test func aPartThatWaitsIsHeldWithWhatItWaitsForAndSendNowSendsIt() async throws {
         let w = World()
         gatesUp(w)
