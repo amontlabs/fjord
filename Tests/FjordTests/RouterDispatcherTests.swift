@@ -2080,7 +2080,7 @@ import Testing
         let id = d.submit("update the category, rerun CI, and the theme")
         await finish(d, f, id)
         let ask = await wholeAsk(d, id)
-        #expect(ask != nil && ask?.options.allSatisfy { RouterRun.Intent(rawValue: $0.target) == nil } == true)
+        #expect(ask != nil && ask?.options.allSatisfy { !RouteLabel.isFjord($0.target) } == true)
         try? await Task.sleep(for: .milliseconds(100))
         #expect(f.sent.isEmpty && f.prepared.isEmpty && f.started.isEmpty && f.runs.count == 1)
     }

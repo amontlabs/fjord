@@ -397,11 +397,11 @@ struct RouterAskBack: Identifiable, Equatable {
         guard let store, store.routerOn, let ask = askBacks.first(where: { $0.id == id }) else { return false }
         guard live(ask, store: store) else { return false }
         // The whole of a compound message goes to a session, never to the Router's own run that did its Fjord part.
-        if ask.whole, RouterRun.Intent(rawValue: target) != nil { return false }
+        if ask.whole, RouteLabel.isFjord(target) { return false }
         // "Choose folder…" picks with the folder you chose (`pick(_:folder:)`); "Split…" is `split`.
         guard target != RouterAskBack.chooseFolder, target != RouterAskBack.split else { return false }
         // An action's message goes only to a session, and only while Triage and the Router are both on.
-        if ask.context.action != nil, RouterRun.Intent(rawValue: target) != nil || !store.toolsLinked { return false }
+        if ask.context.action != nil, RouteLabel.isFjord(target) || !store.toolsLinked { return false }
         // Offered when it was asked: a card the page has hidden since (or one addressed, a session archived) isn't sent to.
         guard eligible(target, store: store) else { return false }
         if unconfirmed[id] != nil, !Self.isRetryOrOpen(target) { return false }
@@ -657,7 +657,7 @@ struct RouterAskBack: Identifiable, Equatable {
         // What a send to it does: a new session starts one, an intent is the Router's own run.
         let does = action != "send" ? action
             : target?.hasPrefix("new:") == true ? "start"
-            : target.flatMap { RouterRun.Intent(rawValue: $0) } != nil ? "intent" : "send"
+            : target.map(RouteLabel.isFjord) == true ? "intent" : "send"
         traceLog.append(RouterTrace(kind: kind, id: job.id, message: RouterTools.redacted(text),
                                     pills: pills.isEmpty ? nil : pills, pinned: job.context.target, shown: job.context.shown,
                                     notTo: job.context.notTo, replyTo: job.context.replyTo, path: path, action: does,
@@ -979,8 +979,8 @@ struct RouterAskBack: Identifiable, Equatable {
             // A compound message's Fjord part already ran: it goes whole to a session (or is split), never to a run again.
             let whole = entry.fjordPartDone == true
             if whole {
-                found.ranked = found.ranked.filter { RouterRun.Intent(rawValue: $0.target) == nil }
-                found.card = found.card?.filter { RouterRun.Intent(rawValue: $0) == nil }
+                found.ranked = found.ranked.filter { !RouteLabel.isFjord($0.target) }
+                found.card = found.card?.filter { !RouteLabel.isFjord($0) }
             }
             // Nothing left for an action's message (the repo's one clone was where it went): a folder of your choosing.
             let none = unattended && found.ranked.isEmpty && (found.card ?? []).isEmpty
@@ -1189,8 +1189,8 @@ struct RouterAskBack: Identifiable, Equatable {
         var found = await classify(job, projects: job.context.projects)
         try Task.checkCancellation()
         found.sure = false
-        found.ranked = found.ranked.filter { RouterRun.Intent(rawValue: $0.target) == nil }
-        found.card = found.card?.filter { RouterRun.Intent(rawValue: $0) == nil }
+        found.ranked = found.ranked.filter { !RouteLabel.isFjord($0.target) }
+        found.card = found.card?.filter { !RouteLabel.isFjord($0) }
         // Kept on the entry: its send elsewhere asks the same question again, never rerunning the Fjord part.
         store.updateDecision(job.id) { $0.fjordPartDone = true }
         askBack(job, found, path: "compound", whole: true)
@@ -1421,7 +1421,7 @@ struct RouterAskBack: Identifiable, Equatable {
         // Of the sessions you tagged, only they, their cards and the Router's own runs are gone to; when Jev's pick isn't
         // among them, you pick among them (`scope`, above).
         let inScope = { (target: String) in
-            scope.isEmpty || RouterRun.Intent(rawValue: target) != nil || Self.session(of: target, store: store).map(scope.contains) == true
+            scope.isEmpty || RouteLabel.isFjord(target) || Self.session(of: target, store: store).map(scope.contains) == true
         }
         if !scope.isEmpty {
             let kept = found.ranked.filter { inScope($0.target) }
@@ -1444,7 +1444,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
         // Wholly for the Router: one of its own runs, never a session or a project; you pick when Jev's pick isn't one.
         if !unattended, Self.forRouter(job.text, pills: job.context.pills) {
-            let intents = found.ranked.filter { RouterRun.Intent(rawValue: $0.target) != nil }
+            let intents = found.ranked.filter { RouteLabel.isFjord($0.target) }
             if intents.first?.target != found.top?.target { found.sure = false }
             found.ranked = intents.isEmpty ? [Scored(target: "question", p: 0), Scored(target: "change_fjord", p: 0)] : intents
         }
@@ -2003,7 +2003,7 @@ extension RouterDispatcher {
     /// action's message never the Router's own runs.
     static func inWorld(_ world: RepoWorld?, unattended: Bool, store: Store) -> (String) -> Bool {
         { target in
-            if RouterRun.Intent(rawValue: target) != nil { return !unattended }
+            if RouteLabel.isFjord(target) { return !unattended }
             guard let world else { return true }
             if target.hasPrefix("new:") { return world.clones.contains(String(target.dropFirst(4))) }
             return folder(of: target, store: store).map(world.clones.contains) ?? false

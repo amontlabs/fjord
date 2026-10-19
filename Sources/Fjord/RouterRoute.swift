@@ -5,6 +5,13 @@ import Foundation
 // you last told it; the message alone as the state; in the same call, whether the message answers each waiting card,
 // whether it changes Fjord, whether it asks for several things.
 
+/// Fjord's own targets in a route, by name. Apart from `RouterRun.Intent`, which is what a run can do: a label can
+/// stay a target (its features, its bar) after the run it names goes.
+enum RouteLabel: String, CaseIterable {
+    case changeFjord = "change_fjord", question, compound
+    static func isFjord(_ target: String) -> Bool { RouteLabel(rawValue: target) != nil }
+}
+
 extension RouterTools {
     /// Somewhere a message can go, as Jev reads it.
     struct Destination {
@@ -362,7 +369,7 @@ extension RouterTools {
             return (ranked, true)
         }
         guard let top = ranked.first, top.target != "unclear" else { return (ranked, false) }
-        let intent = RouterRun.Intent(rawValue: top.target) != nil
+        let intent = RouteLabel.isFjord(top.target)
         if intent && vetoed { return (ranked, false) }
         let bar = top.target.hasPrefix("new:") ? newSure : intent ? intentSure : sessionSure
         return (ranked, top.p >= bar)
@@ -450,7 +457,7 @@ enum RouteFusion {
                 x["session"] = 1
             } else if target.hasPrefix("new:") {
                 x["new"] = 1
-            } else if RouterRun.Intent(rawValue: target) != nil {
+            } else if RouteLabel.isFjord(target) {
                 x[target] = 1
                 x["ilong"] = f.message.count > 80 ? 1 : 0
                 x["you"] = s.gates["gate_you"] ?? 0
@@ -488,9 +495,9 @@ enum RouteFusion {
             "bias": 1, "lPtop": log(p / max(1 - p, 1e-4)), "lgap": log(max(p - second, 1e-3)),
             "ljev": log(max(s.route[top] ?? 0, 1e-3)), "agree": (s.route[top] ?? 0) >= jevBest ? 1 : 0, "u": s.route["unclear"] ?? 0, "lenlog": log(1 + Double(f.message.count)),
             "recent2": recent >= 2 ? 1 : 0, "top_fin0": x["fin0"] ?? 0,
-            "top_intent": RouterRun.Intent(rawValue: top) != nil ? 1 : 0, "top_new": x["new"] ?? 0, "top_reply": x["reply"] ?? 0,
+            "top_intent": RouteLabel.isFjord(top) ? 1 : 0, "top_new": x["new"] ?? 0, "top_reply": x["reply"] ?? 0,
         ]
-        let table = RouterRun.Intent(rawValue: top) != nil ? surenessIntent : sureness
+        let table = RouteLabel.isFjord(top) ? surenessIntent : sureness
         let z = moment.reduce(0) { $0 + (table[$1.key] ?? 0) * $1.value }
         return (top, 1 / (1 + exp(-z)))
     }
@@ -512,7 +519,7 @@ enum RouteFusion {
             let own = sessionOf(d).flatMap { f.targetOf[$0] } ?? d
             if (P[own] ?? 0) >= agrees, let picked, picked.target == own, picked.sure >= rulesSure { return (rules.ranked, true) }
         }
-        if let (top, sure) = picked, RouterRun.Intent(rawValue: top) == nil {
+        if let (top, sure) = picked, !RouteLabel.isFjord(top) {
             let words = f.message.split(whereSeparator: \.isWhitespace).count
             if words >= fusedWords && sure >= Self.sure { return (fused, true) }
             if words < fusedWords, sure >= shortSure, let id = sessionOf(top), f.leavesItToYou.contains(id) { return (fused, true) }
