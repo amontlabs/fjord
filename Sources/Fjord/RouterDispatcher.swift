@@ -342,6 +342,9 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored private var livePending: [String: (id: UUID, task: Task<Classification?, Never>)] = [:]
     /// Moves on each correction or dismissal (`forgetLive`): an answer asked for before it is neither kept nor used.
     @ObservationIgnored private var liveGeneration = 0
+    /// The parts a draft would be sent as (`predictDivision`), kept as the pick is, and the ones being read.
+    @ObservationIgnored var divisionCache: [String: (at: Date, division: RouterDivision?, board: String)] = [:]
+    @ObservationIgnored var divisionPending: [String: (id: UUID, task: Task<RouterDivision?, Never>)] = [:]
 
     init(store: Store) {
         self.store = store
@@ -1469,14 +1472,23 @@ struct RouterAskBack: Identifiable, Equatable {
             : Set(job.context.sessions.filter { store.claudeSessions[$0].map { !$0.isArchived } == true })
         // The checks are about what the route may go to: the projects it narrows to and the sessions tagged.
         let checkScope = RouterActionChecks.Scope(projects: narrowed.isEmpty ? nil : Set(narrowed), sessions: scope)
+        // The parts shown under the composer for these words are the decision: sent as shown, with nothing asked again (not
+        // Jev, not the divider, not the checks). An action's message and a part are never divided.
+        let divisible = !unattended && !job.context.part && !noClone && !Self.forRouter(job.text, pills: job.context.pills)
+        if divisible, let parts = shownParts(job) {
+            try linked(job.context)
+            return dispatch(job, parts: parts)
+        }
         let checking: Task<RouterActionReading?, Never>? = unattended || job.context.shown != nil ? nil : Task { [effects, tools = job.tools, text = job.text] in
             (try? await effects.checks(tools, text, checkScope)) ?? nil
         }
         defer { checking?.cancel() }
         // The pick shown over the composer for these words is the decision: sent as shown, not asked again.
         var found: Classification
+        var carriedPick = false
         if let shown = job.context.shown, let carried = job.context.jev, carried.assisted, carried.sure, carried.top?.target == shown {
             found = carried
+            carriedPick = true
         } else {
             found = await classify(job, projects: narrowed)
         }
@@ -1492,6 +1504,9 @@ struct RouterAskBack: Identifiable, Equatable {
             liveCache[Self.liveKey(job.text, narrowed)] = nil
         }
         Self.keep(&found, world: world, unattended: unattended, store: store)
+        // Both compound gates up: the divider is asked once, and the message may be for several places. A pick shown over the
+        // composer stays one pick.
+        if divisible, !carriedPick, found.dividesNow, try await byGates(job, &found, projects: narrowed) { return }
         // Where your own words send it ("start a session in lookout …", "tell CI to …"), resolved here and not by Jev, is
         // where it goes: his pick of another doesn't send it elsewhere ("tell CI to update the docs" isn't for Docs). Not
         // where you waved it off, nor when it is gone.
@@ -1713,7 +1728,8 @@ struct RouterAskBack: Identifiable, Equatable {
                 options.append(option)
             }
         } else {
-            for target in (found.card ?? []) + found.ranked.map(\.target) where target != "unclear" && options.count < room {
+            for target in (found.card ?? []) + found.ranked.map(\.target) where target != "unclear" && target != RouteLabel.compound.rawValue
+                && options.count < room {
                 guard var option = option(target, store: store, tools: job.tools), seen.insert(option.id).inserted else { continue }
                 if whole { option.title = "Send the whole message to " + option.title }
                 options.append(option)

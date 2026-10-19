@@ -11,6 +11,10 @@ import Testing
     /// What the stand-ins saw and answer.
     @MainActor final class Fakes {
         var ranked: [RouterDispatcher.Scored] = []
+        /// Jev's answers to the compound gates, the ranking without them, and his sureness (nil: by the scores alone).
+        var gates: [String: Double] = [:]
+        var ungated: RouterDispatcher.Ungated?
+        var rankSure: Bool?
         var rankError: Error?
         var ranks = 0
         /// The projects each routing call was narrowed to.
@@ -78,7 +82,11 @@ import Testing
                     rankProjects.append(projects)
                     if holdRank { await withCheckedContinuation { rankHeld = $0 } }
                     if let rankError { throw rankError }
-                    return RouterDispatcher.Ranking(scored: ranked)
+                    var ranking = RouterDispatcher.Ranking(scored: ranked)
+                    ranking.sure = rankSure
+                    ranking.gates = gates
+                    ranking.ungated = ungated
+                    return ranking
                 },
                 prepare: { [self] _, session in
                     prepared.append(session)

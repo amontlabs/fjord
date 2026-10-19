@@ -315,6 +315,217 @@ import Testing
         #expect(RouterDispatcher.plan(text: code, context: inCode, store: w.store) == .classify)
     }
 
+    // MARK: The gates
+
+    /// Jev's read of a message the compound gates fire on: both up, and the pick compound (or `top` when he is vetoed).
+    private func gatesUp(_ w: World, top: String = "compound", you: Double = 0) {
+        w.f.ranked = [.init(target: top, p: 0.9), .init(target: "session:local_b", p: 0.05), .init(target: "unclear", p: 0.05)]
+        w.f.gates = ["gate_compound": 0.9, "gate_compound2": 0.8, "gate_you": you]
+        w.f.ungated = .init(ranked: [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)], sure: true, card: nil)
+    }
+
+    private let both = "add the page and rerun the build"
+
+    private func parts(_ w: World) -> RouterDivider.Answer {
+        .init(parts: [.init(target: "session:local_b", text: "add the page", waitsFor: nil),
+                      .init(target: "session:local_c", text: "rerun the build", waitsFor: nil)], sure: false, alternatives: [])
+    }
+
+    @Test func gatesUpWithTwoPlacesSendTheDividersPartsWithNoAsk() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = parts(w)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        let entry = try #require(w.entry(id))
+        #expect(entry.parts.map(\.text) == ["add the page", "rerun the build"] && w.dispatcher.askBacks.isEmpty)
+        #expect(w.words(of: "local_b") == ["add the page"] && w.words(of: "local_c") == ["rerun the build"])
+        // One call to Jev, one to the divider, with every place, and waits_for.
+        #expect(w.f.ranks == 1 && w.f.divideRequests.count == 1 && w.f.divideRequests[0].mode == .gates)
+        #expect(w.f.divideRequests[0].places.count > 3 && w.f.sameAsked.isEmpty)
+        for part in entry.parts {
+            let record = try #require(w.record(part.id))
+            #expect(record.delivered != nil && record.decision.confirmed == nil, "the divider placed it, you didn't")
+        }
+        let line = try #require(w.trace().first { $0.id == id && $0.path == "split" })
+        #expect(line.parts?.count == 2)
+    }
+
+    @Test func aPartThatWaitsIsHeldWithWhatItWaitsForAndSendNowSendsIt() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: "ask which version", waitsFor: nil),
+                                     .init(target: "session:local_b", text: "use it", waitsFor: "session:local_c")], sure: true, alternatives: [])
+        let id = try #require(w.dispatcher.submit("ask CI which version, then tell docs to use it"))
+        await w.finishAll(id)
+        let second = try #require(w.entry(id)?.parts.last?.id)
+        #expect(w.dispatcher.held[second]?.hasPrefix("waits for session “Ship it”") == true)
+        #expect(w.words(of: "local_c") == ["ask which version"] && w.words(of: "local_b").isEmpty)
+        w.f.finished = []
+        w.dispatcher.sendNow(second)
+        await waitUntil { w.record(second)?.outcome == .done }
+        #expect(w.words(of: "local_b") == ["use it"])
+        // Don't send drops it instead.
+        gatesUp(w)
+        let id2 = try #require(w.dispatcher.submit("ask CI which version, then tell docs to use it again"))
+        await w.finishAll(id2)
+        let held = try #require(w.entry(id2)?.parts.last?.id)
+        w.dispatcher.dropHeld(held)
+        await waitUntil { w.record(held)?.outcome == .done }
+        #expect(w.record(held)?.doneLines.last == "failed: wasn't sent: you chose not to send it" && w.words(of: "local_b") == ["use it"])
+    }
+
+    @Test func onePlaceWithACompoundPickGoesThereWhenJevAndTheDividerAreSure() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: true, alternatives: [])
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.count == 1 && w.words(of: "local_c") == [both] && w.f.divideRequests.count == 1)
+        // The divider unsure: an ask, its place first, the compound pick not among the buttons.
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: false, alternatives: [])
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(both + "!"))
+        await w.finishAll(id2)
+        let options = try #require(w.dispatcher.askBacks.first { $0.id == id2 }?.options.map(\.target))
+        #expect(options.first == "session:local_c" && !options.contains("compound") && w.words(of: "local_c") == [both])
+    }
+
+    @Test func everyPartWaitingIsTheFirstPartsPlaceAsOnePlace() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: "use the version", waitsFor: "session:local_b"),
+                                     .init(target: "session:local_b", text: "pick a version", waitsFor: "session:local_c")],
+                             sure: true, alternatives: [])
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.count == 1 && w.words(of: "local_c") == [both] && w.dispatcher.held.isEmpty)
+    }
+
+    @Test func aDividerThatFailsOrNamesNoKnownPlaceLeavesTheUngatedPick() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.divideError = RouterTools.Failure("down")
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.count == 1 && w.words(of: "local_b") == [both] && w.dispatcher.askBacks.isEmpty)
+        // An answer whose place isn't one there is: the reading throws, and it is the same.
+        w.dispatcher.effects.divide = { [f = w.f] _, request in
+            f.divideRequests.append(request)
+            return try RouterDivider.read(["parts": [["place": "S99", "text": "x", "waits_for": "none"]], "sure": true, "alternatives": []], request)
+        }
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(both + "."))
+        await w.finishAll(id2)
+        #expect(w.entry(id2)?.parts.count == 1 && w.words(of: "local_b") == [both, both + "."])
+        // The ungated pick still compound: not sure, and the ask doesn't list it.
+        w.f.ungated = .init(ranked: [.init(target: "compound", p: 0.6), .init(target: "session:local_c", p: 0.4)], sure: true, card: nil)
+        w.f.finished = []
+        let id3 = try #require(w.dispatcher.submit(both + "?"))
+        await w.finishAll(id3)
+        #expect(w.dispatcher.askBacks.first { $0.id == id3 }?.options.map(\.target) == ["session:local_c"])
+    }
+
+    @Test func theYouGateDoesntStopTheDivider() async throws {
+        let w = World()
+        gatesUp(w, top: "session:local_a", you: 0.9)
+        w.f.division = parts(w)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.count == 2)
+        // One place and the pick isn't compound: Jev's pick stands as it was.
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: true, alternatives: [])
+        w.f.finished = []
+        w.f.prepared = []
+        let id2 = try #require(w.dispatcher.submit(both + "."))
+        await w.finishAll(id2)
+        #expect(w.entry(id2)?.parts.count == 1 && w.f.prepared == ["local_a"])
+    }
+
+    @Test func gatesDownOrASinglePickShownNeverAskTheDivider() async throws {
+        let w = World()
+        w.f.ranked = [.init(target: "session:local_b", p: 0.97), .init(target: "unclear", p: 0.03)]
+        w.f.gates = ["gate_compound": 0.9, "gate_compound2": 0.2]
+        w.f.division = parts(w)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.isEmpty && w.entry(id)?.parts.count == 1 && w.words(of: "local_b") == [both])
+        // A pick shown over the composer for these words is sent as it was, gates up or not.
+        gatesUp(w)
+        var shown = RouterContext()
+        shown.shown = "session:local_b"
+        var carried = RouterDispatcher.Classification(ranked: [.init(target: "session:local_b", p: 0.97)], sure: true, assisted: true)
+        carried.gates = ["gate_compound": 0.9, "gate_compound2": 0.8]
+        shown.jev = carried
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(both + ".", context: shown))
+        await w.finishAll(id2)
+        #expect(w.f.divideRequests.isEmpty && w.entry(id2)?.parts.count == 1 && w.f.ranks == 1)
+    }
+
+    @Test func aDivisionShownForTheseWordsIsSentAsShownAskingNothing() async throws {
+        let w = World()
+        gatesUp(w)
+        var context = RouterContext()
+        context.division = RouterDivision(text: both, parts: parts(w).parts)
+        let id = try #require(w.dispatcher.submit(" " + both + " ", context: context))
+        await w.finishAll(id)
+        #expect(w.entry(id)?.parts.map(\.text) == ["add the page", "rerun the build"])
+        #expect(w.f.ranks == 0 && w.f.divideRequests.isEmpty && w.f.checked.isEmpty)
+        // Shown for other words: it is read again.
+        w.f.division = parts(w)
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(both + " now", context: context))
+        await w.finishAll(id2)
+        #expect(w.f.ranks == 1 && w.f.divideRequests.count == 1)
+    }
+
+    @Test func anActionsMessageWithTheGatesUpIsNeverDivided() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = parts(w)
+        var context = RouterContext()
+        context.action = RouterActionSource(origin: SessionOrigin(category: "Contributions", thing: "o/lookout#7 Login fails",
+                                                                  actionID: "a", runID: "r"),
+                                            title: "o/lookout#7 Login fails", model: nil, effort: nil)
+        let id = try #require(w.dispatcher.submit(both, context: context))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.isEmpty && w.entry(id)?.parts.count == 1)
+    }
+
+    @Test func theFjordPartOfADivisionRunsWithOnlyItsWords() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = .init(parts: [.init(target: "change_fjord", text: "Mute notifications for an hour.", waitsFor: nil),
+                                     .init(target: "session:local_b", text: "add the page", waitsFor: nil)], sure: true, alternatives: [])
+        let id = try #require(w.dispatcher.submit("Mute notifications for an hour. Then add the page to the docs"))
+        await w.finishAll(id)
+        let input = try #require(w.f.runs.first?.input)
+        #expect(w.f.runs.count == 1 && w.f.runs[0].intent == .changeFjord && w.words(of: "local_b") == ["add the page"])
+        #expect(input.hasSuffix("Mute notifications for an hour.") && !input.contains("add the page") && !input.contains("Then add"))
+    }
+
+    @Test func aDraftsDivisionIsReadOnceItsGatesAreUpAndKeptForTheSend() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.division = parts(w)
+        let found = RouterDispatcher.Classification(try await w.dispatcher.effects.rank(w.dispatcher.makeTools(UUID(), both, pills: []), both, []))
+        let division = await w.dispatcher.predictDivision(both, found: found, projects: [])
+        #expect(division?.parts == parts(w).parts && division?.text == both && w.f.divideRequests.count == 1)
+        // Again for the same words: kept.
+        #expect(await w.dispatcher.predictDivision(both, found: found, projects: []) == division && w.f.divideRequests.count == 1)
+        // The send finds it and asks the divider nothing.
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.count == 2)
+        // Gates down, or one place: no division.
+        var down = found
+        down.gates = ["gate_compound": 0.9, "gate_compound2": 0.1]
+        #expect(await w.dispatcher.predictDivision("something else", found: down, projects: []) == nil && w.f.divideRequests.count == 1)
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: true, alternatives: [])
+        #expect(await w.dispatcher.predictDivision(both + "!", found: found, projects: []) == nil && w.f.divideRequests.count == 2)
+    }
+
     // MARK: Held parts
 
     @Test func aProjectPartTheAppHoldsIsHeldAloneAndDontSendDropsOnlyIt() async throws {

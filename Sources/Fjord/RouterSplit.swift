@@ -163,7 +163,7 @@ extension RouterDispatcher {
         try Task.checkCancellation()
         let parts = answer.parts.map { divided -> SplitPart in
             var target = divided.target
-            var part = SplitPart(target: target, text: divided.text)
+            var part = splitPart(divided, in: job)
             if let card = job.context.replyTo, let session = Self.session(of: "answer:\(card)", store: store),
                Self.session(of: target, store: store) == session {
                 target = "answer:\(card)"
@@ -175,14 +175,138 @@ extension RouterDispatcher {
                 target = "project:" + target.dropFirst(4)
             }
             part.target = target
-            part.waitsFor = divided.waitsFor
-            part.mentions = Self.mentions(of: divided.text, from: job.context.mentions)
-            part.pills = part.mentions.filter(\.pointer.addresses).map(\.range)
             return part
         }
         try await go(job, parts, path: "tags-divider", sure: answer.sure) {
             self.ask(job, targets: ([parts.first?.target].compactMap { $0 } + answer.alternatives).map { askTarget($0, job: job) }, doubt: [])
         }
+    }
+
+    // MARK: The gates
+
+    /// Both compound gates are up: one Haiku call divides the message among every place there is (`RouterDivider`, with
+    /// `waits_for`), as the benchmark's ship form does (evals/router/v2/multi/candidates.py, `Ship3`). Whether the message
+    /// went as parts: true when it did. Two places or more with a part that isn't waiting: the parts go with no ask, the
+    /// waiting ones held. One place, or every part waiting: that place is where Jev's compound pick goes, first in his ranking,
+    /// sure only if he and the divider both are. No answer, or one that names no place: the message is ranked as if the gates
+    /// hadn't fired.
+    func byGates(_ job: Job, _ found: inout Classification, projects: [String]) async throws -> Bool {
+        guard let store else { return false }
+        let place = RouteLabel.compound.rawValue
+        let key = Self.liveKey(job.text, projects)
+        let answer: RouterDivider.Answer
+        if let hit = shownDivision(key), hit.text == job.text.trimmingCharacters(in: .whitespacesAndNewlines) {
+            // Read while you typed: asked of the divider already.
+            answer = .init(parts: hit.parts, sure: true, alternatives: [])
+        } else {
+            stage(job, "dividing")
+            let places = RouterDivider.places(job.tools.destinations(store, projects: projects.isEmpty ? nil : Set(projects)))
+            let request = RouterDivider.Request(message: job.text, places: places, cards: RouterDivider.cardLines(store, places: places),
+                                                context: RouterDivider.contextLines(store, job.context, places: places), mode: .gates)
+            do {
+                answer = try await effects.divide(job.tools, request)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                ungate(&found)
+                return false
+            }
+            try Task.checkCancellation()
+        }
+        let places = Set(answer.parts.map { self.place($0.target) })
+        if places.count >= 2, answer.parts.contains(where: { $0.waitsFor == nil }) {
+            dispatch(job, parts: answer.parts.map { splitPart($0, in: job, fixed: false) }, inputs: found.trace)
+            return true
+        }
+        // One place (the first part's, as the benchmark reads it), or nothing free to send: Jev's pick of compound goes there.
+        if found.top?.target == place, let to = answer.parts.first?.target {
+            let rest = found.ranked.filter { $0.target != place && $0.target != to }
+            found.ranked = [Scored(target: to, p: found.top?.p ?? 0)] + rest
+            found.card = [to] + (found.card ?? rest.map(\.target)).filter { $0 != place && $0 != to }
+            found.sure = found.sure && answer.sure
+        }
+        return false
+    }
+
+    /// The ranking as if the gates hadn't fired. A compound pick that is still there isn't one to act on: it is not sure, and the
+    /// ask doesn't list it.
+    private func ungate(_ found: inout Classification) {
+        if let single = found.ungated {
+            found.ranked = single.ranked
+            found.sure = single.sure
+            found.card = single.card
+        }
+        guard found.top?.target == RouteLabel.compound.rawValue else { return }
+        found.ranked.removeAll { $0.target == RouteLabel.compound.rawValue }
+        found.card = found.card?.filter { $0 != RouteLabel.compound.rawValue }
+        found.sure = false
+    }
+
+    /// The parts shown under the composer for these very words (`RouterContext.division`), as parts to send: none when they
+    /// are for other words, are fewer than two, or one of them has no place to go to any more.
+    func shownParts(_ job: Job) -> [SplitPart]? {
+        guard let store, let shown = job.context.division, shown.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            == job.text.trimmingCharacters(in: .whitespacesAndNewlines), shown.parts.count >= 2,
+              shown.parts.allSatisfy({ eligible($0.target, store: store) }) else { return nil }
+        return shown.parts.map { splitPart($0, in: job, fixed: false) }
+    }
+
+    /// A part of a division as it is about to run: its pills are the ones of the message that its words kept.
+    func splitPart(_ divided: RouterDivider.Part, in job: Job, fixed: Bool = true) -> SplitPart {
+        var part = SplitPart(target: divided.target, text: divided.text)
+        part.fixed = fixed
+        part.waitsFor = divided.waitsFor
+        part.mentions = Self.mentions(of: divided.text, from: job.context.mentions)
+        part.pills = part.mentions.filter(\.pointer.addresses).map(\.range)
+        return part
+    }
+
+    /// The parts a draft would be sent as, while you type: the divider asked of the draft once Jev's read of it has both gates
+    /// up, kept by its words and projects for `liveFor` so that sending them asks nothing again. Nil when it isn't several
+    /// places, can't be asked, or Jev may not read what you type.
+    func predictDivision(_ text: String, found: Classification, projects: [String], mentions: [RouterMention] = []) async -> RouterDivision? {
+        guard let store, store.jevAllows(.drafts), found.dividesNow else { return nil }
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var tagged = RouterContext(projects: projects)
+        tagged.mentions = mentions
+        let narrowed = Self.repoWorld(tagged, store: store).flatMap { $0.clones.isEmpty ? nil : $0.clones } ?? projects
+        let key = Self.liveKey(text, narrowed)
+        if let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor, hit.board == Self.boardRevision(store) {
+            return hit.division
+        }
+        if let pending = divisionPending[key] { return await pending.task.value }
+        let tools = RouterTools(store: store)
+        tools.tagged = RouterPointers.context(mentions, store: store)
+        configure?(tools)
+        let places = RouterDivider.places(tools.destinations(store, projects: narrowed.isEmpty ? nil : Set(narrowed)))
+        var context = tagged
+        context.part = false
+        let request = RouterDivider.Request(message: text, places: places, cards: RouterDivider.cardLines(store, places: places),
+                                            context: RouterDivider.contextLines(store, context, places: places), mode: .gates)
+        let id = UUID()
+        let board = Self.boardRevision(store)
+        // Its own task, as Jev's read of a draft is: a draft that changes, or is sent, doesn't stop it.
+        let pending = Task { [weak self] () -> RouterDivision? in
+            guard let self else { return nil }
+            defer { if self.divisionPending[key]?.id == id { self.divisionPending[key] = nil } }
+            guard self.store?.jevAllows(.drafts) == true, let answer = try? await self.effects.divide(tools, request),
+                  self.store?.jevAllows(.drafts) == true else { return nil }
+            // Several places, with a part to send: one that is only one place is the pick Jev's read already shows.
+            let several = Set(answer.parts.map { self.place($0.target) }).count >= 2 && answer.parts.contains { $0.waitsFor == nil }
+            let division = several ? RouterDivision(text: text, parts: answer.parts) : nil
+            self.divisionCache = self.divisionCache.filter { Date().timeIntervalSince($0.value.at) < Self.liveFor }
+            self.divisionCache[key] = (Date(), division, board)
+            return division
+        }
+        divisionPending[key] = (id, pending)
+        return await pending.value
+    }
+
+    /// A division kept from while you typed, while it is fresh and read on this board.
+    private func shownDivision(_ key: String) -> RouterDivision? {
+        guard let store, let hit = divisionCache[key], Date().timeIntervalSince(hit.at) < Self.liveFor,
+              hit.board == Self.boardRevision(store) else { return nil }
+        return hit.division
     }
 
     /// The parts as they stand: several go as parts; one is the message as it is, to its place (the path of today, when it is
@@ -276,7 +400,7 @@ extension RouterDispatcher {
 
     /// Divides the entry into `parts` and runs each as a message of its own: its words, its tools (so its send passes the
     /// send gate with only its words), its entry in the log.
-    func dispatch(_ job: Job, parts: [SplitPart]) {
+    func dispatch(_ job: Job, parts: [SplitPart], inputs: RouterTrace.Inputs? = nil) {
         guard let store, parts.count >= 2 else { return }
         var ids: [UUID] = []
         store.updateDecision(job.id) { entry in
@@ -288,7 +412,7 @@ extension RouterDispatcher {
             ids = entry.divide(into: pieces)
         }
         guard ids.count == parts.count else { return }
-        trace(job, path: "split", action: "split", target: nil, parts: parts.map(\.target))
+        trace(job, path: "split", action: "split", target: nil, inputs: inputs, parts: parts.map(\.target))
         replaceFlying(job.id, with: ids)
         for (part, id) in zip(parts, ids) {
             var context = RouterContext()
