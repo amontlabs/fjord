@@ -49,6 +49,38 @@ For each part, "waits_for" says whether it can be acted on now: the key of anoth
 needs that place's answer or result first (its reply, a version it picks, a commit it makes), else "none". A part that
 waits is held until that place has answered."""
 
+# ---------------------------------------------------------------- divider prompt revisions (not shipped)
+# The live constants above are what the app sends, pinned byte for byte by parity.py; these are candidates beside them.
+# V2 keeps every word the user's own; V3 allows the minimal turn of address. Both send a part that only has to wait for
+# another place to finish (it can wait itself), and hold only a part that needs another place's answer to be written.
+
+TEXT_RULE_V2 = TEXT_RULE + """ When you drop the words that say where a part goes, what is left must still read as said
+to that place: if the user speaks about the place in the third person ("ask the CI one what it picked", "tell the
+docs one to add its page"), keep that clause whole, address included, rather than leaving a fragment like "what it
+picked". Never leave a dangling piece of an address (a stray "one", "to", "for")."""
+
+TEXT_RULE_V3 = TEXT_RULE + """ When the user speaks about a place in the third person ("ask the CI one what it picked",
+"tell the docs one to add its page"), that place's part may be turned to address it directly, changing only what the
+turn of address needs: the words naming it go, its pronouns become "you"/"your", and a reported question becomes a
+question ("what did you pick?", "add your page"). Change nothing else. Never leave a fragment that talks about the
+place as "it", or a dangling piece of an address (a stray "one", "to", "for")."""
+
+WAITS_RULE_V2 = """
+
+For each part, "waits_for" says whether it can be sent now: the key of another place in your answer only when this
+part can't be acted on without that place's answer: it uses something that place has yet to tell (a version it picks,
+what it found, its reply). A part that only has to happen after another place finishes something ("once it's pushed,
+rebase on it", "cut the release once that passes") can be sent now: the place waits by itself. Its waits_for is
+"none", and its text keeps the words saying what it waits for, with what "it" or "that" refers to copied from the
+other part when the part would not make sense without it. A part that waits is held until that place has answered."""
+
+ROUTER_SYSTEM_V2 = ROUTER_SYSTEM.replace(TEXT_RULE, TEXT_RULE_V2)
+ROUTER_SYSTEM_V3 = ROUTER_SYSTEM.replace(TEXT_RULE, TEXT_RULE_V3)
+# v1 live; v2 own words + send what only has to wait; v3 turn of address + the same; v4 turn of address alone (live
+# waits rule); v5 own-words address rule alone.
+DIVIDER_PROMPTS = {"v1": (None, None), "v2": (ROUTER_SYSTEM_V2, WAITS_RULE_V2), "v3": (ROUTER_SYSTEM_V3, WAITS_RULE_V2),
+                   "v4": (ROUTER_SYSTEM_V3, None), "v5": (ROUTER_SYSTEM_V2, None)}
+
 
 def schema(keys, waits=False):
     part = {"place": {"type": "string", "enum": keys}, "text": {"type": "string"}}
@@ -115,7 +147,7 @@ def _tagged(context):
     return out
 
 
-def model_route(model, state, message, context, note=None, fixed=None, tag="cand", waits=False):
+def model_route(model, state, message, context, note=None, fixed=None, tag="cand", waits=False, prompts=(None, None)):
     """One structured call: A (Haiku), S (Sonnet), and B's divider."""
     ctx = dict(context)
     if ctx.get("tags"):
@@ -126,7 +158,9 @@ def model_route(model, state, message, context, note=None, fixed=None, tag="cand
         keys = [k for k, t in key_target.items() if C.place_of(t) in fixed or t in fixed]
     else:
         keys = list(key_target)
-    res = C.claude(model, ROUTER_SYSTEM + (WAITS_RULE if waits else ""), prompt, schema(keys, waits), tag=tag)
+    system, waits_rule = prompts
+    system = (system or ROUTER_SYSTEM) + ((waits_rule or WAITS_RULE) if waits else "")
+    res = C.claude(model, system, prompt, schema(keys, waits), tag=tag)
     out = res.get("out") or {}
     parts = []
     for p in out.get("parts", []) if isinstance(out, dict) else []:
@@ -386,9 +420,10 @@ class Ship3:
     - Otherwise: Jev's decision as shipped, whole message to one place or an ask."""
     STRUCTURE = ("tags", "tags-divider", "chip")
 
-    def __init__(self):
+    def __init__(self, prompt="v1"):
         self.noask = NoAsk(3)
         self.pipeline = self.noask.pipeline
+        self.prompt = prompt
 
     @staticmethod
     def _single(d, message, context, latency, cost, path):
@@ -420,7 +455,8 @@ class Ship3:
         cost = (d.get("tokens") or 0) * 0.04e-6
         if not ((g1 >= 0.75 and g2 >= 0.5) or top == "compound"):
             return self._single(d, message, context, latency, cost, "ship3-jev")
-        w = model_route(C.HAIKU, state, message, context, tag="cand-haiku-waits", waits=True)
+        w = model_route(C.HAIKU, state, message, context, waits=True, prompts=DIVIDER_PROMPTS[self.prompt],
+                        tag="cand-haiku-waits" + ("" if self.prompt == "v1" else "-" + self.prompt))
         latency += w.get("latency") or 0.0
         cost += w.get("cost") or 0.0
         if w.get("error") or not w["parts"]:
@@ -443,8 +479,8 @@ class Ship3:
 
 
 def make(name):
-    if name == "ship3":
-        return Ship3()
+    if name.startswith("ship3"):
+        return Ship3(name.split("-")[1] if "-" in name else "v1")
     if name.startswith("noask"):
         return NoAsk(int(name[-1]))
     if name in ("hybrid", "hybrid-lazy"):
