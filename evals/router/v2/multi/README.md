@@ -60,6 +60,7 @@ python3 -m v2.multi.score multi dev haiku pipeline
 python3 -m v2.multi.seal haiku pipeline sonnet   # once, after dev
 python3 -m v2.multi.blind make
 python3 -m v2.multi.blind read                   # after ticking blind.md
+python3 -m v2.multi.parity                       # Tests/FjordTests/Fixtures/router-divider-parity.json (no model, synthetic boards)
 ```
 
 Claude-family writing and labelling go through `claude -p` (Sonnet); with `MULTI_CLAUDE_VIA=agent` they leave prompts
