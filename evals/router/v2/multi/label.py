@@ -11,6 +11,7 @@ python3 -m v2.multi.label  →  v2/data/multi/cases.jsonl (+ labels.jsonl, the r
 import argparse
 import hashlib
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 from . import common as C
@@ -89,6 +90,8 @@ def label_batch(family, batch):
                        else "") for b, c in zip(blocks, batch)]
     prompt = LABEL.format(hint=hint, cases="\n".join(blocks))
     res = C.family_call(family, prompt, tag="label-" + family, system="You label benchmark data carefully. Answer with JSON only.")
+    if res.get("error"):
+        print(f"{family} batch of {len(batch)} ({batch[0]['id']}…): {res['error']}", file=sys.stderr, flush=True)
     out = {}
     for lab in ((res.get("out") or {}).get("labels") or []) if isinstance(res.get("out"), dict) else []:
         cid = lab.get("case")
@@ -102,7 +105,7 @@ def label_batch(family, batch):
             if 0 <= i < n_units:
                 units[i] = {"for": sorted({km[k] for k in u.get("for") or [] if k in km}),
                             "may": sorted({km[k] for k in u.get("may") or [] if k in km})}
-        out[cid] = {"family": family, "units": units, "places": sorted({km[k] for k in lab.get("places") or [] if k in km}
+        out[cid] = {"family": family, "model": res.get("model"), "units": units, "places": sorted({km[k] for k in lab.get("places") or [] if k in km}
                                                                        | {p for u in units for p in u["for"]}),
                     "confidence": lab.get("confidence"), "note": lab.get("note")}
     return out

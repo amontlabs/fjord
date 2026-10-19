@@ -25,6 +25,9 @@ HAIKU = "claude-haiku-5-5"
 SONNET = "claude-sonnet-5-5"
 GPT = "gpt-6.1-sol"
 GEMINI = "gemini-4-argon-high"
+# Argon's subscription quota ran out on 2026-10-19 (it resets a week later): Gemini calls not already made with it use
+# Flash.
+GEMINI_FALLBACK = "gemini-3.8-flash-high"
 CLAUDE_FLAGS = ["--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence",
                 "--output-format", "json"]
 FAMILY_MODEL = {"claude": SONNET, "gpt": GPT, "gemini": GEMINI}
@@ -45,7 +48,7 @@ def write_jsonl(path, rows):
     os.replace(tmp, path)
 
 
-def _cached(tag, key_parts, call):
+def _cached(tag, key_parts, call, cache_only=False):
     key = hashlib.sha256(json.dumps(key_parts, ensure_ascii=False).encode()).hexdigest()
     path = CACHE / tag / key[:2] / f"{key}.json"
     if path.exists():
@@ -53,6 +56,8 @@ def _cached(tag, key_parts, call):
             return json.loads(path.read_text())
         except json.JSONDecodeError:
             pass
+    if cache_only:
+        return {"out": None, "text": None, "error": "not cached"}
     res = call()
     if res.get("error") is None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +133,17 @@ def _json_in(text):
                 return json.loads(text[start:end + 1])
             except json.JSONDecodeError:
                 continue
-    return None
+    # Prose around it with braces of its own: the longest object that decodes from some opening brace.
+    decoder, best = json.JSONDecoder(), None
+    for i, ch in enumerate(text):
+        if ch == "{":
+            try:
+                obj, end = decoder.raw_decode(text, i)
+            except json.JSONDecodeError:
+                continue
+            if best is None or end - i > best[0]:
+                best = (end - i, obj)
+    return best[1] if best else None
 
 
 def codex(prompt, tag="gpt", effort="high", timeout=900):
@@ -158,7 +173,7 @@ def codex(prompt, tag="gpt", effort="high", timeout=900):
     return _cached(tag, [GPT, effort, prompt], call)
 
 
-def gemini(prompt, tag="gemini", timeout=420):
+def gemini(prompt, tag="gemini", timeout=420, model=GEMINI, cache_only=False):
     """Gemini through Antigravity (`agy -p`, sandboxed; plan mode hangs on long prompts) from an empty folder; the answer parsed as JSON."""
     def call():
         res = {}
@@ -167,7 +182,7 @@ def gemini(prompt, tag="gemini", timeout=420):
             res = {"out": None, "text": None, "error": None}
             with tempfile.TemporaryDirectory(prefix="multi-gemini-") as cwd:
                 try:
-                    p = subprocess.run(["agy", "-p", prompt, "--model", GEMINI, "--output-format", "json", "--sandbox",
+                    p = subprocess.run(["agy", "-p", prompt, "--model", model, "--output-format", "json", "--sandbox",
                                         "--print-timeout", f"{timeout - 60}s"], capture_output=True, text=True, cwd=cwd, timeout=timeout,
                                        stdin=subprocess.DEVNULL)
                     try:
@@ -176,10 +191,19 @@ def gemini(prompt, tag="gemini", timeout=420):
                         if wrapper.get("status") != "SUCCESS":
                             res["error"] = "status " + str(wrapper.get("status"))
                     except json.JSONDecodeError:
-                        res["text"] = p.stdout[-4000:]
+                        # Log lines around the wrapper: decode it from where it starts.
+                        i = p.stdout.find('{"conversation_id"')
+                        try:
+                            wrapper = json.JSONDecoder().raw_decode(p.stdout, i)[0] if i >= 0 else {}
+                        except json.JSONDecodeError:
+                            wrapper = {}
+                        res["text"] = wrapper.get("response") or p.stdout
                     res["out"] = _json_in(res["text"])
                     if res["out"] is None and res["error"] is None:
                         res["error"] = "no JSON"
+                        debug = DATA / "debug"
+                        debug.mkdir(parents=True, exist_ok=True)
+                        (debug / f"{tag}-{int(time.time())}.txt").write_text(p.stdout + "\n--- stderr\n" + p.stderr)
                 except subprocess.TimeoutExpired:
                     res["error"] = "timeout"
             res["elapsed"] = round(time.time() - t0, 2)
@@ -187,7 +211,7 @@ def gemini(prompt, tag="gemini", timeout=420):
                 break
             time.sleep(5)  # a hung agent turn is common; a fresh one usually answers in 1–2 minutes
         return res
-    return _cached(tag, [GEMINI, prompt], call)
+    return {**_cached(tag, [model, prompt], call, cache_only), "model": model}
 
 
 def family_call(family, prompt, tag, system="Answer with JSON only."):
@@ -200,7 +224,10 @@ def family_call(family, prompt, tag, system="Answer with JSON only."):
     if family == "gpt":
         return codex(system + "\n\n" + prompt, tag=tag)
     if family == "gemini":
-        return gemini(system + "\n\n" + prompt, tag=tag)
+        res = gemini(system + "\n\n" + prompt, tag=tag, cache_only=True)
+        if res.get("error") is None:
+            return res
+        return gemini(system + "\n\n" + prompt, tag=tag, model=GEMINI_FALLBACK)
     raise ValueError(family)
 
 
