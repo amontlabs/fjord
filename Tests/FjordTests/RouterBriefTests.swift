@@ -299,6 +299,8 @@ import Testing
         }
         var announced: [RouterCard] = []
         store.onNewRouterCards = { announced += $0 }
+        // The hold's own limit (20 s, then the banner goes without them) never runs out here, however slow the machine.
+        store.routerTriager.bannerWait = .seconds(3600)
         store.applyTriage(RouterTriage(state: .asks), to: "a#t2")
         store.routerBriefer.request("a#t2", message: "Done. Push to main?", store: store)
         while gate.release == nil { await Task.yield() }

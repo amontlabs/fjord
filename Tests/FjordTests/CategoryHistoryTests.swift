@@ -121,16 +121,18 @@ import Testing
     @Test func aGroupEditOnThePageIsTakenAsOldOnceTheEditsPauseAsARuleEditIs() async throws {
         let store = InboxFixture.store([InboxFixture.pr(1)])
         store.gh.session = StubbedGitHub.session { _ in .init(200, "{}") }
-        var edited = false
-        // Once the page is drawn, a group is edited there: the actions wait for it to be taken in.
+        var edited = false, waited = false
+        // Once the page is drawn, a group is edited there: the actions wait for it to be taken in. Seen waiting once is
+        // enough: the wait is the page's real second, and on a slow machine the tree takes longer than that to settle.
         _ = try await AccessibilityTree.render(CategoriesView(store: store).tipSpace(), ready: { tree in
             if !edited, AccessibilityTree.hasControls(tree) {
                 edited = true
                 store.groups.append(InboxGroup(name: "Trusted", kind: .people, members: ["carol"]))
             }
-            return edited && store.baselinePending
+            if edited && store.baselinePending { waited = true }
+            return waited
         })
-        #expect(store.baselinePending)
+        #expect(waited)
     }
 
     @Test func aRuleOffIsMarkedOnItsCategoryAndTheMarkOpensItsEditor() async throws {

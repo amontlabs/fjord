@@ -66,9 +66,8 @@ import UserNotifications
         model.address(open[0], store: store)
         #expect(model.selection == nil && model.replyTo == open[0])
         model.draft = ""
-        // The pick is replied to: Esc takes that off, then closes.
+        // The pick is replied to: Esc takes that off; then, with nothing left to step out of, it goes on (the window stays).
         #expect(keys.key(key(kVK_Escape), responder: nil) && model.replyTo == nil)
-        // Nothing left to step out of: the key goes on to what has the keyboard.
         #expect(!keys.key(key(kVK_Escape), responder: nil))
     }
 
@@ -387,7 +386,9 @@ import UserNotifications
         #expect(model.suggestions(store).isEmpty && model.replyTo != nil)
         #expect(keys.key(key(kVK_Escape), responder: editor))
         #expect(model.replyTo == nil)
+        // Nothing left to step out of: the field keeps it, and the window stays.
         #expect(keys.key(key(kVK_Escape), responder: editor))
+        #expect(model.replyTo == nil && model.suggestions(store).isEmpty)
     }
 
     @Test func atSuggestsProjectsAndReturnOrTabPicksOne() throws {
@@ -797,19 +798,19 @@ import UserNotifications
         let feedback = NSTextView()
         #expect(keys.key(key(kVK_Escape), responder: feedback))
         #expect(model.revisingPlan == nil && model.replyTo == other.id)
-        // Then the composer's context, then the plan's Revise…, before the window closes.
+        // Then the composer's context, then the plan's Revise….
         #expect(keys.key(key(kVK_Escape), responder: nil))
         #expect(model.replyTo == nil && model.revisingPlan == nil)
         #expect(keys.key(key(kVK_Escape), responder: nil))
         #expect(model.revisingPlan == form.id)
         #expect(keys.key(key(kVK_Escape), responder: feedback))
         #expect(model.revisingPlan == nil)
-        // Another card shown in full: no plan to revise. Picking it armed a reply to it, which Esc takes off; then it closes.
+        // Another card shown in full: no plan to revise. Picking it armed a reply to it, which Esc takes off; then, with
+        // nothing left to step out of, it goes on (the window stays).
         model.select(other.id, store: store)
         #expect(model.expandedPlan(store) == nil && model.replyTo == other.id)
         #expect(keys.key(key(kVK_Escape), responder: nil))
         #expect(model.replyTo == nil)
-        // Nothing left to step out of: the key goes on to what has the keyboard.
         #expect(!keys.key(key(kVK_Escape), responder: nil))
     }
 

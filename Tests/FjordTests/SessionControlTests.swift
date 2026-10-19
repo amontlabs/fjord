@@ -250,6 +250,14 @@ import Testing
         func bump() { lock.lock(); n += 1; lock.unlock() }
     }
 
+    /// A clock that holds still until it is released, then runs on in real time.
+    private final class Release: @unchecked Sendable {
+        private let lock = NSLock()
+        private var start: Date?
+        var elapsed: TimeInterval { lock.lock(); defer { lock.unlock() }; return start.map { Date().timeIntervalSince($0) } ?? 0 }
+        func release() { lock.lock(); if start == nil { start = Date() }; lock.unlock() }
+    }
+
     /// Lets the main queue run what the presence scan handed it.
     private func drain() async {
         for _ in 0..<5 { try? await Task.sleep(nanoseconds: 20_000_000) }
@@ -287,14 +295,15 @@ import Testing
         let calls = Calls()
         l.store.claudeFeed.readPresence(from: l.paths) { calls.bump() }
         await drain()
-        // The clock: 0.3 s before the lease ends, running on in real time. The scan schedules its own look for the expiry.
+        // The clock: 1.5 s before the lease ends, held still until released, then running on in real time. The scan schedules its own look for the expiry.
         let renewed = ClaudePlugin.leaseNow.timeIntervalSince1970
-        let start = Date()
-        l.store.claudeFeed.presenceNow = { Date(timeIntervalSince1970: renewed + ClaudePlugin.lease - 1.5 + Date().timeIntervalSince(start)) }
+        let clock = Release()
+        l.store.claudeFeed.presenceNow = { Date(timeIntervalSince1970: renewed + ClaudePlugin.lease - 1.5 + clock.elapsed) }
         l.store.claudeFeed.scanPresence()
         await drain()
         let base = calls.count
         #expect(l.store.canStop(sessionID: "local_a"))
+        clock.release()
         var watchdog = Watchdog()
         while l.store.canStop(sessionID: "local_a"), !watchdog.expired() { try? await Task.sleep(nanoseconds: 20_000_000) }
         await drain()
