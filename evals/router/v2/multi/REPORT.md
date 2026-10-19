@@ -162,23 +162,34 @@ context. Improving the gates is the lever if those turn out to be common.
 
 ### Variant 3 in the form being shipped (dev only)
 
-The ship form (`candidates.Ship3`) drops the unconditioned first Haiku call. Only when Jev's two compound gates fire
-does one Haiku call run, with `waits_for`, every place and no note:
+The ship form (`candidates.Ship3`) makes at most one Haiku call per message: no unconditioned first call, and B's
+no-waits divider never runs. It works like this:
 
-- Its parts name two places or more and at least one doesn't wait: those parts are sent and the waiting ones held.
-- It names one place, or every part waits: when B's top is compound, that place goes first in B's ranking, and the
-  result is sure only if B and Haiku both are. Otherwise it is B as shipped.
-- The call fails: B, with the gates read as 0.
+- When Jev's two compound gates fire, one Haiku call runs, with `waits_for`, every place and no note.
+- If Jev's pick is compound without the gates, the same call runs. That happened once in dev and twice in the
+  single-place episodes.
+- If the call's parts name two places or more and at least one part doesn't wait, those parts are sent and the
+  waiting ones held.
+- If it names one place, or every part waits, and Jev's pick is compound, that place goes first in Jev's ranking. The
+  result is sure only if Jev and Haiku both are. Otherwise Jev's decision goes as shipped.
+- If the call fails, Jev's decision goes with the gates read as 0: a compound pick becomes an ask on the rest of the
+  ranking. No call failed in these runs.
 
-| vs B as shipped | 3 | 3, ship form |
+Corrected on 2026-10-19. The first measurement of this form ran B's pipeline first. On a compound pick, that called
+B's divider and then the `waits_for` call: two Haiku calls, with the first left out of the cost and latency. Its
+one-place fallback could also take the divider's answer instead of the `waits_for` call's single place. The table
+below is the rerun with one call. It differs from the first measurement only on messages meant for several places,
+where it gets 77.5% fully right instead of 73.8%.
+
+| vs B as shipped | 3 | 3, ship form (one call) |
 |---|---|---|
 | everyday messages, extra wrong sends per 100 (B: 2.6) | +0.2 [0.0, +0.5] | +0.1 [0.0, +0.3] |
 | same, real moments (B: 1.5) | +0.3 [0.0, +0.8] | 0 [0.0, 0.0] |
-| everyday click-loss per submit | +0.03 [−0.02, +0.11] | +0.01 [−0.02, +0.06] |
+| everyday click-loss per submit | +0.03 [−0.02, +0.11] | +0.01 [−0.03, +0.07] |
 | look-multi written (52), wrong sends per 100 (B: 9.6 [3.4, 17.5]) | 0 | 0 |
 | look-multi, your real messages in dev (9), wrong sends per 100 (B: 0) | 0 | 0 |
-| several places (80), fully right (B: 62.5% [54.4, 70.1]) | 73.8% [64.6, 81.8] | 73.8% [64.6, 81.8] (CI vs B +4.1 to +18.7) |
+| several places (80), fully right (B: 62.5% [54.4, 70.1]) | 73.8% [64.6, 81.8] | **77.5%** [69.1, 84.9] (vs B +6.9 to +24.1) |
 
-The ship form matches variant 3 on every slice and adds even fewer wrong sends on everyday messages. Haiku ran on
-4 of 924 everyday submits, against all of them for variant 3, and on 52 of the 141 multi dev cases. On real moments
-it changed nothing.
+The one-call form is at least as good as variant 3 on every slice, and better on messages for several places, where it
+uses the `waits_for` call's own division and single place. Haiku runs on 6 of 925 everyday submits and on 57 of the
+141 multi dev cases. On those it adds about 4.3 s (p50, Jev plus `claude -p`) and $0.0018 per message.

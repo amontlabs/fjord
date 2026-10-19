@@ -376,36 +376,55 @@ class NoAsk:
 
 
 class Ship3:
-    """Exploratory (dev only): variant 3 in the form being shipped. No unconditioned Haiku call: only when Jev's two
-    compound gates fire does one Haiku call run, with `waits_for`, every place and no note.
-    - Two places or more, at least one part not waiting: those parts are sent, the waiting ones held.
-    - One place, or every part waits: when B's top is compound, that place goes first in B's ranking, sure only if B
-      and Haiku both are; otherwise B as shipped.
-    - The call fails: B with the gates read as 0 (a compound pick becomes an ask on the rest of the ranking)."""
+    """Exploratory (dev only): variant 3 in the form being shipped, one Haiku call at most. B's divider never runs.
+    - A reply chip or @tags: the structure decides, as in B.
+    - Jev's two compound gates fire (or its pick is compound anyway): one Haiku call, with `waits_for`, every place and
+      no note. Two places or more with at least one part not waiting: those parts are sent, the waiting ones held.
+      One place, or every part waits: when Jev's pick is compound, that place goes first in its ranking, sure only if
+      Jev and Haiku both are; otherwise Jev's decision as shipped. The call fails: Jev's decision with the gates read
+      as 0 (a compound pick becomes an ask on the rest of the ranking).
+    - Otherwise: Jev's decision as shipped, whole message to one place or an ask."""
+    STRUCTURE = ("tags", "tags-divider", "chip")
+
     def __init__(self):
         self.noask = NoAsk(3)
         self.pipeline = self.noask.pipeline
 
+    @staticmethod
+    def _single(d, message, context, latency, cost, path):
+        """Jev's decision as one place or an ask, as B sends it (pills and asides edited out by rule)."""
+        from v2.run import rules
+        ranked = [r["target"] if isinstance(r, dict) else r for r in d.get("ranked", [])]
+        target = d.get("target")
+        if d["decision"] != "ask" and target and target != "compound":
+            text = rules.edit(message, context.get("pills", []))
+            return {"parts": [{"place": C.place_of(target), "target": target, "text": text}], "sure": True,
+                    "options": list(dict.fromkeys([target] + [t for t in ranked if t]))[:4],
+                    "latency": latency, "cost": cost, "path": path}
+        rest = [t for t in ranked if t and t != "compound"][:4]
+        return {"parts": [], "sure": False, "options": rest, "latency": latency, "cost": cost, "path": path}
+
     def route(self, state, message, context):
         from v2.run import rules
-        b = self.pipeline.route(state, message, context)
-        if b["path"] in ("tags", "tags-divider", "chip"):
-            return {**b, "sure": b["sure"] or len(b["parts"]) >= 2, "path": "ship3-" + b["path"]}
-        g1, g2 = self.noask.gates(state, message, context)
-        if not (g1 >= 0.75 and g2 >= 0.5):
-            return {**b, "path": "ship3-" + b["path"]}
+        reply = context.get("replyTo")
+        chip = reply and any(c["id"] == reply for c in state.get("cards", []))
+        if context.get("tags") or chip:
+            b = self.pipeline.route(state, message, context)  # structure paths: no compound divider
+            if b["path"] in self.STRUCTURE:
+                return {**b, "sure": b["sure"] or len(b["parts"]) >= 2, "path": "ship3-" + b["path"]}
         d = self.pipeline.jev(state, message, context)
+        g1, g2 = self.noask.gates(state, message, context)  # the same Jev request: a cache hit
         ranked = [r["target"] if isinstance(r, dict) else r for r in d.get("ranked", [])]
         top = d.get("target") if d["decision"] != "ask" else d.get("top")
+        latency = d.get("latency") or 0.0
+        cost = (d.get("tokens") or 0) * 0.04e-6
+        if not ((g1 >= 0.75 and g2 >= 0.5) or top == "compound"):
+            return self._single(d, message, context, latency, cost, "ship3-jev")
         w = model_route(C.HAIKU, state, message, context, tag="cand-haiku-waits", waits=True)
-        latency = (d.get("latency") or 0.0) + (w.get("latency") or 0.0)
-        cost = (d.get("tokens") or 0) * 0.04e-6 + (w.get("cost") or 0.0)  # Jev, then the one Haiku call
+        latency += w.get("latency") or 0.0
+        cost += w.get("cost") or 0.0
         if w.get("error") or not w["parts"]:
-            if top == "compound":
-                rest = [t for t in ranked if t and t != "compound"][:4]
-                return {"parts": [], "sure": False, "options": rest, "latency": latency, "cost": cost,
-                        "path": "ship3-failed", "error": w.get("error")}
-            return {**b, "path": "ship3-" + b["path"]}
+            return self._single(d, message, context, latency, cost, "ship3-failed")
         places = {p["place"] for p in w["parts"]}
         sending = [p for p in w["parts"] if not p.get("waits_for")]
         if len(places) >= 2 and sending:
@@ -420,7 +439,7 @@ class Ship3:
                         "options": order, "latency": latency, "cost": cost, "path": "ship3-one"}
             return {"parts": [], "sure": False, "options": order, "latency": latency, "cost": cost,
                     "path": "ship3-one-ask"}
-        return {**b, "path": "ship3-" + b["path"]}
+        return self._single(d, message, context, latency, cost, "ship3-jev")
 
 
 def make(name):
