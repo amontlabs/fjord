@@ -43,13 +43,22 @@ or you are guessing): then nothing is sent and the user picks. In "alternatives"
 user might have meant, most likely first."""
 
 
-def schema(keys):
+WAITS_RULE = """
+
+For each part, "waits_for" says whether it can be acted on now: the key of another place in your answer when this part
+needs that place's answer or result first (its reply, a version it picks, a commit it makes), else "none". A part that
+waits is held until that place has answered."""
+
+
+def schema(keys, waits=False):
+    part = {"place": {"type": "string", "enum": keys}, "text": {"type": "string"}}
+    if waits:
+        part["waits_for"] = {"type": "string", "enum": keys + ["none"]}
     return {"type": "object", "additionalProperties": False,
             "properties": {
                 "parts": {"type": "array", "minItems": 1, "items": {
                     "type": "object", "additionalProperties": False,
-                    "properties": {"place": {"type": "string", "enum": keys}, "text": {"type": "string"}},
-                    "required": ["place", "text"]}},
+                    "properties": part, "required": list(part)}},
                 "sure": {"type": "boolean"},
                 "alternatives": {"type": "array", "items": {"type": "string", "enum": keys}}},
             "required": ["parts", "sure", "alternatives"]}
@@ -106,7 +115,7 @@ def _tagged(context):
     return out
 
 
-def model_route(model, state, message, context, note=None, fixed=None, tag="cand"):
+def model_route(model, state, message, context, note=None, fixed=None, tag="cand", waits=False):
     """One structured call: A (Haiku), S (Sonnet), and B's divider."""
     ctx = dict(context)
     if ctx.get("tags"):
@@ -117,13 +126,16 @@ def model_route(model, state, message, context, note=None, fixed=None, tag="cand
         keys = [k for k, t in key_target.items() if C.place_of(t) in fixed or t in fixed]
     else:
         keys = list(key_target)
-    res = C.claude(model, ROUTER_SYSTEM, prompt, schema(keys), tag=tag)
+    res = C.claude(model, ROUTER_SYSTEM + (WAITS_RULE if waits else ""), prompt, schema(keys, waits), tag=tag)
     out = res.get("out") or {}
     parts = []
     for p in out.get("parts", []) if isinstance(out, dict) else []:
         target = key_target.get(p.get("place"))
         if target:
-            parts.append({"place": C.place_of(target), "target": target, "text": p.get("text", "")})
+            row = {"place": C.place_of(target), "target": target, "text": p.get("text", "")}
+            if waits and p.get("waits_for") in key_target and key_target[p["waits_for"]] != target:
+                row["waits_for"] = key_target[p["waits_for"]]
+            parts.append(row)
     alts = [key_target[k] for k in (out.get("alternatives") or []) if k in key_target] if isinstance(out, dict) else []
     sure = bool(out.get("sure")) and bool(parts) and res.get("error") is None
     return {"parts": merge(parts), "sure": sure, "options": _options(parts, alts), "error": res.get("error"),
@@ -313,7 +325,59 @@ class Hybrid:
         return {**b, "latency": latency, "cost": cost, "path": "hybrid-" + b["path"]}
 
 
+class NoAsk:
+    """Exploratory (dev only): the mix with no ask before a split, the division shown live and sent with Return.
+    1. Jev and the structure decide where; Haiku runs on every message, and its division is sent whenever it names two
+       places or more.
+    2. 1, and a part Haiku says waits for another place's answer is held (not sent). Haiku is asked again, with a
+       `waits_for` field, only on the messages it split.
+    3. 2, but a split is sent only when Jev's compound gates also say several places; otherwise B as shipped."""
+    def __init__(self, variant):
+        self.variant = variant
+        self.pipeline, self.haiku = Pipeline(), Model(C.HAIKU)
+
+    def gates(self, state, message, context):
+        """Jev's two compound gates on this message, from the same request the shipped route makes (cached)."""
+        from v2.run import adapter
+        router = self.pipeline.router
+        formats = router._load()[0]
+        event = {"id": "mp", "kind": "submit", "message": message,
+                 "context": {k: v for k, v in context.items() if k != "tags"}}
+        built, questions, _ = formats.build(router.format_name, adapter.to_case(state, event),
+                                            shuffle_seed=router.option_seed)
+        answers = router._ask(built, questions)[0]["answers"]
+        return [float((answers.get(k) or {}).get("noul", 0)) for k in ("gate_compound", "gate_compound2")]
+
+    def route(self, state, message, context):
+        b = self.pipeline.route(state, message, context)
+        if b["path"] in ("tags", "tags-divider", "chip"):
+            return {**b, "sure": b["sure"] or len(b["parts"]) >= 2, "path": "noask-" + b["path"]}
+        a = self.haiku.route(state, message, context)
+        latency = max(a.get("latency") or 0.0, b.get("latency") or 0.0)
+        cost = (a.get("cost") or 0.0) + (b.get("cost") or 0.0)
+        split = len({p["place"] for p in a["parts"]}) >= 2
+        if split and self.variant == 3:
+            g1, g2 = self.gates(state, message, context)
+            split = g1 >= 0.75 and g2 >= 0.5
+        if not split:
+            return {**b, "latency": latency, "cost": cost, "path": "noask-" + b["path"]}
+        parts, held = a["parts"], []
+        if self.variant >= 2:
+            w = model_route(C.HAIKU, state, message, context, tag="cand-haiku-waits", waits=True)
+            cost += w.get("cost") or 0.0
+            latency += w.get("latency") or 0.0
+            parts = [p for p in w["parts"] if not p.get("waits_for")]
+            held = [p for p in w["parts"] if p.get("waits_for")]
+            if not parts:
+                return {**b, "latency": latency, "cost": cost, "path": "noask-" + b["path"]}
+        return {"parts": parts, "held": held, "sure": True, "options": _options(parts, []), "latency": latency,
+                "cost": cost, "calls": {"model": 2 if self.variant >= 2 else 1}, "path": "noask-split",
+                "error": a.get("error")}
+
+
 def make(name):
+    if name.startswith("noask"):
+        return NoAsk(int(name[-1]))
     if name in ("hybrid", "hybrid-lazy"):
         return Hybrid(lazy=name == "hybrid-lazy")
     if name == "haiku":
