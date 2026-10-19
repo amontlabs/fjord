@@ -294,7 +294,28 @@ class Model:
         return {**r, "path": "model"}
 
 
+class Hybrid:
+    """Exploratory (dev only, after the sealed read): B's structure and Jev for where one message goes, Haiku alone for
+    whether it goes to several places and how it divides. `lazy`: ask Haiku only when Jev isn't sure of one place (it
+    asks, or its compound gates fire), so a sure single send keeps Jev's latency."""
+    def __init__(self, lazy=False):
+        self.pipeline, self.haiku, self.lazy = Pipeline(), Model(C.HAIKU), lazy
+
+    def route(self, state, message, context):
+        b = self.pipeline.route(state, message, context)
+        if b["path"] in ("tags", "tags-divider", "chip") or (self.lazy and b["path"] == "jev" and b["sure"]):
+            return {**b, "path": "hybrid-" + b["path"]}
+        a = self.haiku.route(state, message, context)
+        latency = max(a.get("latency") or 0.0, b.get("latency") or 0.0)  # both asked at once
+        cost = (a.get("cost") or 0.0) + (b.get("cost") or 0.0)
+        if len({p["place"] for p in a["parts"]}) >= 2:
+            return {**a, "latency": latency, "cost": cost, "path": "hybrid-split"}
+        return {**b, "latency": latency, "cost": cost, "path": "hybrid-" + b["path"]}
+
+
 def make(name):
+    if name in ("hybrid", "hybrid-lazy"):
+        return Hybrid(lazy=name == "hybrid-lazy")
     if name == "haiku":
         return Model(C.HAIKU)
     if name == "sonnet":

@@ -62,7 +62,7 @@ def single(name, limit=None, workers=4):
     episodes._SKIPPED_CARDS = _PerThread()
     eps = episodes.load_episodes(C.ROUTER / "v2" / "data" / "episodes" / "dev" / "episodes.jsonl")[:limit]
     cand = candidates.make(name)
-    if name == "pipeline":
+    if name in ("pipeline", "hybrid", "hybrid-lazy"):
         workers = 1  # the shipped policy keeps module state per call (fusion._CASES): one at a time
 
     def play(ep):
@@ -82,8 +82,8 @@ def multi(name, split, workers=4, allow_test=False):
     if split == "test" and not allow_test:
         raise SystemExit("the test split is read only through v2.multi.seal")
     cases = [c for c in C.jsonl(C.DATA / "cases.jsonl") if c["split"] == split]
-    if name == "pipeline":
-        cand, workers = candidates.Pipeline(), 1
+    if name in ("pipeline", "hybrid", "hybrid-lazy"):
+        cand, workers = candidates.make(name), 1
     else:
         cand = candidates.make(name)
 
@@ -98,7 +98,7 @@ def multi(name, split, workers=4, allow_test=False):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("slice", choices=["single", "multi"])
-    ap.add_argument("candidate", choices=["haiku", "pipeline", "sonnet"])
+    ap.add_argument("candidate", choices=["haiku", "pipeline", "sonnet", "hybrid", "hybrid-lazy"])
     ap.add_argument("--split", default="dev", choices=["dev"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--workers", type=int, default=4)
