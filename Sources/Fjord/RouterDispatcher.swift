@@ -42,6 +42,13 @@ struct RouterContext: Equatable {
     /// Sent from the Router page's composer: its run shows as a pill over the composer, flying to where it went
     /// (`RouterFlights`), and an ask about it unfolds there rather than in Needs you.
     var flies = false
+    /// The parts shown under the composer for these very words (`RouterLiveTarget`): a send goes with them as shown, asking
+    /// nothing again. Nil: no division was shown, or it was for other words.
+    var division: RouterDivision?
+    /// Sessions picked with ⌘ in the Brief (`session:<id>`): each gets the whole message.
+    var recipients: [String] = []
+    /// The run is one part of a divided message: it goes where it was given and is never divided again.
+    var part = false
 
     init(replyTo: String? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil,
          predicted: String? = nil, jev: RouterDispatcher.Classification? = nil, shown: String? = nil, pills: [Range<Int>] = []) {
@@ -54,6 +61,12 @@ struct RouterContext: Equatable {
         self.shown = shown
         self.pills = pills
     }
+}
+
+/// The parts a message was divided into, for the words they were read for.
+struct RouterDivision: Equatable {
+    var text: String
+    var parts: [RouterDivider.Part]
 }
 
 // MARK: - The ask-back card
@@ -108,6 +121,17 @@ struct RouterAskBack: Identifiable, Equatable {
         var card: [String]? = nil
         /// What it was decided on, for the routing trace (`RouterTrace`).
         var trace: RouterTrace.Inputs? = nil
+        /// Jev's answers to the gates (`RouterTools.gates`), by question.
+        var gates: [String: Double] = [:]
+        /// The same ranking as if the compound gates hadn't fired (`Ungated`).
+        var ungated: Ungated? = nil
+    }
+
+    /// A ranking decided with the two compound gates at zero: where a message goes when it isn't divided.
+    struct Ungated: Equatable {
+        var ranked: [Scored]
+        var sure: Bool
+        var card: [String]?
     }
 
     /// What Jev (or the words alone) made of a message.
@@ -124,8 +148,18 @@ struct RouterAskBack: Identifiable, Equatable {
         var card: [String]? = nil
         /// What it was decided on, for the routing trace (`RouterTrace`).
         var trace: RouterTrace.Inputs? = nil
+        /// Jev's answers to the gates (`Ranking.gates`), and the ranking without the compound gates (`Ranking.ungated`).
+        var gates: [String: Double] = [:]
+        var ungated: Ungated? = nil
 
         var top: Scored? { ranked.first }
+
+        /// Both compound gates are up (both answered, neither under its bar): the message may be for several places. The
+        /// verdict reads an unanswered second gate as up (`RouterTools.verdict`); a division waits for both.
+        var dividesNow: Bool {
+            guard let g = gates["gate_compound"], let g2 = gates["gate_compound2"] else { return false }
+            return g >= RouterTools.gateSure && g2 >= RouterTools.compound2Sure
+        }
 
         init(ranked: [Scored], sure: Bool, assisted: Bool) {
             self.ranked = ranked
@@ -139,11 +173,15 @@ struct RouterAskBack: Identifiable, Equatable {
                 self.init(ranked: ranking.scored, sure: sure, assisted: true)
                 card = ranking.card
                 trace = ranking.trace
+                gates = ranking.gates
+                ungated = ranking.ungated
                 return
             }
             let route = Dictionary(ranking.scored.map { ($0.target, $0.p) }, uniquingKeysWith: +)
             let verdict = RouterTools.verdict(route: route, answers: [], gates: [:]) { $0.hasPrefix("session:") ? String($0.dropFirst(8)) : nil }
             self.init(ranked: verdict.ranked, sure: verdict.sure, assisted: true)
+            gates = ranking.gates
+            ungated = ranking.ungated
         }
     }
 
@@ -225,7 +263,20 @@ struct RouterAskBack: Identifiable, Equatable {
         var answerPlan: @MainActor (RouterTools, _ card: String, PendingForm.PlanDecision, FormSnapshot) async throws -> String = { _, _, _, _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
+        /// A message divided among the places it is for (`RouterDivider`): one Haiku call.
+        var divide: @MainActor (RouterTools, RouterDivider.Request) async throws -> RouterDivider.Answer = { _, _ in
+            throw RouterTools.Failure("The Router isn't ready")
+        }
+        /// Whether `sentence` of `message` is meant for the place `tagged` (the words of its tag), as Jev reads it: the yes.
+        var same: @MainActor (RouterTools, _ message: String, _ sentence: String, _ tagged: String) async throws -> Double = { _, _, _, _ in
+            throw RouterTools.Failure("The Router isn't ready")
+        }
     }
+
+    /// The question asked of a sentence that follows a tag (`Effects.same`), as the Router benchmark asks it
+    /// (evals/router/v2/multi/candidates.py `SAME_PLACE`).
+    static let samePlace = "Is `sentence` meant for the same place as `tagged` (the place the user tagged it for), rather than for a "
+        + "different session or for Fjord itself? Read `message` for context."
 
     /// Asks waiting for a pick, oldest first.
     private(set) var askBacks: [RouterAskBack] = []
@@ -253,10 +304,10 @@ struct RouterAskBack: Identifiable, Equatable {
     /// Starts whose session the Claude app has but doesn't run yet, by their entry: what their first message waits for. Not
     /// a run under way (you may send meanwhile); Stop ends them too.
     private(set) var held: [UUID: String] = [:]
-    @ObservationIgnored private var heldTasks: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var heldTools: [UUID: RouterTools] = [:]
+    @ObservationIgnored var heldTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var heldTools: [UUID: RouterTools] = [:]
     /// Held starts you chose not to send (`dropHeld`): their line says so.
-    @ObservationIgnored private var dropped: Set<UUID> = []
+    @ObservationIgnored var dropped: Set<UUID> = []
 
     @ObservationIgnored private weak var store: Store?
     @ObservationIgnored var effects: Effects
@@ -295,11 +346,17 @@ struct RouterAskBack: Identifiable, Equatable {
         store.routerRunReverted = { [weak self] id in self?.reverted(id) }
     }
 
-    private struct Job {
+    struct Job {
         var id: UUID
         var text: String
         var context: RouterContext
         var tools: RouterTools
+    }
+
+    /// A run that divided into parts: the composer's pill for it is replaced by one for each part, in its place.
+    func replaceFlying(_ id: UUID, with ids: [UUID]) {
+        guard let i = flying.firstIndex(of: id) else { return }
+        flying.replaceSubrange(i...i, with: ids)
     }
 
     /// A composer pill is done with (landed, failed or dismissed): its run is no longer one of `flying`.
@@ -508,7 +565,7 @@ struct RouterAskBack: Identifiable, Equatable {
     // MARK: Runs
 
     /// `action`: an action's message, whose every send is refused once Triage or the Router is off (`linked`).
-    private func makeTools(_ id: UUID, _ text: String, pills: [Range<Int>], mentions: [RouterMention] = [],
+    func makeTools(_ id: UUID, _ text: String, pills: [Range<Int>], mentions: [RouterMention] = [],
                            action: Bool = false) -> RouterTools {
         let tools = RouterTools(store: store!)
         tools.claudePath = { [weak self] in self?.claudePath() }
@@ -569,7 +626,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    private func launch(_ job: Job, stage first: String, _ body: @escaping (Job) async throws -> Void) {
+    func launch(_ job: Job, stage first: String, _ body: @escaping (Job) async throws -> Void) {
         if job.context.action != nil { actionRuns.insert(job.id) }
         progress[job.id] = first
         runTools[job.id] = job.tools
@@ -585,7 +642,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    private func end(_ job: Job) {
+    func end(_ job: Job) {
         job.tools.endTurn()
         actionRuns.remove(job.id)
         progress[job.id] = nil
@@ -609,16 +666,16 @@ struct RouterAskBack: Identifiable, Equatable {
         store?.updateDecision(job.id) { $0.add(.failed(RouterDecision.clip(first, 120))) }
     }
 
-    private func stage(_ job: Job, _ text: String) { progress[job.id] = text }
+    func stage(_ job: Job, _ text: String) { progress[job.id] = text }
 
-    private func note(_ job: Job, _ item: RouterDecision.Done, session: String? = nil, card: String? = nil) {
+    func note(_ job: Job, _ item: RouterDecision.Done, session: String? = nil, card: String? = nil) {
         store?.updateDecision(job.id) { $0.add(item, session: session, card: card) }
     }
 
     // MARK: Workflow B
 
     /// 1. The rules; 2. Jev; 3. a Haiku run.
-    private func execute(_ job: Job) async throws {
+    func execute(_ job: Job) async throws {
         guard let store else { return }
         switch Self.plan(text: job.text, context: job.context, store: store) {
         case .reply(let session, let card):
@@ -646,7 +703,7 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var traceLog = RouterTraceLog.shared
 
     /// A routing decided: what it was decided on and what it does, as a trace line.
-    private func trace(_ job: Job, path: String, action: String, target: String?, inputs: RouterTrace.Inputs? = nil,
+    func trace(_ job: Job, path: String, action: String, target: String?, inputs: RouterTrace.Inputs? = nil,
                        checks: RouterTrace.Checks? = nil, kind: RouterTrace.Kind = .decided) {
         let text = job.text
         let pills = job.context.pills.compactMap { range -> String? in
@@ -665,12 +722,12 @@ struct RouterAskBack: Identifiable, Equatable {
     }
 
     /// Where it goes is yours (the card you replied to, the project you tagged to start in).
-    private func chosen(_ job: Job) {
+    func chosen(_ job: Job) {
         store?.updateDecision(job.id) { $0.decision.confirmed = true }
     }
 
     /// A target you fixed yourself: an example for the next ones.
-    private func confirm(_ job: Job, _ target: String) {
+    func confirm(_ job: Job, _ target: String) {
         guard let store else { return }
         store.updateDecision(job.id) {
             $0.decision.target = describe(target, store: store)
@@ -1104,7 +1161,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// the app runs it, in a turn of its own and not as a run under way (the composer is free meanwhile, and Stop leaves
     /// it be: its line's "Don't send" drops it). Waiting too long, the Router switched off or reset, says the message wasn't
     /// sent; the session stays.
-    private func hold(_ job: Job, _ waiting: SessionStart.Held) {
+    func hold(_ job: Job, _ waiting: SessionStart.Held) {
         guard let store else { return }
         let id = job.id
         let session = waiting.waiting.sessionID
@@ -1210,7 +1267,7 @@ struct RouterAskBack: Identifiable, Equatable {
     }
 
     /// Acts on a target: a card or session gets the message, a project a new session, an intent a run.
-    private func route(_ job: Job, to target: String) async throws {
+    func route(_ job: Job, to target: String) async throws {
         guard let store else { return }
         // What the checks name (archive, stop, stop and send, open a session), picked on an ask.
         let act = RouterAct(target: target)
@@ -1594,7 +1651,7 @@ struct RouterAskBack: Identifiable, Equatable {
     }
 
     /// Jev's pick among the targets and the intents; the words alone when he can't be asked.
-    private func classify(_ job: Job, projects: [String]) async -> Classification {
+    func classify(_ job: Job, projects: [String]) async -> Classification {
         guard let store else { return Classification(ranked: [], sure: false, assisted: false) }
         let key = Self.liveKey(job.text, projects)
         // What was read while you typed is yours: an action's message is asked of Jev on its own.
@@ -1620,7 +1677,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// `suggestion`: what a pick corrects, when it isn't Jev's top (a wrong send asked again); `path` for the trace likewise.
     /// `note`: why it asks, when it isn't Jev's doubt; `chooseFolder`: "Choose folder…" is offered last.
-    private func askBack(_ job: Job, _ ranked: Classification, suggestion: String? = nil, path: String? = nil, note: String? = nil,
+    func askBack(_ job: Job, _ ranked: Classification, suggestion: String? = nil, path: String? = nil, note: String? = nil,
                          chooseFolder: Bool = false, whole: Bool = false, acts: [RouterAct]? = nil, checks: RouterTrace.Checks? = nil,
                          turns: [String: String] = [:]) {
         guard let store else { return }
@@ -1835,7 +1892,18 @@ extension RouterDispatcher.Effects {
                     RouterDispatcher.session(of: $0, store: store)
                 }
                 trace.request = (try? JevClient.requestData(call.questions, about: state)).flatMap { String(data: $0, encoding: .utf8) }
-                return RouterDispatcher.Ranking(scored: verdict.ranked, sure: verdict.sure, card: card, trace: trace)
+                // The same signals with the compound gates down: where the message goes when it isn't divided.
+                var ungated = signals
+                ungated.gates["gate_compound"] = 0
+                ungated.gates["gate_compound2"] = 0
+                let single = RouteFusion.decide(ungated, facts: facts, answers: checks) {
+                    RouterDispatcher.session(of: $0, store: store)
+                }
+                var ranking = RouterDispatcher.Ranking(scored: verdict.ranked, sure: verdict.sure, card: card, trace: trace)
+                ranking.gates = signals.gates
+                ranking.ungated = .init(ranked: single.ranked, sure: single.sure,
+                                        card: RouterTools.askCard(ranked: single.ranked.map(\.target), recent: RouterTools.recent(facts)))
+                return ranking
             },
             prepare: { [weak dispatcher] tools, session in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
@@ -1951,7 +2019,25 @@ extension RouterDispatcher.Effects {
                 case .success: return decision.approve ? "Approved “\(c.title)”" : "Sent “\(c.title)” back"
                 case .failure(let error): throw error
                 }
-            })
+            },
+            divide: { [weak dispatcher] tools, request in
+                guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
+                let store = try store(dispatcher)
+                guard let binary = dispatcher.claudePath(), let home = store.routerFiles?.routerHome else {
+                    throw RouterTools.Failure("Claude Code wasn't found")
+                }
+                return try await RouterDivider.run(request, tools: tools, binary: binary, home: home)
+            },
+            same: { [weak dispatcher] tools, message, sentence, tagged in
+                guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
+                guard let ask = dispatcher.jevForEffects(tools) else { throw RouterTools.Failure("no TypeSafe key is set") }
+                let answers = try await ask(["same": .structuredNoul(instructions: ["question": RouterDispatcher.samePlace])],
+                                            ["message": RouterTools.redacted(message), "sentence": RouterTools.redacted(sentence),
+                                             "tagged": RouterTools.redacted(tagged)])
+                guard let yes = answers["same"]?.yes else { throw RouterTools.Failure("Jev didn't answer") }
+                return yes
+            }
+        )
     }
 }
 

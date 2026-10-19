@@ -60,6 +60,14 @@ import Testing
         /// A stop held until the test lets it go (to stop the run while it is being done).
         var holdStop = false
         var stopHeld: CheckedContinuation<Void, Never>?
+        /// The division the divider answers (nil: it fails with `divideError`, or "no answer" when that is nil), and the
+        /// requests it was asked.
+        var division: RouterDivider.Answer?
+        var divideError: Error?
+        var divideRequests: [RouterDivider.Request] = []
+        /// The same-place yes by sentence (a sentence not listed: 0.9), and the (sentence, tagged) pairs asked.
+        var same: [String: Double] = [:]
+        var sameAsked: [(sentence: String, tagged: String)] = []
 
         /// Held by the dispatcher it is installed in (a run still going when its test ends finds it there).
         func install(_ d: RouterDispatcher) {
@@ -135,6 +143,16 @@ import Testing
                     guard snapshot.holds(store!) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
                     planned.append((card, decision))
                     return "decided"
+                },
+                divide: { [self] _, request in
+                    divideRequests.append(request)
+                    if let divideError { throw divideError }
+                    guard let division else { throw RouterTools.Failure("The division had no answer") }
+                    return division
+                },
+                same: { [self] _, _, sentence, tagged in
+                    sameAsked.append((sentence, tagged))
+                    return same[sentence] ?? 0.9
                 })
         }
 
