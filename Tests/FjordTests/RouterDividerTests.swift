@@ -247,6 +247,11 @@ import Testing
         {"parts": [{"place": "fjord-change", "text": "mute it"}, {"place": "fjord-question", "text": "what is waiting?"}], "sure": true, "alternatives": []}
         """)
         #expect(a.parts == [.init(target: "change_fjord", text: "mute it\nwhat is waiting?", waitsFor: nil)])
+        // Whichever comes first, the part has the tools of a change when any piece of it is one.
+        let b = try read("""
+        {"parts": [{"place": "fjord-question", "text": "what is waiting?"}, {"place": "fjord-change", "text": "mute it"}], "sure": true, "alternatives": []}
+        """)
+        #expect(b.parts == [.init(target: "change_fjord", text: "what is waiting?\nmute it", waitsFor: nil)])
     }
 
     @Test func aWaitOnItsOwnPlaceOrOnAPlaceThatIsNotThereIsDropped() throws {

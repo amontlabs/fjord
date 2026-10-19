@@ -112,7 +112,11 @@ extension RouterDispatcher {
 
         var pieces: [Piece] = []
         func piece(_ target: String, fixed: Bool) -> Int {
-            if let i = pieces.firstIndex(where: { place($0.part.target) == place(target) }) { return i }
+            if let i = pieces.firstIndex(where: { place($0.part.target) == place(target) }) {
+                // Fjord's two intents are one place; a part with a change in it runs with the tools of a change.
+                if target == RouteLabel.changeFjord.rawValue { pieces[i].part.target = target }
+                return i
+            }
             var part = SplitPart(target: target, text: "")
             part.fixed = fixed
             if let card = job.context.replyTo, target == "answer:\(card)" { part.replyTo = card }

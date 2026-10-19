@@ -202,6 +202,26 @@ import Testing
         #expect(fjord.decision.confirmed == nil && fjord.decision.targetID == "change_fjord")
     }
 
+    @Test func twoSentencesForFjordMergeIntoAPartThatRunsWithTheToolsAChangeNeeds() async throws {
+        let w = World()
+        w.f.same = ["Which sessions are waiting?": 0.2, "Mute notifications for an hour.": 0.2]
+        let rank = w.dispatcher.effects.rank
+        // Jev places the question first and the change second, each sure.
+        w.dispatcher.effects.rank = { tools, message, projects in
+            var ranking = try await rank(tools, message, projects)
+            ranking.scored = [.init(target: message.hasPrefix("Which") ? "question" : "change_fjord", p: 0.97), .init(target: "unclear", p: 0.03)]
+            return ranking
+        }
+        let (text, context) = w.message([c, .text(" rerun the build. Which sessions are waiting? Mute notifications for an hour.")])
+        let id = try #require(w.dispatcher.submit(text, context: context))
+        await w.finishAll(id)
+        let entry = try #require(w.entry(id))
+        #expect(entry.parts.count == 2 && entry.parts.last?.text == "Which sessions are waiting? Mute notifications for an hour.")
+        // One run for the part, with the tools of a change: the question alone couldn't do the second sentence.
+        #expect(w.f.runs.count == 1 && w.f.runs[0].intent == .changeFjord)
+        #expect(entry.parts.last.flatMap { w.record($0.id) }?.decision.targetID == "change_fjord")
+    }
+
     @Test func aLoneTagWithASecondSentenceForItsPlaceIsOnePartAndAsksNothingElse() async throws {
         let w = World()
         w.f.same = ["Then add a test.": 0.9]

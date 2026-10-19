@@ -250,6 +250,8 @@ enum RouterDivider {
             if let w = waits, place(w) == place(to) { waits = nil }
             if let i = parts.firstIndex(where: { place($0.target) == place(to) }) {
                 parts[i].text += "\n" + text
+                // Fjord's two places are one; a part with a change in it runs with the tools of a change.
+                if to == RouteLabel.changeFjord.rawValue { parts[i].target = to }
                 // A piece that waits holds the whole part: sent at once, the rest of it would go ahead of what it needs.
                 if parts[i].waitsFor == nil { parts[i].waitsFor = waits }
             } else {
