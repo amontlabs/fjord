@@ -126,3 +126,36 @@ Haiku alone asked in parallel; its division is used only when it names two place
 order: the gold, A's and B's. Tick the ones you'd accept as sent, then run `python3 -m v2.multi.blind read` to see
 how often you agreed with the gold and with each design. The key is in `blind/key.json`; don't open it before you're
 done.
+
+## Exploratory: the mix with no ask before a split (dev only)
+
+The user's direction after the report: speed doesn't matter, and a split is shown live under the composer, so Return
+sends it with no ask. Every division is scored as sent. These variants were decided after the sealed read, and were
+run on the single-place episodes and the multi dev split only (`candidates.NoAsk`, `noask.py`):
+
+1. Jev and the structure decide where; Haiku runs on every message and its division is sent whenever it names two
+   places or more.
+2. As 1, plus a hold: Haiku is asked again on the messages it split, with a `waits_for` field per part (its own
+   judgment, no word rule), and a part that waits for another place's answer is held, not sent.
+3. As 2, but a split is sent only when Jev's compound gates also fire (gate_compound ≥ 0.75, gate_compound2 ≥ 0.5);
+   otherwise B as shipped.
+
+| vs B as shipped | 1 | 2 | 3 |
+|---|---|---|---|
+| everyday messages, extra wrong sends per 100 (B: 2.6) | +1.3 [+0.2, +2.5] | +1.5 [+0.6, +2.6] | **+0.2 [0.0, +0.5]** |
+| same, real moments (B: 1.5) | +2.3 [+1.0, +3.8] | +2.3 [+1.0, +3.8] | **+0.3 [0.0, +0.8]** |
+| everyday click-loss per submit | +0.55 [0.0, +1.24] | +0.68 [+0.23, +1.30] | +0.03 [−0.02, +0.11] |
+| look-multi written (52, 20 groups), wrong sends per 100 (B: 9.6 [3.4, 17.5]) | 25.0 [17.3, 33.3] | **0** | **0** |
+| look-multi, your real messages in dev (9), wrong sends per 100 (B: 0) | 11.1 (1 of 9) | 11.1 (1 of 9) | 0 |
+| several places (80, 22 groups), fully right (B: 62.5% [54.4, 70.1]) | **87.5%** [81.0, 93.3] | 85.0% [79.5, 90.5] | 73.8% [64.6, 81.8] |
+
+Only 9 of your 59 real look-multi messages are in dev. The other 50 are in the sealed split, which these variants
+did not read. The hold removes every look-multi wrong send in written dev: those came from dependencies. It does
+nothing for everyday messages, where Haiku's extra splits aren't dependencies.
+
+**Pick: 3.** It costs at most half a wrong send per 100 everyday messages, against 1.5–2.3 for 1 and 2. In exchange
+it gets 11 more of every 100 multi-place messages fully right (CI +4 to +19). Variant 2 gets another 11 per 100
+multi-place messages right, at 1.3–2 more wrong sends per 100 everyday messages. That pays only if more than about
+one message in eight is meant for several places, and your transcripts and router trace show nothing close to that.
+Variant 3's limit is Jev's gates: it still misses the multi-place messages they don't flag, mostly pronouns and shared
+context. Improving the gates is the lever if those turn out to be common.
