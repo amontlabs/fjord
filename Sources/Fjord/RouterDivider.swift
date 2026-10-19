@@ -236,8 +236,8 @@ enum RouterDivider {
     }
 
     /// The parts of a structured answer, validated: a part whose place isn't one it could name, or with no words, is
-    /// dropped; two parts for one place are one, in message order (Fjord's two places are one); a `waits_for` is kept
-    /// only for another place that is there. Throws when nothing is left.
+    /// dropped; two parts for one place are one, in message order (Fjord's two places are one), waiting when any of its
+    /// pieces does; a `waits_for` is kept only for another place that is there. Throws when nothing is left.
     static func read(_ structured: [String: Any], _ r: Request) throws -> Answer {
         let keys = keys(r.mode, r.places)
         let target = Dictionary(r.places.filter { keys.contains($0.key) }.map { ($0.key, $0.target) }, uniquingKeysWith: { a, _ in a })
@@ -250,6 +250,8 @@ enum RouterDivider {
             if let w = waits, place(w) == place(to) { waits = nil }
             if let i = parts.firstIndex(where: { place($0.target) == place(to) }) {
                 parts[i].text += "\n" + text
+                // A piece that waits holds the whole part: sent at once, the rest of it would go ahead of what it needs.
+                if parts[i].waitsFor == nil { parts[i].waitsFor = waits }
             } else {
                 parts.append(Part(target: to, text: text, waitsFor: waits))
             }

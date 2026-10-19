@@ -232,6 +232,16 @@ import Testing
         #expect(a.parts.map(\.text) == ["one\nthree", "two"] && a.parts.map(\.target) == ["session:ci", "session:docs"])
     }
 
+    @Test func aPartWhoseLaterPieceWaitsWaitsAsAWhole() throws {
+        let a = try read("""
+        {"parts": [{"place": "S1", "text": "ask which version", "waits_for": "none"}, {"place": "S2", "text": "edit the header", "waits_for": "none"},
+                   {"place": "S2", "text": "use that version", "waits_for": "S1"}, {"place": "S1", "text": "and note it", "waits_for": "S2"}],
+         "sure": true, "alternatives": []}
+        """)
+        #expect(a.parts == [.init(target: "session:ci", text: "ask which version\nand note it", waitsFor: "session:docs"),
+                            .init(target: "session:docs", text: "edit the header\nuse that version", waitsFor: "session:ci")])
+    }
+
     @Test func fjordsTwoPlacesAreOnePlace() throws {
         let a = try read("""
         {"parts": [{"place": "fjord-change", "text": "mute it"}, {"place": "fjord-question", "text": "what is waiting?"}], "sure": true, "alternatives": []}
