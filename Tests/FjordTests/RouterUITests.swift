@@ -38,8 +38,7 @@ import UserNotifications
     @Test func arrowsWalkTheCardsAndSpaceArchivesNothing() throws {
         let store = demo()
         let model = RouterModel()
-        var closed = false
-        let keys = RouterKeys(store: store, model: model) { closed = true }
+        let keys = RouterKeys(store: store, model: model)
         let open = model.cards(store).filter(\.isOpen).map(\.id)
         try #require(open.count == 3)
         #expect(keys.key(key(kVK_DownArrow), responder: nil))
@@ -68,14 +67,15 @@ import UserNotifications
         #expect(model.selection == nil && model.replyTo == open[0])
         model.draft = ""
         // The pick is replied to: Esc takes that off, then closes.
-        #expect(keys.key(key(kVK_Escape), responder: nil) && model.replyTo == nil && !closed)
-        #expect(keys.key(key(kVK_Escape), responder: nil) && closed)
+        #expect(keys.key(key(kVK_Escape), responder: nil) && model.replyTo == nil)
+        // Nothing left to step out of: the key goes on to what has the keyboard.
+        #expect(!keys.key(key(kVK_Escape), responder: nil))
     }
 
     @Test func theArrowsWalkTheCardsInTheOrderThePageShowsThem() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         reopenTransfer(store)
         // Two addressed cards in the history, the one addressed now below the older one.
         store.setCardAddressed(store.openRouterCards.first { $0.kind == .stuck }!.id, true)
@@ -120,7 +120,7 @@ import UserNotifications
     @Test func aFinishedTurnNotShownWhileItsSessionRunsThingsIsNotWalkedPickedNorCounted() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let hidden = store.openRouterCards.first { $0.sessionID == "local_demo-ci" && $0.kind == .done }!
         #expect(!(store.claudeTasks["local_demo-ci"] ?? []).isEmpty)
         #expect(!store.routerPage.notes.contains { $0.id == hidden.id })
@@ -261,7 +261,7 @@ import UserNotifications
     @Test func returnInTheComposerSendsAndShiftReturnDoesNot() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let editor = NSTextView()
         model.composerFocused = true
         model.draft = "tell lookout to run the tests"
@@ -278,7 +278,7 @@ import UserNotifications
     @Test func typingWithNothingFocusedGoesToTheComposer() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let request = model.focusRequest
         #expect(keys.key(key(kVK_ANSI_H, "h"), responder: nil))
         #expect(model.focusRequest != request && model.pendingKeys.count == 1)
@@ -287,7 +287,7 @@ import UserNotifications
     @Test func spaceNeitherArchivesNorOpensAgain() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let ids = store.routerShownOpenCards.filter { $0.kind != .waiting }.prefix(2).map(\.id)
         #expect(ids.count == 2)
         store.setCardAddressed(ids[1], true)
@@ -322,7 +322,7 @@ import UserNotifications
         model.send(store: store)
         #expect(model.draft == "hello" && store.router.decisions.count == before)
         // Typing with nothing focused doesn't go to a composer that can't send.
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         #expect(!keys.key(key(kVK_ANSI_H, "h"), responder: nil))
     }
 
@@ -360,7 +360,7 @@ import UserNotifications
     @Test func returnOnAPickedCardRepliesToItAndTheReplyGoesWithTheMessage() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let card = model.cards(store).filter(\.isOpen)[1]
         model.select(card.id, store: store)
         #expect(keys.key(key(kVK_Return, "\r"), responder: nil))
@@ -378,24 +378,22 @@ import UserNotifications
     @Test func escClearsTheSuggestionsThenTheReplyThenCloses() {
         let store = demo()
         let model = RouterModel()
-        var closed = false
-        let keys = RouterKeys(store: store, model: model) { closed = true }
+        let keys = RouterKeys(store: store, model: model)
         model.composerFocused = true
         model.replyTo = store.openRouterCards[0].id
         let editor = editor(model, "tell @mi")
         #expect(!model.suggestions(store).isEmpty)
         #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(model.suggestions(store).isEmpty && model.replyTo != nil && !closed)
+        #expect(model.suggestions(store).isEmpty && model.replyTo != nil)
         #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(model.replyTo == nil && !closed)
+        #expect(model.replyTo == nil)
         #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(closed)
     }
 
     @Test func atSuggestsProjectsAndReturnOrTabPicksOne() throws {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         model.composerFocused = true
         _ = editor(model, "check @")
         let all = model.suggestions(store).map(\.name)
@@ -421,7 +419,7 @@ import UserNotifications
     @Test func theSuggestionsFollowTheCaretNotTheEndOfTheText() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         model.composerFocused = true
         // Mid-message: the @ word the caret is in is the one suggested, and picking it keeps the rest of the text.
         let view = editor(model, "ask @lc about the tests", caret: 7)
@@ -586,7 +584,7 @@ import UserNotifications
     @Test func returnRepliesOnlyToAListedCard() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         // Picked, then gone from the list (the file dropped it): Return replies to the listed card next to it.
         let listed = model.cards(store).map(\.id)
         model.selection = listed[1]
@@ -633,7 +631,7 @@ import UserNotifications
     @Test func backspaceAtTheStartTakesTheReplyOff() {
         let store = demo()
         let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model) {}
+        let keys = RouterKeys(store: store, model: model)
         let editor = NSTextView()
         model.composerFocused = true
         model.replyTo = store.openRouterCards[0].id
@@ -787,8 +785,7 @@ import UserNotifications
     @Test func escIsThePlansBackWhileItIsRevisedAndItsReviseOnceNothingElseIs() throws {
         let store = demo()
         let model = RouterModel()
-        var closed = 0
-        let keys = RouterKeys(store: store, model: model) { closed += 1 }
+        let keys = RouterKeys(store: store, model: model)
         let card = try #require(store.routerShownOpenCards.first { $0.kind == .plan })
         let form = try #require(store.pendingForm(for: card))
         let other = try #require(store.routerShownOpenCards.first { $0.kind != .plan && $0.kind != .waiting })
@@ -799,21 +796,21 @@ import UserNotifications
         model.replyTo = other.id
         let feedback = NSTextView()
         #expect(keys.key(key(kVK_Escape), responder: feedback))
-        #expect(model.revisingPlan == nil && model.replyTo == other.id && closed == 0)
+        #expect(model.revisingPlan == nil && model.replyTo == other.id)
         // Then the composer's context, then the plan's Revise…, before the window closes.
         #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.replyTo == nil && model.revisingPlan == nil && closed == 0)
+        #expect(model.replyTo == nil && model.revisingPlan == nil)
         #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.revisingPlan == form.id && closed == 0)
+        #expect(model.revisingPlan == form.id)
         #expect(keys.key(key(kVK_Escape), responder: feedback))
-        #expect(model.revisingPlan == nil && closed == 0)
+        #expect(model.revisingPlan == nil)
         // Another card shown in full: no plan to revise. Picking it armed a reply to it, which Esc takes off; then it closes.
         model.select(other.id, store: store)
         #expect(model.expandedPlan(store) == nil && model.replyTo == other.id)
         #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.replyTo == nil && closed == 0)
-        #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(closed == 1)
+        #expect(model.replyTo == nil)
+        // Nothing left to step out of: the key goes on to what has the keyboard.
+        #expect(!keys.key(key(kVK_Escape), responder: nil))
     }
 
     @Test func anApprovalIsWrittenToTheFormsFolder() async throws {
