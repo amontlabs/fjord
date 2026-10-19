@@ -18,7 +18,6 @@ A Swift package (Swift tools 5.10, macOS 14+). The app is built into a bundle, w
 ./scripts/build-app.sh && open "build/Fjord.app"
 ```
 
-Until `scripts/silod.release` has a `SILOD_SHA256`, `build-app.sh` needs `SILOD_ARCHIVE` pointing at a local engine tarball (Silo's `package-engine.py` builds one).
 
 The embedded Silo engine (`silo-engine-<version>-macos-arm64.tar.gz`) runs on Apple Silicon only, like Silo hosts; on an Intel Mac the app starts but the engine can't run.
 
