@@ -15,6 +15,13 @@ import Testing
         #expect(service.registerCalls == 0)
     }
 
+    @Test func anAgentMacOSHasNeverSeenIsOneToEnableWhenItsPlistIsInTheBundle() {
+        #expect(SystemEngineAgentService.status(.notFound, plistInBundle: true) == .notRegistered)
+        #expect(SystemEngineAgentService.status(.notFound, plistInBundle: false) == .notFound)
+        #expect(SystemEngineAgentService.status(.enabled, plistInBundle: true) == .enabled)
+        #expect(SystemEngineAgentService.status(.requiresApproval, plistInBundle: true) == .requiresApproval)
+    }
+
     @Test func explicitEnableRegistersThenConnectsTheSocketClient() async {
         let service = MockEngineAgentService(status: .notRegistered, statusAfterRegister: .enabled)
         let connector = MockEngineConnector([
