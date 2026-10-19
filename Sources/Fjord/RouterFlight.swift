@@ -335,7 +335,8 @@ struct FlightFramesKey: PreferenceKey {
             let id = String(target.dropFirst(7))
             return store.router.cards.first { $0.id == id }?.title
         }
-        if target.hasPrefix("session:") { return store.claudeSessions[String(target.dropFirst(8))]?.title }
+        // The session's row is observed on its own: not every session's change redraws what names one (a history of parts).
+        if target.hasPrefix("session:") { return store.sessionRow(String(target.dropFirst(8)))?.session.title }
         if target.hasPrefix("new:") { return "New session in \(store.folderName(String(target.dropFirst(4))))" }
         switch target {
         case "question": return "the Router"

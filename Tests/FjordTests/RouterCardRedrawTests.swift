@@ -21,6 +21,25 @@ import Testing
         #expect(!notified)
     }
 
+    @Test func aPlaceNamedByASessionRedrawsForThatSessionsTitleAloneNotForEverySession() {
+        let store = Store()
+        Demo.populate(store, .router)
+        let id = store.claudeSessions.keys.sorted()[0]
+        let other = store.claudeSessions.keys.first { $0 != id }!
+        let target = "session:\(id)"
+        #expect(RouterFlights.destination(target, store: store) == store.claudeSessions[id]?.title)
+        var notified = false
+        // What a completed part of a divided message in the history names its place by (`HistoryDecisionLine.place`).
+        withObservationTracking { _ = RouterFlights.destination(target, store: store) } onChange: { notified = true }
+        store.claudeActivity[other] = ClaudeActivity(text: "Reading a file", since: Date())
+        store.claudeSessions[other]?.title = "Another title"
+        store.claudeSessions[other] = store.claudeSessions[other]
+        #expect(!notified)
+        store.claudeSessions[id]?.title = "Renamed session"
+        #expect(notified && RouterFlights.destination(target, store: store) == "Renamed session")
+        #expect(RouterFlights.destination("session:no such session", store: store) == nil)
+    }
+
     @Test func aSessionsRowRedrawsForThatSessionAloneAndIsAsMadeAfresh() {
         let store = Store()
         Demo.populate(store, .router)
