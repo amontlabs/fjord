@@ -247,34 +247,4 @@ extension RouterDispatcherTests {
         guard case .stopped? = decision(s2, b)?.done.first else { Issue.record("the stop that went through is on the line"); return }
         #expect(d2.askBacks.isEmpty)
     }
-
-    // MARK: Split keeps the pills
-
-    @Test func splitCarriesThePillsAndTheComposerGetsThemBack() async {
-        let (s, d, f) = setup()
-        f.ranked = [.init(target: "compound", p: 0.9), .init(target: "unclear", p: 0.1)]
-        let text = "tell @ci to rerun and update the category"
-        var context = RouterContext()
-        let mention = RouterMention(range: 5..<8, pointer: .project("/code/ci"), name: "ci")
-        context.mentions = [mention]
-        let id = d.submit(text, context: context)
-        await finish(d, f, id)
-        await waitUntil { d.askBacks.contains { $0.id == id } }
-        d.split(id!)
-        #expect(d.splitRequest?.mentions == [mention] && d.splitRequest?.text == text)
-        // Into an empty composer: the pill is back, not a plain “@ci”.
-        let model = RouterModel()
-        model.restore(text, mentions: [mention])
-        #expect(model.draft == "tell \(MentionText.markString) to rerun and update the category" && model.pointers == [.project("/code/ci")])
-        // Behind a draft that has a pill of its own: its marks come first.
-        let other = RouterModel()
-        other.draft = "first \(MentionText.markString)"
-        other.pointers = [.session("local_a")]
-        other.restore(text, mentions: [mention])
-        #expect(other.pointers == [.session("local_a"), .project("/code/ci")] && other.draft.hasSuffix("\n\ntell \(MentionText.markString) to rerun and update the category"))
-        // A mention that doesn't stand where it says stays words.
-        let (draft, pointers) = MentionText.restoring("hello @ci", mentions: [RouterMention(range: 0..<3, pointer: .project("/x"), name: "ci")])
-        #expect(draft == "hello @ci" && pointers.isEmpty)
-        _ = s
-    }
 }

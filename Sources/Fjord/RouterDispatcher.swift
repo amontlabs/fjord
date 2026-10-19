@@ -77,10 +77,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// notification's repo is known.
     static let chooseFolder = "choose_folder"
 
-    /// "Split…" on a compound message's ask: the composer opens with the message to write its parts yourself.
-    static let split = "split"
-
-    /// A target you can pick: `answer:<card>`, `session:<id>`, `new:<folder>`, `change_fjord`, `question`, `chooseFolder` or `split`.
+    /// A target you can pick: `answer:<card>`, `session:<id>`, `new:<folder>`, `change_fjord`, `question` or `chooseFolder`.
     struct Option: Identifiable, Equatable, Hashable {
         var target: String
         var title: String
@@ -99,8 +96,6 @@ struct RouterAskBack: Identifiable, Equatable {
     var at: Date
     /// Why it asks, when it isn't Jev's doubt ("No clone of owner/repo").
     var note: String? = nil
-    /// A compound message whose Fjord part the Router's run did: the buttons send the whole message to a session, or split it.
-    var whole = false
 }
 
 // MARK: - Dispatcher
@@ -282,14 +277,6 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// Asks waiting for a pick, oldest first.
     private(set) var askBacks: [RouterAskBack] = []
-    /// Set by "Split…" on a compound message's ask: the page puts `text` in the composer and clears it.
-    var splitRequest: SplitRequest?
-    struct SplitRequest: Equatable {
-        var id: UUID
-        var text: String
-        /// The pills the message had, where they stood in `text` (its "@name"s): they come back as pills.
-        var mentions: [RouterMention] = []
-    }
     /// The runs of messages sent from the composer (`RouterContext.flies`), oldest first: the composer's pills.
     private(set) var flying: [UUID] = []
     /// How far each run under way is, by its entry in the log ("classifying", "sending"…).
@@ -466,10 +453,8 @@ struct RouterAskBack: Identifiable, Equatable {
     func pick(_ id: UUID, target: String) -> Bool {
         guard let store, store.routerOn, let ask = askBacks.first(where: { $0.id == id }) else { return false }
         guard live(ask, store: store) else { return false }
-        // The whole of a compound message goes to a session, never to the Router's own run that did its Fjord part.
-        if ask.whole, RouteLabel.isFjord(target) { return false }
-        // "Choose folder…" picks with the folder you chose (`pick(_:folder:)`); "Split…" is `split`.
-        guard target != RouterAskBack.chooseFolder, target != RouterAskBack.split else { return false }
+        // "Choose folder…" picks with the folder you chose (`pick(_:folder:)`); `compound` is a label, never somewhere to go.
+        guard target != RouterAskBack.chooseFolder, target != RouteLabel.compound.rawValue else { return false }
         // An action's message goes only to a session, and only while Triage and the Router are both on.
         if ask.context.action != nil, RouteLabel.isFjord(target) || !store.toolsLinked { return false }
         // Offered when it was asked: a card the page has hidden since (or one addressed, a session archived) isn't sent to.
@@ -1063,17 +1048,10 @@ struct RouterAskBack: Identifiable, Equatable {
             let away = { (target: String) in target != wrong && Self.session(of: target, store: store) != sent.session }
             found.ranked = found.ranked.filter { away($0.target) }
             found.card = found.card?.filter(away)
-            // A compound message's Fjord part already ran: it goes whole to a session (or is split), never to a run again.
-            let whole = entry.fjordPartDone == true
-            if whole {
-                found.ranked = found.ranked.filter { !RouteLabel.isFjord($0.target) }
-                found.card = found.card?.filter { !RouteLabel.isFjord($0) }
-            }
             // Nothing left for an action's message (the repo's one clone was where it went): a folder of your choosing.
             let none = unattended && found.ranked.isEmpty && (found.card ?? []).isEmpty
             try linked(job.context)
-            askBack(job, found, suggestion: wrong, path: "elsewhere", note: noClone ? world?.note : nil, chooseFolder: noClone || none,
-                    whole: whole)
+            askBack(job, found, suggestion: wrong, path: "elsewhere", note: noClone ? world?.note : nil, chooseFolder: noClone || none)
         }
     }
 
@@ -1271,30 +1249,6 @@ struct RouterAskBack: Identifiable, Equatable {
             $0.reply = reply.isEmpty ? nil : reply
             $0.note = done.isEmpty ? nil : done
         }
-        // The run did the Fjord part and its reply says the rest is for a session. The message itself is never rewritten
-        // or sent on its own: one card asks whether to send it whole to a session, or to split it yourself.
-        guard intent == .compound else { return }
-        var found = await classify(job, projects: job.context.projects)
-        try Task.checkCancellation()
-        found.sure = false
-        found.ranked = found.ranked.filter { !RouteLabel.isFjord($0.target) }
-        found.card = found.card?.filter { !RouteLabel.isFjord($0) }
-        // Kept on the entry: its send elsewhere asks the same question again, never rerunning the Fjord part.
-        store.updateDecision(job.id) { $0.fjordPartDone = true }
-        askBack(job, found, path: "compound", whole: true)
-    }
-
-    /// "Split…" on a compound message's ask: nothing is sent; the composer opens with the message as written, to split.
-    func split(_ id: UUID) {
-        guard let store, let i = askBacks.firstIndex(where: { $0.id == id }), askBacks[i].whole else { return }
-        let ask = askBacks.remove(at: i)
-        forgetLive()
-        store.updateDecision(id) {
-            $0.reply = [$0.reply, "Split: the message is back in the composer."].compactMap { $0 }.joined(separator: " ")
-            $0.outcome = .done
-        }
-        splitRequest = SplitRequest(id: id, text: ask.message, mentions: ask.context.mentions)
-        follow(id)
     }
 
     /// Acts on a target: a card or session gets the message, a project a new session, an intent a run.
@@ -1513,9 +1467,13 @@ struct RouterAskBack: Identifiable, Equatable {
             liveCache[Self.liveKey(job.text, narrowed)] = nil
         }
         Self.keep(&found, world: world, unattended: unattended, store: store)
-        // Both compound gates up: the divider is asked once, and the message may be for several places. A pick shown over the
-        // composer stays one pick.
-        if divisible, !carriedPick, found.dividesNow, try await byGates(job, &found, projects: narrowed) { return }
+        // Both compound gates up, or Jev's top pick is compound anyway (the benchmark's `Ship3`): the divider is asked once, and
+        // the message may be for several places. A pick shown over the composer stays one pick.
+        if divisible, !carriedPick, found.dividesNow || found.top?.target == RouteLabel.compound.rawValue,
+           try await byGates(job, &found, projects: narrowed) { return }
+        // A compound pick is never one to act on, whatever came of the divider (or where it isn't asked: an action's message, a
+        // part, words wholly for the Router): it goes from the ranking, and the rest is asked among.
+        if found.top?.target == RouteLabel.compound.rawValue { ungate(&found) }
         // Where your own words send it ("start a session in lookout …", "tell CI to …"), resolved here and not by Jev, is
         // where it goes: his pick of another doesn't send it elsewhere ("tell CI to update the docs" isn't for Docs). Not
         // where you waved it off, nor when it is gone.
@@ -1724,14 +1682,14 @@ struct RouterAskBack: Identifiable, Equatable {
     /// `suggestion`: what a pick corrects, when it isn't Jev's top (a wrong send asked again); `path` for the trace likewise.
     /// `note`: why it asks, when it isn't Jev's doubt; `chooseFolder`: "Choose folder…" is offered last.
     func askBack(_ job: Job, _ ranked: Classification, suggestion: String? = nil, path: String? = nil, note: String? = nil,
-                         chooseFolder: Bool = false, whole: Bool = false, acts: [RouterAct]? = nil, checks: RouterTrace.Checks? = nil,
+                         chooseFolder: Bool = false, acts: [RouterAct]? = nil, checks: RouterTrace.Checks? = nil,
                          turns: [String: String] = [:]) {
         guard let store else { return }
         let found = ranked
         var options: [RouterAskBack.Option] = []
         var seen = Set<String>()
         // Four: on real moments the fourth holds the answer 3–10% more often (evals/router/explore/selective.py).
-        let room = chooseFolder || whole ? 3 : 4
+        let room = chooseFolder ? 3 : 4
         if let acts {
             // The checks' ask: typed actions, each a verb on its target (`RouterActionChecks.decideAction` chose and ordered them).
             for act in acts where options.count < room && act.target != RouteLabel.compound.rawValue {
@@ -1741,19 +1699,16 @@ struct RouterAskBack: Identifiable, Equatable {
         } else {
             for target in (found.card ?? []) + found.ranked.map(\.target) where target != "unclear" && target != RouteLabel.compound.rawValue
                 && options.count < room {
-                guard var option = option(target, store: store, tools: job.tools), seen.insert(option.id).inserted else { continue }
-                if whole { option.title = "Send the whole message to " + option.title }
+                guard let option = option(target, store: store, tools: job.tools), seen.insert(option.id).inserted else { continue }
                 options.append(option)
             }
         }
         if chooseFolder, let choose = option(RouterAskBack.chooseFolder, store: store) { options.append(choose) }
-        if whole, let split = option(RouterAskBack.split, store: store) { options.append(split) }
         // The turns the checks judged go with the ask: a stop or an interrupt picked later names them.
         var context = job.context
         if !turns.isEmpty { context.turns = turns }
-        var ask = RouterAskBack(id: job.id, message: job.text, context: context, options: options,
+        let ask = RouterAskBack(id: job.id, message: job.text, context: context, options: options,
                                 suggestion: suggestion ?? (acts != nil ? options.first?.target : found.top?.target), at: Date(), note: note)
-        ask.whole = whole
         var inputs = found.trace
         inputs?.card = options.map(\.target)
         trace(job, path: path ?? (found.assisted ? "jev" : "words"), action: "ask", target: found.top?.target, inputs: inputs,
@@ -1789,8 +1744,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
         switch target {
         case RouterAskBack.chooseFolder: return .init(target: target, title: "Choose folder…", detail: "a new session there")
-        case RouterAskBack.split: return .init(target: target, title: "Split…", detail: "write each part yourself")
-        case "change_fjord", "compound": return .init(target: target, title: "Change Fjord", detail: "Categories, groups, settings")
+        case "change_fjord": return .init(target: target, title: "Change Fjord", detail: "Categories, groups, settings")
         case "question": return .init(target: target, title: "Answer from what Fjord knows", detail: "A question about now")
         default: return nil
         }
@@ -1829,7 +1783,7 @@ struct RouterAskBack: Identifiable, Equatable {
             return .init(target: act.target, title: title, detail: "\(c.kind.label) · \(store.routerSessionProject(c.sessionID).name)")
         case .start(let folder):
             return .init(target: act.target, title: "New session in " + store.folderName(folder), detail: "")
-        case .changeFjord, .compound: return .init(target: act.target, title: "Change Fjord", detail: "Categories, groups, settings")
+        case .changeFjord: return .init(target: act.target, title: "Change Fjord", detail: "Categories, groups, settings")
         case .askFjord: return .init(target: act.target, title: "Ask Fjord", detail: "A question about now")
         case .open(let id):
             guard let s = session(id) else { return nil }
@@ -1837,7 +1791,7 @@ struct RouterAskBack: Identifiable, Equatable {
         case .retry(let id):
             guard let s = session(id) else { return nil }
             return .init(target: act.target, title: "Send again to " + name(s.title), detail: "the same message: it can't arrive twice")
-        case .other: return nil
+        case .compound, .other: return nil
         }
     }
 

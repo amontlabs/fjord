@@ -162,18 +162,9 @@ struct RouterDecision: Identifiable, Equatable {
     /// The same message's session settings: what a session the Router starts for it is called and runs on. Nil for anything
     /// else, and in entries from before (the thing's line is the title then, on your defaults).
     var actionStart: ActionStart?
-    /// The decision whose compound message this one is a session part of (`RouterDispatcher.think`): it waited for your pick,
-    /// and is yours like any message you sent. Nil for anything else.
-    var splitFrom: UUID?
-    /// A compound message whose Fjord part the Router's run did (its ask offers the whole message to sessions): sent elsewhere
-    /// again, it is asked the same way and never run a second time.
-    var fjordPartDone: Bool?
-    /// No longer set: parts of a compound message wait for your pick and are then your decisions, linked by `splitFrom`.
-    /// Kept so entries from before still decode.
+    /// No longer set. Kept so entries from before still decode (entries from the compound run also carry keys the decoder
+    /// ignores).
     var generated: Bool?
-    /// What a part inherits from the message it was split from, to rank it within the same scope (and again when it is sent
-    /// elsewhere): the projects and pointers of the original.
-    var inherited: Inherited?
 
     /// One place a message went to: the words for it, and everything that happened there. A message that goes to one place has
     /// one part, which is the entry itself (same id); a divided one (docs/design/spec/router.md, Several places) has one per
@@ -225,11 +216,6 @@ struct RouterDecision: Identifiable, Equatable {
             if let session, !links.sessions.contains(session) { links.sessions.append(session) }
             if let card, !links.cards.contains(card) { links.cards.append(card) }
         }
-    }
-
-    struct Inherited: Codable, Equatable {
-        var projects: [String]
-        var mentions: [RouterMention]
     }
 
     struct ActionStart: Codable, Equatable {
@@ -528,7 +514,7 @@ struct RouterDecision: Identifiable, Equatable {
 extension RouterDecision: Codable {
     private enum Key: String, CodingKey {
         case id, at, trigger, decision, done, outcome, links, reply, note, delivered, mentions, fromAction, actionStart
-        case splitFrom, fjordPartDone, generated, inherited, parts
+        case generated, parts
     }
 
     /// A one-part entry is today's flat keys, so its file is as it was and an older build reads it; a divided one has `parts`
@@ -553,10 +539,7 @@ extension RouterDecision: Codable {
         try c.encodeIfPresent(mentions, forKey: .mentions)
         try c.encodeIfPresent(fromAction, forKey: .fromAction)
         try c.encodeIfPresent(actionStart, forKey: .actionStart)
-        try c.encodeIfPresent(splitFrom, forKey: .splitFrom)
-        try c.encodeIfPresent(fjordPartDone, forKey: .fjordPartDone)
         try c.encodeIfPresent(generated, forKey: .generated)
-        try c.encodeIfPresent(inherited, forKey: .inherited)
     }
 
     init(from decoder: Decoder) throws {
@@ -567,10 +550,7 @@ extension RouterDecision: Codable {
         mentions = try c.decodeIfPresent([RouterMention].self, forKey: .mentions)
         fromAction = try c.decodeIfPresent(SessionOrigin.self, forKey: .fromAction)
         actionStart = try c.decodeIfPresent(ActionStart.self, forKey: .actionStart)
-        splitFrom = try c.decodeIfPresent(UUID.self, forKey: .splitFrom)
-        fjordPartDone = try c.decodeIfPresent(Bool.self, forKey: .fjordPartDone)
         generated = try c.decodeIfPresent(Bool.self, forKey: .generated)
-        inherited = try c.decodeIfPresent(Inherited.self, forKey: .inherited)
         if let decoded = try c.decodeIfPresent([Part].self, forKey: .parts), !decoded.isEmpty {
             parts = decoded
             if parts.count == 1 { parts[0].id = id }

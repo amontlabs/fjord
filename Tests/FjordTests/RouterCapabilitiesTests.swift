@@ -28,7 +28,7 @@ struct RouterCapabilitiesTests {
         let tools = RouterCapability.toolNames(.changeFjord, triage: true)
         for gone in ["mark_seen", "archive_cards", "reopen_card", "mute_project", "stop_session"] { #expect(!tools.contains(gone), "\(gone)") }
         // The Brief (the role says it is read through `board`) is readable in a change run too, as in a question run.
-        #expect(tools.contains("board") && RouterCapability.toolNames(.compound, triage: true).contains("board"))
+        #expect(tools.contains("board"))
         let specs = Set(RouterTools.specs.compactMap { $0["name"] as? String })
         for gone in ["mark_seen", "archive_cards", "reopen_card", "mute_project", "stop_session"] { #expect(!specs.contains(gone), "\(gone)") }
         for intent in RouterRun.Intent.allCases {
@@ -45,8 +45,6 @@ struct RouterCapabilitiesTests {
                 #expect(capability.guidance.map(change.contains) ?? true)
             }
             #expect(change.contains("Triage's inbox categories") == triage)
-            let compound = RouterRun.role(.compound, triage: triage)
-            #expect(RouterCapability.available(.compound, triage: triage).allSatisfy { $0.scope.map(compound.contains) ?? true })
             let question = RouterRun.role(.question, triage: triage)
             #expect(question.contains("cards, working sessions, the Brief, settings") && question.contains("the inbox, categories") == triage)
         }
@@ -59,7 +57,6 @@ struct RouterCapabilitiesTests {
             let all = FjordTools.names.subtracting(triage ? [] : FjordTools.triageNames)
             let reads = readNames.union(["board"]).subtracting(triage ? [] : FjordTools.triageNames)
             #expect(RouterRun.toolNames(.changeFjord, triage: triage) == all.union(["board"]))
-            #expect(RouterRun.toolNames(.compound, triage: triage) == all.union(["board"]))
             #expect(RouterRun.toolNames(.question, triage: triage) == reads)
         }
     }

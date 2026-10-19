@@ -7,7 +7,7 @@ import Foundation
 
 struct RouterCapability: Equatable {
     var id: String
-    /// The run intent that uses it. A compound run takes `changeFjord`'s.
+    /// The run intent that uses it.
     var intent: RouterRun.Intent
     /// What it does, as the routing classifier is told (nil for a capability that only reads, which routing doesn't name).
     var outcome: String?
@@ -16,7 +16,7 @@ struct RouterCapability: Equatable {
     var roleSentence: String?
     /// Out of the run's tools, role and text when Triage is off.
     var needsTriage: Bool = false
-    /// What a change or compound run changes with it, as a noun phrase for "You change …".
+    /// What a change run changes with it, as a noun phrase for "You change …".
     var scope: String? = nil
     /// What a question run can read through it, as a noun phrase.
     var reads: String? = nil
@@ -64,10 +64,9 @@ extension RouterCapability {
               roleSentence: nil, needsTriage: true, reads: "the inbox, categories"),
     ]
 
-    /// The capabilities a run of `intent` has (a compound run has a change's), without Triage's when it is off.
+    /// The capabilities a run of `intent` has, without Triage's when it is off.
     static func available(_ intent: RouterRun.Intent, triage: Bool) -> [RouterCapability] {
-        let own: RouterRun.Intent = intent == .compound ? .changeFjord : intent
-        return all.filter { $0.intent == own && (triage || !$0.needsTriage) }
+        all.filter { $0.intent == intent && (triage || !$0.needsTriage) }
     }
 
     static func toolNames(_ intent: RouterRun.Intent, triage: Bool) -> Set<String> {
@@ -105,14 +104,6 @@ extension RouterCapability {
         let about = prose(available(.question, triage: triage).compactMap(\.reads))
         return "You answer a question about the current state (" + about + ") from the state given and your read tools. You change "
             + "nothing; you have no tool that does. `done` is \"answered\"."
-    }
-
-    /// The compound run's role paragraph.
-    static func compoundRole(triage: Bool) -> String {
-        let scopes = prose(available(.compound, triage: triage).compactMap(\.scope))
-        return "The message asks for more than one thing. Do only what concerns Fjord itself (" + scopes + "), as asked, with your "
-            + "tools. The rest is meant for a session: don't do it and don't rewrite it. Say in `reply`, in a line, that the message "
-            + "also asks something of a session; the user is then asked where to send the whole message, or to split it."
     }
 
     /// What the routing classifier is told Fjord does itself. It is not told whether Triage is on (the routing questions are

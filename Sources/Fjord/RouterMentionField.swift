@@ -12,21 +12,6 @@ enum MentionText {
 
     static func isBreak(_ c: Character) -> Bool { c.isWhitespace || c == mark }
 
-    /// A message sent as text ("@name" where a pill stood) back as a draft and its pills: each mention's "@name" becomes its mark
-    /// again, in order. Mentions that don't stand where they say (`RouterDispatcher.mentions`) stay plain words.
-    @MainActor static func restoring(_ text: String, mentions: [RouterMention]) -> (draft: String, pointers: [RouterPointer]) {
-        let chars = Array(text)
-        var draft = "", pointers: [RouterPointer] = [], at = 0
-        func words(_ slice: ArraySlice<Character>) -> String { String(slice).replacingOccurrences(of: markString, with: "") }
-        for m in RouterDispatcher.mentions(mentions, in: text) {
-            draft += words(chars[at..<m.range.lowerBound])
-            draft.append(mark)
-            pointers.append(m.pointer)
-            at = m.range.upperBound
-        }
-        return (draft + words(chars[at...]), pointers)
-    }
-
     /// The draft as the Router gets it: each pill as "@name".
     static func plain(_ draft: String, pointers: [RouterPointer], name: (RouterPointer) -> String) -> String {
         var next = pointers.makeIterator()

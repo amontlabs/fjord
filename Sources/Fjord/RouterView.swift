@@ -470,26 +470,6 @@ final class RouterModel {
         var sentAt: Date? = nil
     }
 
-    /// "Split…": the compound message back in the composer. No armed reply, edit or pinned/predicted target goes with it (a send
-    /// would fork or go to that one with these words). A draft you had not sent stays: the message follows it, below.
-    func restore(_ text: String, mentions: [RouterMention] = []) {
-        replyTo = nil
-        editing = nil
-        live.reset()
-        // Its pills come back as pills (a mark each, in order), not as plain "@name".
-        let (words, tagged) = MentionText.restoring(text, mentions: mentions)
-        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            pointers = tagged
-            draft = words
-        } else {
-            // The draft's own marks come first, so the new ones follow theirs.
-            pointers += tagged
-            draft += "\n\n" + words
-        }
-        caretRequest = (draft as NSString).length
-        focusRequest &+= 1
-    }
-
     /// "Edit and resend": the message in the composer, which takes the keyboard; no reply or pin goes with it (picking one
     /// later ends the edit: the draft then goes there as a message of its own). Its pills come back as the "@name" they were
     /// sent as; an attachment character in it (pasted before the composer left them out) goes, as a paste's does.

@@ -96,8 +96,6 @@ enum RouterRun {
     enum Intent: String, Equatable, CaseIterable {
         case changeFjord = "change_fjord"
         case question
-        /// Several things in one message: the Fjord part is done here, and the reply says the rest is for a session.
-        case compound
     }
 
     /// What the run answered: `reply` is shown in the history, `done` is the few words for what it did.
@@ -134,7 +132,6 @@ enum RouterRun {
         switch intent {
         case .changeFjord: return common + "\n\n" + RouterCapability.changeRole(triage: triage)
         case .question: return common + "\n\n" + RouterCapability.questionRole(triage: triage)
-        case .compound: return common + "\n\n" + RouterCapability.compoundRole(triage: triage)
         }
     }
 

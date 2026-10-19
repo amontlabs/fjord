@@ -263,7 +263,7 @@ extension RouterDispatcher {
 
     /// The ranking as if the gates hadn't fired. A compound pick that is still there isn't one to act on: it is not sure, and the
     /// ask doesn't list it.
-    private func ungate(_ found: inout Classification) {
+    func ungate(_ found: inout Classification) {
         if let single = found.ungated {
             found.ranked = single.ranked
             found.sure = single.sure

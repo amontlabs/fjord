@@ -278,28 +278,6 @@ import Testing
         #expect(lines.contains { $0.kind == .corrected && $0.from == "session:local_b" && $0.target == "session:local_a" })
     }
 
-    @Test func aCompoundMessageSentElsewhereIsAskedAsAWholeMessageAndNeverRunsTheFjordPartAgain() async throws {
-        let w = World()
-        w.fakes.ranked = [.init(target: "compound", p: 0.9), .init(target: "change_fjord", p: 0.04), .init(target: "session:local_b", p: 0.04),
-                          .init(target: "session:local_a", p: 0.02)]
-        let id = try #require(w.dispatcher.submit("update the category and tell the docs one to add a changelog entry"))
-        await w.finish(id)
-        #expect(w.fakes.runs.count == 1 && w.entry(id)?.fjordPartDone == true)
-        w.fakes.finished = []
-        #expect(w.dispatcher.pick(id, target: "session:local_b"))
-        await w.finish(id)
-        await waitUntil { w.fakes.sent.count == 1 && w.entry(id)?.delivered != nil }
-        w.fakes.finished = []
-        w.dispatcher.sendElsewhere(id)
-        await w.finish(id)
-        // Asked again as a whole message: no run of the Router on it, nor where it went.
-        let ask = try #require(w.dispatcher.askBacks.first { $0.id == id })
-        #expect(ask.whole && ask.options.last?.target == RouterAskBack.split)
-        #expect(!ask.options.contains { $0.target == "change_fjord" || $0.target == "compound" || $0.target == "session:local_b" })
-        #expect(!w.dispatcher.pick(id, target: "change_fjord") && !w.dispatcher.pick(id, target: "compound"))
-        #expect(w.fakes.runs.count == 1, "the Fjord part ran once")
-    }
-
     @Test func anActionsMessageSentElsewhereIsStillAnActionsMessage() async throws {
         let w = World()
         w.store.codeFolders.scan = { _ in .init(repos: ["/code/lookout": ["o/lookout"], "/code/lookout-2": ["o/lookout"]]) }

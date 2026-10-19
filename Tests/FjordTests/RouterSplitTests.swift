@@ -540,6 +540,59 @@ import Testing
         #expect(w.dispatcher.askBacks.first { $0.id == id3 }?.options.map(\.target) == ["session:local_c"])
     }
 
+    @Test func aCompoundTopAsksTheDividerWhenOnlyOneGateIsUp() async throws {
+        let w = World()
+        gatesUp(w)
+        // The benchmark's ship form fires on both gates or on a compound top: here the tight gate is down and the top is compound.
+        w.f.gates = ["gate_compound": 0.9, "gate_compound2": 0.2]
+        w.f.division = parts(w)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.map(\.text) == ["add the page", "rerun the build"])
+        #expect(w.dispatcher.askBacks.isEmpty && w.f.runs.isEmpty)
+        // A top that isn't compound, with one gate down, never asks it.
+        gatesUp(w, top: "session:local_b")
+        w.f.gates = ["gate_compound": 0.9, "gate_compound2": 0.2]
+        w.f.finished = []
+        w.f.divideRequests = []
+        let id2 = try #require(w.dispatcher.submit(both + "."))
+        await w.finishAll(id2)
+        #expect(w.f.divideRequests.isEmpty && w.entry(id2)?.parts.count == 1)
+    }
+
+    @Test func aCompoundTopTheDividerCantResolveIsAnAskAmongTheRestAndNeverARun() async throws {
+        let w = World()
+        gatesUp(w)
+        w.f.ungated = nil
+        w.f.gates = ["gate_compound": 0.9, "gate_compound2": 0.2]
+        w.f.divideError = RouterTools.Failure("down")
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        let ask = try #require(w.dispatcher.askBacks.first { $0.id == id })
+        #expect(ask.options.first?.target == "session:local_b" && !ask.options.contains { $0.target == "compound" || $0.target == "change_fjord" })
+        #expect(w.f.runs.isEmpty && w.f.prepared.isEmpty && w.entry(id)?.parts.count == 1)
+        // An answer with no part at all is no more of a place.
+        w.f.divideError = nil
+        w.f.division = .init(parts: [], sure: true, alternatives: [])
+        w.f.finished = []
+        let id2 = try #require(w.dispatcher.submit(both + "."))
+        await w.finishAll(id2)
+        let ask2 = try #require(w.dispatcher.askBacks.first { $0.id == id2 })
+        #expect(!ask2.options.contains { $0.target == "compound" } && w.f.runs.isEmpty && w.f.prepared.isEmpty)
+        // Where the divider isn't asked at all (an action's message), a compound top is the same ask and no run.
+        var context = RouterContext()
+        context.action = RouterActionSource(origin: SessionOrigin(category: "Contributions", thing: "o/lookout#7 Login fails",
+                                                                  actionID: "a", runID: "r"),
+                                            title: "o/lookout#7 Login fails", model: nil, effort: nil)
+        w.f.divideRequests = []
+        w.f.finished = []
+        let id3 = try #require(w.dispatcher.submit(both + "?", context: context))
+        await w.finishAll(id3)
+        #expect(w.f.divideRequests.isEmpty && w.f.runs.isEmpty && w.f.prepared.isEmpty)
+        let ask3 = try #require(w.dispatcher.askBacks.first { $0.id == id3 })
+        #expect(!ask3.options.contains { $0.target == "compound" || $0.target == "change_fjord" })
+    }
+
     @Test func theYouGateDoesntStopTheDivider() async throws {
         let w = World()
         gatesUp(w, top: "session:local_a", you: 0.9)

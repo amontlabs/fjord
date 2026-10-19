@@ -276,13 +276,6 @@ struct RouterPageView: View {
                 columns
             }
         }
-        // "Split…" on a compound message's ask: the message is back in the composer to write its parts.
-        .onChange(of: store.routerDispatcher.splitRequest) { _, request in
-            guard let request else { return }
-            model.restore(request.text, mentions: request.mentions)
-            model.composerFocused = true
-            store.routerDispatcher.splitRequest = nil
-        }
     }
 
     private var columns: some View {
@@ -2910,7 +2903,7 @@ struct AskBackCard: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.bubble").font(.system(size: 13, weight: .medium)).foregroundStyle(warm)
-                Text(ask.whole ? "Part of this is for a session" : ask.context.part ? "Where should this part go?" : "Where should this go?").cdsText((14, 20), .semibold, CDS.Text.primary)
+                Text(ask.context.part ? "Where should this part go?" : "Where should this go?").cdsText((14, 20), .semibold, CDS.Text.primary)
                 Spacer(minLength: 4)
                 CardAge(date: ask.at)
             }
@@ -2926,7 +2919,6 @@ struct AskBackCard: View, Equatable {
                 ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                     ClaudeButton(option.title + (option.detail.isEmpty ? "" : " · \(option.detail)"), variant: .secondary, size: .sm) {
                         if option.target == RouterAskBack.chooseFolder { chooseFolder() }
-                        else if option.target == RouterAskBack.split { store.routerDispatcher.split(ask.id) }
                         else { store.routerDispatcher.pick(ask.id, target: option.target) }
                     }
                     // RouterKeys: ⌘1–⌘4 on the newest ask.
