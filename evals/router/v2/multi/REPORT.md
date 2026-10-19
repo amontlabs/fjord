@@ -193,3 +193,77 @@ where it gets 77.5% fully right instead of 73.8%.
 The one-call form is at least as good as variant 3 on every slice, and better on messages for several places, where it
 uses the `waits_for` call's own division and single place. Haiku runs on 6 of 925 everyday submits and on 57 of the
 141 multi dev cases. On those it adds about 4.3 s (p50, Jev plus `claude -p`) and $0.0018 per message.
+
+## Exploratory: improving the divider's prompt (dev only)
+
+These runs use the ship form (`Ship3`, prompts as shipped at ca486625) on the multi dev split and the single-place
+episodes. They never read the sealed split.
+
+**What fails today.** The ship form gets 18 of the 80 dev messages meant for several places wrong. Grouped by cause:
+
+| cause | cases | the divider's fault? |
+|---|---|---|
+| Jev's gates didn't fire, so B sent the whole message to one place or asked (shared context 4, pronouns 3, no tags 3) | 10 | no: gate recall |
+| a part that only has to wait for another session to finish ("once it's in, rebase on it") was held, so its place was missed | 5 | yes (`WAITS_RULE`) |
+| a shared sentence went to a third, wrong session instead of both | 1 | yes |
+| words changed ("No endless testing on either" → "No endless testing") | 1 | yes |
+| a pronoun left dangling in a tag split ("include those changes"), which structure decides with no model | 1 | no |
+
+The automatic score misses a sixth problem, the one in the smoke test: a dropped address that leaves a fragment. A
+blind GPT judge read the 72 parts the live prompt sends in splits:
+
+- 8 (11%) don't read as said to their session. Examples: "a minimal reproduction of the bug first.", "just give me
+  what it has so far" and "commit what it has" sent to that same session, "one commit everything on main first".
+- 5 (7%) lean on something only another part says.
+- 1 (1.4%) has added words.
+
+My own reading found 7 fragments. The look-multi messages split today are all correct holds of a dependent part (0
+wrong sends).
+
+**What changed.** The four revisions sit beside the live constants in `candidates.py`, and the live ones are
+untouched (parity stays green):
+
+| | address rule | dependency rule |
+|---|---|---|
+| v2 | `TEXT_RULE_V2`: own words only; keep a third-person clause whole rather than leave a fragment | `WAITS_RULE_V2`: hold only a part that needs another place's answer; send a part that only has to wait for another to finish, with what it waits for |
+| v3 | `TEXT_RULE_V3`: the minimal turn of address ("what it picked" → "what did you pick?", its → your), nothing else | `WAITS_RULE_V2` |
+| v4 | `TEXT_RULE_V3` | live `WAITS_RULE` |
+| v5 | `TEXT_RULE_V2` | live `WAITS_RULE` |
+
+**What it gained or cost** (multi dev, 80 cases for several places and 52 written look-multi; Δ is against the live
+prompt, with a 95% interval over groups):
+
+| | live | v2 | v3 | v4 | v5 |
+|---|---|---|---|---|---|
+| several places fully right | 77.5% [69.4, 84.9] | 81.2% (Δ −1.3 to +9.5) | 76.2% (Δ −5.3 to +2.7) | 76.2% (Δ −5.6 to +2.7) | 77.5% (Δ −3.7 to +3.6) |
+| look-multi wrong sends per 100 (B: 9.6) | 0 | 3.8 [0, 10.4] | 5.8 [0, 14.0] | 0 | 0 |
+| your real look-multi in dev (9) | 0 | 0 | 0 | 0 | 0 |
+| split parts not said to their session (judge) | 11% | 8.5% | 1.0% | **2.8%** | 10% |
+| split parts with added words | 1.4% | 16% | 25% | 15% | 1.4% |
+| of which changed beyond the turn of address (judge) | 1.4% | 10.6% | 16.7% | 6.9% | 1.4% |
+| everyday submits where the gates fire: wrong sends (8 submits; B 1 of 7) | 2 | 4 | 3 | 2 | 3 |
+
+- **The own-words address rule (v5) does nothing.** Haiku still drops the address and leaves the fragment: 10% against 11%.
+- **The turn of address (v4) fixes the fragments,** down from 11% to 3% of split parts. It has the smoke test's
+  shape: "Are you finished?", "Just give me what you have so far.", "What exactly did you commit?". But 15% of split
+  parts gain words, and 7% change more than the address. Some of those changes are wrong: "check the crash on the
+  version before its commit" (its = the version's) became "before your commit", and "Rerun CI twice" gained "CI".
+- **Sending what only has to wait (v2)** recovers some of the 5 held parts: +3.7 points fully right, but not clearly
+  (the interval includes 0). In exchange it sends parts to sessions the labellers wanted left out (3.8 per 100
+  look-multi). It also copies a referent by paraphrasing it ("Once the duplicate disks migration bug is fixed, rebase
+  on it"): 16% of parts gain words. The labellers themselves split on these cases. Whether a part that only waits
+  should go now is a product decision, not something a prompt can learn.
+- **Nothing beats the live prompt clearly on dev,** and every revision adds words. 8 everyday submits are too few to
+  read either way.
+
+**Recommendation: keep the live prompts.** The biggest failure group, 10 of 18, is the gates' recall, not the divider.
+The fragment problem is real (about 1 split part in 9). The only prompt that fixes it, v4, does so by rewording. It
+breaks the own-words rule in 15% of parts, sometimes changing the meaning, so I wouldn't ship it. If you want the turn
+of address anyway, confirm v4 on held-out data before porting it:
+- a fresh written set of about 150 multi-place messages, weighted to third-person addresses ("ask X what it…", "tell
+  X to … its …"), on calib boards;
+- labelled by GPT and Gemini;
+- judged blind for address, meaning kept and words changed;
+- plus your own check of 40 address turns.
+
+Ship it only if meaning-changing rewrites stay under 2% of parts.
