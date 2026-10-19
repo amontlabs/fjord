@@ -205,7 +205,7 @@ extension RouterDispatcher {
     func byGates(_ job: Job, _ found: inout Classification, projects: [String]) async throws -> Bool {
         guard let store else { return false }
         let place = RouteLabel.compound.rawValue
-        let key = Self.liveKey(job.text, projects)
+        let key = Self.divisionKey(job.text, projects)
         let answer: RouterDivider.Answer
         if let kept = keptAnswer(key) {
             // Read while you typed: asked of the divider already.
@@ -276,11 +276,17 @@ extension RouterDispatcher {
         found.sure = false
     }
 
+    /// What a divider's answer is kept by: the words as they are sent, the first line's indentation included (parts cut from
+    /// other indentation are not these words' parts), and the projects.
+    static func divisionKey(_ text: String, _ projects: [String]) -> String {
+        ([RouterModel.sendable(text)] + projects).joined(separator: "\u{1}")
+    }
+
     /// The parts shown under the composer for these very words (`RouterContext.division`), as parts to send: none when they
     /// are for other words, are fewer than two, or one of them has no place to go to any more.
     func shownParts(_ job: Job) -> [SplitPart]? {
-        guard let store, let shown = job.context.division, shown.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            == job.text.trimmingCharacters(in: .whitespacesAndNewlines), shown.parts.count >= 2,
+        guard let store, let shown = job.context.division, RouterModel.sendable(shown.text) == RouterModel.sendable(job.text),
+              shown.parts.count >= 2,
               shown.parts.allSatisfy({ eligible($0.target, store: store) }) else { return nil }
         return shown.parts.map { splitPart($0, in: job, fixed: false) }
     }
@@ -300,11 +306,11 @@ extension RouterDispatcher {
     /// places, can't be asked, or Jev may not read what you type.
     func predictDivision(_ text: String, found: Classification, projects: [String], mentions: [RouterMention] = []) async -> RouterDivision? {
         guard let store, store.jevAllows(.drafts), found.dividesNow else { return nil }
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = RouterModel.sendable(text)
         var tagged = RouterContext(projects: projects)
         tagged.mentions = mentions
         let narrowed = Self.repoWorld(tagged, store: store).flatMap { $0.clones.isEmpty ? nil : $0.clones } ?? projects
-        let key = Self.liveKey(text, narrowed)
+        let key = Self.divisionKey(text, narrowed)
         if let kept = keptAnswer(key) { return division(of: kept, text: text) }
         if let reading = pendingAnswer(key) { return await reading.value.flatMap { division(of: $0, text: text) } }
         let tools = RouterTools(store: store)

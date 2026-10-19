@@ -81,6 +81,12 @@ final class RouterLiveTarget {
         var waits: Bool
     }
 
+    /// What a pick or the parts shown are for: the words as they are sent (the first line's indentation is part of them) and
+    /// the projects.
+    private static func key(_ exact: String, _ projects: [String]) -> String {
+        ([exact] + projects).joined(separator: "\u{1}")
+    }
+
     /// How long typing pauses before Jev is asked, and the fewest characters worth asking about.
     @ObservationIgnored var delay: Duration = .milliseconds(600)
     static let minLength = 12
@@ -99,6 +105,8 @@ final class RouterLiveTarget {
     /// once, after the same stillness (never per keystroke), and its parts replace the pick.
     func update(text: String, context: RouterContext, store: Store) {
         if previewing, Store.isDemo { return }
+        // The words as they will be sent (an indented first line kept): what a division is for, to the character.
+        let exact = RouterModel.sendable(text)
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let fixed = pinned != nil || !recipients.isEmpty || RouterDispatcher.plan(text: text, context: context, store: store) != .classify
         guard store.routerOn, store.jevReadsDrafts, !Store.isDemo, !fixed, text.count >= Self.minLength else {
@@ -107,7 +115,7 @@ final class RouterLiveTarget {
             if text.isEmpty { dismissed = nil }
             return
         }
-        let key = RouterDispatcher.liveKey(text, context.projects)
+        let key = Self.key(exact, context.projects)
         current = key
         if prediction != nil || division != nil, predicted != key { clear() }
         // The pick or the parts shown are for these words: whatever was asked since is for others.
@@ -124,7 +132,7 @@ final class RouterLiveTarget {
             guard !Task.isCancelled, let self, self.current == key else { return }
             if let found, found.dividesNow {
                 self.dividing = true
-                let division = await store.routerDispatcher.predictDivision(text, found: found, projects: context.projects,
+                let division = await store.routerDispatcher.predictDivision(exact, found: found, projects: context.projects,
                                                                             mentions: context.mentions)
                 // The draft changed, or the composer left, while the divider was read: its parts are for other words.
                 guard !Task.isCancelled, self.current == key else { return }
@@ -147,8 +155,7 @@ final class RouterLiveTarget {
 
     /// The prediction, if it is still for this draft and its target can still be sent to: what a click may pin.
     func valid(text: String, context: RouterContext, store: Store) -> Prediction? {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let p = prediction, predicted == RouterDispatcher.liveKey(text, context.projects), context.replyTo == nil,
+        guard let p = prediction, predicted == Self.key(RouterModel.sendable(text), context.projects), context.replyTo == nil,
               context.target == nil, p.target != dismissed, store.routerDispatcher.eligible(p.target, store: store) else { return nil }
         return p
     }
@@ -156,8 +163,8 @@ final class RouterLiveTarget {
     /// The parts shown, if they are still for this draft and every place in them can still be sent to: what a send goes with.
     /// The words are the draft's as it is sent, by the exact text.
     func validDivision(text: String, context: RouterContext, store: Store) -> RouterDivision? {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let division, predicted == RouterDispatcher.liveKey(text, context.projects), division.text == text,
+        let text = RouterModel.sendable(text)
+        guard let division, predicted == Self.key(text, context.projects), division.text == text,
               context.replyTo == nil, context.target == nil, context.recipients.isEmpty,
               division.parts.allSatisfy({ store.routerDispatcher.eligible($0.target, store: store) }) else { return nil }
         return division
@@ -196,7 +203,7 @@ final class RouterLiveTarget {
     /// A demo or a shot: a pick shown with nothing behind it, for its words.
     func preview(_ prediction: Prediction) {
         self.prediction = prediction
-        predicted = RouterDispatcher.liveKey(prediction.text, [])
+        predicted = Self.key(prediction.text, [])
         previewing = true
     }
 
@@ -204,7 +211,7 @@ final class RouterLiveTarget {
     func preview(division: RouterDivision, store: Store) {
         self.division = division
         chips = Self.chips(division, store: store)
-        predicted = RouterDispatcher.liveKey(division.text, [])
+        predicted = Self.key(division.text, [])
         previewing = true
     }
 

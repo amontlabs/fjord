@@ -92,6 +92,27 @@ import Testing
         #expect(w.f.ranks == 1, "Jev was not asked again")
     }
 
+    @Test func aChangeOfTheFirstLinesIndentationIsAChangeOfWords() async throws {
+        let w = world()
+        gatesUp(w)
+        let model = model()
+        type(both, model, w)
+        await waitUntil { model.live.division != nil }
+        #expect(model.context(w.store).division != nil)
+        // Only blank lines before it and whitespace after it are left out of what is sent; an indent is part of the words.
+        model.draft = "\n" + both + "  "
+        #expect(model.context(w.store).division != nil)
+        model.draft = "    " + both
+        #expect(model.context(w.store).division == nil, "the parts were cut from other words")
+        // Typed that way, the parts are read again, for the words as they are, and not taken from the answer for the others.
+        type("    " + both, model, w)
+        #expect(model.live.division == nil && model.live.chips.isEmpty)
+        await waitUntil { w.f.divideRequests.count == 2 }
+        await waitUntil { model.live.division != nil }
+        #expect(w.f.divideRequests.count == 2 && w.f.divideRequests[1].message == "    " + both)
+        #expect(model.context(w.store).division?.text == "    " + both)
+    }
+
     @Test func recipientsFixWhereItGoesAndEachGetsTheWholeMessage() async throws {
         let w = world()
         gatesUp(w)

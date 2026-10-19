@@ -649,7 +649,7 @@ import Testing
         gatesUp(w)
         var context = RouterContext()
         context.division = RouterDivision(text: both, parts: parts(w).parts)
-        let id = try #require(w.dispatcher.submit(" " + both + " ", context: context))
+        let id = try #require(w.dispatcher.submit("\n" + both + " ", context: context))
         await w.finishAll(id)
         #expect(w.entry(id)?.parts.map(\.text) == ["add the page", "rerun the build"])
         #expect(w.f.ranks == 0 && w.f.divideRequests.isEmpty && w.f.checked.isEmpty)
