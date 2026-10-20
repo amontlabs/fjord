@@ -534,10 +534,37 @@ import Testing
                         answer: @escaping ([String: JevClient.Question], [String: String]) -> [String: JevClient.Answer])
         async -> (questions: [String: JevClient.Question], state: [String: String], found: RouterDispatcher.Classification?) {
         var asked: [String: JevClient.Question] = [:], state: [String: String] = [:]
-        d.asker = { q, st in asked = q; state = st; return answer(q, st) }
+        // The routing call; the addressed gate's own call beside it is answered and left out.
+        d.asker = { q, st in
+            if q["route"] != nil { asked = q; state = st }
+            return answer(q, st)
+        }
         d.effects = .live(d)
         let found = await d.predict(text, projects: [])
         return (asked, state, found)
+    }
+
+    @Test func whetherItSpeaksToSeveralSessionsIsAskedInACallOfItsOwnOnTheMessageAlone() async {
+        let (s, d, _) = setup()
+        defer { withExtendedLifetime(s) {} }
+        var calls: [(questions: [String: JevClient.Question], state: [String: String])] = []
+        d.asker = { q, st in
+            calls.append((q, st))
+            if q["route"] != nil { return ["route": Self.choice(["Update the docs": 0.9, "unclear": 0.1])] }
+            return [RouterTools.addressedGate: .noul(0.8)]
+        }
+        d.effects = .live(d)
+        let found = await d.predict("For the login one: use sqlite. For the docs one: add the date", projects: [])
+        #expect(calls.count == 2)
+        let own = calls.first { $0.questions["route"] == nil }
+        #expect(own.map { Set($0.questions.keys) } == [RouterTools.addressedGate])
+        #expect(own?.state == ["message": "For the login one: use sqlite. For the docs one: add the date"])
+        guard case .structuredNoul(let instructions) = own?.questions[RouterTools.addressedGate] else { Issue.record("no gate"); return }
+        // The sessions by the names their options have, in Fjord's order; nothing else of the board.
+        #expect((instructions as? [String: Any])?["places"] as? String == "Fix the login bug; Update the docs")
+        // Not in the routing call, whose answers it never moves; read only for whether the divider is asked.
+        #expect(calls.first { $0.questions["route"] != nil }?.questions[RouterTools.addressedGate] == nil)
+        #expect(found?.gates[RouterTools.addressedGate] == 0.8 && found?.divides == true && found?.dividesNow == false)
     }
 
     private static func choice(_ p: [String: Double]) -> JevClient.Answer {

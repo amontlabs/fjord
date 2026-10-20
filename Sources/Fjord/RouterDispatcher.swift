@@ -159,9 +159,13 @@ struct RouterAskBack: Identifiable, Equatable {
             return g >= RouterTools.gateSure && g2 >= RouterTools.compound2Sure
         }
 
-        /// The divider is asked of the message (the benchmark's `Ship3`): both gates are up, or Jev's top pick is compound anyway.
-        /// What a send does, and so what the draft's live division is read on.
-        var divides: Bool { dividesNow || top?.target == RouteLabel.compound.rawValue }
+        /// The divider is asked of the message (the benchmark's `Ship3`, `ap70`): both gates are up, Jev's top pick is compound
+        /// anyway, or the message speaks to two or more sessions in turn (`RouterTools.addressedGate`). What a send does, and so
+        /// what the draft's live division is read on.
+        var divides: Bool {
+            dividesNow || top?.target == RouteLabel.compound.rawValue
+                || (gates[RouterTools.addressedGate] ?? 0) >= RouterTools.addressedSure
+        }
 
         init(ranked: [Scored], sure: Bool, assisted: Bool) {
             self.ranked = ranked
@@ -1882,6 +1886,11 @@ extension RouterDispatcher.Effects {
                 // with it, fenced.
                 var state = ["message": RouterTools.redacted(message)]
                 if let tagged = tools.tagged { state["tagged in the message"] = RouterTools.redacted(tagged) }
+                // Whether it speaks to several sessions in turn, beside it in a call of its own on the message alone (as
+                // measured): its answer only says whether to ask the divider, and it failing changes nothing.
+                let addressedQuestion = [RouterTools.addressedGate: RouterTools.addressedQuestion(destinations)]
+                let addressedState = ["message": RouterTools.redacted(message)]
+                async let addressed = try? ask(addressedQuestion, addressedState)
                 let answers = try await ask(call.questions, state)
                 guard let pick = answers["route"]?.choice else { throw RouterTools.Failure("Jev didn't pick a target") }
                 var signals = RouteFusion.Signals(route: [:])
@@ -1909,8 +1918,12 @@ extension RouterDispatcher.Effects {
                 let single = RouteFusion.decide(ungated, facts: facts, answers: checks) {
                     RouterDispatcher.session(of: $0, store: store)
                 }
+                if let p = await addressed?[RouterTools.addressedGate]?.yes {
+                    trace.gates[RouterTools.addressedGate] = p
+                }
                 var ranking = RouterDispatcher.Ranking(scored: verdict.ranked, sure: verdict.sure, card: card, trace: trace)
                 ranking.gates = signals.gates
+                ranking.gates[RouterTools.addressedGate] = trace.gates[RouterTools.addressedGate]
                 ranking.ungated = .init(ranked: single.ranked, sure: single.sure,
                                         card: RouterTools.askCard(ranked: single.ranked.map(\.target), recent: RouterTools.recent(facts)))
                 return ranking

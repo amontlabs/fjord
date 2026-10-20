@@ -18,8 +18,9 @@ import Testing
                                      folder: "/code/lookout", text: "Which database?", createdAt: Date())]
         var calls = 0
         s.routerDispatcher.asker = { questions, state in
-            calls += 1
+            // The routing calls (the addressed gate's own call goes beside each one).
             guard case .structuredChoice(let keys, _, _) = questions["route"] else { return [:] }
+            calls += 1
             // Sure of the session asking which database (its option, named by its title), when the message mentions one.
             let card = keys.first { $0 == "Fix the login bug" } ?? keys[0]
             let sure = state["message"]?.contains("database") == true

@@ -61,6 +61,23 @@ extension RouterTools {
         "gate_you": .structuredNoul(instructions: ["question": "Does `message` speak to one agent as \"you\" about its own work (\"did you…\", \"your end\", \"what are you waiting for\", \"you said…\"), or reply to something it just said?"]),
     ]
 
+    /// Whether the message speaks to two or more of the board's sessions in turn, each picked out by what it works on. The
+    /// compound gates miss these ("For the CI one: add the toggle. For the router redesign: …" reads gate_compound2 0.2–0.45),
+    /// so the divider was never asked. Asked in a call of its own on the message alone, so the routing call's answers don't
+    /// move; read only for whether the divider is asked (`Classification.divides`), never by the verdict or the fusion. On
+    /// the multi-place dev split, 82.5% of the messages for several places came out fully right against 77.5%, with no
+    /// everyday decision changed (evals/router/v2/multi/REPORT.md, "the gates' recall").
+    nonisolated static let addressedGate = "gate_addressed"
+    nonisolated static let addressedSure = 0.7
+
+    static func addressedQuestion(_ destinations: [Destination]) -> JevClient.Question {
+        let places = destinations.filter { $0.sessionID != nil }.map(\.name)
+        return .structuredNoul(instructions: [
+            "question": "Does `message` give instructions to two or more of `places`, each picked out by what it works on (\"the CI one: …\", \"in the X session …\", \"tell the Y one to …\")? Several points or steps for one session is no.",
+            "places": places.joined(separator: "; "),
+        ])
+    }
+
     static let nextInstructions = "Is `message` the user's next message in `conversation`: what the user says back to it?"
     /// How many of the latest sessions get the next-message check.
     static let nextLatest = 3

@@ -560,6 +560,32 @@ import Testing
         #expect(w.f.divideRequests.isEmpty && w.entry(id2)?.parts.count == 1)
     }
 
+    @Test func aMessageSpeakingToTwoSessionsInTurnAsksTheDividerWithTheGatesDown() async throws {
+        let w = World()
+        // "For the CI one: … For the docs one: …": the compound gates down, Jev's pick one session, the addressed gate up.
+        w.f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]
+        w.f.gates = ["gate_compound": 0.6, "gate_compound2": 0.3, RouterTools.addressedGate: 0.8]
+        w.f.division = parts(w)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.map(\.text) == ["add the page", "rerun the build"])
+        #expect(w.dispatcher.askBacks.isEmpty)
+        // Under its bar it asks nothing: Jev's pick goes, the message whole.
+        w.f.gates = ["gate_compound": 0.6, "gate_compound2": 0.3, RouterTools.addressedGate: 0.6]
+        w.f.finished = []
+        w.f.divideRequests = []
+        let id2 = try #require(w.dispatcher.submit(both + "."))
+        await w.finishAll(id2)
+        #expect(w.f.divideRequests.isEmpty && w.entry(id2)?.parts.count == 1)
+        // Up, but the divider names one place: Jev's pick goes as it would have.
+        w.f.gates = ["gate_compound": 0.6, "gate_compound2": 0.3, RouterTools.addressedGate: 0.8]
+        w.f.division = .init(parts: [.init(target: "session:local_c", text: both, waitsFor: nil)], sure: true, alternatives: [])
+        w.f.finished = []
+        let id3 = try #require(w.dispatcher.submit(both + "!"))
+        await w.finishAll(id3)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id3)?.parts.count == 1 && w.words(of: "local_b").last == both + "!")
+    }
+
     @Test func aCompoundTopTheDividerCantResolveIsAnAskAmongTheRestAndNeverARun() async throws {
         let w = World()
         gatesUp(w)
