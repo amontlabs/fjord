@@ -95,10 +95,20 @@ def multi(name, split, workers=4, allow_test=False):
     return out
 
 
+_KNOWN = ("haiku", "pipeline", "sonnet", "hybrid", "hybrid-lazy", "noask1", "noask2", "noask3", "ship3", "ship3-v2",
+          "ship3-v3", "ship3-v4", "ship3-v5")
+
+
+def _known(name):
+    if name not in _KNOWN:
+        raise argparse.ArgumentTypeError(f"unknown candidate {name}")
+    return name
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("slice", choices=["single", "multi"])
-    ap.add_argument("candidate", choices=["haiku", "pipeline", "sonnet", "hybrid", "hybrid-lazy", "noask1", "noask2", "noask3", "ship3", "ship3-v2", "ship3-v3", "ship3-v4", "ship3-v5"])
+    ap.add_argument("candidate", type=lambda n: n if n.startswith("ship3+") else _known(n))
     ap.add_argument("--split", default="dev", choices=["dev"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--workers", type=int, default=4)

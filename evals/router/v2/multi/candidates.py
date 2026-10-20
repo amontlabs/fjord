@@ -425,6 +425,10 @@ class Ship3:
         self.pipeline = self.noask.pipeline
         self.prompt = prompt
 
+    def fires(self, state, message, context, g1, g2):
+        """Another reason to ask the divider, beside the gates and a compound pick (gates.Ship3Plus): none as shipped."""
+        return False
+
     @staticmethod
     def _single(d, message, context, latency, cost, path):
         """Jev's decision as one place or an ask, as B sends it (pills and asides edited out by rule)."""
@@ -453,7 +457,7 @@ class Ship3:
         top = d.get("target") if d["decision"] != "ask" else d.get("top")
         latency = d.get("latency") or 0.0
         cost = (d.get("tokens") or 0) * 0.04e-6
-        if not ((g1 >= 0.75 and g2 >= 0.5) or top == "compound"):
+        if not ((g1 >= 0.75 and g2 >= 0.5) or top == "compound" or self.fires(state, message, context, g1, g2)):
             return self._single(d, message, context, latency, cost, "ship3-jev")
         w = model_route(C.HAIKU, state, message, context, waits=True, prompts=DIVIDER_PROMPTS[self.prompt],
                         tag="cand-haiku-waits" + ("" if self.prompt == "v1" else "-" + self.prompt))
@@ -479,6 +483,9 @@ class Ship3:
 
 
 def make(name):
+    if name.startswith("ship3+"):
+        from . import gates
+        return gates.Ship3Plus(name[len("ship3+"):])
     if name.startswith("ship3"):
         return Ship3(name.split("-")[1] if "-" in name else "v1")
     if name.startswith("noask"):
