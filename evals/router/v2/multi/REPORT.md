@@ -267,3 +267,78 @@ of address anyway, confirm v4 on held-out data before porting it:
 - plus your own check of 40 address turns.
 
 Ship it only if meaning-changing rewrites stay under 2% of parts.
+
+## Exploratory: the gates' recall (dev only, 2026-10-20)
+
+These runs use the ship form (`Ship3`, prompts as shipped) on the multi dev split and the single-place episodes, with
+one more reason to ask the divider (`gates.Ship3Plus`, `python3 -m v2.multi.gates`). They never read the sealed split.
+Every number is against the ship form; intervals are 95% over groups, paired.
+
+**What fails.** Of the 80 dev messages for several places, the gates miss 10 (the divider is never asked). They are
+plain to read: "Spacing one: keep the side bar full height. Wrapping one: add the coauthor", "in the microsandbox PRs
+session rebase…, and the stability banner one commit…". `gate_compound` is often up (0.57–0.91); `gate_compound2` is
+the one that stays down (0.19–0.45): it asks for sessions "it names", and "the CI one" doesn't read as naming. Haiku
+gets 6 of the 10 fully right when asked, so 6 is the most a better trigger can recover here. The other 4 are pronoun
+messages Haiku also gets wrong (pronouns stay 0 of 7 in every variant: that is the divider, not the gates).
+
+**What was tried.** Three kinds, as asked:
+
+- the thresholds: `gate_compound2`'s bar at 0.3 instead of 0.5 (`gt30`);
+- a third signal Jev already returns: the routing call's own probability for `compound` (`pc30`, `pc50`; no new call);
+- reworded gates, each asked alone in a Jev call of its own on the message, so the routing call's answers don't move:
+  `addr` (instructions to two or more sessions, each picked out by what it works on: "the CI one: …", "in the X
+  session …", "tell the Y one to …"), `addr-places` (the same over `places`, the board's session names), `split`
+  ("should it be split…"), `agents` ("does it speak to two or more agents in turn…"). `split` and `agents` were dropped
+  at the trigger stage: `split` catches 2 of the 6 at a bar where it fires on 17 everyday submits, `agents` at most 1
+  (firing on 19).
+
+| vs the ship form | several places fully right (80) | Δ | everyday extra wrong sends per 100 (v2 dev episodes) | real moments | everyday decisions changed |
+|---|---|---|---|---|---|
+| ship form | 77.5% [69.1, 84.9] | | (ship: 2.7) | (ship: 1.5) | |
+| bar 0.3 for `gate_compound2` | 80.0% | 0 to +6.7 | +0.2 [0, +0.5] | +0.3 [0, +0.8] | 2 |
+| route `compound` ≥ 0.5 | 78.8% | 0 to +4.3 | 0 | 0 | 0 |
+| route `compound` ≥ 0.3 | 81.2% | 0 to +8.6 | +0.1 [0, +0.3] | 0 | 2 |
+| `addr` ≥ 0.5 | 82.5% | +1.1 to +10.1 | 0 | 0 | 0 |
+| `addr-places` ≥ 0.6 | 83.8% | +1.4 to +11.6 | +0.1 [0, +0.3] | 0 | 1 |
+| **`addr-places` ≥ 0.7 (ported)** | **82.5%** [75.3, 88.6] | **+1.2 to +9.9** | **0** | **0** | **0** |
+| the same, asked inside the routing call | 82.5% | +1.2 to +9.9 | −0.1 [−0.5, +0.2] | −0.5 [−1.3, 0] | 25 |
+| route `compound` ≥ 0.3 or `addr-places` ≥ 0.7 | 85.0% [79.5, 90.5] | +2.4 to +13.3 | +0.1 [0, +0.3] | 0 | 2 |
+
+Look-multi messages (52 written, 9 of yours): 0 wrong sends for every variant except the 0.3 bar (1 of your 9).
+
+- **The everyday "wrong" sends** of `compound` ≥ 0.3 and `addr-places` ≥ 0.6 are one message: "can you stop nagging me
+  about the lcu update…, and for the macos alternative…, make the background animated". It is plainly for Fjord and a
+  session; its gold is soft (Claude: the session; GPT: compound), so the split counts half wrong. The other change of
+  `compound` ≥ 0.3 is an ask that became a right split.
+- **Inside the routing call** the new question moves the other answers: 25 everyday decisions change (11 right sends
+  became asks and 8 asks right sends; 3 wrong sends became asks and 3 asks wrong sends), the fusion having been fitted
+  on answers asked without it. Its own call
+  moves nothing, so no refit is needed. That is the form ported.
+- **A check on messages these were not chosen on**: the 332 Router-style messages written on your real boards in round 2
+  (30 of them for several places) and 459 of your real moments not in the dev episodes, messages only:
+
+| | Router-style, several places caught (30) | Router-style, fires on one-place (296) | real moments, fires (459) |
+|---|---|---|---|
+| ship form (gates or a compound pick) | 18 | 0 | 5 |
+| + `addr-places` ≥ 0.7 | 20 | 0 | 5 |
+| + route `compound` ≥ 0.3 | 25 | 1 | 7 |
+| + both | 25 | 1 | 7 |
+
+  Firing only asks the divider; it sends nothing to two places unless Haiku divides the message.
+
+**Ported: `addr-places` ≥ 0.7, in a Jev call of its own** (`RouterTools.addressedGate`, `Classification.divides`). On dev
+it gets 4 more of every 80 messages for several places fully right (82.5% against 77.5%, +1.2 to +9.9), changes no
+everyday decision, and sends nothing wrong on look-multi messages. Held out, it catches 2 more of 30 Router-style
+messages for several places and fires on nothing new. Its price: one more Jev call per message, in parallel with the
+routing call (about 350–400 input tokens, so about $0.000015), and Haiku on 10 more of the 89 untagged dev messages
+(the 6 misses it catches and 4 look-multi messages, all of whose dependent parts it holds).
+
+**Not ported, your call: the route's `compound` ≥ 0.3 beside it.** It adds 2 more dev messages (85.0%, +2.4 to +13.3)
+and, held out, 5 more of the 30 Router-style ones (25 against 20). It costs nothing to ask. But it splits the soft-gold
+message above, which the rule "no everyday wrong sends" counts against it, and it fires on 2 more of your 459 real
+moments. Port it if you'd rather split a message plainly for two places that one labeller read as one.
+
+How sure: the wording and the bar were chosen on dev, among 4 wordings and 5 bars, on 10 misses. The neighbouring
+choices agree (`addr` ≥ 0.5 and `addr-places` ≥ 0.6 give 82.5–83.8%), and the held-out Router-style messages agree in
+direction, but the gain there is 2 of 30. What is left: 4 gate misses on dev (2 Haiku would get right), 7 pronoun
+messages the divider gets wrong, the 5 parts the dependency rule holds, and the fragments.

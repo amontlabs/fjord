@@ -60,6 +60,8 @@ python3 -m v2.multi.score multi dev haiku pipeline
 python3 -m v2.multi.seal haiku pipeline sonnet   # once, after dev
 python3 -m v2.multi.blind make
 python3 -m v2.multi.blind read                   # after ticking blind.md
+python3 -m v2.multi.gates probe                  # the gates' recall (REPORT.md): Jev's signals per dev case, then probe-single,
+                                                 # reword, everyday, everyday-ship; runs: run multi|single ship3+ap70; report
 python3 -m v2.multi.parity                       # Tests/FjordTests/Fixtures/router-divider-parity.json (no model, synthetic boards)
 ```
 
