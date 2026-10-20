@@ -118,6 +118,8 @@ struct RouterAskBack: Identifiable, Equatable {
         var trace: RouterTrace.Inputs? = nil
         /// Jev's answers to the gates (`RouterTools.gates`), by question.
         var gates: [String: Double] = [:]
+        /// The routing call's own score for `compound` (Jev's route, before the fusion).
+        var compoundRoute: Double? = nil
         /// The same ranking as if the compound gates hadn't fired (`Ungated`).
         var ungated: Ungated? = nil
     }
@@ -146,6 +148,8 @@ struct RouterAskBack: Identifiable, Equatable {
         /// Jev's answers to the gates (`Ranking.gates`), and the ranking without the compound gates (`Ranking.ungated`).
         var gates: [String: Double] = [:]
         var ungated: Ungated? = nil
+        /// Jev's route score for `compound` (`Ranking.compoundRoute`).
+        var compoundRoute: Double? = nil
         /// A compound top was taken from the ranking with nothing to replace it (the divider couldn't resolve it): the message is
         /// for several places, and nothing sends it whole to one (`ungate`).
         var compoundUnresolved = false
@@ -159,11 +163,13 @@ struct RouterAskBack: Identifiable, Equatable {
             return g >= RouterTools.gateSure && g2 >= RouterTools.compound2Sure
         }
 
-        /// The divider is asked of the message (the benchmark's `Ship3`, `ap70`): both gates are up, Jev's top pick is compound
-        /// anyway, or the message speaks to two or more sessions in turn (`RouterTools.addressedGate`). What a send does, and so
-        /// what the draft's live division is read on.
+        /// The divider is asked of the message (the benchmark's `Ship3`, `pc30-ap70`): both gates are up, Jev's top pick is
+        /// compound anyway, his routing call gives `compound` at least `RouterTools.compoundRouteSure`, or the message speaks
+        /// to two or more sessions in turn (`RouterTools.addressedGate`). What a send does, and so what the draft's live
+        /// division is read on.
         var divides: Bool {
             dividesNow || top?.target == RouteLabel.compound.rawValue
+                || (compoundRoute ?? 0) >= RouterTools.compoundRouteSure
                 || (gates[RouterTools.addressedGate] ?? 0) >= RouterTools.addressedSure
         }
 
@@ -181,6 +187,7 @@ struct RouterAskBack: Identifiable, Equatable {
                 trace = ranking.trace
                 gates = ranking.gates
                 ungated = ranking.ungated
+                compoundRoute = ranking.compoundRoute
                 return
             }
             let route = Dictionary(ranking.scored.map { ($0.target, $0.p) }, uniquingKeysWith: +)
@@ -188,6 +195,7 @@ struct RouterAskBack: Identifiable, Equatable {
             self.init(ranked: verdict.ranked, sure: verdict.sure, assisted: true)
             gates = ranking.gates
             ungated = ranking.ungated
+            compoundRoute = ranking.compoundRoute
         }
     }
 
@@ -1924,6 +1932,7 @@ extension RouterDispatcher.Effects {
                 var ranking = RouterDispatcher.Ranking(scored: verdict.ranked, sure: verdict.sure, card: card, trace: trace)
                 ranking.gates = signals.gates
                 ranking.gates[RouterTools.addressedGate] = trace.gates[RouterTools.addressedGate]
+                ranking.compoundRoute = signals.route[RouteLabel.compound.rawValue] ?? 0
                 ranking.ungated = .init(ranked: single.ranked, sure: single.sure,
                                         card: RouterTools.askCard(ranked: single.ranked.map(\.target), recent: RouterTools.recent(facts)))
                 return ranking

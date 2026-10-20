@@ -333,10 +333,12 @@ messages for several places and fires on nothing new. Its price: one more Jev ca
 routing call (about 350–400 input tokens, so about $0.000015), and Haiku on 10 more of the 89 untagged dev messages
 (the 6 misses it catches and 4 look-multi messages, all of whose dependent parts it holds).
 
-**Not ported, your call: the route's `compound` ≥ 0.3 beside it.** It adds 2 more dev messages (85.0%, +2.4 to +13.3)
-and, held out, 5 more of the 30 Router-style ones (25 against 20). It costs nothing to ask. But it splits the soft-gold
-message above, which the rule "no everyday wrong sends" counts against it, and it fires on 2 more of your 459 real
-moments. Port it if you'd rather split a message plainly for two places that one labeller read as one.
+**Ported too, on your go-ahead (2026-10-20): the route's `compound` ≥ 0.3 beside it** (`RouterTools.compoundRouteSure`,
+read in `Classification.divides`, so the live split and the send ask the divider on the same messages). It adds 2 more
+dev messages (85.0%, +2.4 to +13.3 against the ship form) and, held out, 5 more of the 30 Router-style ones (25 against
+20). It costs no call: the score comes with the routing call. Its price: it splits the soft-gold message above (+0.1
+wrong sends per 100 everyday submits, 0 to +0.3; none on real moments), and it fires on 2 more of your 459 real moments,
+where Haiku then decides whether there is more than one place.
 
 How sure: the wording and the bar were chosen on dev, among 4 wordings and 5 bars, on 10 misses. The neighbouring
 choices agree (`addr` ≥ 0.5 and `addr-places` ≥ 0.6 give 82.5–83.8%), and the held-out Router-style messages agree in

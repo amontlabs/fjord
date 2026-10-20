@@ -14,6 +14,8 @@ import Testing
         /// Jev's answers to the compound gates, the ranking without them, and his sureness (nil: by the scores alone).
         var gates: [String: Double] = [:]
         var ungated: RouterDispatcher.Ungated?
+        /// Jev's route score for `compound` (`Ranking.compoundRoute`).
+        var compoundRoute: Double?
         var rankSure: Bool?
         var rankError: Error?
         var ranks = 0
@@ -86,6 +88,7 @@ import Testing
                     ranking.sure = rankSure
                     ranking.gates = gates
                     ranking.ungated = ungated
+                    ranking.compoundRoute = compoundRoute
                     return ranking
                 },
                 prepare: { [self] _, session in
@@ -550,7 +553,7 @@ import Testing
         var calls: [(questions: [String: JevClient.Question], state: [String: String])] = []
         d.asker = { q, st in
             calls.append((q, st))
-            if q["route"] != nil { return ["route": Self.choice(["Update the docs": 0.9, "unclear": 0.1])] }
+            if q["route"] != nil { return ["route": Self.choice(["Update the docs": 0.8, "compound": 0.1, "unclear": 0.1])] }
             return [RouterTools.addressedGate: .noul(0.8)]
         }
         d.effects = .live(d)
@@ -565,6 +568,8 @@ import Testing
         // Not in the routing call, whose answers it never moves; read only for whether the divider is asked.
         #expect(calls.first { $0.questions["route"] != nil }?.questions[RouterTools.addressedGate] == nil)
         #expect(found?.gates[RouterTools.addressedGate] == 0.8 && found?.divides == true && found?.dividesNow == false)
+        // The routing call's own score for compound comes with it, as Jev gave it.
+        #expect(found?.compoundRoute == 0.1)
     }
 
     private static func choice(_ p: [String: Double]) -> JevClient.Answer {

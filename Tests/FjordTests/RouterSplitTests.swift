@@ -586,6 +586,26 @@ import Testing
         #expect(w.f.divideRequests.count == 1 && w.entry(id3)?.parts.count == 1 && w.words(of: "local_b").last == both + "!")
     }
 
+    @Test func jevsRouteScoringCompoundAtItsBarAsksTheDividerWithTheGatesDown() async throws {
+        let w = World()
+        // Both gates down, no addressed gate, Jev's pick one session: his routing call gives compound 0.3.
+        w.f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]
+        w.f.gates = ["gate_compound": 0.6, "gate_compound2": 0.3]
+        w.f.compoundRoute = 0.3
+        w.f.division = parts(w)
+        let id = try #require(w.dispatcher.submit(both))
+        await w.finishAll(id)
+        #expect(w.f.divideRequests.count == 1 && w.entry(id)?.parts.map(\.text) == ["add the page", "rerun the build"])
+        #expect(w.dispatcher.askBacks.isEmpty)
+        // Just under it: nothing asks the divider, and Jev's pick goes, the message whole.
+        w.f.compoundRoute = 0.29
+        w.f.finished = []
+        w.f.divideRequests = []
+        let id2 = try #require(w.dispatcher.submit(both + "."))
+        await w.finishAll(id2)
+        #expect(w.f.divideRequests.isEmpty && w.entry(id2)?.parts.count == 1 && w.words(of: "local_b").last == both + ".")
+    }
+
     @Test func aCompoundTopTheDividerCantResolveIsAnAskAmongTheRestAndNeverARun() async throws {
         let w = World()
         gatesUp(w)

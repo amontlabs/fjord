@@ -70,6 +70,13 @@ extension RouterTools {
     nonisolated static let addressedGate = "gate_addressed"
     nonisolated static let addressedSure = 0.7
 
+    /// Jev's routing call itself gives `compound` this much: the divider is asked too (`Classification.divides`), with no
+    /// call of its own. With the addressed gate, 85.0% of the dev messages for several places came out fully right against
+    /// 82.5% for the gate alone; it split one everyday message plainly for Fjord and a session that one labeller read as
+    /// one place (+0.1 wrong sends per 100, 0 to +0.3; none on real moments), and caught 25 of 30 held-out Router-style
+    /// messages for several places against 20 (evals/router/v2/multi/REPORT.md, "the gates' recall", `pc30-ap70`).
+    nonisolated static let compoundRouteSure = 0.3
+
     static func addressedQuestion(_ destinations: [Destination]) -> JevClient.Question {
         let places = destinations.filter { $0.sessionID != nil }.map(\.name)
         return .structuredNoul(instructions: [

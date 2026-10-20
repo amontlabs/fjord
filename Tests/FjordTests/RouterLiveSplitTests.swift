@@ -76,6 +76,25 @@ import Testing
         #expect(other.live.division == nil && w.f.divideRequests.count == 1)
     }
 
+    @Test func jevsRouteScoringCompoundAtItsBarIsDividedLiveAsTheSendDivides() async throws {
+        let w = world()
+        gatesUp(w)
+        // Both gates down and Jev's pick one session, but his routing call gives compound 0.3: shown as the send divides.
+        w.f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]
+        w.f.gates = ["gate_compound": 0.6, "gate_compound2": 0.3]
+        w.f.compoundRoute = 0.3
+        let model = model()
+        type(both, model, w)
+        await waitUntil { model.live.division != nil }
+        #expect(model.live.chips.map(\.words) == ["add the page", "rerun the build"] && w.f.divideRequests.count == 1)
+        // Just under it: neither shown nor asked.
+        w.f.compoundRoute = 0.29
+        let other = self.model()
+        type(both + "!", other, w)
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(other.live.division == nil && w.f.divideRequests.count == 1)
+    }
+
     @Test func changedWordsTakeTheDivisionAway() async {
         let w = world()
         gatesUp(w)
