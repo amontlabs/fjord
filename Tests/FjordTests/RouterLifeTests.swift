@@ -45,14 +45,18 @@ import Testing
         #expect(life.needsOpening)
         let r9 = life.open("About tests.", at: t0)
         #expect(r9)
-        #expect(life.root == RouterRoot(through: 4, at: t0, text: "About tests.") && life.opening == "About tests.")
+        #expect(life.root == RouterRoot(through: 4, at: t0, text: "About tests.", withOpening: true) && life.opening == "About tests.")
         let again = life.open("Again.", at: t0)
         #expect(!life.needsOpening && !again)
         #expect(!SessionLife(first: 0).needsOpening)
         var later = SessionLife(first: 4)
         later.add(RouterLeaf(turn: 5, at: t0, text: "x"))
-        let r10 = later.open("Too late.", at: t0)
-        #expect(!r10)
+        // With leaves already kept it still lands (an earlier try failed), and the whole-life line is due again with it.
+        later.set(RouterRoot(through: 5, at: t0, text: "Without it."))
+        let r10 = later.open("Late.", at: t0)
+        #expect(r10 && later.root?.text == "Without it." && later.rootDue)
+        later.set(RouterRoot(through: 5, at: t0, text: "With it.", withOpening: true))
+        #expect(later.root?.text == "With it." && !later.rootDue)
     }
 
     @Test func theLinesSurviveTheFile() throws {
@@ -74,19 +78,20 @@ import Testing
 
     // MARK: The transcript
 
-    static func line(_ type: String, _ content: String, tool: Bool = false) -> String {
+    static func line(_ type: String, _ content: String, tool: Bool = false, ends: Bool = false) -> String {
         let escaped = content.replacingOccurrences(of: "\"", with: "\\\"")
         if type == "user" {
             return #"{"type":"user","uuid":"u\#(abs(content.hashValue))","message":{"role":"user","content":"\#(escaped)"}}"#
         }
         let part = tool ? #"{"type":"tool_use","id":"t","name":"Bash","input":{}}"# : #"{"type":"text","text":"\#(escaped)"}"#
-        return #"{"type":"assistant","message":{"role":"assistant","content":[\#(part)]}}"#
+        let reason = ends ? #""stop_reason":"end_turn","# : ""
+        return #"{"type":"assistant","message":{"role":"assistant",\#(reason)"content":[\#(part)]}}"#
     }
 
     static func transcript(_ turns: [(String, String)], openUser: String? = nil, openNarration: String? = nil) -> Data {
         var lines: [String] = []
         for (user, answer) in turns {
-            lines += [line("user", user), line("assistant", "", tool: true), line("assistant", answer)]
+            lines += [line("user", user), line("assistant", "", tool: true), line("assistant", answer, ends: true)]
         }
         if let openUser { lines.append(line("user", openUser)) }
         if let openNarration { lines.append(line("assistant", openNarration)) }
@@ -95,12 +100,16 @@ import Testing
 
     @Test func finishedTurnsPairYourMessageWithTheFinalAnswer() {
         let data = Self.transcript([("Fix the badge", "Fixed it."), ("Now the tests", "Tests pass.")], openUser: "And docs", openNarration: "Looking at the docs")
-        #expect(Claude.finishedTurns(tail: data, includingOpen: false) == [.init(user: "Fix the badge", answer: "Fixed it."),
+        #expect(Claude.finishedTurns(tail: data) == [.init(user: "Fix the badge", answer: "Fixed it."),
                                                                            .init(user: "Now the tests", answer: "Tests pass.")])
-        // A turn that ended on its answer counts when it is the last.
+        // A turn that ended on its answer counts when it is the last; one the transcript doesn't end doesn't, whatever the
+        // session's state says.
         let ended = Self.transcript([("Fix the badge", "Fixed it.")])
-        #expect(Claude.finishedTurns(tail: ended, includingOpen: true).count == 1)
-        #expect(Claude.finishedTurns(tail: ended, includingOpen: false).isEmpty)
+        #expect(Claude.finishedTurns(tail: ended).count == 1)
+        let next = ended + Data(("\n" + Self.line("user", "Colour it") + "\n" + Self.line("assistant", "Colouring")).utf8)
+        #expect(Claude.finishedTurns(tail: next).count == 1)
+        let narrated = Self.transcript([("Fix the badge", "Fixed it.")], openUser: "Colour it", openNarration: "Colouring")
+        #expect(Claude.finishedTurns(tail: narrated).count == 1)
     }
 
     // MARK: The writer
@@ -232,7 +241,100 @@ import Testing
         store.claudeSessions[id]?.completedTurns = 2
         store.routerLife.sync(store: store)
         await store.routerLife.idle()
-        #expect(store.router.lives[id]?.leaves.map(\.turn) == [2])
+        // Turn 1 is written too, in order, now that its turn is known to have gone unwritten.
+        #expect(store.router.lives[id]?.leaves.map(\.turn) == [1, 2])
+    }
+
+    @MainActor @Test func everyTurnFinishedMeanwhileGetsItsLeafInOrderBeforeTheWholeLifeLine() async throws {
+        let store = store()
+        let calls = Calls()
+        writer(store, calls)
+        let id = working(store, turns: 0)
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        // Three turns finish before the next look.
+        calls.data = Self.transcript([("One", "Did one."), ("Two", "Did two."), ("Three", "Did three.")])
+        store.claudeSessions[id]?.completedTurns = 3
+        store.claudeSessions[id]?.running = false
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        let life = try #require(store.router.lives[id])
+        #expect(life.leaves.map(\.turn) == [1, 2, 3] && life.root?.through == 3)
+        #expect(calls.contexts.count == 4)
+        #expect(calls.contexts[0].contains("Did one.") && calls.contexts[1].contains("Did two.") && calls.contexts[2].contains("Did three."))
+        #expect(calls.contexts[3].contains("Its turns so far") && calls.contexts[3].contains("turn 1:") && calls.contexts[3].contains("turn 3:"))
+    }
+
+    @MainActor @Test func aFailedOpeningIsTriedAgainAtTheNextLookAndTheWholeLifeLineGainsIt() async throws {
+        let store = store()
+        let calls = Calls()
+        writer(store, calls)
+        calls.fail = true
+        calls.data = Self.transcript([("Add a badge", "Added.")])
+        let id = working(store, turns: 1)
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        store.claudeSessions[id]?.running = false
+        #expect(store.router.lives[id]?.opening == nil && store.router.lives[id]?.first == 1)
+        // A turn finishes and its leaf lands while the opening still fails (the model is back for leaves only).
+        calls.fail = false
+        let runner = store.routerLife.runner
+        store.routerLife.runner = { system, context, schema in
+            if context.contains("Its conversation so far") { throw RouterTools.Failure("down") }
+            return try await runner!(system, context, schema)
+        }
+        calls.data = Self.transcript([("Add a badge", "Added."), ("Colour it", "Coloured.")])
+        store.claudeSessions[id]?.completedTurns = 2
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        var life = try #require(store.router.lives[id])
+        #expect(life.leaves.map(\.turn) == [2] && life.opening == nil && life.root?.withOpening != true)
+        // The next look, with no turn finished: the opening is tried again, lands, and the whole-life line is written again with it.
+        store.routerLife.runner = runner
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        life = try #require(store.router.lives[id])
+        #expect(life.opening == "Opening line." && life.leaves.map(\.turn) == [2] && life.root?.withOpening == true)
+        #expect(calls.contexts.last?.contains("before the turns below: Opening line.") == true)
+        // The opening covers the turn it had, not the one after.
+        let opening = try #require(calls.contexts.first { $0.contains("Its conversation so far") })
+        #expect(opening.contains("Add a badge") && !opening.contains("Colour it"))
+    }
+
+    @MainActor @Test func aNextTurnAlreadyInTheFileIsNotTakenForTheFinishedOne() async throws {
+        let store = store()
+        let calls = Calls()
+        writer(store, calls)
+        let id = working(store, turns: 0)
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        // Turn 1 finished; turn 2's message and narration are in the file before the session's state moved on.
+        calls.data = Self.transcript([("One", "Did one.")], openUser: "Two", openNarration: "Starting two")
+        store.claudeSessions[id]?.completedTurns = 1
+        store.claudeSessions[id]?.running = false
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        #expect(calls.contexts.count == 2 && calls.contexts[0].contains("Did one.") && !calls.contexts[0].contains("Starting two"))
+        // The state says turn 2 ended before the file does: what is read of it is never the unfinished turn's narration.
+        store.claudeSessions[id]?.completedTurns = 2
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        #expect(!calls.contexts.contains { $0.contains("Starting two") || $0.contains("User: Two") })
+    }
+
+    @Test func aTurnLongerThanAnyTailIsReadFromItsOwnMessage() throws {
+        let dir = TempDir()
+        let url = dir.path("t.jsonl")
+        var text = Self.line("user", "Earlier ask") + "\n" + Self.line("assistant", "Earlier answer.", ends: true) + "\n"
+        text += Self.line("user", "The long ask") + "\n"
+        let filler = Self.line("assistant", String(repeating: "step ", count: 20_000), tool: false)
+        for _ in 0..<60 { text += filler + "\n" + Self.line("assistant", "", tool: true) + "\n" }
+        text += Self.line("assistant", "Finally done.", ends: true) + "\n"
+        try Data(text.utf8).write(to: url)
+        #expect(text.utf8.count > 5 << 20)
+        #expect(Claude.finishedTurns(at: url, last: 1) == [.init(user: "The long ask", answer: "Finally done.")])
+        #expect(Claude.finishedTurns(at: url, last: 2).map(\.user) == ["Earlier ask", "The long ask"])
+        #expect(Claude.finishedTurns(at: url, last: 9).count == 2)
     }
 
     @MainActor @Test func aSlowLeafOfAnOlderTurnNeverOverwritesANewerOne() async throws {

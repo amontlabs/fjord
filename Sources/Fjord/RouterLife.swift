@@ -10,9 +10,11 @@ import os
 // - Its whole life: one Haiku call after each new leaf, over ALL the session's leaves, oldest first (root = f(all leaves);
 //   never a summary of the previous summary), saying what the session is about overall.
 // Each line says which turn it reaches; a write for an older turn than what is stored is dropped. Leaves are only ever
-// appended: they are the Router's memory of the session. A session already open when it is first seen has no leaves: its
-// whole-life line is written once from its transcript (the opening), and leaves go forward from its next finished turn;
-// no leaf is made for a past one. Only sessions the Router shows are followed, from the moment it first shows them. The Brief writer reads both lines (RouterDigestWriter.swift); the rows show them.
+// appended: they are the Router's memory of the session. Every finished turn without a leaf gets one, in order, before
+// the whole-life line is written. A session already open when it is first seen has no leaves for the turns it had then:
+// its whole-life line is written once from its transcript (the opening), tried again until it lands, and leaves go
+// forward from its next finished turn; no leaf is made for a past one. A turn is finished when its transcript says so
+// (the last answer ends it), never because the session's state says it is. Only sessions the Router shows are followed, from the moment it first shows them. The Brief writer reads both lines (RouterDigestWriter.swift); the rows show them.
 // Their words follow how you asked the Router to write to you (Settings), like every other Haiku text of the Router's.
 
 /// One finished turn of a session in one line, written when it finished.
@@ -29,6 +31,8 @@ struct RouterRoot: Codable, Equatable, Hashable, Sendable {
     var through: Int
     var at: Date
     var text: String
+    /// Whether the opening was among what it was written from (nil in files from before: no).
+    var withOpening: Bool?
 }
 
 /// A session's two lines and the leaves behind them.
@@ -44,10 +48,13 @@ struct SessionLife: Codable, Equatable, Sendable {
 
     /// The latest turn something of it is kept for.
     var covered: Int { max(first, leaves.last?.turn ?? 0) }
-    /// Open with finished turns and nothing written of them yet.
-    var needsOpening: Bool { first > 0 && opening == nil && leaves.isEmpty && root == nil }
-    /// A leaf the whole-life line doesn't reach yet.
-    var rootDue: Bool { leaves.last.map { $0.turn > (root?.through ?? 0) } ?? false }
+    /// Open with finished turns and no opening line yet (leaves or not: they don't make up for the turns before them).
+    var needsOpening: Bool { first > 0 && opening == nil }
+    /// A leaf the whole-life line doesn't reach yet, or an opening it was written without.
+    var rootDue: Bool {
+        guard let last = leaves.last else { return false }
+        return last.turn > (root?.through ?? 0) || (opening != nil && root?.withOpening != true)
+    }
 
     /// Appends a leaf, unless one of that turn or a later one is kept already. Whether it was kept.
     @discardableResult mutating func add(_ leaf: RouterLeaf) -> Bool {
@@ -56,18 +63,21 @@ struct SessionLife: Codable, Equatable, Sendable {
         return true
     }
 
-    /// Takes a whole-life line, unless one reaching as far or further is kept. Whether it was kept.
+    /// Takes a whole-life line, unless one reaching as far or further is kept (one reaching as far but written with the
+    /// opening replaces one written without). Whether it was kept.
     @discardableResult mutating func set(_ new: RouterRoot) -> Bool {
-        guard new.through > (root?.through ?? 0) else { return false }
+        let through = root?.through ?? 0
+        guard new.through > through || (new.through == through && new.withOpening == true && root?.withOpening != true) else { return false }
         root = new
         return true
     }
 
-    /// Takes the opening line, while nothing else is written of the session. Whether it was kept.
+    /// Takes the opening line, while there is none. It is the whole-life line too when there is no other yet; else the
+    /// whole-life line is due again, with it. Whether it was kept.
     @discardableResult mutating func open(_ text: String, at: Date) -> Bool {
         guard needsOpening else { return false }
         opening = text
-        root = RouterRoot(through: first, at: at, text: text)
+        if root == nil { root = RouterRoot(through: first, at: at, text: text, withOpening: true) }
         return true
     }
 }
@@ -97,35 +107,68 @@ extension Claude {
         var answer: String
     }
 
-    /// The turns of a transcript, oldest first, those that ended in a text answer. `includingOpen`: the turn the transcript
-    /// ends on counts too; a session still working has only narration there, no answer yet, so it doesn't.
-    nonisolated static func finishedTurns(tail: Data, includingOpen: Bool) -> [FinishedTurn] {
+    /// The turns of a transcript, oldest first, those that ended in a text answer. A turn followed by your next message
+    /// has ended; the last one has when the transcript says so (its last entry is an assistant's that ends the turn): a
+    /// session still working has only narration there, no answer yet, and a next message of yours already in the file
+    /// starts a turn that isn't finished.
+    nonisolated static func finishedTurns(tail: Data) -> [FinishedTurn] {
         var turns: [FinishedTurn] = []
         var user: String?
         var texts: [String] = []
-        func close() {
+        var ended = false
+        func close(last: Bool) {
             let answer = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            if let user, !answer.isEmpty { turns.append(FinishedTurn(user: user, answer: answer)) }
+            if let user, !answer.isEmpty, !last || ended { turns.append(FinishedTurn(user: user, answer: answer)) }
             texts = []
         }
         for line in tail.split(separator: UInt8(ascii: "\n")) {
             let raw = Data(line)
             if let message = SessionFork.message(raw) {
-                close()
+                close(last: false)
                 user = message.text
+                ended = false
                 continue
             }
             guard let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any], obj["type"] as? String == "assistant",
                   obj["isSidechain"] as? Bool != true else { continue }
-            let parts = (obj["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+            let message = obj["message"] as? [String: Any]
+            let parts = message?["content"] as? [[String: Any]] ?? []
+            let reason = message?["stop_reason"] as? String
+            ended = reason == "end_turn" || reason == "stop_sequence"
             if parts.contains(where: { $0["type"] as? String == "tool_use" }) {
                 texts = []
             } else {
                 texts += parts.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }
             }
         }
-        if includingOpen { close() }
+        close(last: true)
         return turns
+    }
+
+    /// The last `count` finished turns of a transcript file (fewer when it has fewer), read backward a whole line at a
+    /// time until the oldest of them is found from its own message: however long a turn was, it is read from its start.
+    nonisolated static func finishedTurns(at url: URL, last count: Int) -> [FinishedTurn] {
+        guard count > 0 else { return [] }
+        var lines: [Data] = []
+        var found: [FinishedTurn] = []
+        func evaluate() {
+            var data = Data()
+            for line in lines.reversed() { data.append(line); data.append(UInt8(ascii: "\n")) }
+            found = finishedTurns(tail: data)
+        }
+        var evaluated = true
+        forEachLineBackward(of: url) { line in
+            lines.append(line)
+            evaluated = false
+            // A message of yours starts a turn: from here on the lines hold whole turns.
+            if SessionFork.message(line) != nil {
+                evaluate()
+                evaluated = true
+            }
+            return found.count < count
+        }
+        if !evaluated { evaluate() }
+        return Array(found.suffix(count))
     }
 }
 
@@ -223,15 +266,15 @@ enum RouterLifeContext {
 // MARK: - The writer
 
 /// Writes the lines, a few sessions at a time (one session's calls one after the other). It looks at what the Router shows
-/// whenever Claude's sessions are read (`Store.feedRouter`); what failed isn't tried again until a turn has finished since
-/// (a failure leaves the other lines as they were).
+/// whenever Claude's sessions are read (`Store.feedRouter`); a leaf or whole-life line that failed isn't tried again until
+/// a turn has finished since, and the opening is tried again at every look until it lands (a failure leaves the other
+/// lines as they were).
 @MainActor @Observable final class RouterLifeWriter {
     /// Sessions being written or waiting to be.
     private(set) var busy: Set<String> = []
     @ObservationIgnored private var queue: [String] = []
     @ObservationIgnored private var running = 0
     /// The turn each kind of write last failed for, by session: asked again once the session has gone past it.
-    @ObservationIgnored private var failedOpening: [String: Int] = [:]
     @ObservationIgnored private var failedLeaf: [String: Int] = [:]
     @ObservationIgnored private var failedRoot: [String: Int] = [:]
     /// Bumped when the Router is turned off: a write begun before it is dropped.
@@ -245,8 +288,6 @@ enum RouterLifeContext {
     static let timeout: TimeInterval = 30
     /// Sessions written at once; the rest wait.
     static let concurrency = 2
-    /// The end of a transcript a leaf reads: a turn's message and answer are in it unless the turn was a very long one.
-    static let tail = 1 << 20
     private static let log = Logger(subsystem: InboxLog.subsystem, category: "router")
 
     private func canWrite(_ store: Store) -> Bool {
@@ -293,10 +334,11 @@ enum RouterLifeContext {
 
     private enum Step { case opening, leaf(Int), root }
 
-    /// What a session needs written next, if anything.
-    private func next(_ session: ClaudeSession, _ life: SessionLife) -> Step? {
-        if life.needsOpening, failedOpening[session.id] != life.first { return .opening }
-        if session.completedTurns > life.covered, failedLeaf[session.id] != session.completedTurns { return .leaf(session.completedTurns) }
+    /// What a session needs written next, if anything: the opening, then the oldest turn without a leaf, then the
+    /// whole-life line. `openingFailed`: the opening has been tried in this run.
+    private func next(_ session: ClaudeSession, _ life: SessionLife, openingFailed: Bool = false) -> Step? {
+        if life.needsOpening, !openingFailed { return .opening }
+        if session.completedTurns > life.covered, failedLeaf[session.id] != session.completedTurns { return .leaf(life.covered + 1) }
         if life.rootDue, let last = life.leaves.last, failedRoot[session.id] != last.turn { return .root }
         return nil
     }
@@ -322,10 +364,11 @@ enum RouterLifeContext {
     /// One session's writes, one after the other. Whether any landed.
     private func write(_ id: String, store: Store, generation: Int) async -> Bool {
         var landed = false
-        // Each write changes what is next; it ends when nothing is, or a write failed (which is not tried again for the
-        // same turn).
+        var openingFailed = false
+        // Each write changes what is next; it ends when nothing is. A failed write is not tried again in this run (a leaf
+        // or the whole-life line, not for the same turn either).
         while generation == self.generation, store.router.enabled, let session = store.claudeSessions[id], !session.isArchived,
-              let life = store.router.lives[id], let step = next(session, life) {
+              let life = store.router.lives[id], let step = next(session, life, openingFailed: openingFailed) {
             let project = session.folderName
             let outcome: Outcome
             switch step {
@@ -336,50 +379,61 @@ enum RouterLifeContext {
             switch outcome {
             case .landed: landed = true
             case .again: continue
+            case .failed:
+                if case .opening = step { openingFailed = true }
             case .stop: return landed
             }
         }
         return landed
     }
 
-    private enum Outcome { case landed, again, stop }
+    private enum Outcome { case landed, again, failed, stop }
 
     private func call(_ system: String, _ context: String, store: Store) async throws -> String {
         try await (runner ?? RouterBriefer.haiku(store: store, model: Self.model, timeout: Self.timeout))(
             RouterStyle.prompt(system, style: store.routerStyle), context, nil)
     }
 
-    private func transcript(_ session: ClaudeSession, whole: Bool, store: Store) async -> Data? {
-        if let reader { return await reader(session, whole) }
+    /// The finished turns of a session's transcript, the last `count` of them (all when nil).
+    private func finishedTurns(_ session: ClaudeSession, last count: Int?, store: Store) async -> [Claude.FinishedTurn]? {
+        if let reader {
+            guard let data = await reader(session, count == nil) else { return nil }
+            let turns = Claude.finishedTurns(tail: data)
+            return count.map { Array(turns.suffix($0)) } ?? turns
+        }
         let guestRuntime = GuestRouterRuntime.shared
-        if guestRuntime.location(for: session.id) != nil { return guestRuntime.transcript(for: session.id)?.tail }
+        if guestRuntime.location(for: session.id) != nil {
+            return guestRuntime.transcript(for: session.id).map { Claude.finishedTurns(tail: $0.tail) }
+        }
         let reader = store.activityReader
         let cli = session.cliID
         return await Task.detached(priority: .utility) {
             guard let url = cli.flatMap({ reader.transcript($0) }) else { return nil }
-            return whole ? try? Data(contentsOf: url) : Claude.tail(of: url, bytes: Self.tail)
+            if let count { return Claude.finishedTurns(at: url, last: count) }
+            return (try? Data(contentsOf: url)).map { Claude.finishedTurns(tail: $0) }
         }.value
     }
 
-    private func fail(_ kind: ReferenceWritableKeyPath<RouterLifeWriter, [String: Int]>, _ id: String, turn: Int, _ error: Error?) -> Outcome {
-        self[keyPath: kind][id] = turn
+    private func fail(_ kind: ReferenceWritableKeyPath<RouterLifeWriter, [String: Int]>?, _ id: String, turn: Int, _ error: Error?) -> Outcome {
+        if let kind { self[keyPath: kind][id] = turn }
         Self.log.notice("No line for a session: \(error?.localizedDescription ?? "nothing to read", privacy: .public)")
-        return .stop
+        return .failed
     }
 
     private func writeOpening(_ session: ClaudeSession, project: String, store: Store, generation: Int) async -> Outcome {
         let first = store.router.lives[session.id]?.first ?? 0
-        let running = session.running
-        guard let data = await transcript(session, whole: true, store: store) else { return fail(\.failedOpening, session.id, turn: first, nil) }
-        let turns = Claude.finishedTurns(tail: data, includingOpen: !running)
-        guard !turns.isEmpty else { return fail(\.failedOpening, session.id, turn: first, nil) }
+        let done = session.completedTurns
+        guard let all = await finishedTurns(session, last: nil, store: store) else { return fail(nil, session.id, turn: first, nil) }
+        // The turns it had finished when first seen: numbered back from the session's latest.
+        let turns = all.enumerated().filter { done - (all.count - 1 - $0.offset) <= first }.map(\.element)
+        guard !turns.isEmpty else { return fail(nil, session.id, turn: first, nil) }
         let text: String
         do {
             let answer = try await call(RouterLifeContext.openingRules, RouterLifeContext.opening(title: session.title, project: project, turns: turns), store: store)
             guard let cleaned = RouterLifeContext.clean(answer, sentences: 2) else { throw RouterTools.Failure("Haiku's answer was empty") }
             text = cleaned
         } catch {
-            return fail(\.failedOpening, session.id, turn: first, error)
+            return fail(nil, session.id, turn: first, error)
         }
         await store.motionGate.still()
         guard generation == self.generation, store.router.enabled else { return .stop }
@@ -389,34 +443,38 @@ enum RouterLifeContext {
         return .landed
     }
 
+    /// The leaf of the oldest turn without one (`turn`), read from the transcript by that turn's own message and answer.
     private func writeLeaf(_ session: ClaudeSession, turn: Int, project: String, store: Store, generation: Int) async -> Outcome {
-        let running = session.running
-        guard let data = await transcript(session, whole: false, store: store) else { return fail(\.failedLeaf, session.id, turn: turn, nil) }
-        // The turn must still be the session's latest, and the session still as it was (running or not) when it was read:
-        // a turn that ended meanwhile, or began, would have been read as another one. Looked at again then.
-        guard let now = store.claudeSessions[session.id], now.completedTurns == turn, now.running == running else { return .again }
-        guard let last = Claude.finishedTurns(tail: data, includingOpen: !running).last else {
-            return fail(\.failedLeaf, session.id, turn: turn, nil)
+        let done = session.completedTurns
+        guard let turns = await finishedTurns(session, last: done - turn + 1, store: store) else {
+            return fail(\.failedLeaf, session.id, turn: done, nil)
         }
+        // The turns are numbered back from the session's latest, which must not have moved while they were read. A
+        // transcript with fewer finished turns than the session counted starts at the oldest it has.
+        guard let now = store.claudeSessions[session.id], now.completedTurns == done else { return .again }
+        let oldest = done - turns.count + 1
+        let number = max(turn, oldest)
+        guard number <= done, turns.indices.contains(number - oldest) else { return fail(\.failedLeaf, session.id, turn: done, nil) }
         let text: String
         do {
-            let answer = try await call(RouterLifeContext.leafRules, RouterLifeContext.leaf(title: session.title, project: project, turn: last), store: store)
+            let answer = try await call(RouterLifeContext.leafRules, RouterLifeContext.leaf(title: session.title, project: project, turn: turns[number - oldest]), store: store)
             guard let cleaned = RouterLifeContext.clean(answer, sentences: 1) else { throw RouterTools.Failure("Haiku's answer was empty") }
             text = cleaned
         } catch {
-            return fail(\.failedLeaf, session.id, turn: turn, error)
+            return fail(\.failedLeaf, session.id, turn: done, error)
         }
         await store.motionGate.still()
         guard generation == self.generation, store.router.enabled else { return .stop }
         var state = store.router
         // An older turn than one kept is dropped here, whatever came meanwhile.
-        guard state.lives[session.id]?.add(RouterLeaf(turn: turn, at: Date(), text: text)) == true else { return .again }
+        guard state.lives[session.id]?.add(RouterLeaf(turn: number, at: Date(), text: text)) == true else { return .again }
         store.router = state
         return .landed
     }
 
     private func writeRoot(_ session: ClaudeSession, life: SessionLife, project: String, store: Store, generation: Int) async -> Outcome {
         guard let through = life.leaves.last?.turn else { return .stop }
+        let withOpening = life.opening != nil
         let text: String
         do {
             let context = RouterLifeContext.root(title: session.title, project: project, opening: life.opening, leaves: life.leaves)
@@ -429,7 +487,7 @@ enum RouterLifeContext {
         await store.motionGate.still()
         guard generation == self.generation, store.router.enabled else { return .stop }
         var state = store.router
-        guard state.lives[session.id]?.set(RouterRoot(through: through, at: Date(), text: text)) == true else { return .again }
+        guard state.lives[session.id]?.set(RouterRoot(through: through, at: Date(), text: text, withOpening: withOpening)) == true else { return .again }
         store.router = state
         return .landed
     }
