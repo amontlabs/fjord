@@ -311,6 +311,17 @@ enum AppWindowShots {
             model.summarizer.runner = { _ in try await Task.sleep(for: .seconds(3600)); return "" }
             if let last = rows.last { model.summarizer.request(last.id, store: store) }
         }),
+        // Every session with its two lines (RouterLife.swift): what it is about overall, and what its latest turn did.
+        Shot(name: "router-session-lines", destination: { _ in .router }, size: CGSize(width: 1500, height: 1400), compose: { model, store in
+            Demo.routerTriage(store)
+            routerLines(store)
+            for zone in RouterZone.allCases { model.setFolded(zone, false) }
+        }),
+        Shot(name: "router-session-lines-narrow", destination: { _ in .router }, size: CGSize(width: 900, height: 1400), compose: { model, store in
+            Demo.routerTriage(store)
+            routerLines(store)
+            for zone in RouterZone.allCases { model.setFolded(zone, false) }
+        }),
         Shot(name: "router-replying-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
             store.router.cards = store.router.cards.map { var c = $0; if c.isOpen { c.addressedAt = Date(); c.addressedBy = .you }; return c }
             if let card = store.routerPage.history.last(where: { if case .card = $0 { true } else { false } }) {
@@ -909,6 +920,52 @@ enum AppWindowShots {
     }
 
     /// An archive, a reopen and a mute as the page's buttons do them: applied, in the history with Revert.
+    /// The demo's sessions with demo lines: a whole-life line each, and a latest-turn line for most.
+    private static func routerLines(_ store: Store) {
+        for id in ["local_demo-transfer", "local_demo-linux"] { store.claudeSessions[id]?.running = true }
+        let whole = [
+            "local_demo-lookout": "Adding completion notifications to Fjord: banners when a session finishes, then tuning when they stay quiet.",
+            "local_demo-ci": "Finding why the sandbox tests fail only in CI, and getting the pipeline green again.",
+            "local_demo-transfer": "Moving the repository to a new owner: remotes, branch protections and the old fork's clean-up.",
+            "local_demo-linux": "Running LCU's JavaScript sandbox on Linux guests, starting from the storage layout.",
+            "local_demo-silo-guest": "Rebasing the guest agent branch onto main before the v0.9 release.",
+            "local_demo-silo-rel": "Cutting Silo v0.9: changelog, signing, and waiting on the release workflow.",
+            "local_demo-site-copy": "Writing the landing page copy: headline options, then the sections under it.",
+            "local_demo-zig": "Making std.fs walk symlinks, with tests for the edge cases.",
+            "local_demo-release": "Shipping Fjord 2.4: the build, the release notes and the App Store submission.",
+            "local_demo-api": "Adding a rate limiter to the public API, per key, with a test for the burst case.",
+            "local_demo-calc": "Reading the calculator's display reliably in LCU, so its tests can assert on it.",
+            "local_demo-theme": "Fixing the Router's theme so dark and Claude themes stay legible.",
+            "local_demo-login": "Fixing the login redirect that drops the return URL, then waiting on CI.",
+            "local_demo-docs": "Redesigning the docs site: navigation, search and the getting-started page.",
+            "local_demo-schema": "Migrating the schema in steps without downtime.",
+            "local_demo-bump": "Bumping the SDK across the packages, waiting on CI for the result.",
+        ]
+        let latest = [
+            "local_demo-lookout": "Wired the badge to the unread count and started the test suite.",
+            "local_demo-ci": "Fixed the flaky sandbox test; CI is green again.",
+            "local_demo-transfer": "Added the new remote and asked who should own the old fork.",
+            "local_demo-silo-guest": "Rebased cleanly, but needs your OK to force-push.",
+            "local_demo-silo-rel": "Pushed the tag; the release workflow is running.",
+            "local_demo-site-copy": "Wrote three headline options for the landing page.",
+            "local_demo-zig": "Added the symlink walk and one test; asks where the second belongs.",
+            "local_demo-release": "Built 2.4 and wrote the notes; needs your OK to publish.",
+            "local_demo-api": "Wrote the limiter and asks whether the limit is per key or per IP.",
+            "local_demo-calc": "Couldn't read the display after three tries.",
+            "local_demo-theme": "Fixed the contrast and opened a PR.",
+            "local_demo-login": "Fixed the redirect and pushed; CI is running.",
+            "local_demo-docs": "Rebuilt the navigation; says it works but didn't run the site.",
+        ]
+        var state = store.router
+        for (id, text) in whole {
+            var life = SessionLife(first: 3)
+            life.open(text, at: Date().addingTimeInterval(-7200))
+            if let line = latest[id] { life.add(RouterLeaf(turn: 4, at: Date().addingTimeInterval(-300), text: line)) }
+            state.lives[id] = life
+        }
+        store.router = state
+    }
+
     private static func routerActions(_ store: Store, model: RouterModel) {
         Demo.routerBusyDay(store)
         store.router.enabled = true

@@ -2304,6 +2304,7 @@ struct WorkingCard: View, Equatable {
             }
             .canvasHeader()
             if !unanswered.isEmpty { UnansweredLine(questions: unanswered) }
+            SessionLinesView(store: store, sessionID: row.id).padding(.trailing, 8)
             if expanded { details } else if let summary { WorkingSummary(summary: summary) }
             if let error = summarizer.errors[row.id] {
                 Text(error).cdsText((12, 16), .regular, CDS.Fill.warning).lineLimit(2).padding(.leading, 26)
@@ -2490,6 +2491,7 @@ struct WaitingCard: View, Equatable {
                     .padding(.leading, 26).padding(.trailing, 8)
                     .accessibilityHidden(true)
             }
+            SessionLinesView(store: store, sessionID: card.sessionID).padding(.trailing, 8)
             if expanded {
                 CDSProse(text: card.text, color: CDS.Text.secondary, inset: false)
                     .padding(.leading, 26).padding(.trailing, 8).padding(.top, 4)
@@ -2691,6 +2693,9 @@ struct CardView: View, Equatable {
                     .padding(.horizontal, 14).padding(.bottom, expanded ? 4 : 7).padding(.top, -3)
                     .padding(.leading, wide ? 28 : 0)
             }
+            SessionLinesView(store: store, sessionID: card.sessionID)
+                .padding(.horizontal, 14).padding(.bottom, expanded ? 4 : 7).padding(.top, -3)
+                .padding(.leading, wide ? 28 : 0)
             let without = card.wentAheadWithout
             if !without.isEmpty {
                 Text(Self.wentAhead(without)).cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(expanded ? nil : 2)
