@@ -85,4 +85,62 @@ extension Claude {
             return false
         }
     }
+
+    /// The events that say a command started under a process: it forks (`NOTE_FORK`), and each new child executes
+    /// (`NOTE_EXEC`), which is when the child's arguments become the command's. `check` runs on every event, and once
+    /// after each child is armed, since a child can have executed before its source was (posix_spawn forks and execs in
+    /// one step). Cancel it when nothing is waiting.
+    final class CommandWatch: @unchecked Sendable {
+        private let pid: Int32
+        private let queue = DispatchQueue(label: "fjord.claude.command-watch", qos: .utility)
+        private let check: @Sendable () -> Void
+        private let children: @Sendable (Int32) -> [Int32]
+        private var fork: DispatchSourceProcess?
+        private var execs: [Int32: DispatchSourceProcess] = [:]
+        private var cancelled = false
+
+        init(pid: Int32, children: @escaping @Sendable (Int32) -> [Int32] = ProcessLister.system.children,
+             check: @escaping @Sendable () -> Void) {
+            self.pid = pid
+            self.children = children
+            self.check = check
+            queue.async { [self] in
+                guard !cancelled else { return }
+                let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .fork, queue: queue)
+                source.setEventHandler { [weak self] in self?.armChildren() }
+                source.resume()
+                fork = source
+                // The command may have started before the source was armed.
+                armChildren()
+            }
+        }
+
+        private func armChildren() {
+            guard !cancelled else { return }
+            for child in children(pid) where execs[child] == nil {
+                let source = DispatchSource.makeProcessSource(identifier: child, eventMask: [.exec, .exit], queue: queue)
+                source.setEventHandler { [weak self, weak source] in
+                    guard let self, !self.cancelled else { return }
+                    if let source, source.data.contains(.exit) {
+                        source.cancel()
+                        self.execs[child] = nil
+                    }
+                    self.check()
+                }
+                source.resume()
+                execs[child] = source
+            }
+            check()
+        }
+
+        func cancel() {
+            queue.async { [self] in
+                cancelled = true
+                fork?.cancel()
+                fork = nil
+                execs.values.forEach { $0.cancel() }
+                execs = [:]
+            }
+        }
+    }
 }

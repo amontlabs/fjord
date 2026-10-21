@@ -214,7 +214,7 @@ enum Claude {
         private var processes: Claude.ProcessLister = .system
         /// The Bash prompts still pending, by session, for the check below.
         private var watching: [String: [Claude.PermissionNote]] = [:]
-        private var watchTimer: DispatchSourceTimer?
+        private var watches: [String: Claude.CommandWatch] = [:]
 
         private struct Cached {
             var modified: Date
@@ -262,37 +262,30 @@ enum Claude {
             }
         }
 
-        /// Keeps a one-second look going while a Bash prompt is pending, and stops it when none is. Claude Code sends no
-        /// event when a prompt is approved and the kernel reports no new process's arguments (a fork is announced before
-        /// its exec, and there is no way to follow a process's children), so the process table has to be looked at; the
-        /// look runs only for a pending note. Deleting the note wakes the folder watcher, which refreshes the activity.
-        /// Holds `lock`.
+        /// Watches a session's Claude Code process while a Bash prompt is pending for it (`Claude.CommandWatch`), and stops
+        /// when none is. Claude Code sends no event when a prompt is approved; the approved command starting is the sign,
+        /// and the system reports it as the process forking and the child executing. Deleting the note wakes the folder
+        /// watcher, which refreshes the activity. Holds `lock`.
         private func watch(_ cliID: String, _ notes: [Claude.PermissionNote]) {
             let bash = notes.filter { $0.tool == "Bash" }
             watching[cliID] = bash.isEmpty ? nil : bash
-            if watching.isEmpty {
-                watchTimer?.cancel()
-                watchTimer = nil
-            } else if watchTimer == nil {
-                let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "fjord.claude.permission-watch", qos: .utility))
-                timer.schedule(deadline: .now() + 1, repeating: 1)
-                timer.setEventHandler { [weak self] in self?.checkWatched() }
-                timer.resume()
-                watchTimer = timer
+            if bash.isEmpty {
+                watches.removeValue(forKey: cliID)?.cancel()
+            } else if watches[cliID] == nil, let pid = pid(of: cliID) {
+                watches[cliID] = Claude.CommandWatch(pid: pid) { [weak self] in self?.checkWatched(cliID) }
             }
         }
 
-        private func checkWatched() {
+        private func checkWatched(_ cliID: String) {
             lock.lock()
-            let pending = watching
+            let notes = watching[cliID] ?? []
             let processes = processes
             lock.unlock()
-            for (cliID, notes) in pending {
-                let left = Claude.clearingStartedCommands(notes, pid: pid(of: cliID), processes: processes)
-                lock.lock()
-                if left.count != notes.count { watch(cliID, left) }
-                lock.unlock()
-            }
+            guard !notes.isEmpty else { return }
+            let left = Claude.clearingStartedCommands(notes, pid: pid(of: cliID), processes: processes)
+            lock.lock()
+            if left.count != notes.count { watch(cliID, left) }
+            lock.unlock()
         }
 
         func activity(for cliID: String) -> ClaudeActivity? {

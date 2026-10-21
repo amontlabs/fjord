@@ -92,4 +92,28 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: live.path))
         #expect(!FileManager.default.fileExists(atPath: gone.path))
     }
+
+    @Test func aSpawnedChildRunningTheCommandWakesTheWatch() async throws {
+        let fired = Fired()
+        let me = getpid()
+        let watch = Claude.CommandWatch(pid: me) {
+            if Claude.commandStarted("31338", after: 0, under: me, processes: .system) { fired.set() }
+        }
+        defer { watch.cancel() }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        child.arguments = ["-c", "sleep 31338 && true"]
+        try child.run()
+        defer { child.terminate() }
+        for _ in 0..<100 where !fired.value { try await Task.sleep(nanoseconds: 50_000_000) }
+        #expect(fired.value)
+    }
+}
+
+private final class Fired: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return on }
+    func set() { lock.lock(); on = true; lock.unlock() }
 }
