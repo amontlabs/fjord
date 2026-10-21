@@ -209,6 +209,12 @@ enum Claude {
         /// Where Fjord's hook leaves a note when an ordinary tool's permission prompt opens (`RouterPaths.permissions`); nil
         /// reads none.
         private var permissions: URL?
+        /// Claude Code's registry of live processes (`~/.claude/sessions`): which process runs which session.
+        private var registry: URL?
+        private var processes: Claude.ProcessLister = .system
+        /// The Bash prompts still pending, by session, for the check below.
+        private var watching: [String: [Claude.PermissionNote]] = [:]
+        private var watchTimer: DispatchSourceTimer?
 
         private struct Cached {
             var modified: Date
@@ -221,10 +227,72 @@ enum Claude {
 
         init(permissions: URL? = nil) { self.permissions = permissions }
 
-        func setPermissions(_ url: URL?) {
+        func setPermissions(_ url: URL?, registry: URL? = nil, processes: Claude.ProcessLister = .system) {
             lock.lock()
             permissions = url
+            self.registry = registry
+            self.processes = processes
             lock.unlock()
+        }
+
+        /// The process running a session, by Claude Code's registry.
+        private func pid(of cliID: String) -> Int32? {
+            guard let registry else { return nil }
+            return ClaudePeers.registry(dir: registry)
+                .compactMap { pid, entries in entries.first { $0.sessionID == cliID }.map { (pid, $0.startedAt ?? 0) } }
+                .max { $0.1 < $1.1 }?.0
+        }
+
+        /// Removes the notes of sessions with no live process: a session that ended or was deleted answers no prompt.
+        func pruneNotes() {
+            lock.lock()
+            let permissions = permissions, registry = registry
+            lock.unlock()
+            guard let permissions, let registry,
+                  let files = try? FileManager.default.contentsOfDirectory(at: permissions, includingPropertiesForKeys: nil),
+                  files.contains(where: { $0.pathExtension == "json" }),
+                  (try? FileManager.default.contentsOfDirectory(at: registry, includingPropertiesForKeys: nil)) != nil else { return }
+            let live = Set(ClaudePeers.registry(dir: registry).values.flatMap { $0.map { FormHook.safe($0.sessionID) } })
+            for file in files where file.pathExtension == "json" {
+                let name = file.lastPathComponent
+                // `<session>-<ms>-<pid>.json`: the session id has no more than the dashes of a UUID, so cut the last two.
+                let parts = name.dropLast(5).split(separator: "-", omittingEmptySubsequences: false)
+                guard parts.count > 2 else { continue }
+                if !live.contains(parts.dropLast(2).joined(separator: "-")) { try? FileManager.default.removeItem(at: file) }
+            }
+        }
+
+        /// Keeps a one-second look going while a Bash prompt is pending, and stops it when none is. Claude Code sends no
+        /// event when a prompt is approved and the kernel reports no new process's arguments (a fork is announced before
+        /// its exec, and there is no way to follow a process's children), so the process table has to be looked at; the
+        /// look runs only for a pending note. Deleting the note wakes the folder watcher, which refreshes the activity.
+        /// Holds `lock`.
+        private func watch(_ cliID: String, _ notes: [Claude.PermissionNote]) {
+            let bash = notes.filter { $0.tool == "Bash" }
+            watching[cliID] = bash.isEmpty ? nil : bash
+            if watching.isEmpty {
+                watchTimer?.cancel()
+                watchTimer = nil
+            } else if watchTimer == nil {
+                let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "fjord.claude.permission-watch", qos: .utility))
+                timer.schedule(deadline: .now() + 1, repeating: 1)
+                timer.setEventHandler { [weak self] in self?.checkWatched() }
+                timer.resume()
+                watchTimer = timer
+            }
+        }
+
+        private func checkWatched() {
+            lock.lock()
+            let pending = watching
+            let processes = processes
+            lock.unlock()
+            for (cliID, notes) in pending {
+                let left = Claude.clearingStartedCommands(notes, pid: pid(of: cliID), processes: processes)
+                lock.lock()
+                if left.count != notes.count { watch(cliID, left) }
+                lock.unlock()
+            }
         }
 
         func activity(for cliID: String) -> ClaudeActivity? {
@@ -242,7 +310,11 @@ enum Claude {
                 // Force the notes to be looked at again against this tail.
                 entry.notes = ["\u{0}"]
             }
-            let notes = permissions.map { Claude.PermissionNote.read(in: $0, session: cliID) } ?? []
+            var notes = permissions.map { Claude.PermissionNote.read(in: $0, session: cliID) } ?? []
+            if notes.contains(where: { $0.tool == "Bash" }) {
+                notes = Claude.clearingStartedCommands(notes, pid: pid(of: cliID), processes: processes)
+            }
+            watch(cliID, notes)
             let names = notes.map(\.file.lastPathComponent)
             if entry.notes != names {
                 entry.notes = names
@@ -1002,7 +1074,7 @@ final class ClaudeFeed: @unchecked Sendable {
             }
         }
         // A permission prompt opening is noted by the hook in this folder: the activity is read again then.
-        activityReader.setPermissions(paths?.permissions)
+        activityReader.setPermissions(paths?.permissions, registry: paths?.claudeDir.appendingPathComponent("sessions", isDirectory: true))
         permissionWatcher = paths.map { paths in
             try? FileManager.default.createDirectory(at: paths.permissions, withIntermediateDirectories: true,
                                                       attributes: [.posixPermissions: 0o700])
@@ -1232,6 +1304,7 @@ final class ClaudeFeed: @unchecked Sendable {
         let sessions = live ?? []
         var activity: [String: ClaudeActivity] = [:]
         var watched = Set<String>()
+        activityReader.pruneNotes()
         for session in sessions where session.running {
             guard let cli = session.cliID else { continue }
             watched.insert(cli)
