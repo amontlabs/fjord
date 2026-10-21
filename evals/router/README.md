@@ -115,3 +115,30 @@ personal.py): after ~50 labels, late real wrong sends 4.5% → 2.3% in a time-or
 Two live keys in your transcripts (an OpenRouter and a z.ai key) reached TypeSafe in eval requests before redaction
 caught them; real/boards.py now also strips any long letters-and-digits token, and Lookout redacts the same way
 before anything goes to Jev (RouterTools.redacted).
+
+## A whole-life line per session (2026-10-21, explore/life.py)
+
+UniiChat keeps a chat as a tree of one-line summaries whose root says what the whole conversation has been about. Here
+each session option also carries `what it has been about overall`: one line (≤ 300 chars) Haiku wrote from the
+session's turns before the moment (earlier turns' messages and answers, the current turn's message alone), keyed by
+session and turn (1,145 lines for the real boards, in gitignored real/data/life.json). Everything else is the ship form
+(`combo-o` + final3); the written sets are no longer in the repo, so both formats are refit on realA + styleA and paired
+per case on all 610 labelled real moments (95% intervals from a session-grouped bootstrap):
+
+| real (paired) | combo-o | combo-life | Δ |
+|---|---|---|---|
+| Jev's top-1 (no fitting involved) | 44.3 | 52.1 | +7.9 [+5.2, +10.6], 61 gained / 13 lost |
+| right sends | 35.7 | 41.6 | +5.9 [+3.3, +8.5] |
+| wrong sends | 2.8 | 3.1 | +0.3 [−0.5, +1.1] |
+| needless asks | 18.7 | 14.8 | −3.9 [−6.3, −1.6] |
+
+- Top-1 rises on clear (+9.5) and plausible (+7.1) moments alike; Jev's own ranking needs no tuning, so this holds for
+  realA too.
+- realB alone (sessions never tuned on, n=213): right 36.6 → 39.4, wrong 2.8 → 2.8, top-1 48.8 → 52.6; the right-send
+  gain there is within noise. Most of the right-send gain on all real is realA, where the weights were fit.
+- With the shipped weights unchanged the line makes Jev surer and wrong sends rise (real 2.9 → 4.4%): shipping it needs
+  a refit of RouteFusion's tables.
+- Cost: +18% input tokens (3,130 → 3,680 per call), plus a cheap-model line per session turn, which an incremental
+  tree (UniiChat's leaves merged in pairs) keeps to one short call per turn.
+- Unlike round 2's richer *recent* context (first ask, last 2 paragraphs: noise), a line about the whole session is a
+  measurable gain in ranking. The line here is written from the turns directly, an upper bound on a tree's root.
