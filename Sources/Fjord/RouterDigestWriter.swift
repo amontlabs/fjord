@@ -363,6 +363,8 @@ import os
             var todo: [Int]
             var tasks: Int
             var waitingOn: String
+            /// Its whole-life and latest-turn lines (RouterLife.swift): a new one is progress, never urgent.
+            var lines = SessionLines()
         }
 
         var urgent: Urgent
@@ -379,7 +381,7 @@ import os
                 let todo = store.claudeActivity[s.id]?.todo
                 out[s.id] = Print(urgent: urgent, progress: .init(
                     running: store.claudeSessions[s.id]?.running ?? false, turns: store.claudeSessions[s.id]?.completedTurns ?? 0,
-                    todo: todo.map { [$0.done, $0.total] } ?? [], tasks: store.claudeTasks[s.id]?.count ?? 0, waitingOn: s.waitingOn))
+                    todo: todo.map { [$0.done, $0.total] } ?? [], tasks: store.claudeTasks[s.id]?.count ?? 0, waitingOn: s.waitingOn, lines: s.lines))
             }
         }
         return out
@@ -640,6 +642,8 @@ import os
             let asks: [String]
             /// What a waiting session waits on: it can hold another session's title, so it is fenced and bounded.
             var waitingOn: String = ""
+            /// What it is about overall, and what its latest turn did (written by Haiku from the session's words: untrusted).
+            var lines = SessionLines()
             /// The open card it is shown by, if it has one.
             var card: String? = nil
         }
@@ -671,7 +675,8 @@ import os
                 var sessions: [Session] = []
                 var seen = Set<String>()
                 for item in folder.groups.flatMap(\.items) {
-                    guard seen.insert(item.sessionID).inserted, let session = Self.session(item, page: page) else { continue }
+                    guard seen.insert(item.sessionID).inserted, var session = Self.session(item, page: page) else { continue }
+                    session.lines = store.sessionLines(session.id) ?? SessionLines()
                     sessions.append(session)
                     board.projectOf[session.id] = folder.key
                     board.kinds[session.id] = session.kind
@@ -750,6 +755,10 @@ enum DigestPrompt {
     - why: one sentence saying what happened and what it means for the user.
     - changed: false when the events change nothing worth saying (then the rest is ignored).
 
+    A session may carry "whole life" (what it is about overall) and "latest turn" (what its last finished turn did): \
+    short summaries of it, there to tell the user what each session is about, not news in themselves. Use them to say \
+    what a session is, without repeating them word for word.
+
     Point at sessions with tags around a few words of the sentence, never a whole paragraph: <need s="ID">…</need> for a \
     [needs you] session, <look s="ID">…</look> for a [worth a look] one, <run s="ID">…</run> for a [working] one. Copy \
     each ID verbatim from the board: a tag with another ID is read as plain text, and a tag whose kind doesn't match the \
@@ -797,6 +806,8 @@ enum DigestPrompt {
                 if let progress = now[s.id].map({ Self.progress($0.progress) }), !progress.isEmpty { line += " (progress: \(progress))" }
                 if !s.text.isEmpty { line += " " + SessionFence.fence(String(s.text.prefix(400))) }
                 if !s.asks.isEmpty { line += " asks: " + SessionFence.fence(s.asks.joined(separator: " | ")) }
+                if let life = s.lines.life { line += " whole life: " + SessionFence.fence(String(life.prefix(400))) }
+                if let latest = s.lines.latest { line += " latest turn: " + SessionFence.fence(String(latest.prefix(400))) }
                 out.append(line)
             }
         }
@@ -855,6 +866,7 @@ enum DigestPrompt {
         if old.tasks != new.tasks { parts.append("background tasks \(old.tasks) -> \(new.tasks)") }
         if old.turns != new.turns { parts.append("turn \(old.turns) -> \(new.turns)") }
         if old.waitingOn != new.waitingOn { parts.append("waiting on something else") }
+        if old.lines != new.lines { parts.append("its summary lines changed") }
         return parts.joined(separator: ", ")
     }
 

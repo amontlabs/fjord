@@ -73,7 +73,7 @@ struct SessionLife: Codable, Equatable, Sendable {
 }
 
 /// The two lines a row shows.
-struct SessionLines: Equatable, Sendable {
+struct SessionLines: Hashable, Sendable {
     var life: String?
     var latest: String?
     var isEmpty: Bool { life == nil && latest == nil }
