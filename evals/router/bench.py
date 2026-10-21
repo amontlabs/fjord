@@ -46,11 +46,29 @@ def half(case_id):
     return "realA" if int(hashlib.sha256(sid.encode()).hexdigest(), 16) % 2 == 0 else "realB"
 
 
+_BOARDS = None
+
+
+def style_half(case):
+    """realA or realB for a Router-style case: the half of the real moment whose board it reuses (a style case is
+    written on a real board, so splitting by its own id put ~56 of 150 styleA cases on realB boards)."""
+    global _BOARDS
+    if _BOARDS is None:
+        _BOARDS = {}
+        for c in load_set("real"):
+            _BOARDS.setdefault(frozenset((s["id"], s["idle_min"]) for s in c["board"]["sessions"]), []).append(c)
+    reals = _BOARDS.get(frozenset((s["id"], s.get("idle_min")) for s in case["board"]["sessions"]))
+    if not reals:
+        return half(case["id"])
+    same = [c for c in reals if set(c["gold"]["to"]) & set(case["gold"]["to"])]
+    return half((same or reals)[0]["id"])
+
+
 def load_set(name):
     if name in ("realA", "realB"):
         return [c for c in load_set("real") if half(c["id"]) == name]
     if name in ("styleA", "styleB"):
-        return [c for c in load_set("style") if half(c["id"]) == name.replace("style", "real")]
+        return [c for c in load_set("style") if style_half(c) == name.replace("style", "real")]
     cases = []
     for f in sorted(glob.glob(str(HERE / SETS[name]))):
         for line in open(f):

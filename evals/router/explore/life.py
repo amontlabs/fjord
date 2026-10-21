@@ -86,13 +86,24 @@ def jobs():
     return out, per_case
 
 
+def haiku(prompt, max_chars=MAX_CHARS, tries=2):
+    """One line from Haiku via `claude -p` from a temp cwd (no tools, no settings, no session kept); None on failure."""
+    for _ in range(tries):
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                r = subprocess.run(["claude", "-p", "--model", "haiku", "--system-prompt", "You summarize conversations in one line.",
+                                    "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence"],
+                                   input=prompt, capture_output=True, text=True, cwd=d, timeout=180)
+        except subprocess.TimeoutExpired:
+            continue
+        line = " ".join(r.stdout.split())
+        if r.returncode == 0 and line:
+            return line[:max_chars]
+    return None
+
+
 def write_line(conv):
-    with tempfile.TemporaryDirectory() as d:
-        r = subprocess.run(["claude", "-p", "--model", "haiku", "--system-prompt", "You summarize conversations in one line.",
-                            "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence"],
-                           input=PROMPT.format(conv=conv), capture_output=True, text=True, cwd=d, timeout=180)
-    line = " ".join(r.stdout.split())
-    return line[:MAX_CHARS] if r.returncode == 0 and line else None
+    return haiku(PROMPT.format(conv=conv))
 
 
 def derive(workers=6):

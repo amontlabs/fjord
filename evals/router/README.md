@@ -122,7 +122,8 @@ UniiChat keeps a chat as a tree of one-line summaries whose root says what the w
 each session option also carries `what it has been about overall`: one line (≤ 300 chars) Haiku wrote from the
 session's turns before the moment (earlier turns' messages and answers, the current turn's message alone), keyed by
 session and turn (1,145 lines for the real boards, in gitignored real/data/life.json). Everything else is the ship form
-(`combo-o` + final3); the written sets are no longer in the repo, so both formats are refit on realA + styleA and paired
+(`combo-o` + final3); the written sets are no longer in the repo, so both formats are refit on realA + styleA (**with a
+leaky style split, corrected in the next section**: the refit numbers below, and the realB-only ones, moved a little) and paired
 per case on all 610 labelled real moments (95% intervals from a session-grouped bootstrap):
 
 | real (paired) | combo-o | combo-life | Δ |
@@ -142,3 +143,79 @@ per case on all 610 labelled real moments (95% intervals from a session-grouped 
   tree (UniiChat's leaves merged in pairs) keeps to one short call per turn.
 - Unlike round 2's richer *recent* context (first ask, last 2 paragraphs: noise), a line about the whole session is a
   measurable gain in ranking. The line here is written from the turns directly, an upper bound on a tree's root.
+
+## The same line, the production way, with controls (2026-10-21, explore/lifetree.py)
+
+Three things were wrong with the section above, all fixed here.
+1. **Style split leak.** `bench.half()` hashed each style case's own id, so 54 of the 150 `styleA` cases (the fitting
+   half) were written on boards of `realB` moments, and 106 of the 182 `styleB` ones on `realA` boards. `bench.load_set`
+   now gives a style case the half of the real moment whose board it reuses (`style_half`): styleA 201, styleB 131
+   cases. This changes every earlier table that fit or scored on `styleA`/`styleB` (the earlier tables were not re-run);
+   real splits are untouched (realA 397, realB 213).
+2. **The line wasn't the production artefact.** It was written from the raw transcript, with your own past phrasing.
+   Now: a *leaf* is one Haiku line per finished turn, from that turn alone (your message, clipped to 500 chars, and the
+   session's answer, its last 900); a *root* is one Haiku line rewritten from all the session's leaves for turns finished
+   by the moment, oldest first (first 8 + last 80 when a session has over 88 turns). The unfinished current turn gives no
+   leaf. Leaves are cached by session@turn (2,013), roots by session@turns-finished (1,166); 3,179 Haiku calls, 0 failed,
+   real/data/tree_{leaves,roots}.json (gitignored).
+3. **Missing controls.** `combo-recent` = only the latest finished turn's leaf in the same field; `combo-shuffled` = the
+   roots permuted among the session options of the same board (a derangement, seed per case), so length and style
+   match but the content belongs to another session.
+
+All formats are `combo-o` plus one field (`what it has been about overall`, ≤ 300 chars) on each session option;
+final3 weights refit per format on realA + styleA (fixed split). Real (n=610, paired, refit; Jev's top-1 involves no
+fitting; "right/wrong/needless" on realA are in-sample for the weights, so realB is the clean column):
+
+| real, all (n=610) | top-1 | right | wrong | wrong to a session | needless asks | input tokens |
+|---|---|---|---|---|---|---|
+| combo-o | 44.3 | 36.2 | 3.3 | 3.0 | 18.4 | 3,126 |
+| combo-life (direct line) | 52.1 | 42.0 | 3.0 | 2.6 | 14.3 | 3,677 |
+| combo-root (production) | 53.1 | 42.0 | 2.8 | 2.5 | 14.6 | 3,688 |
+| combo-recent (latest leaf) | 50.8 | 40.7 | 3.0 | 2.8 | 15.7 | 3,589 |
+| combo-shuffled (control) | 38.2 | 31.6 | 2.5 | 2.1 | 22.6 | 3,688 |
+
+| realB (n=213, never fit on) | top-1 | right | wrong | wrong to a session | needless asks | input tokens |
+|---|---|---|---|---|---|---|
+| combo-o | 48.8 | 37.6 | 3.3 | 3.3 | 18.3 | 2,889 |
+| combo-life | 52.6 | 39.0 | 3.3 | 3.3 | 17.8 | 3,380 |
+| combo-root | 53.5 | 40.4 | 2.3 | 2.3 | 16.9 | 3,391 |
+| combo-recent | 53.5 | 38.5 | 3.3 | 3.3 | 18.3 | 3,299 |
+| combo-shuffled | 43.7 | 31.5 | 3.3 | 3.3 | 23.5 | 3,391 |
+
+Paired vs combo-o (points, session-grouped bootstrap 95% CI; gained/lost = cases where the metric rose/fell; for
+wrong, `+` means more wrong sends):
+
+| format | real top-1 | real right | real wrong | real needless | realB top-1 | realB right |
+|---|---|---|---|---|---|---|
+| combo-life | +7.9 [+5.0, +10.5] 61/13 | +5.7 [+3.3, +8.3] | −0.3 [−1.0, +0.3] | −4.1 [−6.6, −1.8] | +3.8 [+0.4, +7.8] | +1.4 [−1.5, +4.5] |
+| combo-root | +8.9 [+5.7, +11.6] 64/10 | +5.7 [+3.2, +8.3] | −0.5 [−1.3, +0.3] | −3.8 [−6.0, −1.8] | +4.7 [+1.0, +9.0] | +2.8 [−0.8, +6.9] |
+| combo-recent | +6.6 [+3.5, +9.3] 56/16 | +4.4 [+1.8, +6.7] | −0.3 [−1.0, +0.3] | −2.6 [−4.1, −1.0] | +4.7 [+1.0, +8.8] | +0.9 [−2.5, +4.5] |
+| combo-shuffled | −6.1 [−9.9, −2.7] 21/58 | −4.6 [−6.6, −2.3] | −0.8 [−2.0, +0.2] | +4.3 [+2.2, +6.1] | −5.2 [−10.6, +0.5] | −6.1 [−9.9, −2.4] |
+
+Root against its neighbours (real top-1): vs direct line +1.0 [−1.5, +3.3]; vs recent +2.3 [−0.2, +4.8] (realB +0.0
+[−3.2, +3.2]); vs shuffled +14.9 [+11.3, +18.4]. Router-style cases (styleB, n=131) are near the ceiling (top-1 91.6)
+and show no effect for any format (root top-1 +0.0, right −2.3 [−5.6, +1.0]); styleA the same (root top-1 −1.5).
+Shipped (unrefit) weights: same ranking by top-1, but wrong sends rise with every real line (root 3.1 → 3.9, +0.8
+[0.0, +1.8]; recent +0.3), so any of them needs the RouteFusion refit. Full tables: `python3 -m explore.lifetree report`.
+
+**Verdict.**
+- root ≈ direct line: the production-way root keeps the whole gain (top-1 +8.9 vs +7.9, difference within noise). The
+  earlier result was not an artefact of the line being written from raw phrasing.
+- root vs recent: the latest turn's one-liner alone gets most of it (+6.6 of +8.9 top-1; +4.7 on realB, equal to root's).
+  Root's extra over recent is +2.3 top-1 [−0.2, +4.8], not distinguishable from zero, and 0 on realB. So most of the
+  gain is recency (what each session was just doing, in a model's words) rather than whole-life content; a whole-life
+  root adds at most a couple of points beyond it.
+- shuffled ≪ root, and below the baseline: the gain is not "more text". A line that belongs to another session actively
+  misleads Jev (top-1 −6.1, needless asks +4.3), so Jev does read the content.
+- Right sends gain (+5.7 on real) is mostly realA (in-sample weights); on realB it is +2.8 [−0.8, +6.9] for root, not
+  significant. Wrong sends do not rise under a refit (3.3 → 2.8 real, 3.3 → 2.3 realB).
+
+Cost: +18% input tokens for root (3,126 → 3,688 per call; recent +15%); at ship time one short leaf call per finished
+turn plus one root rewrite per session whenever a turn finishes (here 2,013 leaves + 1,166 roots over 610 moments, Haiku
+via `claude -p`, ~3 h wall at 8 workers on a loaded machine; each call is a few hundred input tokens, roots up to ~4k).
+
+Caveats: one Haiku sample per line (no variance across rewrites); 20 of the 610 moments share a board with another
+(style cases take the first match with the same gold); sessions with no finished turn at the moment (new ones) have no
+line in any format; shuffled leaves a board with a single described session unchanged; real/data/tree_*.json hold
+redacted (real/boards.redact) text derived lines only on this machine.
+
