@@ -12,6 +12,9 @@ Coding agents multiply what you ship, and what you have to keep up with. Fjord s
 
 </div>
 
+> [!WARNING]
+> Work in progress. Expect rough edges and breaking changes between releases.
+
 <!-- TODO: hero screenshot (the bar at the screen's edge, the window open on the Router).
      Render it with `--window-shots` / `--playground-shots` (see DEVELOPMENT.md), save it as
      docs/screenshots/hero.png, then replace this comment with:
@@ -96,6 +99,10 @@ Change any of them in Settings → Shortcuts. <kbd>⌘F</kbd> searches, and <kbd
 ## Development
 
 Building from source, tests, debug flags and releasing: [DEVELOPMENT.md](DEVELOPMENT.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ---
 
