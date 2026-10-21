@@ -107,7 +107,7 @@ Pretends to be version 0.1.0: checks for, downloads and verifies the latest rele
 
 - `--lifecycle` prints the app's idle state (sessions, how many are working, whether a window shows, Reduce Motion) for `scripts/idle-cpu.sh`.
 - `--motion-script <steps> --quit-after` plays a scripted sequence of motions and quits, for `scripts/motion-trace.sh`.
-- `--form-hook` is what Claude Code runs through `~/.claude/hooks/fjord-form.sh` when a session asks a question or wants a plan approved. Not for direct use.
+- `--form-hook` is what Claude Code runs through `~/.claude/hooks/fjord-form.sh` when a session asks a question, wants a plan approved, or opens a permission prompt for any other tool (it only notes that one, prints nothing and leaves at once). Not for direct use.
 
 ## Tooling scripts
 

@@ -213,7 +213,7 @@ extension RouterCard.Kind {
         case .done: "Done"
         case .stuck: "Stuck"
         case .asks: "Asks you"
-        case .approval: "Needs your OK"
+        case .approval, .permission: "Needs your OK"
         case .waiting: "Waiting"
         case .finish: "Finish up"
         }
@@ -226,7 +226,7 @@ extension RouterCard.Kind {
         case .done: Theme.accent
         case .stuck: Theme.red
         case .asks: Theme.amber
-        case .approval: RouterTriage.approvalTint
+        case .approval, .permission: RouterTriage.approvalTint
         case .waiting: RouterTriage.waitingTint
         case .finish: Theme.amber
         }
@@ -239,7 +239,7 @@ extension RouterCard.Kind {
         case .done: "checkmark"
         case .stuck: "exclamationmark.triangle.fill"
         case .asks: "bubble.left.and.text.bubble.right.fill"
-        case .approval: "hand.raised.fill"
+        case .approval, .permission: "hand.raised.fill"
         case .waiting: "hourglass"
         case .finish: "flag.fill"
         }

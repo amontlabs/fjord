@@ -1798,7 +1798,7 @@ struct RouterAskBack: Identifiable, Equatable {
             switch c.kind {
             case .question, .asks: title = "Answer " + name(c.title) + "’s question"
             case .plan: title = "Answer " + name(c.title) + "’s plan"
-            case .approval: title = "Answer " + name(c.title) + "’s request"
+            case .approval, .permission: title = "Answer " + name(c.title) + "’s request"
             case .done, .stuck, .waiting, .finish: title = "Send to " + name(c.title)
             }
             return .init(target: act.target, title: title, detail: "\(c.kind.label) · \(store.routerSessionProject(c.sessionID).name)")

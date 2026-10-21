@@ -12,6 +12,8 @@ struct RouterPaths: Equatable, Sendable {
 
     /// Forms the hook holds open, one file each, and the answers Fjord writes for them.
     var forms: URL { support.appendingPathComponent("forms", isDirectory: true) }
+    /// A note for each permission prompt an ordinary tool opens (see `FormHook.observe`), read by `Claude.PermissionNote`.
+    var permissions: URL { support.appendingPathComponent("permissions", isDirectory: true) }
     /// The Router process's working folder.
     var routerHome: URL { support.appendingPathComponent("router", isDirectory: true) }
     /// Fjord's Claude Code plugin, a folder marketplace Claude Code reads in place (see `ClaudePlugin`).
@@ -304,7 +306,7 @@ final class FormBridge: @unchecked Sendable {
 /// `PermissionRequest` hook on `AskUserQuestion` and `ExitPlanMode`). It leaves the form in the forms folder and waits: an
 /// answer written by Fjord is printed as the hook's decision, which answers the form like a click. If it is answered
 /// in the app first, or anything else ends the wait, it leaves quietly and the app's own form stands. It prints nothing
-/// but that one decision.
+/// but that one decision. For any other tool it only observes: it notes the prompt (`observe`) and leaves at once.
 ///
 /// A plan's decision is the one the app's own buttons give (checked against Claude Code 2.1): Approve is `allow` with the
 /// input as it came (a bare `allow` is ignored for this tool), and the session leaves plan mode as it would there; Keep
@@ -318,6 +320,8 @@ enum FormHook {
 
     struct Environment {
         var forms: URL
+        /// Where notes of ordinary tools' prompts go; beside the forms folder unless given.
+        var permissions: URL? = nil
         var input: Data
         var output: (Data) -> Void
         var pid: Int32 = getpid()
@@ -333,7 +337,7 @@ enum FormHook {
 
     /// How a run ended (the process exits 0 whichever it is).
     enum Outcome: Equatable {
-        case ignored, answered, answeredElsewhere, parentGone, disabled, stopped, timedOut, failed
+        case ignored, observed, answered, answeredElsewhere, parentGone, disabled, stopped, timedOut, failed
     }
 
     nonisolated(unsafe) static var signalled: sig_atomic_t = 0
@@ -344,7 +348,7 @@ enum FormHook {
             signal(sig) { _ in FormHook.signalled = 1 }
         }
         guard let input = readInput(fd: STDIN_FILENO, stopped: { FormHook.signalled != 0 }) else { exit(0) }
-        let env = Environment(forms: RouterPaths.unguarded.forms, input: input) { data in
+        let env = Environment(forms: RouterPaths.unguarded.forms, permissions: RouterPaths.unguarded.permissions, input: input) { data in
             FileHandle.standardOutput.write(data)
         }
         _ = run(env)
@@ -381,12 +385,12 @@ enum FormHook {
         let fm = FileManager.default
         guard let request = try? JSONSerialization.jsonObject(with: env.input) as? [String: Any],
               request["hook_event_name"] as? String == "PermissionRequest",
-              let tool = request["tool_name"] as? String, tool == questionTool || tool == planTool,
+              let tool = request["tool_name"] as? String,
               let input = request["tool_input"] as? [String: Any] else { return .ignored }
         guard fm.fileExists(atPath: env.forms.appendingPathComponent(FormBridge.marker).path) else { return .disabled }
         let session = request["session_id"] as? String ?? "unknown"
-        let safe = String(session.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }
-            .map(Character.init))
+        guard tool == questionTool || tool == planTool else { return observe(env, request: request, tool: tool, input: input) }
+        let safe = Self.safe(session)
         let started = env.now()
         let key = "\(safe.isEmpty ? "unknown" : safe)-\(Int64(started.timeIntervalSince1970 * 1000))-\(env.pid)"
         let pending = env.forms.appendingPathComponent("\(key).json")
@@ -431,6 +435,31 @@ enum FormHook {
             if env.now().timeIntervalSince(started) >= env.maxWait { cleanUp(); return .timedOut }
             env.sleep(env.interval)
         }
+    }
+
+    /// A session id as a file name's part.
+    static func safe(_ session: String) -> String {
+        String(session.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }
+            .map(Character.init))
+    }
+
+    /// An ordinary tool's permission prompt is about to show: the hook only notes it, for Fjord to read the session as
+    /// waiting on you, and leaves at once. It prints nothing, so Claude Code's own prompt goes on untouched. What ends the
+    /// wait is read from the transcript (the call's result, a denial included), not here: this process is gone by then.
+    static func observe(_ env: Environment, request: [String: Any], tool: String, input: [String: Any]) -> Outcome {
+        let session = request["session_id"] as? String ?? "unknown"
+        let safe = Self.safe(session)
+        let started = env.now()
+        let key = "\(safe.isEmpty ? "unknown" : safe)-\(Int64(started.timeIntervalSince1970 * 1000))-\(env.pid)"
+        let dir = env.permissions ?? env.forms.deletingLastPathComponent().appendingPathComponent("permissions", isDirectory: true)
+        var note: [String: Any] = [
+            "key": key, "session_id": session, "transcript_path": request["transcript_path"] as? String ?? "",
+            "tool_name": tool, "tool_input": input, "created_at": Int64(started.timeIntervalSince1970 * 1000),
+        ]
+        if let id = request["tool_use_id"] as? String, !id.isEmpty { note["tool_use_id"] = id }
+        guard let data = try? JSONSerialization.data(withJSONObject: note, options: [.sortedKeys]),
+              (try? PrivateFile.write(data, to: dir.appendingPathComponent("\(key).json"))) != nil else { return .failed }
+        return .observed
     }
 
     /// The decision for Fjord's answer file, or nil while it isn't one for this tool: a question's answers go
@@ -611,8 +640,10 @@ struct FormHookInstaller {
     /// What the settings run: the script's path, quoted for the shell if it has to be.
     var command: String { Self.quoted(script.path, onlyIfNeeded: true) }
     static let timeout = 86400
-    /// The tools the hook holds: questions, and plans to approve.
-    static let matcher = "\(FormHook.questionTool)|\(FormHook.planTool)"
+    /// The tools the hook holds: questions, and plans to approve (a guest's hook runs those alone: `formMatcher`).
+    static let formMatcher = "\(FormHook.questionTool)|\(FormHook.planTool)"
+    /// Every tool: the hook holds the two form tools and only notes the permission prompt of any other.
+    static let matcher = "*"
     static let attempts = 3
     /// Runs between computing a change and writing it (tests write to the file there, as Claude Code might).
     var beforeReplace: (() -> Void)?

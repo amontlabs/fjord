@@ -109,6 +109,17 @@ import Testing
         #expect(state.cards.first?.kind == .plan && state.cards.first?.text == "Move the cache")
     }
 
+    @Test func anOrdinaryToolsPermissionPromptMakesAPermissionCardThatEndsWithTheCall() {
+        var state = seen([session(running: true)])
+        let ask = ClaudeActivity(text: "Asks your OK to run `git push`", since: at(1), waitsForYou: true, tool: "Bash", toolUseID: "t1")
+        update(&state, [session(running: true)], activity: ["local_a": ask], now: 1)
+        #expect(state.cards.first?.kind == .permission && state.cards.first?.text == "run `git push`")
+        #expect(state.cards.first?.isOpen == true)
+        // The call's result reached the transcript: the session is thinking again.
+        update(&state, [session(running: true)], activity: ["local_a": ClaudeActivity(text: "Thinking", since: at(3))], now: 3)
+        #expect(state.cards[0].addressedBy == .answered)
+    }
+
     @Test func aNewWaitAnswersTheOldOneAndCardsItself() {
         var state = seen([session(running: true)])
         update(&state, [session(running: true)], activity: ["local_a": question(1, "First?")], now: 1)

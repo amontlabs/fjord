@@ -203,19 +203,53 @@ enum Claude {
     /// Finds transcripts and reads only their tail, again only when they changed.
     final class ActivityReader {
         private var paths: [String: URL] = [:]
-        private var cache: [URL: (Date, ClaudeActivity?)] = [:]
+        private var cache: [URL: Cached] = [:]
         /// Read from the refresh queue and (for icons) from the main thread.
         private let lock = NSLock()
+        /// Where Fjord's hook leaves a note when an ordinary tool's permission prompt opens (`RouterPaths.permissions`); nil
+        /// reads none.
+        private var permissions: URL?
+
+        private struct Cached {
+            var modified: Date
+            var activity: ClaudeActivity?
+            var calls: Claude.TailCalls
+            /// The permission notes this was merged with (their file names).
+            var notes: [String]
+            var merged: ClaudeActivity?
+        }
+
+        init(permissions: URL? = nil) { self.permissions = permissions }
+
+        func setPermissions(_ url: URL?) {
+            lock.lock()
+            permissions = url
+            lock.unlock()
+        }
 
         func activity(for cliID: String) -> ClaudeActivity? {
             guard let url = transcript(cliID) else { return nil }
             lock.lock()
             defer { lock.unlock() }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            if let cached = cache[url], cached.0 == modified { return cached.1 }
-            let activity = Claude.activity(tail: Claude.tail(of: url))
-            cache[url] = (modified, activity)
-            return activity
+            var entry: Cached
+            if let cached = cache[url], cached.modified == modified {
+                entry = cached
+            } else {
+                let tail = Claude.tail(of: url)
+                let activity = Claude.activity(tail: tail)
+                entry = Cached(modified: modified, activity: activity, calls: Claude.tailCalls(tail: tail), notes: [], merged: activity)
+                // Force the notes to be looked at again against this tail.
+                entry.notes = ["\u{0}"]
+            }
+            let notes = permissions.map { Claude.PermissionNote.read(in: $0, session: cliID) } ?? []
+            let names = notes.map(\.file.lastPathComponent)
+            if entry.notes != names {
+                entry.notes = names
+                entry.merged = Claude.mergingPermission(entry.activity, calls: entry.calls, notes: notes)
+            }
+            cache[url] = entry
+            return entry.merged
         }
 
         func transcript(_ cliID: String) -> URL? {
@@ -295,6 +329,135 @@ enum Claude {
         result?.narration = narration
         result?.todo = todo
         return result
+    }
+
+    // MARK: Permission prompts of ordinary tools
+
+    /// A tool call in a transcript's tail that has no result in it yet.
+    struct OpenCall: Hashable {
+        var id: String
+        var name: String
+        var input: NSDictionary
+        var since: Date
+    }
+
+    /// Every call in a transcript's tail, and the ids it has a result for.
+    struct TailCalls: Hashable {
+        var all: [OpenCall] = []
+        var answered: Set<String> = []
+    }
+
+    /// Reads a tail forward: every `tool_use` and `tool_result` in it.
+    static func tailCalls(tail: Data) -> TailCalls {
+        var calls: [OpenCall] = []
+        var answered = Set<String>()
+        let use = Data("tool_use".utf8), result = Data("tool_result".utf8)
+        for line in tail.split(separator: UInt8(ascii: "\n")) {
+            let raw = Data(line)
+            guard raw.range(of: use) != nil || raw.range(of: result) != nil,
+                  let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+                  let type = obj["type"] as? String, type == "assistant" || type == "user",
+                  let parts = (obj["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
+            let since = (obj["timestamp"] as? String).flatMap { try? Date($0, strategy: Self.iso) } ?? Date()
+            for part in parts {
+                switch (type, part["type"] as? String) {
+                case ("assistant", "tool_use"?):
+                    guard let id = part["id"] as? String, let name = part["name"] as? String else { continue }
+                    calls.append(OpenCall(id: id, name: name, input: (part["input"] as? NSDictionary) ?? [:], since: since))
+                case ("user", "tool_result"?):
+                    if let id = part["tool_use_id"] as? String { answered.insert(id) }
+                default: break
+                }
+            }
+        }
+        return TailCalls(all: calls, answered: answered)
+    }
+
+    /// What Fjord's hook leaves when a permission prompt opens for an ordinary tool: which call it is for. The hook only
+    /// observes (it prints no decision); the prompt is over when that call's result reaches the transcript.
+    struct PermissionNote: Hashable {
+        var file: URL
+        var tool: String
+        var input: NSDictionary
+        /// The call's id when the hook was told it.
+        var toolUseID: String?
+        var createdMs: Int64
+
+        /// Whether this note is for `call`: the id if the note has one, else the tool and the exact input.
+        func matches(_ call: OpenCall) -> Bool {
+            if let toolUseID { return toolUseID == call.id }
+            return call.name == tool && call.input.isEqual(input)
+        }
+
+        static func prefix(for session: String) -> String { FormHook.safe(session) + "-" }
+
+        /// The notes of a session, newest first.
+        static func read(in dir: URL, session: String) -> [PermissionNote] {
+            let prefix = Self.prefix(for: session)
+            let files = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix(prefix) }
+            let notes = files.compactMap { url -> PermissionNote? in
+                guard let data = try? Data(contentsOf: url),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tool = obj["tool_name"] as? String, let input = obj["tool_input"] as? NSDictionary else { return nil }
+                return PermissionNote(file: url, tool: tool, input: input, toolUseID: obj["tool_use_id"] as? String,
+                                      createdMs: (obj["created_at"] as? NSNumber)?.int64Value ?? 0)
+            }
+            return notes.sorted { ($0.createdMs, $0.file.lastPathComponent) > ($1.createdMs, $1.file.lastPathComponent) }
+        }
+    }
+
+    /// The activity as it is with the permission prompts there are: a note whose call has its result is over and is taken
+    /// away; one whose call is still open makes the session wait on you, as a question does. A session already waiting on
+    /// a question or a plan is left as it is.
+    static func mergingPermission(_ base: ClaudeActivity?, calls: TailCalls, notes: [PermissionNote]) -> ClaudeActivity? {
+        var pending: (PermissionNote, OpenCall)?
+        for note in notes {
+            // The note's call is the latest of those it matches: with its result, the prompt is over.
+            guard let call = calls.all.last(where: note.matches) else { continue }
+            if calls.answered.contains(call.id) {
+                try? FileManager.default.removeItem(at: note.file)
+            } else if pending == nil {
+                pending = (note, call)
+            }
+        }
+        guard base?.waitsForYou != true, let (note, call) = pending else { return base }
+        var merged = ClaudeActivity(text: permissionText(tool: note.tool, input: note.input as? [String: Any] ?? [:]),
+                                    since: call.since, waitsForYou: true, tool: call.name, toolUseID: call.id)
+        merged.narration = base?.narration
+        merged.todo = base?.todo
+        return merged
+    }
+
+    /// "Asks your OK to …": what the prompt is for, in a few plain words.
+    static let permissionPrefix = "Asks your OK to "
+
+    static func permissionText(tool name: String, input: [String: Any]) -> String {
+        func code(_ s: String, _ n: Int = 80) -> String {
+            let line = s.split(separator: "\n").first.map(String.init) ?? s
+            return "`" + (line.count > n ? String(line.prefix(n - 1)) + "…" : line) + "`"
+        }
+        func file(_ key: String = "file_path") -> String {
+            (input[key] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "a file"
+        }
+        let what: String
+        switch name {
+        case "Bash": what = "run " + code(input["command"] as? String ?? "a command")
+        case "Edit", "MultiEdit": what = "edit " + file()
+        case "NotebookEdit": what = "edit " + file("notebook_path")
+        case "Write": what = "write " + file()
+        case "Read": what = "read " + file()
+        case "WebFetch": what = "read " + ((input["url"] as? String).flatMap { URL(string: $0)?.host } ?? "a web page")
+        case "WebSearch": what = "search the web"
+        default:
+            if name.hasPrefix("mcp__") {
+                let parts = name.components(separatedBy: "__")
+                what = parts.count > 2 ? "use \(parts[2]) from \(parts[1])" : "use \(name)"
+            } else {
+                what = "use " + (name.isEmpty ? "a tool" : name)
+            }
+        }
+        return permissionPrefix + what
     }
 
     /// Whether the last assistant entry ends the turn. Presence can stay live while Claude waits for another message,
@@ -818,6 +981,7 @@ final class ClaudeFeed: @unchecked Sendable {
     /// Where the plugin's presence files are read from (the Router's files); nil reads none, and sessions keep the guess.
     private var presencePaths: RouterPaths?
     private var presenceWatcher: FolderWatcher?
+    private var permissionWatcher: FolderWatcher?
     /// The live presence files as of the last read, by the CLI session id.
     private var presenceRead: [String: ClaudePlugin.Presence] = [:]
 
@@ -835,6 +999,15 @@ final class ClaudeFeed: @unchecked Sendable {
         presenceWatcher = paths.map { paths in
             FolderWatcher([paths.pluginSessions], latency: 0.5) { [weak self] in
                 self?.presenceQueue.async { self?.scanPresence() }
+            }
+        }
+        // A permission prompt opening is noted by the hook in this folder: the activity is read again then.
+        activityReader.setPermissions(paths?.permissions)
+        permissionWatcher = paths.map { paths in
+            try? FileManager.default.createDirectory(at: paths.permissions, withIntermediateDirectories: true,
+                                                      attributes: [.posixPermissions: 0o700])
+            return FolderWatcher([paths.permissions], latency: 0.2) {
+                DispatchQueue.main.async { MainActor.assumeIsolated { changed() } }
             }
         }
     }

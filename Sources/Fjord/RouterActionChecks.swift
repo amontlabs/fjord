@@ -448,5 +448,5 @@ enum RouterActionChecks {
 
 extension RouterTools {
     /// The kinds of card that wait on you.
-    static let waitsOnYou: Set<RouterCard.Kind> = [.question, .plan, .asks, .approval]
+    static let waitsOnYou: Set<RouterCard.Kind> = [.question, .plan, .asks, .approval, .permission]
 }

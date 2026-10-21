@@ -194,7 +194,7 @@ struct GuestRouterInstaller: Sendable {
 
 /// Guest-side settings CAS. It backs up the first original and merges Fjord's command hook without discarding other hooks.
 enum GuestClaudeSettings {
-    static let matcher = FormHookInstaller.matcher
+    static let matcher = FormHookInstaller.formMatcher
 
     static func installHook(client: any GuestClient, computer: GuestReference, paths: GuestRouterPaths) async throws {
         let command = FormHookInstaller.quoted(paths.hook, onlyIfNeeded: true)

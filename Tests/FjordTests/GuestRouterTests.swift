@@ -359,7 +359,7 @@ private struct AccountPausingGuestClient: GuestClient {
         let command = FormHookInstaller.quoted(paths.hook, onlyIfNeeded: true)
         let original = try JSONSerialization.data(withJSONObject: [
             "hooks": ["PermissionRequest": [[
-                "matcher": FormHookInstaller.matcher,
+                "matcher": FormHookInstaller.formMatcher,
                 "hooks": [["type": "command", "command": command], ["type": "command", "command": "custom-hook"]],
             ]]],
         ], options: [.sortedKeys])

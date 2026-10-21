@@ -141,6 +141,7 @@ enum RouterBriefContext {
             switch subject.kind {
             case .question: "It stopped on a question for the user. Say exactly what each question asks, what the choices mean, and why it needs the answer."
             case .plan: "It stopped on a plan for the user to approve. Say what the plan would do, and what approving it lets it go on with."
+            case .permission: "It stopped on a permission prompt for the user. Say exactly what it asks to do, and what saying yes lets happen."
             case .approval: "It asks the user's OK. Say exactly what it wants to do, and what saying yes lets happen."
             case .asks: "Its final message asks the user something. Say exactly what it needs decided or answered, and why."
             case .stuck: "It is stuck. Say what blocks it, and what the user can do to unblock it."

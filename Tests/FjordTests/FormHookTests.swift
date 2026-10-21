@@ -235,9 +235,40 @@ import Testing
         #expect(pendingFiles(dir).isEmpty)
     }
 
+    private func permissionFiles(_ dir: TempDir) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: dir.path("permissions"), includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+    }
+
+    @Test func anOrdinaryToolsPromptIsNotedAndNothingIsPrintedOrWaitedFor() throws {
+        let dir = TempDir()
+        let (outcome, box) = run(dir, input: request(transcript: nil, tool: "Bash", input: ["command": "git push"]))
+        #expect(outcome == .observed)
+        #expect(box.output.isEmpty && box.sleeps == 0)
+        // No form is held for it.
+        #expect(pendingFiles(dir).isEmpty)
+        let note = try #require(permissionFiles(dir).first)
+        let obj = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: note)) as? [String: Any])
+        #expect(obj["tool_name"] as? String == "Bash" && obj["session_id"] as? String == "cli-1")
+        #expect((obj["tool_input"] as? [String: Any])?["command"] as? String == "git push")
+        #expect(note.lastPathComponent.hasPrefix("cli-1-"))
+    }
+
+    @Test func aPromptIsNotNotedWhileTheRouterIsOff() {
+        let dir = TempDir()
+        let (outcome, box) = run(dir, input: request(transcript: nil, tool: "Edit"), enabled: false)
+        #expect(outcome == .disabled && box.output.isEmpty && permissionFiles(dir).isEmpty)
+    }
+
+    @Test func theFormToolsAreStillHeldAndNotNoted() {
+        let dir = TempDir()
+        let (outcome, _, _) = decidePlan(dir, .init(approve: true))
+        #expect(outcome == .answered)
+        #expect(permissionFiles(dir).isEmpty)
+    }
+
     @Test func otherHooksAndBadInputAreIgnored() {
         let dir = TempDir()
-        #expect(run(dir, input: request(transcript: nil, tool: "Bash")).0 == .ignored)
         #expect(run(dir, input: request(transcript: nil, event: "PreToolUse")).0 == .ignored)
         #expect(run(dir, input: Data("not json".utf8)).0 == .ignored)
         #expect(run(dir, input: Data()).0 == .ignored)

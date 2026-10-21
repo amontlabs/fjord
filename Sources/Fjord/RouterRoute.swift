@@ -194,6 +194,7 @@ extension RouterTools {
         case .plan: what = "waits for you to approve its plan"
         case .asks: what = "asks you something"
         case .approval: what = "asks your OK"
+        case .permission: return "asks your OK to " + hinted(card.text, 300)
         case .done, .finish, .stuck, .waiting: return nil
         }
         var text = hinted(card.text, 300)

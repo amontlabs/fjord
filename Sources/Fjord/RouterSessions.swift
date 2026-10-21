@@ -27,7 +27,7 @@ struct ClaudeDot: View {
         init(_ card: RouterCard) {
             guard card.isOpen else { self = .quiet; return }
             switch card.kind {
-            case .question, .plan, .asks, .approval, .finish: self = .needsYou
+            case .question, .plan, .asks, .approval, .permission, .finish: self = .needsYou
             case .stuck: self = .stuck
             case .done: self = .done
             case .waiting: self = .waiting

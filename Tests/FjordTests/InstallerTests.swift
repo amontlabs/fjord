@@ -11,7 +11,7 @@ import Testing
     }
 
     private func ours(_ installer: FormHookInstaller) -> [String: Any] {
-        ["matcher": "AskUserQuestion|ExitPlanMode", "hooks": [["type": "command", "command": installer.command, "timeout": 86400]]]
+        ["matcher": "*", "hooks": [["type": "command", "command": installer.command, "timeout": 86400]]]
     }
 
     @Test func anOlderFjordsQuestionsOnlyHookIsOutdatedAndMovesToTheNewMatcher() throws {
@@ -120,7 +120,7 @@ import Testing
         let installer = FormHookInstaller(claudeDir: dir.url)
         // Ours shares an entry with someone else's hook.
         let shared: [String: Any] = ["hooks": ["PermissionRequest": [
-            ["matcher": "AskUserQuestion|ExitPlanMode", "hooks": [["type": "command", "command": "/x/log.sh"],
+            ["matcher": "*", "hooks": [["type": "command", "command": "/x/log.sh"],
                                                      ["type": "command", "command": installer.command]]],
         ]]]
         try JSONSerialization.data(withJSONObject: shared).write(to: dir.path("settings.json"))
@@ -155,7 +155,7 @@ import Testing
         try installer.install(executable: exe)
         let link = try FileManager.default.destinationOfSymbolicLink(atPath: claude.appendingPathComponent("settings.json").path)
         #expect(link == real.path)
-        #expect(String(decoding: try Data(contentsOf: real), as: UTF8.self).contains("AskUserQuestion"))
+        #expect(String(decoding: try Data(contentsOf: real), as: UTF8.self).contains("PermissionRequest"))
     }
 
     @Test func pathsWithSpacesAreQuoted() {

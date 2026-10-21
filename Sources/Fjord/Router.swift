@@ -235,6 +235,8 @@ struct RouterCard: Codable, Identifiable, Hashable {
         case question
         /// Stopped on a plan to approve (ExitPlanMode).
         case plan
+        /// Stopped on an ordinary tool's permission prompt (Bash, Edit, Write, an MCP tool…), seen by Fjord's hook.
+        case permission
         /// Finished its turn.
         case done
         /// Finished its turn, and its summary (or Jev's triage) says it is blocked.
@@ -256,12 +258,13 @@ struct RouterCard: Codable, Identifiable, Hashable {
         var modelLabel: String { self == .done ? "Finished" : label }
 
         /// Made when a turn ends (the others while one waits).
-        var isTurn: Bool { self != .question && self != .plan }
+        var isTurn: Bool { self != .question && self != .plan && self != .permission }
         /// The kind a build from before the triage reads instead (it knew only question, plan, done and stuck): saved as
         /// `kind`, with this one beside it as `kindDetail`, so going back to such a build keeps the cards.
         var legacy: Kind {
             switch self {
             case .question, .plan, .done, .stuck: self
+            case .permission: .question
             case .asks, .approval: .stuck
             case .waiting, .finish: .done
             }
@@ -272,7 +275,7 @@ struct RouterCard: Codable, Identifiable, Hashable {
         /// step left to you, then news.
         var rank: Int {
             switch self {
-            case .approval: 0
+            case .approval, .permission: 0
             case .question, .plan, .asks: 1
             case .stuck: 2
             case .finish: 3
@@ -558,6 +561,12 @@ enum RouterFeed {
             let prefix = "Approve the plan: "
             let text = activity.text.hasPrefix(prefix) ? String(activity.text.dropFirst(prefix.count)) : activity.text
             return Wait(ms: ms, toolUseID: activity.toolUseID, kind: .plan, text: text)
+        }
+        if let tool = activity.tool, tool != "AskUserQuestion" {
+            // A prompt for any other tool: the card says what it asks to do, the kind tag says it asks your OK.
+            let prefix = Claude.permissionPrefix
+            let text = activity.text.hasPrefix(prefix) ? String(activity.text.dropFirst(prefix.count)) : activity.text
+            return Wait(ms: ms, toolUseID: activity.toolUseID, kind: .permission, text: text)
         }
         return Wait(ms: ms, toolUseID: activity.toolUseID, kind: .question, text: activity.text)
     }
