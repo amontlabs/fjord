@@ -265,7 +265,7 @@ import Testing
         #expect(calls.contexts[3].contains("Its turns so far") && calls.contexts[3].contains("turn 1:") && calls.contexts[3].contains("turn 3:"))
     }
 
-    @MainActor @Test func aFailedOpeningIsTriedAgainAtTheNextLookAndTheWholeLifeLineGainsIt() async throws {
+    @MainActor @Test func aFailedOpeningIsTriedAgainOnceAnotherTurnFinishesAndTheWholeLifeLineGainsIt() async throws {
         let store = store()
         let calls = Calls()
         writer(store, calls)
@@ -289,12 +289,19 @@ import Testing
         await store.routerLife.idle()
         var life = try #require(store.router.lives[id])
         #expect(life.leaves.map(\.turn) == [2] && life.opening == nil && life.root?.withOpening != true)
-        // The next look, with no turn finished: the opening is tried again, lands, and the whole-life line is written again with it.
+        // Another look with no turn finished: the opening isn't asked again (an outage isn't called at every look).
         store.routerLife.runner = runner
+        let asked = calls.contexts.count
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        #expect(calls.contexts.count == asked && store.router.lives[id]?.opening == nil)
+        // Once another turn finishes, the opening is tried again, lands, and the whole-life line is written again with it.
+        calls.data = Self.transcript([("Add a badge", "Added."), ("Colour it", "Coloured."), ("Ship it", "Shipped.")])
+        store.claudeSessions[id]?.completedTurns = 3
         store.routerLife.sync(store: store)
         await store.routerLife.idle()
         life = try #require(store.router.lives[id])
-        #expect(life.opening == "Opening line." && life.leaves.map(\.turn) == [2] && life.root?.withOpening == true)
+        #expect(life.opening == "Opening line." && life.leaves.map(\.turn) == [2, 3] && life.root?.withOpening == true)
         #expect(calls.contexts.last?.contains("before the turns below: Opening line.") == true)
         // The opening covers the turn it had, not the one after.
         let opening = try #require(calls.contexts.first { $0.contains("Its conversation so far") })

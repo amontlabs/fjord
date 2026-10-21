@@ -277,6 +277,8 @@ enum RouterLifeContext {
     /// The turn each kind of write last failed for, by session: asked again once the session has gone past it.
     @ObservationIgnored private var failedLeaf: [String: Int] = [:]
     @ObservationIgnored private var failedRoot: [String: Int] = [:]
+    /// The turn count a session's opening failed at: it is tried again once another turn has finished, not at every look.
+    @ObservationIgnored private var failedOpening: [String: Int] = [:]
     /// Bumped when the Router is turned off: a write begun before it is dropped.
     @ObservationIgnored private var generation = 0
     /// Answers in Haiku's place (tests, shots). Without one, a test run or a demo writes nothing.
@@ -337,7 +339,7 @@ enum RouterLifeContext {
     /// What a session needs written next, if anything: the opening, then the oldest turn without a leaf, then the
     /// whole-life line. `openingFailed`: the opening has been tried in this run.
     private func next(_ session: ClaudeSession, _ life: SessionLife, openingFailed: Bool = false) -> Step? {
-        if life.needsOpening, !openingFailed { return .opening }
+        if life.needsOpening, !openingFailed, failedOpening[session.id] != session.completedTurns { return .opening }
         if session.completedTurns > life.covered, failedLeaf[session.id] != session.completedTurns { return .leaf(life.covered + 1) }
         if life.rootDue, let last = life.leaves.last, failedRoot[session.id] != last.turn { return .root }
         return nil
@@ -377,10 +379,12 @@ enum RouterLifeContext {
             case .root: outcome = await writeRoot(session, life: life, project: project, store: store, generation: generation)
             }
             switch outcome {
-            case .landed: landed = true
+            case .landed:
+                landed = true
+                if case .opening = step { failedOpening[id] = nil }
             case .again: continue
             case .failed:
-                if case .opening = step { openingFailed = true }
+                if case .opening = step { openingFailed = true; failedOpening[id] = session.completedTurns }
             case .stop: return landed
             }
         }
