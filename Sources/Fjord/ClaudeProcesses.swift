@@ -52,22 +52,29 @@ extension Claude {
         }
     }
 
-    /// Whether `command`, approved at a permission prompt, is running under `root` (the session's Claude Code process):
-    /// a descendant that started at or after the prompt and has the command in its arguments. Claude Code runs a Bash
-    /// call as `zsh -c '… && eval '<command, single quotes escaped as '"'"'>' …'`, so the command is looked for as it is
-    /// and as that shell quoting of it.
+    /// Whether `command`, approved at a permission prompt, is running as a Bash call of `root` (the session's Claude Code
+    /// process): a child it spawned directly, at or after the prompt, whose script is Claude Code's wrapper
+    /// `<shell> -c '… && eval '<command, single quotes escaped as '"'"'>' < /dev/null && …'`, with the command as the
+    /// `eval` segment as a whole. A command mentioned inside another process's arguments (`echo 'git push'`), or run
+    /// further down the tree, is not the call.
     static func commandStarted(_ command: String, after startedMs: Int64, under root: Int32, processes: ProcessLister) -> Bool {
         guard !command.isEmpty else { return false }
-        let quoted = "'" + command.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-        var seen: Set<Int32> = [root]
-        var queue = [root]
-        while !queue.isEmpty {
-            let parent = queue.removeFirst()
-            for child in processes.children(parent) where seen.insert(child).inserted {
-                queue.append(child)
-                guard let info = processes.info(child), info.startedMs >= startedMs else { continue }
-                if info.arguments.contains(where: { $0.contains(command) || $0.contains(quoted) }) { return true }
-            }
+        let segment = "eval '" + command.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+        return processes.children(root).contains { child in
+            guard let info = processes.info(child), info.startedMs >= startedMs,
+                  let flag = info.arguments.firstIndex(of: "-c"), flag + 1 < info.arguments.count else { return false }
+            return isEvalSegment(segment, in: info.arguments[flag + 1])
+        }
+    }
+
+    /// Whether `segment` is a whole `&&`-separated part of `script`: at its start or after `&& `, and at its end or before a space.
+    private static func isEvalSegment(_ segment: String, in script: String) -> Bool {
+        var from = script.startIndex
+        while let range = script.range(of: segment, range: from..<script.endIndex) {
+            let startsPart = range.lowerBound == script.startIndex || script[..<range.lowerBound].hasSuffix("&& ")
+            let endsPart = range.upperBound == script.endIndex || script[range.upperBound] == " "
+            if startsPart && endsPart { return true }
+            from = range.upperBound
         }
         return false
     }

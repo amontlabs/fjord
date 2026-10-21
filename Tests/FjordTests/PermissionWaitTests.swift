@@ -74,6 +74,23 @@ import Testing
         #expect(merged(text, dir)?.toolUseID == "t2")
     }
 
+    @Test func aCallLargerThanTheTailIsFoundAndItsResultEndsTheWait() throws {
+        let dir = TempDir()
+        let url = try note(dir, tool: "Write", input: ["file_path": "/a/big.txt", "content": String(repeating: "x", count: 300_000)], id: "t1")
+        let transcript = dir.path("t.jsonl")
+        let call = use("t1", "Write", ["file_path": "/a/big.txt", "content": String(repeating: "x", count: 300_000)])
+        try Data((result("t0") + call).utf8).write(to: transcript)
+        let notes = Claude.PermissionNote.read(in: dir.path("permissions"), session: "cli-1")
+        let tail = Claude.tail(of: transcript)
+        #expect(Claude.tailCalls(tail: tail).all.isEmpty)
+        let calls = Claude.locating(notes, in: transcript, calls: Claude.tailCalls(tail: tail))
+        #expect(Claude.mergingPermission(Claude.activity(tail: tail), calls: calls, notes: notes)?.waitsForYou == true)
+        try Data((result("t0") + call + result("t1")).utf8).write(to: transcript)
+        let after = Claude.locating(notes, in: transcript, calls: Claude.tailCalls(tail: Claude.tail(of: transcript)))
+        #expect(Claude.mergingPermission(nil, calls: after, notes: notes)?.waitsForYou != true)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test func aQuestionKeepsItsOwnWait() throws {
         let dir = TempDir()
         _ = try note(dir, tool: "Bash", input: ["command": "ls"])

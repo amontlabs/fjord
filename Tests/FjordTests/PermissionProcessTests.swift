@@ -35,10 +35,20 @@ import Testing
         #expect(Claude.commandStarted(command, after: n.createdMs, under: 10, processes: lister(table)))
     }
 
-    @Test func aGrandchildCounts() throws {
+    @Test func aGrandchildOrAMentionOfTheCommandDoesNotCount() throws {
         let table = [11: (parent: Int32(10), info: Claude.ProcessInfo(startedMs: 2000, arguments: ["sh"])),
-                     12: (parent: 11, info: Claude.ProcessInfo(startedMs: 2000, arguments: wrapped("make")))]
-        #expect(Claude.commandStarted("make", after: 1000, under: 10, processes: lister(table)))
+                     12: (parent: 11, info: Claude.ProcessInfo(startedMs: 2000, arguments: wrapped("make"))),
+                     13: (parent: 10, info: Claude.ProcessInfo(startedMs: 2000, arguments: ["/bin/zsh", "-c", "echo 'make'"])),
+                     14: (parent: 10, info: Claude.ProcessInfo(startedMs: 2000, arguments: ["echo", "make"])),
+                     15: (parent: 10, info: Claude.ProcessInfo(startedMs: 2000, arguments: ["/bin/zsh", "-c", "source /x && echo eval 'make' && eval 'make2'"]))]
+        #expect(!Claude.commandStarted("make", after: 1000, under: 10, processes: lister(table)))
+    }
+
+    @Test func aBackgroundChildEchoingAPendingCommandDoesNotClearItsPrompt() throws {
+        let dir = TempDir()
+        let n = try note(dir, "git push")
+        let table = [11: (parent: Int32(10), info: Claude.ProcessInfo(startedMs: 2000, arguments: wrapped("echo 'git push'")))]
+        #expect(Claude.clearingStartedCommands([n], pid: 10, processes: lister(table)).count == 1)
     }
 
     @Test func aProcessFromBeforeTheNoteDoesNotCount() throws {
@@ -67,15 +77,15 @@ import Testing
 
     @Test func theSystemListerSeesAChildAndItsArguments() throws {
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        child.arguments = ["31337"]
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        child.arguments = ["-c", "eval 'sleep 31337' < /dev/null && true"]
         try child.run()
         defer { child.terminate() }
         let me = getpid()
         #expect(Claude.ProcessLister.system.children(me).contains(child.processIdentifier))
         let info = try #require(Claude.ProcessLister.system.info(child.processIdentifier))
-        #expect(info.arguments == ["/bin/sleep", "31337"] || info.arguments == ["sleep", "31337"])
-        #expect(Claude.commandStarted("31337", after: 0, under: me, processes: .system))
+        #expect(info.arguments.last == "eval 'sleep 31337' < /dev/null && true")
+        #expect(Claude.commandStarted("sleep 31337", after: 0, under: me, processes: .system))
     }
 
     @Test func notesOfSessionsWithoutALiveProcessAreRemoved() throws {
@@ -93,17 +103,40 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: gone.path))
     }
 
+    @Test func aWatchFollowsTheSessionToItsNewProcessAndEndsWithTheSession() throws {
+        let dir = TempDir()
+        let sessions = dir.path("sessions")
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let me = getpid(), parent = getppid()
+        try Data(#"{"pid":\#(me),"sessionId":"s-1-a","startedAt":1}"#.utf8).write(to: sessions.appendingPathComponent("\(me).json"))
+        let reader = Claude.ActivityReader()
+        reader.setPermissions(dir.path("permissions"), registry: sessions)
+        let n = try note(dir, "make")
+        reader.watchForTesting("s-1-a", [n])
+        #expect(reader.watchedPIDs == ["s-1-a": me])
+        // Resumed under another process.
+        try FileManager.default.removeItem(at: sessions.appendingPathComponent("\(me).json"))
+        try Data(#"{"pid":\#(parent),"sessionId":"s-1-a","startedAt":2}"#.utf8).write(to: sessions.appendingPathComponent("\(parent).json"))
+        reader.watchForTesting("s-1-a", [n])
+        #expect(reader.watchedPIDs == ["s-1-a": parent])
+        // The session ends.
+        try FileManager.default.removeItem(at: sessions.appendingPathComponent("\(parent).json"))
+        try Data(#"{"pid":\#(me),"sessionId":"other-1-b"}"#.utf8).write(to: sessions.appendingPathComponent("\(me).json"))
+        reader.pruneNotes()
+        #expect(reader.watchedPIDs.isEmpty)
+    }
+
     @Test func aSpawnedChildRunningTheCommandWakesTheWatch() async throws {
         let fired = Fired()
         let me = getpid()
         let watch = Claude.CommandWatch(pid: me) {
-            if Claude.commandStarted("31338", after: 0, under: me, processes: .system) { fired.set() }
+            if Claude.commandStarted("sleep 31338", after: 0, under: me, processes: .system) { fired.set() }
         }
         defer { watch.cancel() }
         try await Task.sleep(nanoseconds: 200_000_000)
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/bin/sh")
-        child.arguments = ["-c", "sleep 31338 && true"]
+        child.arguments = ["-c", "eval 'sleep 31338' < /dev/null && true"]
         try child.run()
         defer { child.terminate() }
         for _ in 0..<100 where !fired.value { try await Task.sleep(nanoseconds: 50_000_000) }

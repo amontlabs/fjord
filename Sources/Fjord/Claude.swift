@@ -214,7 +214,7 @@ enum Claude {
         private var processes: Claude.ProcessLister = .system
         /// The Bash prompts still pending, by session, for the check below.
         private var watching: [String: [Claude.PermissionNote]] = [:]
-        private var watches: [String: Claude.CommandWatch] = [:]
+        private var watches: [String: (pid: Int32, watch: Claude.CommandWatch)] = [:]
 
         private struct Cached {
             var modified: Date
@@ -248,11 +248,16 @@ enum Claude {
             lock.lock()
             let permissions = permissions, registry = registry
             lock.unlock()
-            guard let permissions, let registry,
-                  let files = try? FileManager.default.contentsOfDirectory(at: permissions, includingPropertiesForKeys: nil),
-                  files.contains(where: { $0.pathExtension == "json" }),
-                  (try? FileManager.default.contentsOfDirectory(at: registry, includingPropertiesForKeys: nil)) != nil else { return }
+            guard let registry, (try? FileManager.default.contentsOfDirectory(at: registry, includingPropertiesForKeys: nil)) != nil else { return }
             let live = Set(ClaudePeers.registry(dir: registry).values.flatMap { $0.map { FormHook.safe($0.sessionID) } })
+            lock.lock()
+            for cliID in Array(watches.keys) where !live.contains(FormHook.safe(cliID)) {
+                watches.removeValue(forKey: cliID)?.watch.cancel()
+                watching[cliID] = nil
+            }
+            lock.unlock()
+            guard let permissions,
+                  let files = try? FileManager.default.contentsOfDirectory(at: permissions, includingPropertiesForKeys: nil) else { return }
             for file in files where file.pathExtension == "json" {
                 let name = file.lastPathComponent
                 // `<session>-<ms>-<pid>.json`: the session id has no more than the dashes of a UUID, so cut the last two.
@@ -269,12 +274,19 @@ enum Claude {
         private func watch(_ cliID: String, _ notes: [Claude.PermissionNote]) {
             let bash = notes.filter { $0.tool == "Bash" }
             watching[cliID] = bash.isEmpty ? nil : bash
-            if bash.isEmpty {
-                watches.removeValue(forKey: cliID)?.cancel()
-            } else if watches[cliID] == nil, let pid = pid(of: cliID) {
-                watches[cliID] = Claude.CommandWatch(pid: pid) { [weak self] in self?.checkWatched(cliID) }
+            let pid = bash.isEmpty ? nil : pid(of: cliID)
+            // A session resumed under another process is watched under that one.
+            if let current = watches[cliID], current.pid != pid {
+                watches.removeValue(forKey: cliID)?.watch.cancel()
+            }
+            if let pid, watches[cliID] == nil {
+                watches[cliID] = (pid, Claude.CommandWatch(pid: pid) { [weak self] in self?.checkWatched(cliID) })
             }
         }
+
+        /// The process each session's watch is on, and a way to set one without a transcript (tests).
+        var watchedPIDs: [String: Int32] { lock.lock(); defer { lock.unlock() }; return watches.mapValues(\.pid) }
+        func watchForTesting(_ cliID: String, _ notes: [Claude.PermissionNote]) { lock.lock(); watch(cliID, notes); lock.unlock() }
 
         private func checkWatched(_ cliID: String) {
             lock.lock()
@@ -311,7 +323,7 @@ enum Claude {
             let names = notes.map(\.file.lastPathComponent)
             if entry.notes != names {
                 entry.notes = names
-                entry.merged = Claude.mergingPermission(entry.activity, calls: entry.calls, notes: notes)
+                entry.merged = Claude.mergingPermission(entry.activity, calls: Claude.locating(notes, in: url, calls: entry.calls), notes: notes)
             }
             cache[url] = entry
             return entry.merged
@@ -414,28 +426,66 @@ enum Claude {
 
     /// Reads a tail forward: every `tool_use` and `tool_result` in it.
     static func tailCalls(tail: Data) -> TailCalls {
-        var calls: [OpenCall] = []
-        var answered = Set<String>()
-        let use = Data("tool_use".utf8), result = Data("tool_result".utf8)
-        for line in tail.split(separator: UInt8(ascii: "\n")) {
-            let raw = Data(line)
-            guard raw.range(of: use) != nil || raw.range(of: result) != nil,
-                  let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
-                  let type = obj["type"] as? String, type == "assistant" || type == "user",
-                  let parts = (obj["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
-            let since = (obj["timestamp"] as? String).flatMap { try? Date($0, strategy: Self.iso) } ?? Date()
-            for part in parts {
-                switch (type, part["type"] as? String) {
-                case ("assistant", "tool_use"?):
-                    guard let id = part["id"] as? String, let name = part["name"] as? String else { continue }
-                    calls.append(OpenCall(id: id, name: name, input: (part["input"] as? NSDictionary) ?? [:], since: since))
-                case ("user", "tool_result"?):
-                    if let id = part["tool_use_id"] as? String { answered.insert(id) }
-                default: break
-                }
+        var calls = TailCalls()
+        for line in tail.split(separator: UInt8(ascii: "\n")) { addCalls(in: Data(line), to: &calls) }
+        return calls
+    }
+
+    /// Adds the calls and results of one transcript line (appending, so in the order lines are given).
+    private static func addCalls(in raw: Data, to calls: inout TailCalls) {
+        guard raw.range(of: Data("tool_use".utf8)) != nil || raw.range(of: Data("tool_result".utf8)) != nil,
+              let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              let type = obj["type"] as? String, type == "assistant" || type == "user",
+              let parts = (obj["message"] as? [String: Any])?["content"] as? [[String: Any]] else { return }
+        let since = (obj["timestamp"] as? String).flatMap { try? Date($0, strategy: Self.iso) } ?? Date()
+        for part in parts {
+            switch (type, part["type"] as? String) {
+            case ("assistant", "tool_use"?):
+                guard let id = part["id"] as? String, let name = part["name"] as? String else { continue }
+                calls.all.append(OpenCall(id: id, name: name, input: (part["input"] as? NSDictionary) ?? [:], since: since))
+            case ("user", "tool_result"?):
+                if let id = part["tool_use_id"] as? String { calls.answered.insert(id) }
+            default: break
             }
         }
-        return TailCalls(all: calls, answered: answered)
+    }
+
+    /// The calls of a tail, and for the notes whose call is not in it (a call or a result larger than the tail, or pushed
+    /// out of it) the transcript read backward, whole lines at a time, until every note's call is found or the file starts.
+    static func locating(_ notes: [PermissionNote], in url: URL, calls tailed: TailCalls) -> TailCalls {
+        guard notes.contains(where: { note in !tailed.all.contains(where: note.matches) }) else { return tailed }
+        var found = TailCalls()
+        var open = notes
+        forEachLineBackward(of: url) { line in
+            addCalls(in: line, to: &found)
+            open.removeAll { note in found.all.contains(where: note.matches) }
+            return !open.isEmpty
+        }
+        found.all.reverse()
+        return found
+    }
+
+    /// The lines of a file, last first, each whole however long, until `body` returns false.
+    static func forEachLineBackward(of url: URL, chunk: Int = 1 << 20, _ body: (Data) -> Bool) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        guard var offset = try? handle.seekToEnd() else { return }
+        let newline = UInt8(ascii: "\n")
+        var carry = Data()  // the start of a line whose beginning is not read yet
+        while offset > 0 {
+            let size = min(UInt64(chunk), offset)
+            offset -= size
+            guard (try? handle.seek(toOffset: offset)) != nil, let block = try? handle.read(upToCount: Int(size)) else { return }
+            var data = block + carry
+            carry = Data()
+            while let cut = data.lastIndex(of: newline) {
+                let line = data[data.index(after: cut)...]
+                data = Data(data[..<cut])
+                if !line.isEmpty, !body(Data(line)) { return }
+            }
+            carry = data
+        }
+        if !carry.isEmpty { _ = body(carry) }
     }
 
     /// What Fjord's hook leaves when a permission prompt opens for an ordinary tool: which call it is for. The hook only
