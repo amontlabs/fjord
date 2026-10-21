@@ -351,8 +351,9 @@ final class Store {
             if oldValue.cards != router.cards || oldValue.decisions != router.decisions || oldValue.enabled != router.enabled
                 || (router.digest == nil && router.enabled) {
                 routerDigester.observe(from: oldValue, to: router, store: self)
-            } else if oldValue.pendingDesktopStarts != router.pendingDesktopStarts || oldValue.runsOnProjects != router.runsOnProjects {
-                // What decides a session's project.
+            } else if oldValue.pendingDesktopStarts != router.pendingDesktopStarts || oldValue.runsOnProjects != router.runsOnProjects
+                        || oldValue.lives != router.lives {
+                // What decides a session's project, and what each session's lines say.
                 routerDigester.markDirty(store: self)
             }
             // Worked out again only if what it is made of changed: a session's stamps or an open card changing leave it (and
@@ -583,6 +584,8 @@ final class Store {
     @ObservationIgnored let routerTriager = RouterTriager()
     /// What each card tells you, in plain words (see RouterBrief.swift).
     @ObservationIgnored let routerBriefer = RouterBriefer()
+    /// Each shown session's two lines: its latest turn, and its whole life (see RouterLife.swift).
+    @ObservationIgnored let routerLife = RouterLifeWriter()
     /// Keeps the Brief up to date (RouterDigestWriter.swift).
     @ObservationIgnored let routerDigester = RouterDigestWriter()
     /// The Brief, kept with the Router's state.

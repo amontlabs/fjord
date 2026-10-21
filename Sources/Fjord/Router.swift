@@ -18,6 +18,8 @@ struct RouterState: Codable, Equatable {
     /// The sessions' summaries you asked for, oldest first (see RouterSummary.swift); kept under the key of the overviews of
     /// every session that came before them, which read as summaries of none.
     var summaries: [RouterSummary] = []
+    /// Each shown session's two lines and the leaves behind them, by session (see RouterLife.swift).
+    var lives: [String: SessionLife] = [:]
     /// What the feed last saw of each session (see `RouterFeed.Stamp`): a change is an event, the same is not.
     var seen: [String: String] = [:]
     /// The question or plan each session is stopped on, by when it began (ms since 1970, exactly as the transcript says):
@@ -117,7 +119,7 @@ struct RouterState: Codable, Equatable {
     /// `chat` is read, never written (an older file's changes); `claudeSessionID`, and an older file's `autoContinue` and
     /// `autoContinueSessions`, are ignored.
     private enum CodingKeys: String, CodingKey {
-        case enabled, enabledAt, cards, changes, chat, decisions, summaries = "overviews", seen, waits, waitTools, formSeen, pendingTurns, origins, heldWaits, fjordStarted, handledTurns, replies, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries, guestPendingForms, pendingGuestDisables, pendingGuestRemovals, digest
+        case enabled, enabledAt, cards, changes, chat, decisions, summaries = "overviews", lives, seen, waits, waitTools, formSeen, pendingTurns, origins, heldWaits, fjordStarted, handledTurns, replies, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries, guestPendingForms, pendingGuestDisables, pendingGuestRemovals, digest
     }
 
     func encode(to encoder: Encoder) throws {
@@ -128,6 +130,7 @@ struct RouterState: Codable, Equatable {
         try c.encode(changes, forKey: .changes)
         try c.encode(decisions, forKey: .decisions)
         try c.encode(summaries, forKey: .summaries)
+        try c.encode(lives, forKey: .lives)
         try c.encode(seen, forKey: .seen)
         try c.encode(waits, forKey: .waits)
         try c.encode(waitTools, forKey: .waitTools)
@@ -183,6 +186,7 @@ struct RouterState: Codable, Equatable {
         }
         decisions = list(.decisions)
         summaries = list(.summaries)
+        lives = map(.lives)
         seen = map(.seen)
         waits = map(.waits)
         waitTools = map(.waitTools)
@@ -753,6 +757,8 @@ enum RouterFeed {
         // (the store's sessions leave the archived out); nil: `sessions`.
         let known = listed ?? Dictionary(sessions.map { ($0.id, $0.lastActivity) }, uniquingKeysWith: { a, b in max(a, b) })
         keep(&state.handledTurns) { key, _ in known[key] != nil }
+        // A session's lines and leaves go with the session, not with its archiving.
+        keep(&state.lives) { key, _ in known[key] != nil }
         if state.handledTurns.count > maxHandled {
             let kept = Set(state.handledTurns.keys.sorted { (known[$0] ?? .distantPast, $0) > (known[$1] ?? .distantPast, $1) }.prefix(maxHandled))
             state.handledTurns = state.handledTurns.filter { kept.contains($0.key) }
@@ -1045,6 +1051,7 @@ extension Store {
                           muted: [], mutedSessions: mutedSessionIDs(), viewing: viewingNow, unread: agents.appUnread.map(Set.init), forms: forms, tasks: claudeTasks,
                           inventory: claudeTaskInventory, listed: claudeSessionsListed, now: now)
         applyTurnSummaries(&state)
+        defer { routerLife.sync(store: self) }
         if state != router {
             let known = Dictionary(router.cards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             router = state
@@ -1103,7 +1110,7 @@ extension Store {
         }
         router = state
         // Off: a triage under way comes to nothing, and no banner held for one comes; your messages' runs stop.
-        if !on { routerTriager.turnedOff(); routerBriefer.cancelAll(); routerDispatcher.stopAll(reason: RouterDispatcher.unlinkedWords, actions: true); routerDispatcher.unlinked() }
+        if !on { routerTriager.turnedOff(); routerBriefer.cancelAll(); routerLife.cancelAll(); routerDispatcher.stopAll(reason: RouterDispatcher.unlinkedWords, actions: true); routerDispatcher.unlinked() }
         applyRouterSwitch(install: true)
         if on {
             feedRouter(now: now)

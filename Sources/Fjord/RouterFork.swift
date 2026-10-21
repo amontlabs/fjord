@@ -90,7 +90,7 @@ enum SessionFork {
     private static let stamp = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
     /// One transcript line as a message of yours, if it is one.
-    private static func message(_ line: Data) -> Message? {
+    static func message(_ line: Data) -> Message? {
         // Cheap first: most lines aren't a user's.
         guard line.count > 2, line.range(of: Data(#""type":"user""#.utf8)) != nil,
               let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
