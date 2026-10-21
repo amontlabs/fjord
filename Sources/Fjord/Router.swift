@@ -911,13 +911,14 @@ enum RouterFeed {
         state.cards.append(card)
     }
 
-    /// Keeps the file small: past `maxCards` addressed cards, the oldest of them go. An open card never does (there is one
-    /// per session at most, so they stay few): it still wants you. A handled turn's card that goes leaves its turn number
-    /// behind (`handledTurns`); the changes keep the latest.
+    /// Keeps the file small: past `maxCards` addressed cards, those addressed longest ago go, so a card you just archived
+    /// stays however old it is (the Brief checks it off, its Revert can open it again). An open card never does (there is
+    /// one per session at most, so they stay few): it still wants you. A handled turn's card that goes leaves its turn
+    /// number behind (`handledTurns`); the changes keep the latest.
     static func prune(_ state: inout RouterState) {
         let addressed = state.cards.enumerated().filter { !$0.element.isOpen }
         if addressed.count > maxCards {
-            let drop = Set(addressed.sorted { $0.element.createdAt < $1.element.createdAt }.prefix(addressed.count - maxCards).map(\.offset))
+            let drop = Set(addressed.sorted { ($0.element.addressedAt ?? $0.element.createdAt) < ($1.element.addressedAt ?? $1.element.createdAt) }.prefix(addressed.count - maxCards).map(\.offset))
             for i in drop where state.cards[i].kind.isTurn {
                 let card = state.cards[i]
                 guard let range = card.id.range(of: "#t", options: .backwards), let turn = Int(card.id[range.upperBound...]) else { continue }

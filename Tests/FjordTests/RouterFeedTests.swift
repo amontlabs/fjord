@@ -421,6 +421,17 @@ import Testing
         #expect(state.cards.count == 305)
     }
 
+    @Test func anOldCardJustArchivedOutlastsTheCap() {
+        var state = RouterState()
+        state.cards = [RouterCard(id: "old", sessionID: "s-old", kind: .asks, title: "", folder: nil, text: "", createdAt: at(0))]
+            + (1...RouterFeed.maxCards).map { RouterCard(id: "c\($0)", sessionID: "s\($0)", kind: .done, title: "", folder: nil, text: "",
+                                                        createdAt: at(Double($0)), addressedAt: at(Double($0)), addressedBy: .you) }
+        RouterFeed.address(&state, "s-old", .you, at(1000))
+        RouterFeed.prune(&state)
+        // The card archived now stays; the one addressed longest ago goes instead.
+        #expect(state.cards.contains { $0.id == "old" } && !state.cards.contains { $0.id == "c1" })
+    }
+
     @Test func theChangesKeepTheLatest() {
         var state = RouterState()
         state.changes = (0..<510).map {
