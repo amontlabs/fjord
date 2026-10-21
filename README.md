@@ -106,4 +106,4 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 
-<p align="center">Made by <a href="https://amontlabs.com">Amont Labs</a>. All rights reserved.</p>
+<p align="center">Made by <a href="https://amontlabs.com">Amont Labs</a>.</p>
