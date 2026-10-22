@@ -866,6 +866,21 @@ import Testing
         #expect(!out.isError && orders == 0)
     }
 
+    @Test func aSessionTwoProcessesClaimIsNotWokenAndNothingIsSent() async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        relay(s, dir)
+        // A second live process under the same Claude app session as local_a's.
+        let other = try JSONSerialization.data(withJSONObject: ["pid": Int(getppid()), "hostSessionId": "local_a",
+                                                                "sessionId": "cli-local_a-2", "name": "Fix the login bug", "status": "busy"])
+        try other.write(to: dir.path("claude/sessions/\(getppid()).json"))
+        let t = tools(s, turn: "tell them to ship")
+        var orders = 0
+        t.relayOrders = { _, _ in orders += 1 }
+        let out = try #require(await t.tool("prepare", ["session": "local_a"]))
+        #expect(out.isError && out.text.contains("two processes claim it") && orders == 0)
+    }
+
     @Test func withoutAnyRelayTheFailureSaysSoAndNothingIsSent() async throws {
         let dir = TempDir()
         let s = await store(dir)

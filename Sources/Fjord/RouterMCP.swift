@@ -1172,6 +1172,8 @@ final class RouterMCPServer: @unchecked Sendable {
         // What the user says to the Router in an @router aside never goes on: if one is still there, nothing is sent. Text
         // Fjord wrote itself goes as it is.
         if !verbatim { try noAside(ready.text) }
+        // Woken before this (`prepare`) when it has no process at all. What reaches here without one is a session that can't be
+        // woken: two processes claim it (a wake would start a third), or the Claude app has no Claude Code id for it yet.
         guard let cli else { throw Failure("“\(title)” isn't running in the Claude app, or two processes claim it; nothing was sent") }
         // What your message tags goes after your words, fenced: Fjord's, never inside them, and never read for an
         // aside (checked above on your words alone).
