@@ -1166,7 +1166,7 @@ final class RouterMCPServer: @unchecked Sendable {
         // What the user says to the Router in an @router aside never goes on: if one is still there, nothing is sent. Text
         // Fjord wrote itself goes as it is.
         if !verbatim { try noAside(ready.text) }
-        guard let cli else { throw Failure("“\(title)” isn't running in the Claude app: open it first (open_session)") }
+        guard let cli else { throw Failure("“\(title)” isn't running in the Claude app: open it there, then Retry") }
         // What your message tags goes after your words, fenced: Fjord's, never inside them, and never read for an
         // aside (checked above on your words alone).
         let body = verbatim ? ready.text : RouterPointers.attach(tagged, to: ready.text)

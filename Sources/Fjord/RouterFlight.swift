@@ -36,6 +36,8 @@ struct FlightFramesKey: PreferenceKey {
         var id: UUID
         var text: String
         var phase: Phase = .pending
+        /// How many times it was sent again (Retry) before this one: a failure that comes at once says so.
+        var retries = 0
     }
 
     struct Flight: Identifiable, Equatable {
@@ -85,6 +87,8 @@ struct FlightFramesKey: PreferenceKey {
     @ObservationIgnored private var placeWaiters: [UUID: () -> Void] = [:]
     /// Runs seen, so one dropped from the stack never comes back.
     @ObservationIgnored private var seen: Set<UUID> = []
+    /// The runs that are a Retry of another, by how many times their words were sent again.
+    @ObservationIgnored private var retried: [UUID: Int] = [:]
     /// Flights waiting for their place to be laid out.
     @ObservationIgnored private var launching: Set<UUID> = []
     /// A flight to the history landed (the page shows it in a narrow window).
@@ -104,9 +108,9 @@ struct FlightFramesKey: PreferenceKey {
             guard let entry = store.router.record(id), case .you(let text) = entry.trigger else { continue }
             // The parts take the place of the message's pill, in its order.
             if let parent = store.router.parent(of: id), let at = pills.firstIndex(where: { $0.id == parent }) {
-                pills.insert(Pill(id: id, text: text), at: at)
+                pills.insert(Pill(id: id, text: text, retries: retried[id] ?? 0), at: at)
             } else {
-                pills.append(Pill(id: id, text: text))
+                pills.append(Pill(id: id, text: text, retries: retried[id] ?? 0))
             }
         }
         for pill in pills where pill.phase == .pending && !launching.contains(pill.id) {
@@ -131,7 +135,9 @@ struct FlightFramesKey: PreferenceKey {
                     let relay = store.router.guestRelayDeliveries.last { $0.decisionID == pill.id }
                     let canRetry = relay.map { ($0.state == .inFlight || $0.state == .unconfirmed) && $0.signedPayload != nil
                         && $0.hostSessionID != nil } ?? true
-                    set(pill.id, .failed(stopped ? "Stopped · nothing was sent" : why, retry: !stopped && canRetry))
+                    // Sent again and failing again is a new attempt, not nothing happening: the pill says so.
+                    let again = pill.retries > 0 && !stopped ? " · tried again" + (pill.retries > 1 ? " (\(pill.retries)×)" : "") : ""
+                    set(pill.id, .failed(stopped ? "Stopped · nothing was sent" : why + again, retry: !stopped && canRetry))
                     if stopped { Task { try? await Task.sleep(for: .seconds(2.4)); self.leave(pill.id, store: store) } }
                 } else {
                     // Dismissed, or nothing to show for it.
@@ -162,10 +168,11 @@ struct FlightFramesKey: PreferenceKey {
             store.routerDispatcher.retryGuestDelivery(relay)
             return
         }
-        var context = RouterContext()
+        // As it was sent: its tags, projects, armed reply and the place you had confirmed (read before the pill is dropped).
+        var context = store.routerDispatcher.resendContext(id) ?? RouterContext()
         context.flies = true
         drop(id, store: store)
-        store.routerDispatcher.submit(pill.text, context: context)
+        if let new = store.routerDispatcher.submit(pill.text, context: context) { retried[new] = pill.retries + 1 }
     }
 
     // MARK: Flying

@@ -298,6 +298,8 @@ struct RouterAskBack: Identifiable, Equatable {
     private(set) var askBacks: [RouterAskBack] = []
     /// The runs of messages sent from the composer (`RouterContext.flies`), oldest first: the composer's pills.
     private(set) var flying: [UUID] = []
+    /// The context each of `flying` was sent with, until its pill is done with: a Retry sends again as it was sent.
+    @ObservationIgnored private var sentWith: [UUID: RouterContext] = [:]
     /// How far each run under way is, by its entry in the log ("classifying", "sending"…).
     private(set) var progress: [UUID: String] = [:]
     /// A run of yours is under way: the composer shows Stop. An action's message being placed, or waiting its turn, is the
@@ -376,10 +378,35 @@ struct RouterAskBack: Identifiable, Equatable {
     func replaceFlying(_ id: UUID, with ids: [UUID]) {
         guard let i = flying.firstIndex(of: id) else { return }
         flying.replaceSubrange(i...i, with: ids)
+        sentWith[id] = nil
     }
 
     /// A composer pill is done with (landed, failed or dismissed): its run is no longer one of `flying`.
-    func forgetFlying(_ id: UUID) { flying.removeAll { $0 == id } }
+    func forgetFlying(_ id: UUID) {
+        flying.removeAll { $0 == id }
+        sentWith[id] = nil
+    }
+
+    /// What a composer message is sent again with (a Retry): what it was sent with, so its tags, projects, armed reply and
+    /// the place you confirmed or picked are the same, and nothing asks again. What held only for the first attempt is
+    /// left out: Jev's reading and the parts shown for the words (`jev`, `shown`, `predicted`, `division`, the `turns`
+    /// checked) are read anew, and a place the message went to only by being read is guessed again. Nil: it wasn't sent
+    /// from the composer, or its pill is gone.
+    func resendContext(_ id: UUID) -> RouterContext? {
+        guard var context = sentWith[id] else { return nil }
+        context.flies = true
+        context.jev = nil
+        context.shown = nil
+        context.predicted = nil
+        context.division = nil
+        context.turns = [:]
+        // A session you confirmed (picked, pinned or went with) is where it goes again: no new ask.
+        if context.target == nil, context.replyTo == nil, let entry = store?.router.record(id), entry.decision.confirmed == true,
+           let target = entry.decision.targetID, target.hasPrefix("session:") {
+            context.target = target
+        }
+        return context
+    }
 
     /// The demo's ask and run under way gone (`RouterFlightDemo` plays its own).
     func clearPreview() {
@@ -420,7 +447,10 @@ struct RouterAskBack: Identifiable, Equatable {
         entry.fromAction = context.action?.origin
         entry.actionStart = context.action.map { .init(title: $0.title, model: $0.model, effort: $0.effort) }
         let id = store.logDecision(entry)
-        if context.flies, context.action == nil { flying.append(id) }
+        if context.flies, context.action == nil {
+            flying.append(id)
+            sentWith[id] = context
+        }
         let job = Job(id: id, text: text, context: context,
                       tools: makeTools(id, text, pills: context.pills, mentions: context.mentions, action: context.action != nil))
         // Actions' messages one at a time, in order (`nextAction`); yours at once.

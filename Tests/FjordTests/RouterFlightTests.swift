@@ -202,6 +202,36 @@ import Testing
         await waitUntil { f.finished.count == 2 }
     }
 
+    @Test func aRetrySendsAsItWasSentWithItsTagsAndTheConfirmedPlace() async {
+        let (s, flights, f) = setup()
+        f.ranked = [.init(target: "session:local_a", p: 0.9), .init(target: "unclear", p: 0.1)]
+        f.failSend = "the session's inbox is closed"
+        var context = RouterContext()
+        context.flies = true
+        context.pills = [0..<6]
+        context.mentions = [RouterMention(range: 0..<6, pointer: .notification("pr:o/r#1"), name: "o/r#1")]
+        context.jev = .init(ranked: [], sure: true, assisted: true)
+        let id = s.routerDispatcher.submit("@o/r#1 fix it", context: context)!
+        await waitUntil { f.finished.contains(id) }
+        // The place you picked for it (an ask answered) is the entry's confirmed one.
+        s.updateDecision(id) {
+            $0.decision.targetID = "session:local_b"
+            $0.decision.confirmed = true
+        }
+        flights.sync(store: s)
+        let resend = s.routerDispatcher.resendContext(id)
+        #expect(resend?.mentions == context.mentions && resend?.pills == [0..<6] && resend?.flies == true)
+        #expect(resend?.target == "session:local_b" && resend?.jev == nil)
+        flights.retry(id, store: s)
+        let new = s.routerDispatcher.flying.last
+        #expect(new != nil && new != id)
+        #expect(s.router.record(new!)?.mentions == context.mentions)
+        await waitUntil { f.finished.contains(new!) }
+        flights.sync(store: s)
+        #expect(s.router.record(new!)?.decision.targetID == "session:local_b", "it goes where it went, asking nothing")
+        if case .failed(let why, _)? = flights.pills.first?.phase { #expect(why.hasSuffix("tried again")) } else { Issue.record("not failed again") }
+    }
+
     @Test func whereARunLands() {
         func entry(target: String?, done: [RouterDecision.Done], sessions: [String] = [], cards: [String] = []) -> RouterDecision {
             var e = RouterDecision(trigger: .you("x"), decision: .init(intent: "message"))
