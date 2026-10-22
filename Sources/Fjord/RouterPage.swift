@@ -1149,7 +1149,7 @@ extension RouterDecision {
         guard outcome == .pending else { return summary }
         if let progress = store.routerDispatcher.progress[id] { return progress + "…" }
         // A start whose first message waits for the relay to start the session: started, and what it waits for.
-        if let held = store.routerDispatcher.held[id] { return summary + " · " + held }
+        if let held = store.routerDispatcher.held[id] { return summary(waiting: false) + " · " + held }
         return summary
     }
 }
@@ -1207,7 +1207,7 @@ private struct HistoryDecisionLine: View, Equatable {
             // The line names just the place it waits for; the rest is in its details.
             let holding = RouterFlights.holds(decision)
             let waitsFor = holding ? RouterFlights.destination(decision.parts.first?.waitsFor, store: store) : nil
-            read = (holding ? "held" + (waitsFor.map { " · waits for \($0)" } ?? " · " + held) : decision.summary + " · " + held, true)
+            read = (holding ? "held" + (waitsFor.map { " · waits for \($0)" } ?? " · " + held) : decision.summary(waiting: false) + " · " + held, true)
         } else {
             read = (decision.summary, false)
         }

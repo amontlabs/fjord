@@ -975,6 +975,26 @@ import Testing
         #expect(decision(s, e)?.doneLines == ["started a session in lookout", "failed: its first message wasn't sent: you chose not to send it"])
     }
 
+    @Test func aHeldStartIsKeptAsWaitingAndOneLostInAQuitIsSettledAtTheNextStart() async {
+        let (s, d, f) = setup()
+        let ready = Prepared(text: "fix the typo", original: "fix the typo", rephrased: false)
+        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "fix the typo", project: "lookout",
+                                        ready: ready, settings: nil)
+        let a = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
+        await waitUntil { f.finishHeld != nil }
+        // What is kept with the entry says it waits, with no help from this process; the live line says why itself.
+        let kept = try? #require(decision(s, a))
+        #expect(kept?.parts[0].isWaitingToSend == true && kept?.summary == "started in lookout · first message waiting")
+        #expect(kept?.summary(waiting: false) == "started in lookout")
+        // Fjord quits and starts again: nothing runs that wait any more, and the entry says it was lost, not waiting.
+        let again = RouterDispatcher(store: s)
+        _ = again
+        let lost = decision(s, a)
+        #expect(lost?.outcome == .done && lost?.parts[0].isWaitingToSend == false)
+        #expect(lost?.doneLines.last == "failed: its first message wasn't sent: Fjord quit while the session was starting")
+        f.finishHeld?.resume()
+    }
+
     @Test func aForkAskedForInWordsOrFromThePageIsLoggedAndItsFirstMessageSent() async {
         let (s, d, f) = setup()
         // Named by its title: forked from before your last message, the rest its first message; never a routing example.

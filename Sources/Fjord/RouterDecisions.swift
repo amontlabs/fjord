@@ -206,6 +206,13 @@ struct RouterDecision: Identifiable, Equatable {
             return done.lastIndex(where: \.sendsWords).map { $0 < cancelled } ?? true
         }
 
+        /// A session was started and its first message has not gone yet: the start is held for the session's process (a held start,
+        /// `RouterDispatcher.hold`). Kept with the entry, so it reads the same after Fjord restarts; `settleLostHolds` ends it then.
+        var isWaitingToSend: Bool {
+            outcome == .pending && done.contains { if case .started = $0 { true } else { false } }
+                && !done.contains { switch $0 { case .sent, .failed, .interrupted: true; default: false } }
+        }
+
         /// Adds `done` and the links it implies.
         mutating func add(_ item: Done, session: String? = nil, card: String? = nil) {
             done.append(item)
@@ -379,7 +386,10 @@ struct RouterDecision: Identifiable, Equatable {
     }
 
     /// The short phrase after the trigger on the history line: what happened, or how it ended.
-    var summary: String {
+    var summary: String { summary(waiting: true) }
+
+    /// `summary`; with `waiting` false a start whose first message waits doesn't say so (a line that says why itself).
+    func summary(waiting: Bool) -> String {
         switch outcome {
         case .reverted: return "reverted"
         case .corrected(_, let to): return "corrected to \(to)"
@@ -391,7 +401,9 @@ struct RouterDecision: Identifiable, Equatable {
         let more = done.count > 1 ? " +\(done.count - 1)" : ""
         switch first {
         case .sent(let to, _, _): return "sent to \(to)" + more
-        case .started(_, let project, let model, let effort): return "started in \(project)" + settingsWords(model, effort) + more
+        case .started(_, let project, let model, let effort):
+            return "started in \(project)" + settingsWords(model, effort) + more
+                + (waiting && parts.count == 1 && parts[0].isWaitingToSend ? " · first message waiting" : "")
         case .preparedGuest(let project, _, _): return "ready in Claude · \(project)" + more
         case .changed: return "changed Fjord" + more
         case .answered: return "answered" + more
@@ -413,6 +425,7 @@ struct RouterDecision: Identifiable, Equatable {
             if part.done.contains(where: { if case .failed = $0 { true } else { false } }) { state = "failed" }
             else if part.delivered?.cancelled?.stopped == true || part.endsCancelled { state = "cancelled" }
             else if part.outcome == .pending, part.waitsFor != nil, part.done.isEmpty { state = "held" }
+            else if part.isWaitingToSend { state = "waiting" }
             else if part.outcome == .pending { state = "working" }
             else if part.done.contains(where: \.sendsWords) { state = "sent" }
             else { state = "done" }

@@ -365,6 +365,21 @@ struct RouterAskBack: Identifiable, Equatable {
         // An entry whose ask-back card is still up is not pruned from the history (its pick needs the record).
         store.decisionsInUse = { [weak self] in Set(self?.askBacks.map(\.id) ?? []) }
         store.routerRunReverted = { [weak self] id in self?.reverted(id) }
+        settleLostHolds()
+    }
+
+    /// A held start is kept with its entry (started, first message waiting), but its wait is this process's: one still waiting
+    /// when Fjord starts again was lost with the quit. Said so on its line, not left "waiting" for good.
+    func settleLostHolds() {
+        guard let store else { return }
+        for entry in store.router.decisions {
+            for part in entry.parts where part.isWaitingToSend && held[part.id] == nil && heldTasks[part.id] == nil {
+                store.updateDecision(part.id) {
+                    $0.add(.failed("its first message wasn't sent: Fjord quit while the session was starting"))
+                    $0.outcome = .done
+                }
+            }
+        }
     }
 
     struct Job {
