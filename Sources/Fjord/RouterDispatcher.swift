@@ -1241,11 +1241,10 @@ struct RouterAskBack: Identifiable, Equatable {
         store.noteFjordStarted(session)
         if let action = job.context.action { store.noteOrigin(action.origin, for: session) }
         store.updateDecision(id) { $0.add(.started(session: session, project: waiting.project, model: nil, effort: nil), session: session) }
-        guard waiting.ready != nil else {
-            if waiting.settings != nil { store.updateDecision(id) { $0.add(.failed("model/effort: no first message to set them with")) } }
-            return
-        }
-        held[id] = Self.heldWords
+        // With no first message (a start or fork with nothing to say) there is nothing to hold: the session is only woken.
+        let sends = waiting.ready != nil
+        if !sends, waiting.settings != nil { store.updateDecision(id) { $0.add(.failed("model/effort: no first message to set them with")) } }
+        if sends { held[id] = Self.heldWords }
         let tools = makeTools(id, job.text, pills: job.context.pills, mentions: job.context.mentions,
                               action: job.context.action != nil)
         let context = job.context
@@ -1255,17 +1254,19 @@ struct RouterAskBack: Identifiable, Equatable {
                 guard let self else { return }
                 let delivery = try await effects.finish(tools, waiting)
                 try Task.checkCancellation()
-                // The session ran only now: an action's first message goes only if Triage and the Router are still on.
-                try linked(context)
-                held[id] = "sending"
-                let ack = try await effects.send(tools, delivery)
-                store.updateDecision(id) { entry in
-                    if let settings = waiting.settings {
-                        entry.done.removeAll { if case .started = $0 { true } else { false } }
-                        AppliedSettings.from(ack: ack, requested: settings, supported: delivery.settingsSigned)
-                            .record(session: session, project: waiting.project, in: &entry)
+                if sends {
+                    // The session ran only now: an action's first message goes only if Triage and the Router are still on.
+                    try linked(context)
+                    held[id] = "sending"
+                    let ack = try await effects.send(tools, delivery)
+                    store.updateDecision(id) { entry in
+                        if let settings = waiting.settings {
+                            entry.done.removeAll { if case .started = $0 { true } else { false } }
+                            AppliedSettings.from(ack: ack, requested: settings, supported: delivery.settingsSigned)
+                                .record(session: session, project: waiting.project, in: &entry)
+                        }
+                        entry.add(.sent(to: delivery.to, text: delivery.body, original: nil), session: session)
                     }
-                    entry.add(.sent(to: delivery.to, text: delivery.body, original: nil), session: session)
                 }
             } catch {
                 let dropped = self?.dropped.remove(id) != nil

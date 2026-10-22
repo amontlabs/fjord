@@ -123,8 +123,8 @@ import Testing
                 finish: { [self] _, held in
                     await withCheckedContinuation { finishHeld = $0 }
                     if let finishError { throw RouterTools.Failure(finishError) }
-                    return RouterDispatcher.Delivery(to: "peer-late", text: "⟦signed⟧\nhello", body: "hello", original: "hello",
-                                                     rephrased: false, session: held.waiting.sessionID, newSessionIn: held.project,
+                    return RouterDispatcher.Delivery(to: "peer-late", text: held.ready == nil ? "" : "⟦signed⟧\nhello", body: "hello",
+                                                     original: "hello", rephrased: false, session: held.waiting.sessionID, newSessionIn: held.project,
                                                      settings: held.settings, settingsSigned: settingsSigned)
                 },
                 fork: { [self] _, request in
@@ -993,6 +993,27 @@ import Testing
         #expect(lost?.outcome == .done && lost?.parts[0].isWaitingToSend == false)
         #expect(lost?.doneLines.last == "failed: its first message wasn't sent: Fjord quit while the session was starting")
         f.finishHeld?.resume()
+    }
+
+    @Test func aStartOrForkWithNoFirstMessageIsStillWokenAndSendsNothing() async {
+        let (s, d, f) = setup()
+        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "fix the typo", project: "lookout",
+                                        ready: nil, settings: nil)
+        let a = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
+        // Its finish is the wake (RouterTools.finishStart); nothing is held, nothing is waiting, nothing is sent.
+        await waitUntil { f.finishHeld != nil }
+        #expect(d.held[a!] == nil && decision(s, a)?.parts[0].isWaitingToSend == false)
+        f.finishHeld?.resume()
+        await waitUntil { d.heldTasks[a!] == nil }
+        #expect(f.sent.isEmpty && decision(s, a)?.outcome == .done && decision(s, a)?.doneLines == ["started a session in lookout"])
+        // A wake that fails says so on the line.
+        f.finishHeld = nil
+        f.finishError = "Fjord's relay isn't running: start it in Claude"
+        let b = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
+        await waitUntil { f.finishHeld != nil }
+        f.finishHeld?.resume()
+        await waitUntil { d.heldTasks[b!] == nil }
+        #expect(decision(s, b)?.doneLines.last == "failed: Fjord's relay isn't running: start it in Claude")
     }
 
     @Test func aForkAskedForInWordsOrFromThePageIsLoggedAndItsFirstMessageSent() async {

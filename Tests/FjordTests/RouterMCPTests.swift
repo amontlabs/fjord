@@ -964,6 +964,41 @@ import Testing
         }
     }
 
+    @Test func aForkTheAppDoesNotRunIsWokenThroughTheRelayLikeAHeldStart() async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        relay(s, dir)
+        let project = dir.path("projects/-code-lookout")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let cli = "0b0e9b9e-3c1f-4c55-9a52-1d1a3b7c9e01"
+        s.claudeSessions["local_a"]?.cliID = cli
+        try RouterForkTests.transcript().write(to: project.appendingPathComponent("\(cli).jsonl"))
+        let t = tools(s, turn: "try SQLite instead")
+        t.transcriptsRoot = dir.path("projects")
+        t.forker = { _ in throw SessionStart.NotRunning(sessionID: "local_forked") }
+        var held: SessionStart.Held?
+        do {
+            _ = try await t.forkSession(s, .init(session: "local_a", point: .beforeLast, message: "try SQLite instead"), ticket: t.ticket())
+        } catch let error as SessionStart.Held { held = error }
+        // Held with its first message, which is what the dispatcher finishes (`finishStart`): it wakes the fork.
+        let waiting = try #require(held)
+        #expect(waiting.ready != nil && waiting.waiting.sessionID == "local_forked")
+        let later = tools(s, turn: "try SQLite instead")
+        var orders: [String] = []
+        later.relayOrders = { order, _ in orders.append(RelaySigner.readable(order)) }
+        later.processWaiter = { _ in "Fork of Fix the login bug" }
+        let support = dir.path("support"), claude = dir.path("claude")
+        later.pluginReadiness = { cli in
+            if cli == "cli-relay" { return true }
+            guard !orders.isEmpty else { return false }
+            PluginFixture.live("forked", support: support, claude: claude)
+            return true
+        }
+        let out = try await later.finishStart(s, waiting, ticket: later.ticket())
+        #expect(out.contains("local_forked") && orders.count == 1 && orders[0].contains("`to` exactly local_forked"))
+        #expect(later.prepared["Fork of Fix the login bug"]?.text.hasPrefix("⟦fjord v1 forked ") == true)
+    }
+
     @Test func aBodyInAnotherUnicodeFormIsNotThePreparedOne() async throws {
         let dir = TempDir()
         let s = await store(dir)
