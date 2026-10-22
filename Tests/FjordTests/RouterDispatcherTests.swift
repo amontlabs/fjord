@@ -939,7 +939,7 @@ import Testing
         // Started, not failed; the run is over (you may send meanwhile) and the line says what its first message waits for.
         #expect(decision(s, a)?.done == [.started(session: "local_late", project: "lookout", model: nil, effort: nil)])
         #expect(!d.isBusy && decision(s, a)?.outcome == .pending && s.router.fjordStarted["local_late"] != nil)
-        #expect(d.held[a!] == RouterDispatcher.heldWords && RouterDispatcher.heldWords.contains("waits for the Claude app to run it"))
+        #expect(d.held[a!] == RouterDispatcher.heldWords && RouterDispatcher.heldWords.contains("waits for Fjord's relay to start the session"))
         // The app runs it: the first message goes, and the line says so.
         f.finishHeld?.resume()
         await waitUntil { decision(s, a)?.outcome == .done }

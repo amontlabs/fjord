@@ -1148,7 +1148,7 @@ extension RouterDecision {
     @MainActor func status(_ store: Store) -> String {
         guard outcome == .pending else { return summary }
         if let progress = store.routerDispatcher.progress[id] { return progress + "…" }
-        // A start whose first message waits for the Claude app to run the session: started, and what it waits for.
+        // A start whose first message waits for the relay to start the session: started, and what it waits for.
         if let held = store.routerDispatcher.held[id] { return summary + " · " + held }
         return summary
     }
@@ -1202,7 +1202,7 @@ private struct HistoryDecisionLine: View, Equatable {
         if let progress = store.routerDispatcher.progress[decision.id] {
             read = (progress + "…", held != nil)
         } else if let held {
-            // A start whose first message waits for the Claude app to run the session: started, and what it waits for. A part
+            // A start whose first message waits for the relay to start the session: started, and what it waits for. A part
             // held for another place's answer: held, and what it waits for.
             // The line names just the place it waits for; the rest is in its details.
             let holding = RouterFlights.holds(decision)

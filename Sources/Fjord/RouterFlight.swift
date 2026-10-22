@@ -151,7 +151,7 @@ struct FlightFramesKey: PreferenceKey {
     func status(_ id: UUID, store: Store) -> String {
         let dispatcher = store.routerDispatcher
         let entry = store.router.record(id)
-        if dispatcher.held[id] != nil { return entry.map(Self.holds) == true ? "held until you send it" : "waiting for Claude to open it" }
+        if dispatcher.held[id] != nil { return entry.map(Self.holds) == true ? "held until you send it" : "waiting for the relay to start it" }
         // A sleeping session being started through the relay: said while it takes.
         if let waking = dispatcher.progress[id], waking.hasPrefix("waking ") { return waking + "…" }
         if let title = Self.destination(entry?.decision.targetID, store: store) { return "→ " + title }

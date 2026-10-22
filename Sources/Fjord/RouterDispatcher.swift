@@ -256,7 +256,7 @@ struct RouterAskBack: Identifiable, Equatable {
         var cancel: @MainActor (RouterDecision.Delivered) async throws -> RouterDecision.Cancelled = { _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
-        /// A held start's first message, prepared once the app runs its session (bounded: `SessionStart.heldWait`).
+        /// A held start's first message, prepared once the app runs its session (`finishStart`).
         var finish: @MainActor (RouterTools, SessionStart.Held) async throws -> Delivery = { _, _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
@@ -1270,7 +1270,7 @@ struct RouterAskBack: Identifiable, Equatable {
     }
 
     /// What a held start's line says while its first message waits.
-    static let heldWords = "the first message waits for the Claude app to run it" + SessionStart.NotRunning.reason
+    static let heldWords = "the first message waits for Fjord's relay to start the session"
 
     /// "Don't send" on a held start's line: its first message is dropped (the session stays), its turn ended at once so
     /// nothing of it can still go.

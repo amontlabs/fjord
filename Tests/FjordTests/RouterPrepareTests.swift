@@ -213,7 +213,7 @@ import Testing
             try await SessionStart.waitForPeer(uuid: "u-1", dir: peers, timeout: 0.5, imported: { true })
         }
         #expect(SessionStart.NotRunning(sessionID: "local_u-1").localizedDescription
-                == "The new session is in the Claude app, but the app hasn't run it yet: open it there (the app runs only so many sessions at once; close one you're done with if it doesn't start)")
+                == "The new session is in the Claude app, but the app hasn't run it yet: Fjord starts it through its relay, nothing needs opening in the app")
         // Whether the app has it: its file under the app's sessions folder (account/org/local_<uuid>.json).
         let root = dir.path("claude-code-sessions")
         let org = root.appendingPathComponent("acct/org")

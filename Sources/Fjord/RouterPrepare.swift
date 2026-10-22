@@ -881,21 +881,21 @@ enum SessionStart {
     /// How long a new session has to run in the Claude app before it is reported: the import takes a second, its process
     /// a few more.
     static let processWait: TimeInterval = 30
-    /// How long its first message is held for once the app has the session but doesn't run it yet (`NotRunning`).
+    /// How long a held part of a divided message waits for you to send it (`RouterDispatcher.heldPartWait`).
     static let heldWait: TimeInterval = 30 * 60
 
     /// The Claude app has the session (it imported it) but doesn't run it: its process isn't there to take a message
     /// yet. Usually the app is at its limit of sessions run at once (its CLI governor: one per 3 GB of memory, at least
-    /// 6): an imported session's start is then given up, not retried, until a slot frees and it is opened, or something
-    /// is sent to it in the app. Fjord can't count the app's sessions as the app does, so it never says the app is
-    /// full.
+    /// 6): an imported session's start is then given up, not retried, and opening it in the app doesn't start it either.
+    /// Fjord starts it through its relay (`RouterTools.wake`). Fjord can't count the app's sessions as the app does, so it
+    /// never says the app is full.
     struct NotRunning: LocalizedError, Equatable {
         /// `local_<uuid>`.
         var sessionID: String
         var errorDescription: String? {
             "The new session is in the Claude app, but the app hasn't run it yet" + Self.reason
         }
-        static let reason = ": open it there (the app runs only so many sessions at once; close one you're done with if it doesn't start)"
+        static let reason = ": Fjord starts it through its relay, nothing needs opening in the app"
     }
 
     /// Whether the Claude app has `local_<uuid>` (imported): its file under the app's sessions folder (account/org/<id>.json).
