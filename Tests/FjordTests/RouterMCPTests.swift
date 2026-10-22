@@ -843,6 +843,16 @@ import Testing
         #expect(ClaudePlugin.relay(in: plugin) == "cli-relay")
     }
 
+    @Test func theRelaysPrefillSaysWhatItIsForThenGivesTheRole() throws {
+        let lines = Store.relayRole.components(separatedBy: "\n\n")
+        #expect(lines.count == 2 && !lines[0].contains("\n") && lines[0].count < 120 && lines[0].contains("Fjord"))
+        #expect(lines[1].hasPrefix("You are Fjord's relay.") && lines[1].hasSuffix("Ready."))
+        let folder = URL(fileURLWithPath: "/tmp/fjord relay")
+        let url = try #require(Store.relayLink(folder: folder))
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        #expect(items?.first { $0.name == "q" }?.value == Store.relayRole && items?.first { $0.name == "folder" }?.value == folder.path)
+    }
+
     @Test func aSessionWhosePluginIsUpIsNotWoken() async throws {
         let dir = TempDir()
         let s = await store(dir)

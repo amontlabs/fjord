@@ -87,9 +87,11 @@ extension Store {
     /// The relay's folder, under Fjord's own.
     var relayFolder: URL? { routerFiles?.routerHome.appendingPathComponent("relay", isDirectory: true) }
 
-    /// What the relay's session is told when it is made: its job, and a word back.
-    static let relayRole = "You are Fjord's relay. Fjord sends you orders to wake sessions: when you receive one, call SendMessage "
-        + "once with exactly the `to` and `message` it gives, and say nothing else. Now reply only: Ready."
+    /// What the relay's session is told when it is made, as the person reads it in the composer before pressing Send: a line on
+    /// what the session is for, then its role and a word back.
+    static let relayRole = "This session lets Fjord start your other Claude sessions when it sends them a message. Leave it running.\n\n"
+        + "You are Fjord's relay. Fjord sends you orders to wake sessions: when you receive one, call SendMessage once with exactly "
+        + "the `to` and `message` it gives, and say nothing else. Now reply only: Ready."
 
     /// The link that opens a new session in the Claude app with the relay's role in the composer: the person presses Send once.
     static func relayLink(folder: URL) -> URL? {
