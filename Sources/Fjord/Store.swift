@@ -613,7 +613,7 @@ final class Store {
     /// Your messages to the Router, as typed runs (each its own).
     @ObservationIgnored lazy var routerDispatcher: RouterDispatcher = {
         let dispatcher = RouterDispatcher(store: self)
-        dispatcher.claudePath = { [weak self] in self?.routerStatus.claudeCode?.path }
+        dispatcher.claudePath = { [weak self] in self?.routerStatus.latestPath() }
         return dispatcher
     }()
     /// The entries of the ask-back cards still up: kept when the history is pruned.

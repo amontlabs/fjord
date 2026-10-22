@@ -454,7 +454,7 @@ extension Store {
         { [weak store] session, text in
             guard let store else { throw RouterTools.Failure("Fjord isn't ready") }
             let tools = RouterTools(store: store)
-            tools.claudePath = { [weak store] in store?.routerStatus.claudeCode?.path }
+            tools.claudePath = { [weak store] in store?.routerStatus.latestPath() }
             tools.verbatim = true
             tools.deliveryCheck = {
                 do { try check(); return nil } catch { return error.localizedDescription }
@@ -471,7 +471,7 @@ extension Store {
                 binary = nil
                 home = nil
             } else {
-                guard let localBinary = store.routerStatus.claudeCode?.path, let localHome = store.routerFiles?.routerHome else {
+                guard let localBinary = store.routerStatus.latestPath(), let localHome = store.routerFiles?.routerHome else {
                     throw RouterTools.Failure("Claude Code wasn't found, so nothing can be sent")
                 }
                 binary = localBinary

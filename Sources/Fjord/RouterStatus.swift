@@ -63,6 +63,14 @@ import Observation
         return found
     }
 
+    /// The newest binary the Claude app has installed, looked up now: a send runs the app's bundled Claude Code, the version its
+    /// sessions run, and not a copy found before the app updated. A few directory reads (the newest version is the first stat),
+    /// so cheap enough to ask at every send; the known one when the app's folder can't be read (or in a test with none).
+    func latestPath() -> String? {
+        if let root = codeRoot, let found = Self.find(in: root) { set(found) }
+        return claudeCode?.path
+    }
+
     private func set(_ found: (path: String, version: String)?) {
         if found?.path != claudeCode?.path || found?.version != claudeCode?.version { claudeCode = found }
     }

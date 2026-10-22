@@ -30,6 +30,30 @@ import Testing
         #expect(found.path == dir.url.appendingPathComponent("2.1.293/bbb/claude.app/Contents/MacOS/claude").path)
     }
 
+    @Test func aSendRunsTheNewestCopyTheAppHasInstalledEvenAfterAnUpdate() throws {
+        let dir = TempDir()
+        func install(_ version: String) {
+            let bin = dir.url.appendingPathComponent("\(version)/hash/claude.app/Contents/MacOS")
+            try! FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: bin.appendingPathComponent("claude").path, contents: Data("#!/bin/sh\n".utf8),
+                                           attributes: [.posixPermissions: 0o755])
+        }
+        let status = RouterStatus()
+        status.codeRoot = dir.url
+        // Nothing installed: nothing found (never a `claude` from the PATH).
+        #expect(status.latestPath() == nil)
+        install("2.1.299")
+        #expect(status.latestPath()?.contains("/2.1.299/") == true)
+        // The app updates: the next send runs the new copy, with no restart of Fjord.
+        install("2.1.304")
+        let updated = status.latestPath()
+        #expect(updated?.contains("/2.1.304/") == true)
+        // The app's folder unreadable: the last one known stays.
+        try FileManager.default.removeItem(at: dir.url.appendingPathComponent("2.1.304"))
+        try FileManager.default.removeItem(at: dir.url.appendingPathComponent("2.1.299"))
+        #expect(status.latestPath() == updated)
+    }
+
     @Test func everySendMessageAsksAndTheAnswerGoesBackOnStdin() throws {
         let settings = try #require(try JSONSerialization.jsonObject(with: RouterAgent.gateSettings()) as? [String: Any])
         #expect((settings["permissions"] as? [String: Any])?["ask"] as? [String] == ["SendMessage"])
