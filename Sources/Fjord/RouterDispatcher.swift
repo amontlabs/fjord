@@ -624,6 +624,7 @@ struct RouterAskBack: Identifiable, Equatable {
         let tools = RouterTools(store: store!)
         tools.claudePath = { [weak self] in self?.claudePath() }
         tools.decision = id
+        tools.stage = { [weak self] in self?.progress[id] = $0 }
         tools.beginTurn(text, pills: pills)
         tools.tagged = RouterPointers.context(mentions, store: store!)
         tools.checkpointBeforeGuestStart = action

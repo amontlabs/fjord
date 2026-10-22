@@ -506,6 +506,10 @@ final class RouterMCPServer: @unchecked Sendable {
     var chosenFolder: String?
     /// Making a session (folder, title) and waiting for its process; tests answer for it.
     var starter: ((String, String) async throws -> SessionStart.Started)?
+    /// Hands the relay a signed order (`wake`), with the relay's CLI id; tests answer for it.
+    var relayOrders: (@MainActor (_ order: String, _ relay: String) async throws -> Void)?
+    /// Tells the pill what is under way ("waking …"); the dispatcher sets it.
+    var stage: ((String) -> Void)?
     /// Waiting for a held start's process (`finishStart`), by its session id: its peer; tests answer for it.
     var processWaiter: ((String) async throws -> String)?
     /// Making a fork and waiting for its process; tests answer for it.
@@ -1113,7 +1117,9 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     /// The Claude Code sessions Fjord's plugin runs in now, read off the main thread.
-    private func pluginSessions(_ store: Store) async -> Set<String> {
+    private func pluginSessions(_ store: Store) async -> Set<String> { await pluginSessionIDs(store) }
+
+    func pluginSessionIDs(_ store: Store) async -> Set<String> {
         guard let paths = store.routerFiles else { return [] }
         let presence = paths.pluginSessions
         let registry = paths.claudeDir.appendingPathComponent("sessions", isDirectory: true)
@@ -1166,7 +1172,7 @@ final class RouterMCPServer: @unchecked Sendable {
         // What the user says to the Router in an @router aside never goes on: if one is still there, nothing is sent. Text
         // Fjord wrote itself goes as it is.
         if !verbatim { try noAside(ready.text) }
-        guard let cli else { throw Failure("“\(title)” isn't running in the Claude app: open it there, then Retry") }
+        guard let cli else { throw Failure("“\(title)” isn't running in the Claude app, or two processes claim it; nothing was sent") }
         // What your message tags goes after your words, fenced: Fjord's, never inside them, and never read for an
         // aside (checked above on your words alone).
         let body = verbatim ? ready.text : RouterPointers.attach(tagged, to: ready.text)
@@ -1226,11 +1232,18 @@ final class RouterMCPServer: @unchecked Sendable {
 
     func prepare(_ store: Store, session query: String, ticket: Ticket) async throws -> String {
         let message = try yourMessage()
-        let (session, to, _, cli) = try await target(store, query)
+        var (session, to, reachable, cli) = try await target(store, query)
         let guestStart = store.router.pendingDesktopStarts.first { $0.desktopSessionID == session.id && $0.state == .matched }
         // Still this turn's call (a late one from an earlier turn changes nothing), then: a new preparation replaces the old
         // one, which is void even if this one fails.
         try live(ticket)
+        // A local session with no process at all (not two claiming it): woken through the relay, then looked for again.
+        if cli == nil, !reachable, guestStart == nil, session.sshHost == nil, let asleep = session.cliID {
+            try await wakeIfAsleep(store, session: session, cli: asleep, ticket: ticket)
+            let woken = try await target(store, query)
+            (session, to, reachable, cli) = (woken.session, woken.to, woken.reachable, woken.cli ?? asleep)
+            try live(ticket)
+        }
         prepared[to] = nil
         let ready = verbatim ? Prepared(text: message, original: message, rephrased: false) : try edited(message)
         let sealed = try await signed(store, ready, title: session.title, cli: guestStart?.guestSessionID ?? cli,
@@ -1428,23 +1441,33 @@ final class RouterMCPServer: @unchecked Sendable {
         }
     }
 
-    /// The rest of a start the app didn't run at once (`SessionStart.Held`), in a turn of its own: waits up to
-    /// `SessionStart.heldWait` for the session's process, then goes on as `startSession` does.
+    /// The rest of a start the app didn't run at once (`SessionStart.Held`), in a turn of its own: wakes the session through
+    /// the relay (no waiting for the app to run it), then goes on as `startSession` does.
     func finishStart(_ store: Store, _ held: SessionStart.Held, ticket: Ticket) async throws -> String {
         let uuid = String(held.waiting.sessionID.dropFirst("local_".count))
+        let peersDir = store.routerFiles?.claudeDir.appendingPathComponent("sessions")
+        // The app has the session but isn't running it (above its cap): the relay starts it, unless it runs already.
+        let running: Bool
+        if processWaiter != nil { running = await pluginUp(store, uuid) }
+        else if let peersDir {
+            let up = await pluginUp(store, uuid)
+            let there = (try? await SessionStart.waitForPeer(uuid: uuid, dir: peersDir, timeout: 0, imported: { true })) != nil
+            running = up || there
+        } else { running = false }
+        if !running {
+            try await wake(store, session: held.waiting.sessionID, cli: uuid, title: held.title, ticket: ticket)
+        }
         let peer: String
         if let waiter = processWaiter {
             peer = try await waiter(held.waiting.sessionID)
         } else {
-            guard let peersDir = store.routerFiles?.claudeDir.appendingPathComponent("sessions") else {
-                throw Failure("Fjord isn't ready")
-            }
+            guard let peersDir else { throw Failure("Fjord isn't ready") }
             do {
                 // Only the time running out is said so; Stop, a reset or the Router off ends the wait as itself.
-                peer = try await SessionStart.waitForPeer(uuid: uuid, dir: peersDir, timeout: SessionStart.heldWait,
+                peer = try await SessionStart.waitForPeer(uuid: uuid, dir: peersDir, timeout: SessionStart.wait,
                                                           imported: { true }, check: { [weak self] in try self?.live(ticket) })
             } catch is SessionStart.NotRunning {
-                throw Failure("The Claude app didn't run the new session within \(Int(SessionStart.heldWait / 60)) min; nothing was sent to it")
+                throw Failure("The Claude app didn't run the new session after Fjord's relay woke it; nothing was sent to it")
             }
         }
         try live(ticket)
@@ -1476,11 +1499,10 @@ final class RouterMCPServer: @unchecked Sendable {
     /// Tests drive plugin readiness directly instead of waiting on a wall-clock poll.
     var pluginReadiness: (@MainActor (String) async -> Bool)?
 
-    private func waitForPlugin(_ store: Store, cli: String, ticket: Ticket) async throws {
+    func waitForPlugin(_ store: Store, cli: String, ticket: Ticket, failure: String? = nil) async throws {
+        let failure = failure ?? "The new session started, but Fjord's plugin didn't come up in it within \(Int(Self.bounded(pluginWait))) s; nothing was sent"
         if let pluginReadiness {
-            guard await pluginReadiness(cli) else {
-                throw Failure("The new session started, but Fjord's plugin didn't come up in it within \(Int(Self.bounded(pluginWait))) s; nothing was sent")
-            }
+            guard await pluginReadiness(cli) else { throw Failure(failure) }
             return
         }
         let deadline = Date().addingTimeInterval(pluginWait)
@@ -1492,7 +1514,7 @@ final class RouterMCPServer: @unchecked Sendable {
         // One last look: the wait may have been slow, not the plugin.
         try live(ticket)
         if await pluginSessions(store).contains(cli) { return }
-        throw Failure("The new session started, but Fjord's plugin didn't come up in it within \(Int(Self.bounded(pluginWait))) s; nothing was sent")
+        throw Failure(failure)
     }
 
     /// The verified way to make a desktop session: a CLI session with no model call, imported by the app, then its process.

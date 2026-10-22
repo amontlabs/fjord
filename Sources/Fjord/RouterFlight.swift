@@ -152,6 +152,8 @@ struct FlightFramesKey: PreferenceKey {
         let dispatcher = store.routerDispatcher
         let entry = store.router.record(id)
         if dispatcher.held[id] != nil { return entry.map(Self.holds) == true ? "held until you send it" : "waiting for Claude to open it" }
+        // A sleeping session being started through the relay: said while it takes.
+        if let waking = dispatcher.progress[id], waking.hasPrefix("waking ") { return waking + "…" }
         if let title = Self.destination(entry?.decision.targetID, store: store) { return "→ " + title }
         return "finding where it goes"
     }
@@ -490,6 +492,10 @@ private struct FlightPill: View {
                 Text(pill.text).cdsText((13, 18), .regular, CDS.Text.secondary).lineLimit(1).truncationMode(.tail)
                 Text(why).cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).truncationMode(.tail)
                 if retry {
+                    // The relay that wakes sleeping sessions isn't running: Claude opens with it ready to send.
+                    if why.hasPrefix(RouterTools.relayDown) {
+                        ClaudeButton("Start it", variant: .ghost, size: .sm) { Task { await store.startRelay() } }
+                    }
                     ClaudeButton("Retry", variant: .ghost, size: .sm) { flights.retry(pill.id, store: store) }
                     ChipClose(label: "Dismiss") { flights.dismiss(pill.id, store: store) }
                 }
