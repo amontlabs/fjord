@@ -302,6 +302,10 @@ import type { EngineInterface, Register } from 'claude-code'
 // prompt passes untouched. In the relay, `tool.call` lets SendMessage through only to a `local_` session and only with a
 // validly signed, fresh wake as its message, and denies every other SendMessage.
 //
+// What the app said around a dropped wake (its desktop guidance, a leading system-reminder) is kept in memory (64 KB at
+// most) and goes once with the next prompt this process takes: at the start of the text of Fjord's own delivery (a plugin's
+// submit can't pass context), or as `context` of a prompt from elsewhere (the person typing). Never on a task-notification.
+//
 // Fjord writes this file; edits are overwritten.
 
 const HEADER = /(?:^|\n)⟦fjord (?:v1 (\S+) (\S+) (\d+)|v2 (\S+) (\S+) (\d+) (\S+) (\S+)|v3 (\S+) (\S+) (\d+) (\S+) (\S+) ([01])|v4 (\S+) (\S+) (\d+) (\S+) (\S+) ([01]) (\S+)) ([0-9a-f]{64})⟧\n/
@@ -364,6 +368,26 @@ export const wakeInPrompt = (text: string) => {
   const m = /<cross-session-message\b[^>]*>\n?([^<]*?)\n?<\/cross-session-message>/.exec(text)
   return m ? parseWake(m[1]) : undefined
 }
+
+/** What a prompt holds besides the app's cross-session envelope: the app's own guidance (a leading system-reminder), trimmed. */
+export const withoutEnvelope = (text: string) =>
+  text.replace(/<cross-session-message\b[^>]*>\n?[^<]*?\n?<\/cross-session-message>/, '').trim()
+
+/** What the app said around a dropped wake, held in memory (never written) until the next prompt this process takes: that
+ * prompt carries it, once. Over this size it is not kept. */
+const KEPT_GUIDANCE_MAX = 64 * 1024
+let guidance: string | undefined
+export const keepGuidance = (text: string) => {
+  const rest = withoutEnvelope(text)
+  guidance = rest && rest.length <= KEPT_GUIDANCE_MAX ? rest : undefined
+}
+/** Takes the held guidance (and forgets it). */
+const takeGuidance = () => {
+  const g = guidance
+  guidance = undefined
+  return g
+}
+export const guidanceHeld = () => guidance
 
 const STOP = /^⟦fjord stop v1 (\S+) (\S+) (\d+) (\S+) ([0-9a-f]{64})⟧\n?/
 
@@ -592,6 +616,7 @@ export const forget = () => {
   inFlight.clear()
   deliveries = Promise.resolve()
   titled = false
+  guidance = undefined
 }
 
 /** Stops what a turn's tools are doing, and keeps their notifications out from now on. `record` is the turn's record taken
@@ -621,16 +646,25 @@ const submit = ($: EngineInterface, nonce: string, body: string): Promise<string
   const forgotten = () => {
     if (sent.get(nonce)?.turnId === undefined) sent.delete(nonce)
   }
-  return $.prompt.submit({ text: body, asUser: true }).then(
+  // Fjord's own submit doesn't pass this plugin's hooks, which can't take `context` from a plugin's call: the held
+  // guidance goes at the start of the text. Put back if the submit didn't enter.
+  const held = takeGuidance()
+  const text = held ? `${held}\n${body}` : body
+  const putBack = () => {
+    if (held && guidance === undefined) guidance = held
+  }
+  return $.prompt.submit({ text, asUser: true }).then(
     (r) => {
       if (r && 'drop' in r && r.drop !== undefined) {
         forgotten()
+        putBack()
         return String(r.drop)
       }
       return undefined
     },
     (error) => {
       forgotten()
+      putBack()
       return String((error as { message?: unknown })?.message ?? error)
     },
   )
@@ -980,6 +1014,7 @@ export const register: Register = (on) => {
     const wake = wakeInPrompt(e.text)
     if (wake && wake.target === (await $.session.id()) && (await wakeSigned($, wake))) {
       if (await claim($, wake.nonce, Number(wake.ts), await $.clock.now())) {
+        keepGuidance(e.text)
         return { drop: 'Fjord woke this session: nothing to answer.' }
       }
     }
@@ -988,6 +1023,12 @@ export const register: Register = (on) => {
       if (ids.length && ids.every((id) => quiet.has(id))) {
         return { drop: 'A task of a message cancelled from Fjord ended: not taken up again.' }
       }
+    }
+    // The app's guidance that came with a dropped wake rides, once, on the next prompt from elsewhere, as context the model
+    // reads beside it. Not on a notification, nor a slash command.
+    if (guidance !== undefined && e.origin.kind !== 'task-notification' && !e.command) {
+      const held = takeGuidance()!
+      return next({ ...e, context: [held, ...(e.context ?? [])] })
     }
     return next(e)
   })

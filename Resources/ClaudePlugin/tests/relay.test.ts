@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { abortMacInput, CAPABILITIES, forget, fromBase64, hmac, invalid, keyId, macInput, parse, parseAbort, parseStop, parseWake, stopMacInput, wakeInPrompt, wakeMacInput, type Settings } from '../hooks/register.ts'
+import { withoutEnvelope, abortMacInput, CAPABILITIES, forget, fromBase64, hmac, invalid, keyId, macInput, parse, parseAbort, parseStop, parseWake, stopMacInput, wakeInPrompt, wakeMacInput, type Settings } from '../hooks/register.ts'
 
 // The vector Fjord's Swift tests check too (ClaudePluginTests): the same key, fields and body give the same MAC and
 // the same wire text.
@@ -49,7 +49,7 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
     sessionId: TARGET,
     /** The relay's session id in config.json. */
     relay: undefined as string | undefined,
-    submitted: [] as { text: string; asUser?: true }[],
+    submitted: [] as { text: string; asUser?: true; context?: readonly string[] }[],
     queued: [] as string[],
     written: {} as Record<string, string>,
     key: KEY as string | undefined,
@@ -121,7 +121,7 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
     await w.holdSubmit
     if (w.dropSubmit) return { drop: 'a hook beneath said no' }
     w.order.push('submit')
-    w.submitted.push({ text: e.text, asUser: e.origin?.kind === 'plugin' ? e.origin.asUser : undefined })
+    w.submitted.push({ text: e.text, asUser: e.origin?.kind === 'plugin' ? e.origin.asUser : undefined, ...(e.context ? { context: e.context } : {}) })
     return { text: e.text }
   })
   on('session.receive', ($, e) => {
@@ -1377,6 +1377,75 @@ describe('the relay’s title', () => {
     await settle()
     expect(rename(w).length).toBe(1)
     expect(JSON.parse(w.written[`/presence/${TARGET}`]).state).toBe('live')
+  })
+})
+
+describe('the app’s guidance around a dropped wake', () => {
+  const GUIDE = '<system-reminder>\nThis conversation is now continuing in the Claude desktop app (Code tab).\n</system-reminder>'
+  const cold = async (extra = GUIDE) =>
+    `${extra}\n<cross-session-message from="local_relay" name="Fjord">\n${await wake()}\n</cross-session-message>`
+  const deliverNow = async ($: any, w: ReturnType<typeof world>) => {
+    w.inbox[`${TARGET}/${NONCE}.msg`] = WIRE
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await w.clock.advance(500)
+    await settle()
+  }
+
+  test('is what is left of the prompt without the envelope', async () => {
+    expect(withoutEnvelope(await cold())).toBe(GUIDE)
+    expect(withoutEnvelope(`<cross-session-message from="x">\n${await wake()}\n</cross-session-message>`)).toBe('')
+  })
+
+  // The plugin's hooks may run in a module copy of their own: held state is seen only through what the next prompt carries.
+  const next = ($: any, text = 'and now this') => $.prompt.submit({ text, origin: { kind: 'composer' } })
+
+  test('nothing is held when the wake came alone', async ($, on) => {
+    const w = world(on)
+    const bare = await ($ as any).prompt.submit({ text: await cold(''), origin: { kind: 'peer' } })
+    expect(bare.drop).toBeDefined()
+    await next($)
+    expect(w.submitted).toEqual([{ text: 'and now this' }])
+  })
+
+  test('is not held when too large', async ($, on) => {
+    const w = world(on)
+    await ($ as any).prompt.submit({ text: await cold('x'.repeat(64 * 1024 + 1)), origin: { kind: 'peer' } })
+    await next($)
+    expect(w.submitted).toEqual([{ text: 'and now this' }])
+  })
+
+  test('starts the text of Fjord’s own next delivery, once', async ($, on) => {
+    const w = world(on)
+    await ($ as any).prompt.submit({ text: await cold(), origin: { kind: 'peer' } })
+    await deliverNow($, w)
+    await next($)
+    expect(w.submitted).toEqual([{ text: `${GUIDE}\n${BODY}`, asUser: true }, { text: 'and now this' }])
+  })
+
+  test('rides as context on a prompt from elsewhere, once', async ($, on) => {
+    const w = world(on)
+    await ($ as any).prompt.submit({ text: await cold(), origin: { kind: 'peer' } })
+    await ($ as any).prompt.submit({ text: 'and now this', origin: { kind: 'composer' } })
+    await ($ as any).prompt.submit({ text: 'then that', origin: { kind: 'composer' } })
+    expect(w.submitted).toEqual([{ text: 'and now this', context: [GUIDE] }, { text: 'then that' }])
+  })
+
+  test('never goes with a task-notification', async ($, on) => {
+    const w = world(on)
+    await ($ as any).prompt.submit({ text: await cold(), origin: { kind: 'peer' } })
+    await ($ as any).prompt.submit({ text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } })
+    await next($)
+    expect(w.submitted).toEqual([{ text: '<task-notification>done</task-notification>' }, { text: 'and now this', context: [GUIDE] }])
+  })
+
+  test('stays held when Fjord’s delivery is refused', async ($, on) => {
+    const w = world(on)
+    await ($ as any).prompt.submit({ text: await cold(), origin: { kind: 'peer' } })
+    w.dropSubmit = true
+    await deliverNow($, w)
+    w.dropSubmit = false
+    await next($)
+    expect(w.submitted).toEqual([{ text: 'and now this', context: [GUIDE] }])
   })
 })
 
