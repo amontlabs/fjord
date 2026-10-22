@@ -830,6 +830,19 @@ import Testing
         #expect(s.router.relay == RouterRelay(sessionID: "local_relay", cliID: "cli-relay"))
     }
 
+    @Test func findingTheRelayTellsThePluginWhichSessionItIsBeforeAnyWake() async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        let plugin = try #require(s.routerFiles?.plugin)
+        try ClaudePlugin.write(to: plugin, version: "1.0.0-rabc", presence: dir.path("support/plugin-sessions"),
+                               key: dir.path("support/relay.key"), registry: dir.path("claude/sessions"))
+        #expect(ClaudePlugin.relay(in: plugin) == nil)
+        relay(s, dir)
+        #expect(s.relaySession()?.cliID == "cli-relay")
+        for _ in 0..<100 where ClaudePlugin.relay(in: plugin) == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(ClaudePlugin.relay(in: plugin) == "cli-relay")
+    }
+
     @Test func aSessionWhosePluginIsUpIsNotWoken() async throws {
         let dir = TempDir()
         let s = await store(dir)

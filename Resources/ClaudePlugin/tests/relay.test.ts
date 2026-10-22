@@ -1342,6 +1342,44 @@ describe('a wake', () => {
   })
 })
 
+describe('the relay’s title', () => {
+  const rename = (w: { commands: { command: string; args?: string }[] }) => w.commands.filter((c) => c.command === 'rename')
+
+  test('is Fjord, set once per process in the relay session', async ($, on) => {
+    const w = world(on)
+    w.relay = TARGET
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await settle()
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await settle()
+    expect(rename(w)).toEqual([{ command: 'rename', args: 'Fjord' }])
+  })
+
+  test('is left alone in any other session, and when the relay is not named yet', async ($, on) => {
+    const w = world(on)
+    w.relay = 'cli-relay'
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await settle()
+    w.relay = undefined
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await settle()
+    expect(rename(w)).toEqual([])
+  })
+
+  test('is tried again later, and a rename that fails breaks nothing', async ($, on) => {
+    const w = world(on)
+    w.commandFails.rename = 'no such command'
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await settle()
+    expect(rename(w)).toEqual([])
+    w.relay = TARGET
+    await w.clock.advance(10_000)
+    await settle()
+    expect(rename(w).length).toBe(1)
+    expect(JSON.parse(w.written[`/presence/${TARGET}`]).state).toBe('live')
+  })
+})
+
 describe('SendMessage in the relay', () => {
   /** The hooks beneath take a few turns of the loop to be reached. */
   const reached = async () => { for (let i = 0; i < 40; i++) await settle() }

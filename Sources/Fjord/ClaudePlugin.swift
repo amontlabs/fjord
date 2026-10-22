@@ -591,6 +591,7 @@ export const forget = () => {
   runningSince = 0
   inFlight.clear()
   deliveries = Promise.resolve()
+  titled = false
 }
 
 /** Stops what a turn's tools are doing, and keeps their notifications out from now on. `record` is the turn's record taken
@@ -866,6 +867,20 @@ export async function poll($: EngineInterface) {
 
 let timer: { cancel: () => void } | undefined
 
+/** Whether this process has named the relay session already (its title can't be read, so it is set once per process). */
+let titled = false
+
+/** In Fjord's relay session, renames it "Fjord", so the sessions it wakes show "From Fjord". Fjord names the relay in the
+ * config when it finds the session (after this starts, perhaps), so it is tried again until it is named; a rename that fails
+ * is left alone (a wake works under any title). */
+async function title($: EngineInterface) {
+  if (titled) return
+  const relay = await config($).then((c) => c.relay, () => undefined)
+  if (!relay || relay !== (await $.session.id().catch(() => undefined))) return
+  titled = true
+  await $.command.run({ command: 'rename', args: 'Fjord' }).catch(() => undefined)
+}
+
 export const register: Register = (on) => {
   on('session.receive', async ($, e, next) => {
     const outcome = await accept($, e.text)
@@ -876,7 +891,11 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     await mark($).catch(() => undefined)
     // The registry may not list the process yet, and a /clear changes the session's id: looked at again now and then.
-    $.clock.every(10_000, () => void mark($).catch(() => undefined))
+    $.clock.every(10_000, () => {
+      void mark($).catch(() => undefined)
+      void title($)
+    })
+    void title($)
     timer?.cancel()
     timer = $.clock.every(POLL_MS, () => void poll($))
     return next(e)

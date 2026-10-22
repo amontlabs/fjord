@@ -105,7 +105,13 @@ extension Store {
            let found = claudeSessions.values.filter({ !$0.isArchived && $0.folderKey == folder && $0.cliID != nil })
             .max(by: { $0.lastActivity < $1.lastActivity }), let cli = found.cliID {
             let relay = RouterRelay(sessionID: found.id, cliID: cli)
-            if router.relay != relay { router.relay = relay }
+            if router.relay != relay {
+                router.relay = relay
+                // The plugin names the relay's session "Fjord" once it knows it (it can't ask Fjord); wakes write it again.
+                if let plugin = routerFiles?.plugin {
+                    Task { _ = try? await OffMain.run { Swift.Result { try ClaudePlugin.setRelay(relay.cliID, in: plugin) } }.get() }
+                }
+            }
             return relay
         }
         return router.relay
