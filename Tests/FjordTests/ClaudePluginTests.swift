@@ -285,6 +285,36 @@ enum PluginFixture {
         #expect(RelaySigner.mac(key: Self.key, target: Self.target, nonce: Self.nonce, ts: String(Self.ts), body: Self.body) == Self.mac)
     }
 
+    /// The wake the plugin's tests check too (`Resources/ClaudePlugin/tests/relay.test.ts`, "a wake").
+    static let wakeNonce = "123e4567-e89b-12d3-a456-426614174001"
+    static let wakeMac = "10e8049ccf2ff75827c09de1d03a454989398c2193577174dd7b1321e87a01b6"
+
+    @Test func aWakeIsAsciiAndItsMacIsTheSharedVector() throws {
+        #expect(RelaySigner.wakeMac(key: Self.key, target: Self.target, nonce: Self.wakeNonce, ts: String(Self.ts)) == Self.wakeMac)
+        let wake = RelaySigner.signWake(target: Self.target, key: Self.key, nonce: UUID(uuidString: Self.wakeNonce)!,
+                                        now: Date(timeIntervalSince1970: Double(Self.ts) / 1000))
+        #expect(wake == "fjord-wake cli-target \(Self.wakeNonce) \(Self.ts) \(Self.wakeMac)")
+        #expect(wake.allSatisfy { $0.isASCII && !$0.isNewline })
+        // It is not a delivery: the inbox and the peer channel read no header from it.
+        #expect(RelayInbox.header(of: wake) == nil)
+    }
+
+    @Test func theRelaySessionIsNamedInThePluginsConfigAndKept() throws {
+        let dir = TempDir()
+        let folder = dir.path("claude-plugin"), presence = dir.path("plugin-sessions"), keyFile = dir.path("relay.key")
+        try ClaudePlugin.write(to: folder, version: "1.0.0-rabc", presence: presence, key: keyFile, registry: dir.path("sessions"))
+        #expect(ClaudePlugin.relay(in: folder) == nil)
+        try ClaudePlugin.setRelay("cli-relay", in: folder)
+        #expect(ClaudePlugin.relay(in: folder) == "cli-relay")
+        // A new write of the folder (a new version, a switch) keeps it, and the rest of the config.
+        try ClaudePlugin.write(to: folder, version: "1.0.1-rabc", presence: presence, key: keyFile, registry: dir.path("sessions"))
+        #expect(ClaudePlugin.relay(in: folder) == "cli-relay")
+        let config = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("config.json"))) as? [String: String]
+        #expect(config?["keyPath"] == keyFile.path && config?["relay"] == "cli-relay")
+        try ClaudePlugin.setRelay(nil, in: folder)
+        #expect(ClaudePlugin.relay(in: folder) == nil)
+    }
+
     @Test func theSettingsAreInsideTheSignature() throws {
         // The same vector the plugin's tests check.
         let mac = "a6d0f7aec97dfa6bf5f6f11f0bdd229e6d72bdc019132b7265213710c7823bb1"

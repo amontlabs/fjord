@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { abortMacInput, CAPABILITIES, forget, fromBase64, hmac, invalid, keyId, macInput, parse, parseAbort, parseStop, stopMacInput, type Settings } from '../hooks/register.ts'
+import { abortMacInput, CAPABILITIES, forget, fromBase64, hmac, invalid, keyId, macInput, parse, parseAbort, parseStop, parseWake, stopMacInput, wakeInPrompt, wakeMacInput, type Settings } from '../hooks/register.ts'
 
 // The vector Fjord's Swift tests check too (ClaudePluginTests): the same key, fields and body give the same MAC and
 // the same wire text.
@@ -47,6 +47,8 @@ const envelope = (text: string) =>
 const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string, unknown>; now?: number } = {}) => {
   const w = {
     sessionId: TARGET,
+    /** The relay's session id in config.json. */
+    relay: undefined as string | undefined,
     submitted: [] as { text: string; asUser?: true }[],
     queued: [] as string[],
     written: {} as Record<string, string>,
@@ -82,7 +84,7 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
       return { value: `${w.key}\n` }
     }
     if (e.path.endsWith('/config.json')) {
-      return { value: JSON.stringify({ keyPath: '/fjord/relay.key', presenceDir: '/presence', sessionsDir: '/sessions', inboxDir: '/inbox' }) }
+      return { value: JSON.stringify({ keyPath: '/fjord/relay.key', presenceDir: '/presence', sessionsDir: '/sessions', inboxDir: '/inbox', relay: w.relay }) }
     }
     if (e.path.startsWith('/inbox/')) {
       const text = w.inbox[e.path.slice('/inbox/'.length)]
@@ -1284,5 +1286,90 @@ describe('stopping a turn and interrupting it', () => {
     expect(presence(w).turn).toEqual({ id: 't1', startedAt: TS + 1500 })
     await $.turn.complete({ ...complete, turnId: 't1' })
     expect(presence(w).turn).toBeNull()
+  })
+})
+
+const WAKE_NONCE = '123e4567-e89b-12d3-a456-426614174001'
+const wake = async (target = TARGET, nonce = WAKE_NONCE, ts = TS, key = KEY) =>
+  `fjord-wake ${target} ${nonce} ${ts} ${await hmac(enc.encode(key), wakeMacInput(target, nonce, String(ts)))}`
+/** As the app delivers a cold-started session's first prompt. */
+const woken = (body: string) =>
+  `<system-reminder>\nThis session runs in the Claude desktop app.\n</system-reminder>\n<cross-session-message from="local_relay" name="Fjord">\n${body}\n</cross-session-message>`
+
+describe('a wake', () => {
+  test('is read from its own text and from the app’s envelope, and from nothing else', async () => {
+    const text = await wake()
+    expect(parseWake(text)).toMatchObject({ target: TARGET, nonce: WAKE_NONCE, ts: String(TS) })
+    expect(wakeInPrompt(woken(text))?.target).toBe(TARGET)
+    expect(wakeInPrompt(woken(`${text} and more`))).toBeUndefined()
+    expect(wakeInPrompt(text)).toBeUndefined()
+    expect(parseWake('fjord-wake x y')).toBeUndefined()
+  })
+
+  test('matches the vector Fjord signs with', async () => {
+    expect(await hmac(enc.encode(KEY), wakeMacInput(TARGET, WAKE_NONCE, String(TS)))).toBe('10e8049ccf2ff75827c09de1d03a454989398c2193577174dd7b1321e87a01b6')
+  })
+
+  test('is dropped in its target: no turn, and its nonce is used up', async ($, on) => {
+    const w = world(on)
+    const text = woken(await wake())
+    const first = await ($ as any).prompt.submit({ text, origin: { kind: 'peer' } })
+    expect(first.drop).toBeDefined()
+    expect(w.submitted).toEqual([])
+    // Seen already: it goes on as the peer message it then is.
+    await ($ as any).prompt.submit({ text, origin: { kind: 'peer' } })
+    expect(w.submitted.length).toBe(1)
+  })
+
+  test('is dropped only when it is signed, fresh and for this session', async ($, on) => {
+    const w = world(on)
+    for (const body of [
+      await wake('someone-else'),
+      await wake(TARGET, '123e4567-e89b-12d3-a456-426614174002', TS - 11 * 60 * 1000),
+      await wake(TARGET, '123e4567-e89b-12d3-a456-426614174003', TS, 'other key'),
+    ]) {
+      const result = await ($ as any).prompt.submit({ text: woken(body), origin: { kind: 'peer' } })
+      expect(result.drop).toBeUndefined()
+    }
+    expect(w.submitted.length).toBe(3)
+  })
+
+  test('does not touch other prompts', async ($, on) => {
+    const w = world(on)
+    await ($ as any).prompt.submit({ text: 'fix the bug', origin: { kind: 'composer' } })
+    await ($ as any).prompt.submit({ text: woken('Please review the PR'), origin: { kind: 'peer' } })
+    expect(w.submitted.length).toBe(2)
+  })
+})
+
+describe('SendMessage in the relay', () => {
+  /** The hooks beneath take a few turns of the loop to be reached. */
+  const reached = async () => { for (let i = 0; i < 40; i++) await settle() }
+  const send = ($: any, to: string, message: string) =>
+    $.tool.call({ tool: 'SendMessage', to, message, tool_use_id: `toolu_${Math.random()}` })
+
+  test('goes only with a valid wake, to a session of the app', async ($, on) => {
+    const w = world(on)
+    w.relay = TARGET
+    const good = await wake('cli-other')
+    const sent = send($, 'local_abc-123', good)
+    await reached()
+    expect(Object.keys(w.finish).length).toBe(1)
+    Object.values(w.finish)[0]()
+    expect((await sent).deny).toBeUndefined()
+    expect((await send($, 'local_abc-123', 'hello')).deny).toBeDefined()
+    expect((await send($, 'local_abc-123', await wake('cli-other', WAKE_NONCE, TS, 'other key'))).deny).toBeDefined()
+    expect((await send($, 'someone', good)).deny).toBeDefined()
+    expect((await send($, 'local_abc', await wake(TARGET))).deny).toBeDefined()
+  })
+
+  test('is left alone in any other session', async ($, on) => {
+    const w = world(on)
+    w.relay = 'cli-relay'
+    const pending = send($, 'someone', 'hello')
+    await reached()
+    expect(Object.keys(w.finish).length).toBe(1)
+    Object.values(w.finish)[0]()
+    expect((await pending).deny).toBeUndefined()
   })
 })

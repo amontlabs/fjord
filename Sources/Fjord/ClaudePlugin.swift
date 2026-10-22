@@ -45,14 +45,17 @@ enum ClaudePlugin {
     /// module can't read the environment): the key, where it leaves its presence files, and Claude Code's registry of
     /// processes. The key itself lives outside the folder (`ensureKey`): `claude plugin install` copies the folder into
     /// Claude Code's cache, and keeps the copy after an uninstall.
-    static func write(to folder: URL, version: String, presence: URL, key: URL, registry: URL) throws {
+    static func write(to folder: URL, version: String, presence: URL, key: URL, registry: URL, relay: String? = nil) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try fm.createDirectory(at: presence, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let inbox = RelayInbox.root(besidePresence: presence)
         try fm.createDirectory(at: inbox, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let config = try JSONSerialization.data(withJSONObject: ["keyPath": key.path, "presenceDir": presence.path,
-                                                                 "sessionsDir": registry.path, "inboxDir": inbox.path],
+        let relay = relay ?? Self.relay(in: folder)
+        var fields = ["keyPath": key.path, "presenceDir": presence.path, "sessionsDir": registry.path, "inboxDir": inbox.path]
+        // The relay's own CLI session id: in that session alone the plugin lets SendMessage carry a wake.
+        if let relay { fields["relay"] = relay }
+        let config = try JSONSerialization.data(withJSONObject: fields,
                                                 options: [.sortedKeys, .withoutEscapingSlashes])
         let files: [(String, Data)] = [
             (".claude-plugin/plugin.json", Data(pluginJSON(version: version).utf8)),
@@ -67,6 +70,22 @@ enum ClaudePlugin {
             if (try? Data(contentsOf: url)) == data { continue }
             try PrivateFile.write(data, to: url, mode: 0o644)
         }
+    }
+
+    /// The relay's CLI session id the folder's config names, if it does.
+    static func relay(in folder: URL) -> String? {
+        let data = try? Data(contentsOf: folder.appendingPathComponent("config.json"))
+        return (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["relay"] as? String
+    }
+
+    /// Names (or, with nil, forgets) the relay's session in the folder's config, leaving the rest of it as it is.
+    static func setRelay(_ relay: String?, in folder: URL) throws {
+        let url = folder.appendingPathComponent("config.json")
+        guard var fields = (try JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] else { return }
+        if fields["relay"] as? String == relay { return }
+        fields["relay"] = relay
+        let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys, .withoutEscapingSlashes])
+        try PrivateFile.write(data + Data("\n".utf8), to: url, mode: 0o644)
     }
 
     /// The key, made once: 32 random bytes, hex, readable by the person alone. Returns it.
@@ -273,6 +292,16 @@ import type { EngineInterface, Register } from 'claude-code'
 // Presence files carry `turn`: `{ id, startedAt }` while a main turn runs, null when idle, rewritten as the turn starts and
 // as it completes.
 //
+// `wake-v1`: Fjord starts a sleeping session through its relay (a session of Fjord's own in the Claude app, named by
+// `relay` in config.json), the one session the app lets call SendMessage to a session with no process. The relay sends the
+// session this text, which the app delivers as the cold-started session's first prompt, inside the app's own envelope:
+//   fjord-wake <target cli session id> <nonce> <ms since 1970> <hex HMAC-SHA256>
+// with the MAC over "wake-v1\n<target>\n<nonce>\n<ms>\n" (ASCII and hex only, so the envelope's escaping can't change it).
+// In the target, `prompt.submit` drops a prompt that holds a valid wake for this session (signature, fresh, nonce never
+// seen, claimed as a delivery's is): no turn runs, the process stays up and this plugin shows its presence. Any other
+// prompt passes untouched. In the relay, `tool.call` lets SendMessage through only to a `local_` session and only with a
+// validly signed, fresh wake as its message, and denies every other SendMessage.
+//
 // Fjord writes this file; edits are overwritten.
 
 const HEADER = /(?:^|\n)⟦fjord (?:v1 (\S+) (\S+) (\d+)|v2 (\S+) (\S+) (\d+) (\S+) (\S+)|v3 (\S+) (\S+) (\d+) (\S+) (\S+) ([01])|v4 (\S+) (\S+) (\d+) (\S+) (\S+) ([01]) (\S+)) ([0-9a-f]{64})⟧\n/
@@ -316,6 +345,24 @@ export const abortMacInput = (target: string, nonce: string, ts: string, cancels
 export const parseAbort = (text: string) => {
   const m = ABORT.exec(text)
   return m ? { target: m[1], nonce: m[2], ts: m[3], cancels: m[4], mac: m[5] } : undefined
+}
+
+const WAKE = /^fjord-wake (\S+) ([0-9a-f-]{8,64}) (\d{1,16}) ([0-9a-f]{64})$/
+
+/** What a wake's MAC covers: its kind, the target (a CLI session id), its nonce and its time, one per line. */
+export const wakeMacInput = (target: string, nonce: string, ts: string) => enc.encode(`wake-v1\n${target}\n${nonce}\n${ts}\n`)
+
+/** A wake's fields from its own text; undefined for anything else. */
+export const parseWake = (text: string) => {
+  const m = WAKE.exec(text.trim())
+  return m ? { target: m[1], nonce: m[2], ts: m[3], mac: m[4] } : undefined
+}
+
+/** The wake a prompt holds: the body of the app's cross-session envelope (the app's own system-reminder may come before it),
+ * which must be a wake and nothing else; undefined for any other prompt. */
+export const wakeInPrompt = (text: string) => {
+  const m = /<cross-session-message\b[^>]*>\n?([^<]*?)\n?<\/cross-session-message>/.exec(text)
+  return m ? parseWake(m[1]) : undefined
 }
 
 const STOP = /^⟦fjord stop v1 (\S+) (\S+) (\d+) (\S+) ([0-9a-f]{64})⟧\n?/
@@ -421,7 +468,7 @@ const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
 
 /** Where Fjord keeps the key and the presence files, and Claude Code its registry of processes, as absolute paths (a
  * hooks module can't read the environment). */
-type Config = { keyPath?: string; presenceDir?: string; sessionsDir?: string; inboxDir?: string }
+type Config = { keyPath?: string; presenceDir?: string; sessionsDir?: string; inboxDir?: string; relay?: string }
 
 async function config($: EngineInterface) {
   return JSON.parse(await $.fs.read(`${$.plugin.root}/config.json`)) as Config
@@ -480,6 +527,16 @@ async function unmark($: EngineInterface) {
   if (!marked) return
   await $.fs.write(`${marked.presenceDir}/${marked.sessionId}`, `${JSON.stringify({ state: 'ended' })}\n`)
   marked = undefined
+}
+
+/** Whether a wake is signed by Fjord's key and fresh (nothing is claimed). */
+async function wakeSigned($: EngineInterface, wake: NonNullable<ReturnType<typeof parseWake>>) {
+  const { keyPath } = await config($)
+  if (!keyPath) return false
+  const key = (await $.fs.read(keyPath)).trim()
+  if (!key) return false
+  const expected = await hmac(enc.encode(key), wakeMacInput(wake.target, wake.nonce, wake.ts))
+  return same(expected, wake.mac) && Math.abs((await $.clock.now()) - Number(wake.ts)) < WINDOW_MS
 }
 
 /** Claims a nonce: false when it was claimed before. Each nonce is a key of its own in the store (it outlives reloads and
@@ -888,8 +945,25 @@ export const register: Register = (on) => {
       turn.cuts.delete(cut)
     }
   }).catch(($, e, next) => next(e))
+  // In Fjord's relay session, SendMessage carries a wake and nothing else, to a session of the app.
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    const relay = await config($).then((c) => c.relay, () => undefined)
+    if (!relay || relay !== (await $.session.id())) return next(e)
+    const call = e as { to?: unknown; message?: unknown }
+    const wake = typeof call.message === 'string' ? parseWake(call.message) : undefined
+    const to = typeof call.to === 'string' ? call.to : ''
+    const fit = !!wake && wake.target !== relay && /^local_[A-Za-z0-9_-]+$/.test(to) && (await wakeSigned($, wake!).catch(() => false))
+    return fit ? next(e) : { deny: 'Fjord’s relay only sends the signed wake it is given, to the session it names.' }
+  })
+  // A wake for this session, the first prompt of a session the app started for Fjord, is dropped: no turn runs.
   // A notification only of tasks of a turn taken back is dropped; one that tells of others too goes as it is.
   on('prompt.submit', async ($, e, next) => {
+    const wake = wakeInPrompt(e.text)
+    if (wake && wake.target === (await $.session.id()) && (await wakeSigned($, wake))) {
+      if (await claim($, wake.nonce, Number(wake.ts), await $.clock.now())) {
+        return { drop: 'Fjord woke this session: nothing to answer.' }
+      }
+    }
     if (e.origin.kind === 'task-notification' && quiet.size) {
       const ids = [...e.text.matchAll(/<tool-use-id>([^<\s]+)<\/tool-use-id>/g)].map((m) => m[1])
       if (ids.length && ids.every((id) => quiet.has(id))) {
@@ -996,6 +1070,21 @@ enum RelaySigner {
         let input = Data("stop-v1\n\(target)\n\(id)\n\(ts)\n\(turn)\n".utf8)
         let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
         return "⟦fjord stop v1 \(target) \(id) \(ts) \(turn) \(code.map { String(format: "%02x", $0) }.joined())⟧\n"
+    }
+
+    /// A wake for the session whose CLI session id is `target`: `fjord-wake <target> <nonce> <ms> <hex HMAC-SHA256>`, its MAC over
+    /// `wake-v1\n<target>\n<nonce>\n<ms>\n`. It is ASCII and hex only: the app puts it in an envelope whose escaping would
+    /// change anything else. The relay session sends it with SendMessage and the plugin in `target` drops it (`wake-v1`).
+    static func signWake(target: String, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
+        let ts = String(RouterFeed.Stamp.ms(now))
+        let id = nonce.uuidString.lowercased()
+        return "fjord-wake \(target) \(id) \(ts) \(wakeMac(key: key, target: target, nonce: id, ts: ts))"
+    }
+
+    static func wakeMac(key: String, target: String, nonce: String, ts: String) -> String {
+        let input = Data("wake-v1\n\(target)\n\(nonce)\n\(ts)\n".utf8)
+        let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
+        return code.map { String(format: "%02x", $0) }.joined()
     }
 
     /// The v2 MAC: `v2\n<target>\n<nonce>\n<ts>\n<model|->\n<effort|->\n` and the body; with `interrupt` the v3 one, which
