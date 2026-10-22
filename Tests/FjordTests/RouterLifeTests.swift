@@ -202,6 +202,58 @@ import Testing
         #expect(RouterStyle.prompt(RouterLifeContext.leafRules, style: store.routerStyle).contains("Like a pirate."))
     }
 
+    @MainActor @Test func eachLineIsAskedAsATypedAnswerNamingYourLanguageAndOnlyItsLineIsKept() async throws {
+        let store = store()
+        let calls = Calls()
+        calls.data = Self.transcript([("Ajoute un badge", "Badge ajouté.")])
+        var schemas: [String?] = []
+        store.routerLife.runner = { _, context, schema in
+            schemas.append(schema)
+            calls.contexts.append(context)
+            let line = context.contains("Its conversation so far") ? "Add a badge to the rows" : "Added a badge"
+            return #"{"language":"English","line":"\#(line)"}"#
+        }
+        store.routerLife.reader = { _, _ in calls.data }
+        let id = working(store, turns: 1)
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        #expect(!schemas.isEmpty && schemas.allSatisfy { $0 == RouterLifeContext.schema })
+        #expect(store.router.lives[id]?.opening == "Add a badge to the rows")
+        // The rules: what the session is for, on one line, never that it ended.
+        for rules in [RouterLifeContext.openingRules, RouterLifeContext.rootRules] { #expect(rules.contains("task title")) }
+        for rules in [RouterLifeContext.leafRules, RouterLifeContext.rootRules, RouterLifeContext.openingRules] {
+            #expect(rules.contains("at most 12 words") && rules.contains("Never say the session ended"))
+        }
+        // A plain answer is the line itself.
+        #expect(RouterLifeContext.line("Add a badge") == "Add a badge")
+        #expect(RouterLifeContext.line(#"{"language":"English","line":"Add a badge"}"#) == "Add a badge")
+    }
+
+    @MainActor @Test func linesWrittenUnderOlderRulesAreWrittenAgainOnceAndTheLeavesStay() async throws {
+        let store = store()
+        let calls = Calls()
+        calls.data = Self.transcript([("Add a badge", "Added."), ("Colour it", "Coloured.")])
+        writer(store, calls)
+        let id = working(store, turns: 2)
+        store.claudeSessions[id]?.running = false
+        // A record from before the rules were versioned: an opening, a leaf and a whole-life line under the old words.
+        var old = SessionLife(first: 1, opening: "Fixed the badge and shipped it.")
+        old.add(RouterLeaf(turn: 2, at: Date(), text: "Coloured it."))
+        old.set(RouterRoot(through: 2, at: Date(), text: "Fixed the badge, then coloured it.", withOpening: true))
+        store.router.lives[id] = old
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        let life = try #require(store.router.lives[id])
+        #expect(life.rules == RouterLifeContext.version)
+        #expect(life.opening == "Opening line." && life.leaves.map(\.text) == ["Coloured it."])
+        #expect(life.root?.through == 2 && life.root?.text.hasPrefix("Whole:") == true)
+        // Once only: looked at again, nothing more is asked.
+        let asked = calls.contexts.count
+        store.routerLife.sync(store: store)
+        await store.routerLife.idle()
+        #expect(calls.contexts.count == asked)
+    }
+
     @MainActor @Test func aSessionFirstSeenBeforeAnyTurnMakesALeafForItsFirstTurn() async throws {
         let store = store()
         let calls = Calls()
@@ -209,7 +261,7 @@ import Testing
         let id = working(store, turns: 0)
         store.routerLife.sync(store: store)
         await store.routerLife.idle()
-        #expect(store.router.lives[id] == SessionLife(first: 0) && calls.contexts.isEmpty)
+        #expect(store.router.lives[id] == SessionLife(first: 0, rules: RouterLifeContext.version) && calls.contexts.isEmpty)
         calls.data = Self.transcript([("Start", "Started.")])
         store.claudeSessions[id]?.completedTurns = 1
         store.claudeSessions[id]?.running = false
