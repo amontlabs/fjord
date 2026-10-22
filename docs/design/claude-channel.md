@@ -58,8 +58,14 @@ Claude's context. The app's guidance that came with it goes with the next prompt
 
 ## Live checks, in order
 
-1. A plugin's `$.mcp.call` `send_message` from an ordinary session wakes a sleeping one: zero turns on both sides; note
-   every visible row on both.
+1. **Passed 2026-10-22.** A throwaway plugin in an ordinary running session called `$.mcp.call("ccd_session_mgmt",
+   "send_message")`; the app started the sleeping target ("delivered"); its plugin dropped the wake. Asked afterwards,
+   neither session's Claude knew of the other or of any message besides the test's own. Traces:
+   - Sender: nothing in its transcript or the app's view of it. The app keeps a delivery receipt in its session record
+     (bookkeeping, never shown to Claude, pruned).
+   - Target: no turn (0), nothing in Claude's context. The app's view shows the dropped wake as a "From <sender>" row; the
+     transcript has a "Prompt dropped by a hook" note. The app flags it `peerMessaged`, which only changes permission
+     auto-approval for scheduled-task sessions (`shouldAutoApprovePermission`).
 2. The same to a running target; and a sender and target in different permission modes.
 3. A new session at the cap, end to end, under 10 s, your words as yours.
 4. With no session running after a relaunch: the one-time open, then a wake.
