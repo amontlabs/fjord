@@ -274,9 +274,10 @@ enum RouterSender {
         }
         let words = body ?? ready?.body ?? text
         let began = Date()
+        let title = store.claudeSessions[local]?.title ?? local
         store.noteOperation(DeliveryOperation(nonce: header.nonce, target: header.target, kind: kind,
                                               bodyHash: DeliveryOperation.hash(of: words), state: .waiting, decisionID: decisionID,
-                                              createdAt: began, updatedAt: began))
+                                              session: local, to: title, createdAt: began, updatedAt: began))
         func settle(_ state: DeliveryOperation.State, _ reason: String? = nil) {
             store.updateOperation(header.nonce) { $0.state = state; $0.reason = reason }
         }
@@ -300,7 +301,6 @@ enum RouterSender {
             await finish(.refused, why)
             throw RouterTools.Failure(why)
         }
-        let title = store.claudeSessions[local]?.title ?? local
         let cli = header.target
         do {
             let ack = try await RouterCarry.deliver(

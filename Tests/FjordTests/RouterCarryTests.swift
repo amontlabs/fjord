@@ -757,6 +757,57 @@ import Testing
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: dir.path("support/relay").path)) ?? []) == ["cli-target"])
     }
 
+    @Test func aTargetsAnswerFoundAfterAQuitMakesTheHistoryShowItDeliveredNotFailed() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        func pending(_ text: String) -> UUID { s.logDecision(RouterDecision(trigger: .you(text), decision: .init(intent: "send"))) }
+        let went = pending("ship it"), refused = pending("stale one"), quiet = pending("nobody answers")
+        func op(_ nonce: String, _ id: UUID) -> DeliveryOperation {
+            DeliveryOperation(nonce: nonce, target: "cli-target", kind: .message, bodyHash: "0123456789abcdef", state: .waiting,
+                              decisionID: id, session: "local_t", to: "Target", createdAt: Date(), updatedAt: Date())
+        }
+        s.noteOperation(op("went", went)); s.noteOperation(op("refused", refused)); s.noteOperation(op("quiet", quiet))
+        // Fjord quits with the three runs pending; loading ends them as interrupted.
+        var loaded = s.router
+        loaded.settleInterrupted()
+        s.router = loaded
+        func done(_ id: UUID) -> [RouterDecision.Done] { s.router.record(id)?.done ?? [] }
+        #expect(done(went) == [.failed("interrupted")])
+        // The target's plugin answered while Fjord was down.
+        try FileManager.default.createDirectory(at: inbox.folder(for: "cli-target"), withIntermediateDirectories: true)
+        try Data("ok\n".utf8).write(to: inbox.files(for: "cli-target", nonce: "went").ack)
+        try Data("refused: stale\n".utf8).write(to: inbox.files(for: "cli-target", nonce: "refused").ack)
+        s.settleLostOperations()
+        #expect(done(went) == [.sent(to: "Target", text: "ship it", original: nil)])
+        #expect(s.router.record(went)?.delivered?.nonce == "went" && s.router.record(went)?.links.sessions == ["local_t"])
+        #expect(done(refused) == [.failed("stale")])
+        // Without an answer it is unsure, and says so rather than "interrupted".
+        let line = done(quiet).compactMap { item -> String? in if case .failed(let why) = item { why } else { nil } }.first
+        #expect(line?.hasPrefix("It may not have arrived") == true)
+        // The history the page draws is made from these.
+        let shown = s.routerHistory.compactMap { entry -> RouterDecision? in if case .decision(let d) = entry { d } else { nil } }
+        #expect(shown.first { $0.id == went }?.done == [.sent(to: "Target", text: "ship it", original: nil)])
+    }
+
+    @Test func aFirstMessageOfAForkLostWithAQuitIsNotToldAsNeverSentOnceItsAnswerIsFound() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        let id = s.logDecision(RouterDecision(trigger: .you("fork it"), decision: .init(intent: "fork")))
+        s.updateDecision(id) { $0.add(.started(session: "local_t", project: "api (fork)", model: nil, effort: nil), session: "local_t") }
+        s.noteOperation(DeliveryOperation(nonce: "first", target: "cli-target", kind: .firstMessage, bodyHash: "0123456789abcdef",
+                                          state: .waiting, decisionID: id, session: "local_t", to: "Target", createdAt: Date(), updatedAt: Date()))
+        var loaded = s.router
+        loaded.settleInterrupted()
+        s.router = loaded
+        try FileManager.default.createDirectory(at: inbox.folder(for: "cli-target"), withIntermediateDirectories: true)
+        try Data("ok\n".utf8).write(to: inbox.files(for: "cli-target", nonce: "first").ack)
+        s.settleLostOperations()
+        let items = s.router.record(id)?.done ?? []
+        #expect(items.count == 2 && !items.contains { if case .failed = $0 { true } else { false } })
+    }
+
     @Test func operationsAreKeptInTheRoutersStateAndOnlyTheLatestAreKept() throws {
         let s = Store()
         s.persists = false

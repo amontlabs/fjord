@@ -43,6 +43,10 @@ struct DeliveryOperation: Codable, Equatable, Identifiable, Sendable {
     /// Why it is `refused`, `unsure` or `needsYou`.
     var reason: String?
     var decisionID: UUID?
+    /// The Claude app's id for the target (`local_<uuid>`) and its title as the history named it: enough to restore the
+    /// visible receipt of a message whose answer came while Fjord was not looking (`Store.reconcileDecision`).
+    var session: String?
+    var to: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -364,6 +368,42 @@ extension Store {
                     $0.state = .unsure
                     $0.reason = "Fjord quit while it was being delivered"
                 }
+            }
+            // The history is made of the decisions, not the operations: what the target said is told there too.
+            if let settled = router.operations.first(where: { $0.nonce == operation.nonce }), settled.state != operation.state {
+                reconcileDecision(for: settled)
+            }
+        }
+    }
+
+    /// The lines that say a send failed, as a quit (`RouterState.settleInterrupted`) or an unsure end (`RouterCarry.unsure`)
+    /// leaves them in the history.
+    private static func staleFailure(_ item: RouterDecision.Done) -> Bool {
+        guard case .failed(let why) = item else { return false }
+        return why == "interrupted" || why.hasPrefix("its first message wasn't sent: Fjord quit") || why.hasPrefix("It may not have arrived")
+    }
+
+    /// Makes the run an operation belongs to say what the operation now says, when it was recovered after the run had ended
+    /// failed or interrupted: delivered when the target's answer was ok (the receipt a Cancel needs is not restored: the turn
+    /// is long over), refused with the target's reason, or unsure with the reason. Nothing else in the run changes.
+    func reconcileDecision(for operation: DeliveryOperation) {
+        guard let id = operation.decisionID else { return }
+        updateDecision(id) { entry in
+            guard entry.done.contains(where: Self.staleFailure) else { return }
+            entry.done.removeAll(where: Self.staleFailure)
+            switch operation.state {
+            case .sent:
+                entry.add(.sent(to: operation.to ?? operation.session ?? "the session", text: entry.triggerText, original: nil), session: operation.session)
+                if let session = operation.session {
+                    entry.delivered = .init(session: session, cli: operation.target, nonce: operation.nonce, at: operation.updatedAt,
+                                            turns: 0, busy: false, abortable: false)
+                }
+            case .refused:
+                entry.add(.failed(RouterDecision.clip(operation.reason ?? "refused", 120)))
+            case .unsure:
+                entry.add(.failed(RouterDecision.clip(RouterCarry.unsure(operation.reason ?? "no answer"), 120)))
+            case .waiting, .needsYou:
+                break
             }
         }
     }
