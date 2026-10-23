@@ -419,6 +419,19 @@ enum AppWindowShots {
                  model.digest.historyOpen = true
                  if let history = store.routerDigest?.history { model.digest.expanded = [history[1].id] }
              }, appearance: .darkAqua),
+        // A message sent to a session, delivered, in the Brief's history among the rewrites, opened (the shape of a real send).
+        Shot(name: "router-brief-history-sent", destination: { _ in .router }, sidebarHidden: true,
+             size: CGSize(width: 1600, height: 1420), compose: { model, store in
+                 Demo.routerDigest(store); model.pickBrief()
+                 model.digest.historyOpen = true
+                 var sent = RouterDecision(at: Date().addingTimeInterval(-30),
+                                           trigger: .you("@superradcompany/microsandbox#1739 apparently there are some conflicts in this PR, fix them"),
+                                           decision: .init(target: "session “fix the merge conflicts in there” in modify-mounts", intent: "message", label: "reply"),
+                                           outcome: .done)
+                 sent.add(.sent(to: "fix the merge conflicts in there", text: "fix them", original: nil), session: "local_demo-transfer")
+                 store.router.decisions.append(sent)
+                 model.digest.expanded = [sent.id.uuidString]
+             }, appearance: .aqua),
         // The history dragged wider, nothing opened in it.
         Shot(name: "router-brief-history-wide", destination: { _ in .router }, sidebarHidden: true,
              size: CGSize(width: 1600, height: 1420), compose: { model, store in
