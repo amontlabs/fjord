@@ -449,6 +449,16 @@ enum AppWindowShots {
                      }
                  }
              }, appearance: .aqua),
+        // Your latest messages under the sessions they went to: sending, delivered, working, and one that didn't go. A session
+        // that replied has none (the theme fix), nor does one with only older words.
+        Shot(name: "router-brief-sent", destination: { _ in .router }, sidebarHidden: true,
+             size: CGSize(width: 1600, height: 1420), compose: { model, store in
+                 Demo.routerDigest(store); model.pickBrief(); briefSent(store)
+             }, appearance: .aqua),
+        Shot(name: "router-brief-sent-dark", destination: { _ in .router }, sidebarHidden: true,
+             size: CGSize(width: 1600, height: 1420), compose: { model, store in
+                 Demo.routerDigest(store); model.pickBrief(); briefSent(store)
+             }, appearance: .darkAqua),
         // No brief yet, the Router on: it is about to be written.
         Shot(name: "router-brief-empty", destination: { _ in .router }, sidebarHidden: true,
              size: CGSize(width: 1400, height: 800), compose: { model, store in
@@ -751,6 +761,30 @@ enum AppWindowShots {
             store.router.decisions[i].trigger = .you(typed.message)
         }
         store.routerDispatcher.preview(ask: typed, progress: store.routerDispatcher.progress)
+    }
+
+    /// Messages you sent, each in the state of one line under its session in the Brief.
+    private static func briefSent(_ store: Store) {
+        let now = Date()
+        func send(_ session: String, _ words: String, _ state: DeliveryOperation.State, running: Bool? = nil, replied: Bool = false,
+                  reason: String? = nil, ago: TimeInterval = 40) {
+            let at = now.addingTimeInterval(-ago)
+            var entry = RouterDecision(at: at, trigger: .you(words), decision: .init(target: session, intent: "message", label: "reply"),
+                                       outcome: .done)
+            entry.add(.sent(to: session, text: words, original: nil), session: session)
+            store.router.decisions.append(entry)
+            store.noteOperation(DeliveryOperation(nonce: UUID().uuidString, target: session, kind: .message, bodyHash: "", state: state,
+                                                  decisionID: entry.id, session: session, to: session, createdAt: at, updatedAt: at))
+            guard var live = store.claudeSessions[session] else { return }
+            if let running { live.running = running }
+            if replied { live.lastActivity = now }
+            store.claudeSessions[session] = live
+        }
+        send("local_demo-lookout", "run the whole suite once more before you tag it", .sent, running: true)
+        send("local_demo-api", "per API key, and 100 a minute is fine", .waiting, ago: 2)
+        send("local_demo-bump", "ping me when CI is green", .sent, running: false)
+        send("local_demo-zig", "put it in a new file, fs/walk_test.zig", .unsure, ago: 300)
+        send("local_demo-theme", "merge it", .sent, running: false, replied: true, ago: 120)
     }
 
     private static func pending(_ model: RouterModel, _ store: Store, asks: Bool = true) {

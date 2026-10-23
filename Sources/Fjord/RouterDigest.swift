@@ -323,6 +323,8 @@ enum DigestMarkup {
     var historyWidth: CGFloat
     /// The rewrites opened to their diff.
     var expanded: Set<String> = []
+    /// The sent lines dismissed (`RouterSentLine`), by their operations' nonces.
+    var dismissedSent: Set<String> = []
     /// Where the history's place is kept: the app's preferences for the window's model, none for shots and tests.
     @ObservationIgnored private let defaults: UserDefaults?
 
@@ -461,12 +463,21 @@ struct DigestPage: View {
             Group {
                 if let digest = store.routerDigest {
                     let fresh = digest.changedSinceSeen
+                    let sent = Self.placeSent(store.routerSentLines(dismissed: model.digest.dismissedSent),
+                                              in: [(RouterDigest.Revision.forYouKey, digest.forYou), (RouterDigest.Revision.lookKey, digest.worthALook)]
+                                                  + digest.projects.map { ($0.folder, $0.text) })
                     VStack(alignment: .leading, spacing: 28) {
-                        lead(digest, items: items, page: page, fresh: fresh)
+                        // A message to a session the text doesn't mention: above it.
+                        if !sent.rest.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(sent.rest) { DigestSentLine(store: store, model: model, line: $0) }
+                            }
+                        }
+                        lead(digest, items: items, page: page, fresh: fresh, sent: sent.byKey)
                         ForEach(digest.projects) { project in
                             let folder = folders.first { $0.key == project.folder }
                             DigestParagraph(store: store, model: model, page: page, items: items, key: project.folder,
-                                            markup: project.text) {
+                                            markup: project.text, sent: sent.byKey[project.folder] ?? []) {
                                 HStack(spacing: 7) {
                                     Circle().fill(folder?.color ?? CDS.Text.muted).frame(width: 8, height: 8)
                                     Text(folder?.name ?? (project.folder as NSString).lastPathComponent)
@@ -540,10 +551,11 @@ struct DigestPage: View {
     }
 
     /// The lead: what's for you, then what's worth a look, each under its name in its colour.
-    private func lead(_ digest: RouterDigest, items: [String: CanvasItem], page: RouterPage, fresh: Set<String>) -> some View {
+    private func lead(_ digest: RouterDigest, items: [String: CanvasItem], page: RouterPage, fresh: Set<String>,
+                      sent: [String: [RouterSentLine]]) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             DigestParagraph(store: store, model: model, page: page, items: items, key: RouterDigest.Revision.forYouKey,
-                            markup: digest.forYou, size: 16) {
+                            markup: digest.forYou, size: 16, sent: sent[RouterDigest.Revision.forYouKey] ?? []) {
                 HStack(spacing: 7) {
                     Label("For you", systemImage: RouterZone.needs.symbol)
                         .font(CDS.sans(12, .semibold)).foregroundStyle(RouterZone.needs.tint)
@@ -553,7 +565,7 @@ struct DigestPage: View {
             .zIndex(model.digest.hovered?.hasPrefix("lead-you#") == true ? 2 : 1)
             if !digest.worthALook.isEmpty {
                 DigestParagraph(store: store, model: model, page: page, items: items, key: RouterDigest.Revision.lookKey,
-                                markup: digest.worthALook, size: 16) {
+                                markup: digest.worthALook, size: 16, sent: sent[RouterDigest.Revision.lookKey] ?? []) {
                     HStack(spacing: 7) {
                         Label("Worth a look", systemImage: RouterZone.notes.symbol)
                             .font(CDS.sans(12, .semibold)).foregroundStyle(CDS.Text.accent)
@@ -578,6 +590,19 @@ struct DigestPage: View {
             Rectangle().fill(CDS.border).frame(height: CDS.hairline).padding(.top, 4)
         }
         .zIndex(model.digest.hovered?.hasPrefix("lead-") == true ? 2 : 0)
+    }
+
+    /// Each sent line under the first paragraph that mentions its session; the rest are for sessions no paragraph names.
+    static func placeSent(_ lines: [String: RouterSentLine], in paragraphs: [(key: String, markup: String)])
+        -> (byKey: [String: [RouterSentLine]], rest: [RouterSentLine]) {
+        var left = lines
+        var byKey: [String: [RouterSentLine]] = [:]
+        for (key, markup) in paragraphs where !left.isEmpty {
+            for case .span(_, let session, _) in DigestMarkup.parse(markup) {
+                if let line = left.removeValue(forKey: session) { byKey[key, default: []].append(line) }
+            }
+        }
+        return (byKey, left.values.sorted { $0.session < $1.session })
     }
 
     /// Each session's item on the page: what it is waiting on you for first, else what it is doing.
@@ -613,6 +638,31 @@ private struct NewTag: View {
     }
 }
 
+/// Your latest message to a session, under where the Brief names it: your words on one line, then how it is going. A failure
+/// stays with its word until dismissed.
+private struct DigestSentLine: View {
+    let store: Store
+    let model: RouterModel
+    let line: RouterSentLine
+
+    var body: some View {
+        let failed = line.status.isFailure
+        HStack(spacing: 6) {
+            Image(systemName: failed ? "exclamationmark.triangle" : "arrow.turn.down.right")
+                .font(.system(size: 10, weight: .medium)).foregroundStyle(failed ? CDS.Text.warning : CDS.Text.muted)
+                .frame(width: 12)
+            Text(line.text).font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
+            Text(line.status.label).font(CDS.sans(12)).foregroundStyle(failed ? CDS.Text.warning : CDS.Text.muted)
+                .lineLimit(1).fixedSize()
+            if failed {
+                ChipClose(label: "Dismiss") { model.digest.dismissedSent.insert(line.nonce) }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("You told this session: \(line.text), \(line.status.label)")
+    }
+}
+
 /// A paragraph of the brief: its name over it, the text with its highlights, and the card opened from it under it.
 private struct DigestParagraph<Title: View>: View {
     let store: Store
@@ -622,6 +672,8 @@ private struct DigestParagraph<Title: View>: View {
     let key: String
     let markup: String
     var size: CGFloat = 15
+    /// Your latest messages to the sessions it names, under it.
+    var sent: [RouterSentLine] = []
     @ViewBuilder let title: Title
 
     var body: some View {
@@ -645,6 +697,7 @@ private struct DigestParagraph<Title: View>: View {
             }
             // A highlight's peek floats over the card opened under the text, not under it.
             .zIndex(state.hovered?.hasPrefix(key + "#") == true ? 1 : 0)
+            ForEach(sent) { DigestSentLine(store: store, model: model, line: $0) }
             if let opened, let item = items[opened] {
                 HStack(alignment: .top, spacing: 8) {
                     CanvasNode(item: item, store: store, model: model, page: page)
