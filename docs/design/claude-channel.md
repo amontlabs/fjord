@@ -18,6 +18,7 @@ Every message of yours goes the same way, whether the target session is running 
    - asleep, first prompt: `prompt.submit` rewrites the prompt to your words; the app's desktop guidance that came with it
      goes as `context`;
    - running: `session.receive` consumes the message and submits your words with `$.prompt.submit({ asUser: true })`.
+5. The target's plugin answers in its own inbox folder, `<nonce>.ack`: that is how Fjord knows it went.
 
 Claude reads your words as typed by you, and the app shows them as an ordinary message of yours: no "Received message
 from…" row, no warning (verified: `wake test one path`, both cases).
@@ -64,11 +65,31 @@ permission auto-approval for scheduled-task sessions.
 ## Operations
 
 Each message has a nonce and a signed payload. Fjord persists `{nonce, target, kind, body hash, state}` before giving the
-order. States: **waiting** (persisted, ordered), **sent** (the target's plugin acked and its turn started), **unsure** (no
-ack and the process is gone: resolved by asking the target's plugin, never by sending again), **refused** or **needs you**,
-with the reason. The app's own receipt says "not delivered … did no turn" for a running target whose plugin consumed it:
+order. States: **waiting** (persisted, ordered), **sent** (the target's plugin acked), **unsure** (no ack in time: resolved by
+the plugin's late ack, found when Fjord next starts, never by sending again), **refused** or **needs you**, with the
+reason. The app's own receipt says "not delivered … did no turn" for a running target whose plugin consumed it:
 the target plugin's ack, not the app's receipt, says it went. A new session's id is persisted before its bootstrap, so a
 retry reuses it.
+
+## What the build settled
+
+- **The body survives the app's escaping.** The app's `kf` scrubs only a `<` that opens a tag it knows (and, across
+  machines, turns `@` into a full-width one). Fjord's signed text is a header line and base64: neither occurs. Checked on the
+  app's own function (extracted from its bundle) and by a test that no signed text holds `<` or `@`.
+- **Answers.** The target's plugin writes `<nonce>.ack` ("ok …", or "refused: why" once the signature held; never for a
+  forgery) in its inbox folder, for a message that came by the app as for one that came from the inbox. A carrier writes
+  `<nonce>.taken` as it begins (the app answers a send only once the target's turn started, which a cold start makes long) and
+  `<nonce>.ack` with the app's own words. The app calls a running target's consumed message "not delivered": only the target's
+  ack counts.
+- **A cold start with settings.** The engine refuses `$.command.run` inside a `prompt.submit` hook, so a first prompt with a
+  model or effort can't set them there. Such a prompt is dropped (no turn) and its words submitted from the plugin's next look,
+  after the settings, with the app's guidance ahead of the words in the text (a plugin's submit takes no context). Without
+  settings the rewrite carries the guidance as `context` as above. A running target's settings are set from the next look too.
+- **Which sessions carry.** The registry entry (`entrypoint: claude-desktop`, `status`, `updatedAt`) and the presence file
+  (`carry-v1`, `turn`) of a live plugin: idle first, then most recently updated. A running target whose plugin is older than
+  `carry-v1` is given its message in its own inbox.
+- **Asleep.** A session with no process (and one Claude Code id) is signed for without its plugin being up; a session with a
+  process but no plugin up is never sent to (it would read the message as a peer's).
 
 ## Live checks
 
