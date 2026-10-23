@@ -54,13 +54,40 @@ import Testing
         let pieces = DigestMarkup.parse(#"Go <need s="a">answer it</need> and <look s="b">see</look>, <run s="c">x</run>."#)
         #expect(pieces == [.text("Go "), .span(.need, session: "a", text: "answer it"), .text(" and "),
                            .span(.look, session: "b", text: "see"), .text(", "), .span(.run, session: "c", text: "x"), .text(".")])
-        // Not a known tag: left as it is, as text.
-        #expect(DigestMarkup.parse(#"a <bold s="a">b</bold> c"#) == [.text(#"a <bold s="a">b</bold> c"#)])
+        // Not a known tag: its words as text, the tags dropped.
+        #expect(DigestMarkup.parse(#"a <bold s="a">b</bold> c"#) == [.text("a b c")])
         // Left open: text.
-        #expect(DigestMarkup.parse(#"a <need s="a">b"#) == [.text(#"a <need s="a">b"#)])
+        #expect(DigestMarkup.parse(#"a <need s="a">b"#) == [.text("a b")])
         #expect(DigestMarkup.parse("").isEmpty)
         // A closing tag of another kind doesn't close it.
-        #expect(DigestMarkup.parse(#"<need s="a">b</look>"#) == [.text(#"<need s="a">b</look>"#)])
+        #expect(DigestMarkup.parse(#"<need s="a">b</look>"#) == [.text("b")])
+    }
+
+    @Test func markupNeverHoldsTagTextInAHighlight() {
+        // What the writer made: a look closed as `</result>`, then another look, whose `</look>` the first one took.
+        let id = "local_11df6cfb-a6c5-46bf-ad95-cdc14559dd25"
+        let bad = "The <look s=\"\(id)\">merge-conflicts session</result> has finished, because PR 1739 is now mergeable. "
+            + "<look s=\"\(id)\">fix merge conflicts</look> is worth a look."
+        #expect(DigestMarkup.parse(bad) == [
+            .text("The merge-conflicts session has finished, because PR 1739 is now mergeable. "),
+            .span(.look, session: id, text: "fix merge conflicts"), .text(" is worth a look."),
+        ])
+        // Nested tags: the inner one is the highlight, the outer one's words stay plain.
+        #expect(DigestMarkup.parse(#"<need s="a">go <look s="b">see</look> now</need>"#) == [
+            .text("go "), .span(.look, session: "b", text: "see"), .text(" now"),
+        ])
+        // Stray closing tags go.
+        #expect(DigestMarkup.parse("done</result> and </look>ok") == [.text("done and ok")])
+        for piece in DigestMarkup.parse(bad) {
+            switch piece {
+            case .text(let t), .span(_, _, let t): #expect(!t.contains("<") && !t.contains(">"))
+            }
+        }
+    }
+
+    @Test func fixRepairsMalformedMarkupBeforeItIsKept() {
+        let b = board()
+        #expect(Writer.fix(#"<need s="s1">first</result> then <need s="s1">second</need>."#, b) == #"first then <need s="s1">second</need>."#)
     }
 
     // MARK: Diff
@@ -1075,5 +1102,19 @@ import Testing
         #expect(RouterDigestState.clamp(10) == RouterDigestState.widths.lowerBound)
         // Shots and tests keep nothing.
         #expect(!RouterModel().digest.historyOpen)
+    }
+
+    @Test func historyListsEverySentMessageWithWhereItWent() {
+        var sent = RouterDecision(at: t0, trigger: .you("fix them"),
+                                  decision: .init(target: "session “fix the merge conflicts” in modify-mounts", intent: "message"), outcome: .done)
+        sent.add(.sent(to: "fix the merge conflicts", text: "fix them", original: nil), session: "s1")
+        var answered = RouterDecision(at: t0, trigger: .you("yes"), outcome: .done)
+        answered.add(.answered(card: "c1"))
+        var system = RouterDecision(at: t0, trigger: .system)
+        system.add(.sent(to: "x", text: "y", original: nil))
+        let listed = DigestHistory.messages(in: [answered, sent, system])
+        #expect(listed.map(\.id) == [sent.id])
+        #expect(DigestHistory.destination(sent) == "session “fix the merge conflicts” in modify-mounts")
+        #expect(DigestHistory.state(sent) == "sent")
     }
 }

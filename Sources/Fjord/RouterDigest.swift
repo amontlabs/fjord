@@ -272,25 +272,38 @@ enum DigestMarkup {
         case span(Kind, session: String, text: String)
     }
 
+    // The text of a tag holds no `<`: a tag opened inside another, or one that never closed, can't swallow the words
+    // between it and the next one.
     // swiftlint:disable:next force_try
-    nonisolated(unsafe) private static let tag = try! Regex(#"<(need|look|run)\s+s="([^"]+)">(.*?)</\1>"#,
+    nonisolated(unsafe) private static let tag = try! Regex(#"<(need|look|run)\s+s="([^"]+)">([^<]*)</\1>"#,
                                                             as: (Substring, Substring, Substring, Substring).self)
+    // Any tag-shaped text left over: an opening tag, a closing one, whatever the writer made up.
+    // swiftlint:disable:next force_try
+    nonisolated(unsafe) private static let stray = try! Regex(#"</?[A-Za-z][^<>]*>"#)
 
-    /// The pieces in order; a tag it doesn't know, or one left open, is read as its text.
+    /// The text without any tag-shaped text in it.
+    static func plain(_ text: String) -> String { text.replacing(stray, with: "") }
+
+    /// The pieces in order. A tag it doesn't know, one left open or one that closes as another kind is dropped, its words
+    /// kept as text; no piece ever holds tag text.
     static func parse(_ markup: String) -> [Piece] {
         var pieces: [Piece] = []
+        func add(_ text: Substring) {
+            let clean = plain(String(text))
+            guard !clean.isEmpty else { return }
+            if case .text(let last)? = pieces.last { pieces[pieces.count - 1] = .text(last + clean) } else { pieces.append(.text(clean)) }
+        }
         var rest = Substring(markup)
         while let match = rest.firstMatch(of: tag) {
-            let before = rest[rest.startIndex..<match.range.lowerBound]
-            if !before.isEmpty { pieces.append(.text(String(before))) }
+            add(rest[rest.startIndex..<match.range.lowerBound])
             if let kind = Kind(rawValue: String(match.output.1)) {
                 pieces.append(.span(kind, session: String(match.output.2), text: String(match.output.3)))
             } else {
-                pieces.append(.text(String(match.output.3)))
+                add(match.output.3)
             }
             rest = rest[match.range.upperBound...]
         }
-        if !rest.isEmpty { pieces.append(.text(String(rest))) }
+        add(rest)
         return pieces
     }
 }
@@ -479,7 +492,8 @@ struct DigestPage: View {
         .safeAreaInset(edge: .trailing, spacing: 0) {
             if model.digest.historyOpen {
                 DigestHistory(store: store, model: model, history: store.routerDigest?.history ?? [],
-                              seenAt: store.routerDigest?.seenAt, folders: folders)
+                              seenAt: store.routerDigest?.seenAt, folders: folders,
+                              messages: DigestHistory.messages(in: store.router.decisions))
                     .frame(width: historyWidth)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -706,6 +720,48 @@ struct DigestHistory: View {
     let history: [RouterDigest.Revision]
     let seenAt: Date?
     let folders: [CanvasFolder]
+    /// What you sent (`messages(in:)`): in the list among the rewrites, by when, so every message is in the history with where
+    /// it went, whether or not it changed the brief.
+    var messages: [RouterDecision] = []
+
+    /// One line of the list.
+    private enum Item: Identifiable {
+        case revision(RouterDigest.Revision)
+        case message(RouterDecision)
+        var id: String {
+            switch self {
+            case .revision(let r): r.id
+            case .message(let d): d.id.uuidString
+            }
+        }
+        var at: Date {
+            switch self {
+            case .revision(let r): r.at
+            case .message(let d): d.at
+            }
+        }
+    }
+
+    private var items: [Item] {
+        (history.map(Item.revision) + messages.map(Item.message)).sorted { $0.at > $1.at }
+    }
+
+    /// The messages you sent from the composer (or an action's prompt): your words went to a session, started one, or
+    /// couldn't. What only answered a card, archived one or asked you has its own line among the rewrites when it changed
+    /// the brief.
+    static func messages(in decisions: [RouterDecision]) -> [RouterDecision] {
+        decisions.filter { decision in
+            guard case .you = decision.trigger else { return false }
+            return decision.places.contains { place in
+                place.done.contains { item in
+                    switch item {
+                    case .sent, .started, .interrupted, .preparedGuest, .failed: true
+                    default: false
+                    }
+                }
+            }
+        }
+    }
 
     /// Its width until its edge is dragged.
     static let width: CGFloat = 380
@@ -718,12 +774,11 @@ struct DigestHistory: View {
                     Text(history.count == 1 ? "1 rewrite" : "\(history.count) rewrites").font(CDS.sans(11)).foregroundStyle(CDS.Text.muted)
                 }
                 Spacer(minLength: 0)
-                IconButton(symbol: "sidebar.right", help: "Hide history", detail: BriefHistoryToggle.key,
-                           size: IconButton.Size.header) { model.digest.toggleHistory() }
             }
-            .padding(.leading, 12).padding(.trailing, 6).frame(height: 34)
+            // Shown and hidden from the header's button (BriefHistoryToggle), as the window's sidebar is: no second one here.
+            .padding(.leading, 12).padding(.trailing, 12).frame(height: 34)
             Rectangle().fill(CDS.border).frame(height: CDS.hairline)
-            if history.isEmpty {
+            if history.isEmpty && messages.isEmpty {
                 Text("Each time the Router rewrites the brief, what changed and why will be here.")
                     .font(CDS.sans(12)).foregroundStyle(CDS.Text.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -732,7 +787,12 @@ struct DigestHistory: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(history) { revision in entry(revision) }
+                        ForEach(items) { item in
+                            switch item {
+                            case .revision(let revision): entry(revision)
+                            case .message(let decision): message(decision)
+                            }
+                        }
                     }
                     .padding(.vertical, 4)
                     .padding(.bottom, DigestPage.bottom)
@@ -744,6 +804,80 @@ struct DigestHistory: View {
         .overlay(alignment: .leading) { Rectangle().fill(CDS.border).frame(width: CDS.hairline) }
         // Its edge drags it wider or narrower; the width is kept once you let go.
         .overlay(alignment: .leading) { DigestHistoryEdge(state: model.digest).offset(x: -DigestHistoryEdge.reach / 2) }
+    }
+
+    /// A message you sent: you, where it went and when; opened, your words and what happened at each place.
+    private func message(_ decision: RouterDecision) -> some View {
+        let id = decision.id.uuidString
+        let open = model.digest.expanded.contains(id)
+        let places = decision.places
+        let where_ = places.map { Self.destination($0) }.joined(separator: ", ")
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(Motion.spatial.resolved(reduce: false)) {
+                    if open { model.digest.expanded.remove(id) } else { model.digest.expanded.insert(id) }
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(CDS.Text.muted).rotationEffect(.degrees(open ? 90 : 0)).frame(width: 8)
+                    trigger(.you("")).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    Text("You told " + where_).font(CDS.sans(12.5, .medium)).foregroundStyle(CDS.Text.primary)
+                        .lineLimit(open ? nil : 1)
+                    Spacer(minLength: 4)
+                    Text(shortAgo(decision.at)).font(CDS.sans(11)).foregroundStyle(CDS.Text.muted).monospacedDigit()
+                }
+                .padding(.horizontal, 6).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(open ? CDS.alpha(0.05) : .clear))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                VStack(alignment: .leading, spacing: 6) {
+                    if case .you(let said) = decision.trigger, !said.isEmpty {
+                        Text("“" + said + "”").font(CDS.sans(11.5)).foregroundStyle(CDS.Text.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(places) { place in
+                        Text(Self.destination(place) + ": " + Self.state(place))
+                            .font(CDS.sans(11.5)).foregroundStyle(CDS.Text.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.leading, 21).padding(.trailing, 6).padding(.bottom, 6)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 6)
+    }
+
+    /// Where a message went, in words: the session or project it was decided for.
+    static func destination(_ place: RouterDecision) -> String {
+        for item in place.done.reversed() {
+            switch item {
+            case .sent(let to, _, _): return place.decision.target ?? "“\(to)”"
+            case .started(_, let project, _, _): return "a new session in \(project)"
+            case .interrupted(let title, _, _): return "“\(title)”"
+            default: continue
+            }
+        }
+        return place.decision.target ?? "the Router"
+    }
+
+    /// What became of it at that place.
+    static func state(_ place: RouterDecision) -> String {
+        if place.isCancelled || place.parts.first?.endsCancelled == true { return "cancelled" }
+        for item in place.done.reversed() {
+            switch item {
+            case .failed(let why): return "didn't go: " + why
+            case .sent: return "sent"
+            case .started: return "started a session"
+            case .interrupted: return "stopped its turn and sent"
+            case .preparedGuest: return "handed to Claude Desktop"
+            default: continue
+            }
+        }
+        return "pending"
     }
 
     private func entry(_ revision: RouterDigest.Revision) -> some View {
