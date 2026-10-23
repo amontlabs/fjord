@@ -28,6 +28,11 @@ enum ClaudePeers {
     struct Registered: Hashable, Sendable {
         var sessionID: String
         var startedAt: Int64?
+        /// What started the process (`claude-desktop` for the Claude app's own), whether it is `busy` or `idle`, and when it
+        /// last changed (ms since 1970): what picks a session to carry a message (`RouterCarry.carriers`).
+        var entrypoint: String? = nil
+        var status: String? = nil
+        var updatedAt: Int64? = nil
     }
 
     /// Every live process in the registry, by pid (what Fjord's plugin binds its presence to). A pid has one
@@ -40,7 +45,9 @@ enum ClaudePeers {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let pid = (obj["pid"] as? NSNumber)?.int32Value, let session = obj["sessionId"] as? String, alive(pid)
             else { continue }
-            found[pid, default: []].append(Registered(sessionID: session, startedAt: (obj["startedAt"] as? NSNumber)?.int64Value))
+            found[pid, default: []].append(Registered(sessionID: session, startedAt: (obj["startedAt"] as? NSNumber)?.int64Value,
+                                                      entrypoint: obj["entrypoint"] as? String, status: obj["status"] as? String,
+                                                      updatedAt: (obj["updatedAt"] as? NSNumber)?.int64Value))
         }
         return found
     }

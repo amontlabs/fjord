@@ -64,8 +64,9 @@ struct RouterState: Codable, Equatable {
     var pendingGuestRemovals: [SessionLocation] = []
     /// The Brief: Now written as prose, kept up to date by its writer, with every rewrite (RouterDigest.swift).
     var digest: RouterDigest?
-    /// Fjord's relay session in the Claude app, the one that wakes sessions with no process (RouterRelay.swift).
-    var relay: RouterRelay?
+    /// The messages of yours Fjord ordered to sessions, each kept before it was ordered and settled by what the target's plugin
+    /// said (RouterCarry.swift).
+    var operations: [DeliveryOperation] = []
 
     /// Questions and plans asked while you looked at the session in the app, by session: no card while you do; one is made
     /// when you leave it, if the wait is still on.
@@ -121,7 +122,7 @@ struct RouterState: Codable, Equatable {
     /// `chat` is read, never written (an older file's changes); `claudeSessionID`, and an older file's `autoContinue` and
     /// `autoContinueSessions`, are ignored.
     private enum CodingKeys: String, CodingKey {
-        case enabled, enabledAt, cards, changes, chat, decisions, summaries = "overviews", lives, seen, waits, waitTools, formSeen, pendingTurns, origins, heldWaits, fjordStarted, handledTurns, replies, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries, guestPendingForms, pendingGuestDisables, pendingGuestRemovals, digest, relay
+        case enabled, enabledAt, cards, changes, chat, decisions, summaries = "overviews", lives, seen, waits, waitTools, formSeen, pendingTurns, origins, heldWaits, fjordStarted, handledTurns, replies, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries, guestPendingForms, pendingGuestDisables, pendingGuestRemovals, digest, operations
     }
 
     func encode(to encoder: Encoder) throws {
@@ -151,7 +152,7 @@ struct RouterState: Codable, Equatable {
         try c.encode(pendingGuestDisables, forKey: .pendingGuestDisables)
         try c.encode(pendingGuestRemovals, forKey: .pendingGuestRemovals)
         try c.encodeIfPresent(digest, forKey: .digest)
-        try c.encodeIfPresent(relay, forKey: .relay)
+        try c.encode(operations, forKey: .operations)
     }
 
     init(from decoder: Decoder) throws {
@@ -208,7 +209,7 @@ struct RouterState: Codable, Equatable {
         pendingGuestDisables = list(.pendingGuestDisables)
         pendingGuestRemovals = list(.pendingGuestRemovals)
         digest = value(.digest)
-        relay = value(.relay)
+        operations = list(.operations)
         linkUnlinkedChanges(legacy: legacy)
         dropped = lost
     }

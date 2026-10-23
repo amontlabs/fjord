@@ -90,14 +90,15 @@ enum PluginFixture {
 
     /// `extra` is merged into the presence file (capabilities, a `turn`).
     static func live(_ cli: String, support: URL, claude: URL, pid: Int32 = getpid(), startedAt: Int64 = 1,
-                     extra: [String: Any] = [:]) {
+                     extra: [String: Any] = [:], registryExtra: [String: Any] = [:]) {
         let fm = FileManager.default
         let registry = claude.appendingPathComponent("sessions", isDirectory: true)
         let presence = support.appendingPathComponent("plugin-sessions", isDirectory: true)
         let plugin = support.appendingPathComponent("claude-plugin", isDirectory: true)
         for dir in [registry, presence, plugin] { try? fm.createDirectory(at: dir, withIntermediateDirectories: true) }
         func write(_ obj: [String: Any], _ url: URL) { try? JSONSerialization.data(withJSONObject: obj).write(to: url) }
-        write(["pid": Int(pid), "sessionId": cli, "startedAt": startedAt], registry.appendingPathComponent("plugin-\(cli).json"))
+        write(["pid": Int(pid), "sessionId": cli, "startedAt": startedAt].merging(registryExtra) { _, new in new },
+              registry.appendingPathComponent("plugin-\(cli).json"))
         let key = support.appendingPathComponent("relay.key")
         let keyID = ClaudePlugin.key(at: key).map(ClaudePlugin.keyID(of:)) ?? "none"
         write(["state": "live", "sessionId": cli, "pid": Int(pid), "startedAt": startedAt, "keyId": keyID,
@@ -285,20 +286,6 @@ enum PluginFixture {
         #expect(RelaySigner.mac(key: Self.key, target: Self.target, nonce: Self.nonce, ts: String(Self.ts), body: Self.body) == Self.mac)
     }
 
-    /// The wake the plugin's tests check too (`Resources/ClaudePlugin/tests/relay.test.ts`, "a wake").
-    static let wakeNonce = "123e4567-e89b-12d3-a456-426614174001"
-    static let wakeMac = "10e8049ccf2ff75827c09de1d03a454989398c2193577174dd7b1321e87a01b6"
-
-    @Test func aWakeIsAsciiAndItsMacIsTheSharedVector() throws {
-        #expect(RelaySigner.wakeMac(key: Self.key, target: Self.target, nonce: Self.wakeNonce, ts: String(Self.ts)) == Self.wakeMac)
-        let wake = RelaySigner.signWake(target: Self.target, key: Self.key, nonce: UUID(uuidString: Self.wakeNonce)!,
-                                        now: Date(timeIntervalSince1970: Double(Self.ts) / 1000))
-        #expect(wake == "fjord-wake cli-target \(Self.wakeNonce) \(Self.ts) \(Self.wakeMac)")
-        #expect(wake.allSatisfy { $0.isASCII && !$0.isNewline })
-        // It is not a delivery: the inbox and the peer channel read no header from it.
-        #expect(RelayInbox.header(of: wake) == nil)
-    }
-
     /// The carry order the plugin's tests check too (`relay.test.ts`, "carrying a message for Fjord").
     static let carryNonce = "523e4567-e89b-12d3-a456-426614174000"
     static let carryMac = "ef010f36d4eee5bad6c8e1b4a25729191eba40dfd5bce4ab822beb58800f7db9"
@@ -318,20 +305,18 @@ enum PluginFixture {
         #expect(!order.contains("<") && !order.contains("@"))
     }
 
-    @Test func theRelaySessionIsNamedInThePluginsConfigAndKept() throws {
+    @Test func thePluginHasNoRelayOrWakeLeftAndItsConfigNamesNoRelaySession() throws {
+        for gone in ["fjord-wake", "wake-v1", "SendMessage", "keepGuidance", "takeGuidance", "wakeSigned"] {
+            #expect(!ClaudePlugin.register.contains(gone), "\(gone)")
+        }
         let dir = TempDir()
         let folder = dir.path("claude-plugin"), presence = dir.path("plugin-sessions"), keyFile = dir.path("relay.key")
+        // A config written by an older version, naming a relay, is rewritten without it.
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(#"{"keyPath":"x","relay":"cli-relay"}"#.utf8).write(to: folder.appendingPathComponent("config.json"))
         try ClaudePlugin.write(to: folder, version: "1.0.0-rabc", presence: presence, key: keyFile, registry: dir.path("sessions"))
-        #expect(ClaudePlugin.relay(in: folder) == nil)
-        try ClaudePlugin.setRelay("cli-relay", in: folder)
-        #expect(ClaudePlugin.relay(in: folder) == "cli-relay")
-        // A new write of the folder (a new version, a switch) keeps it, and the rest of the config.
-        try ClaudePlugin.write(to: folder, version: "1.0.1-rabc", presence: presence, key: keyFile, registry: dir.path("sessions"))
-        #expect(ClaudePlugin.relay(in: folder) == "cli-relay")
         let config = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("config.json"))) as? [String: String]
-        #expect(config?["keyPath"] == keyFile.path && config?["relay"] == "cli-relay")
-        try ClaudePlugin.setRelay(nil, in: folder)
-        #expect(ClaudePlugin.relay(in: folder) == nil)
+        #expect(config?["keyPath"] == keyFile.path && config?["relay"] == nil)
     }
 
     @Test func theSettingsAreInsideTheSignature() throws {

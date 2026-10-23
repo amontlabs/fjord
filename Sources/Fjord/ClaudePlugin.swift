@@ -45,16 +45,13 @@ enum ClaudePlugin {
     /// module can't read the environment): the key, where it leaves its presence files, and Claude Code's registry of
     /// processes. The key itself lives outside the folder (`ensureKey`): `claude plugin install` copies the folder into
     /// Claude Code's cache, and keeps the copy after an uninstall.
-    static func write(to folder: URL, version: String, presence: URL, key: URL, registry: URL, relay: String? = nil) throws {
+    static func write(to folder: URL, version: String, presence: URL, key: URL, registry: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try fm.createDirectory(at: presence, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let inbox = RelayInbox.root(besidePresence: presence)
         try fm.createDirectory(at: inbox, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let relay = relay ?? Self.relay(in: folder)
-        var fields = ["keyPath": key.path, "presenceDir": presence.path, "sessionsDir": registry.path, "inboxDir": inbox.path]
-        // The relay's own CLI session id: in that session alone the plugin lets SendMessage carry a wake.
-        if let relay { fields["relay"] = relay }
+        let fields = ["keyPath": key.path, "presenceDir": presence.path, "sessionsDir": registry.path, "inboxDir": inbox.path]
         let config = try JSONSerialization.data(withJSONObject: fields,
                                                 options: [.sortedKeys, .withoutEscapingSlashes])
         let files: [(String, Data)] = [
@@ -70,22 +67,6 @@ enum ClaudePlugin {
             if (try? Data(contentsOf: url)) == data { continue }
             try PrivateFile.write(data, to: url, mode: 0o644)
         }
-    }
-
-    /// The relay's CLI session id the folder's config names, if it does.
-    static func relay(in folder: URL) -> String? {
-        let data = try? Data(contentsOf: folder.appendingPathComponent("config.json"))
-        return (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["relay"] as? String
-    }
-
-    /// Names (or, with nil, forgets) the relay's session in the folder's config, leaving the rest of it as it is.
-    static func setRelay(_ relay: String?, in folder: URL) throws {
-        let url = folder.appendingPathComponent("config.json")
-        guard var fields = (try JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] else { return }
-        if fields["relay"] as? String == relay { return }
-        fields["relay"] = relay
-        let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys, .withoutEscapingSlashes])
-        try PrivateFile.write(data + Data("\n".utf8), to: url, mode: 0o644)
     }
 
     /// The key, made once: 32 random bytes, hex, readable by the person alone. Returns it.
@@ -950,10 +931,10 @@ export async function carry($: EngineInterface, text: string, taken: (nonce: str
   const own = await $.session.id()
   if (order.carrier !== own) return 'refused: addressed to another session'
   if (!(Math.abs(now - ts) < WINDOW_MS)) return 'refused: stale'
-  // What is carried is a message of Fjord's, signed for another session: never this one's own (nor a session this one is).
+  // What is carried is a message of Fjord's, signed for another session: never this one's own.
   const inner = parse(order.message)
   if (!inner) return 'refused: not a signed message'
-  if (inner.target === own || order.local === `local_${own}`) return 'refused: a session does not carry to itself'
+  if (inner.target === own) return 'refused: a session does not carry to itself'
   if (!(await claim($, order.nonce, ts, now))) return 'refused: already delivered'
   await taken(order.nonce)
   try {
@@ -1248,21 +1229,6 @@ enum RelaySigner {
         let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
         return "⟦fjord carry v1 \(carrier) \(id) \(ts) \(local) \(code.map { String(format: "%02x", $0) }.joined())⟧\n"
             + bytes.base64EncodedString()
-    }
-
-    /// A wake for the session whose CLI session id is `target`: `fjord-wake <target> <nonce> <ms> <hex HMAC-SHA256>`, its MAC over
-    /// `wake-v1\n<target>\n<nonce>\n<ms>\n`. It is ASCII and hex only: the app puts it in an envelope whose escaping would
-    /// change anything else. The relay session sends it with SendMessage and the plugin in `target` drops it (`wake-v1`).
-    static func signWake(target: String, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
-        let ts = String(RouterFeed.Stamp.ms(now))
-        let id = nonce.uuidString.lowercased()
-        return "fjord-wake \(target) \(id) \(ts) \(wakeMac(key: key, target: target, nonce: id, ts: ts))"
-    }
-
-    static func wakeMac(key: String, target: String, nonce: String, ts: String) -> String {
-        let input = Data("wake-v1\n\(target)\n\(nonce)\n\(ts)\n".utf8)
-        let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
-        return code.map { String(format: "%02x", $0) }.joined()
     }
 
     /// The v2 MAC: `v2\n<target>\n<nonce>\n<ts>\n<model|->\n<effort|->\n` and the body; with `interrupt` the v3 one, which
@@ -1596,21 +1562,23 @@ extension ClaudePlugin {
 
 // MARK: - The direct way: an inbox per session
 
-/// Delivery with no model: the signed text (the very text the peer channel would carry, so the plugin checks it the
-/// same way) is written to `relay/<session id>/<nonce>.msg` under Application Support, atomically, and the plugin in
-/// that session, which looks every half second, verifies it, submits it as the person's own words and answers with
-/// `<nonce>.ack` ("ok", or "refused: why"). Fjord reads the ack and removes both files (the plugin cannot
-/// delete). A session whose plugin doesn't answer in time is left to the peer channel; the nonce is the same, so if the
-/// plugin gets to it after all, whichever arrives second is refused as a replay.
+/// Delivery with no model, into one session's own inbox: the signed text is written to `relay/<session id>/<nonce>.msg` under
+/// Application Support, atomically, and the plugin in that session, which looks every half second, verifies it, submits it as
+/// the person's own words and answers with `<nonce>.ack` ("ok", or "refused: why"). Fjord reads the ack and removes both files
+/// (the plugin cannot delete). It is how a session is stopped, interrupted or taken back from, and how a message goes when no
+/// other session can carry it (`RouterCarry`). A plugin that doesn't answer in time leaves the message withdrawn and its fate
+/// unsure: nothing else is tried, and if the plugin gets to it after all, a second copy is refused as a replay. The plugin also
+/// answers there, at the same name, for a message the app handed its session (`RouterCarry`), and `<nonce>.taken` marks a
+/// carry order it began on.
 struct RelayInbox: Sendable {
     var root: URL
     /// How long the plugin has to answer.
     var timeout: TimeInterval = RelayInbox.wait
 
     enum Failure: Error, Equatable, LocalizedError {
-        /// The plugin didn't answer in time: the message is withdrawn, and may go another way.
+        /// The plugin didn't answer in time: the message is withdrawn, and whether it went is not known.
         case unanswered
-        /// The plugin (or the check before writing) refused it: another way would be refused too.
+        /// The plugin (or the check before writing) refused it.
         case refused(String)
         var errorDescription: String? {
             switch self {
@@ -1648,21 +1616,22 @@ struct RelayInbox: Sendable {
 
     func folder(for session: String) -> URL { root.appendingPathComponent(session, isDirectory: true) }
 
-    /// Writes `text` for `session` and waits for the plugin's answer. Throws `unanswered` when there's none within `timeout`
-    /// (the message is withdrawn first), `refused` when the plugin says no. Returns the plugin's answer: "ok", with what it
-    /// applied after it when the message carried settings ("ok model=opus effort=high").
-    /// `gate` says, on the main actor and right before the message is put in place (nothing awaited between the two), why it
-    /// may no longer go: a reason refuses it, unwritten. The file is written aside off the main thread first (the folder, the
-    /// write, its mode); only the gate and the rename that puts it where the plugin looks are on the main actor.
-    @discardableResult
-    func deliver(_ text: String, to session: String, interval: TimeInterval = 0.03,
-                 gate: (@MainActor () -> String?)? = nil) async throws -> String {
+    /// The message file and the answer file of the message with `nonce` in `session`'s folder.
+    func files(for session: String, nonce: String) -> (message: URL, ack: URL, taken: URL) {
+        let dir = folder(for: session)
+        return (dir.appendingPathComponent("\(nonce).msg"), dir.appendingPathComponent("\(nonce).ack"),
+                dir.appendingPathComponent("\(nonce).taken"))
+    }
+
+    /// Puts `text` where `session`'s plugin looks, and returns its message and answer files; the plugin's answer is the caller's
+    /// to wait for. `gate` as in `deliver`: asked on the main actor right before the message is put in place, in the same step.
+    func place(_ text: String, to session: String, gate: (@MainActor () -> String?)? = nil) async throws -> (message: URL, ack: URL) {
         guard let header = Self.header(of: text), header.target == session, Self.safe(session), Self.safe(header.nonce) else {
             throw Failure.refused("not a message signed for this session")
         }
         let dir = folder(for: session)
-        let message = dir.appendingPathComponent("\(header.nonce).msg"), ack = dir.appendingPathComponent("\(header.nonce).ack")
-        let fm = FileManager.default
+        let files = files(for: session, nonce: header.nonce)
+        let message = files.message
         if let gate {
             let aside = try await OffMain.run { Swift.Result { try Self.sweep(dir); return try PrivateFile.prepare(Data(text.utf8), for: message) } }.get()
             do {
@@ -1677,6 +1646,20 @@ struct RelayInbox: Sendable {
         } else {
             try await OffMain.run { Swift.Result { try Self.sweep(dir); try PrivateFile.write(Data(text.utf8), to: message) } }.get()
         }
+        return (message, files.ack)
+    }
+
+    /// Writes `text` for `session` and waits for the plugin's answer. Throws `unanswered` when there's none within `timeout`
+    /// (the message is withdrawn first), `refused` when the plugin says no. Returns the plugin's answer: "ok", with what it
+    /// applied after it when the message carried settings ("ok model=opus effort=high").
+    /// `gate` says, on the main actor and right before the message is put in place (nothing awaited between the two), why it
+    /// may no longer go: a reason refuses it, unwritten. The file is written aside off the main thread first (the folder, the
+    /// write, its mode); only the gate and the rename that puts it where the plugin looks are on the main actor.
+    @discardableResult
+    func deliver(_ text: String, to session: String, interval: TimeInterval = 0.03,
+                 gate: (@MainActor () -> String?)? = nil) async throws -> String {
+        let (message, ack) = try await place(text, to: session, gate: gate)
+        let fm = FileManager.default
         func withdraw() { try? fm.removeItem(at: message); try? fm.removeItem(at: ack) }
         func answer() -> String? {
             guard let data = try? Data(contentsOf: ack), let text = String(data: data, encoding: .utf8) else { return nil }
@@ -1724,25 +1707,6 @@ extension RouterPaths {
 }
 
 extension Store {
-    /// The inbox to deliver to `cli` through, when that session's plugin takes messages that way (it says so in its presence
-    /// file, under the key held now); nil sends them over the peer channel.
-    func relayInbox(for cli: String) async -> RelayInbox? {
-        guard let paths = routerFiles, let keyID = relayKeyCache?.keyID else { return nil }
-        let capable = await OffMain.run {
-            ClaudePlugin.inboxSessions(in: paths.pluginSessions,
-                                       registry: ClaudePeers.registry(dir: paths.claudeDir.appendingPathComponent("sessions", isDirectory: true)),
-                                       keyID: keyID).contains(cli)
-        }
-        return capable ? RelayInbox(root: paths.relay) : nil
-    }
-
-    /// The inbox for a signed text, by the session it is signed for (its CLI session id): callers hold the peer's name, which
-    /// is not the id the plugin's presence and inbox folder go by.
-    func relayInbox(forSigned text: String) async -> RelayInbox? {
-        guard let target = RelayInbox.header(of: text)?.target else { return nil }
-        return await relayInbox(for: target)
-    }
-
     /// Whether `cli`'s plugin applies a model and an effort carried in a message (it says `settings-v1`, under the key held
     /// now). An older plugin doesn't: nothing with settings is sent to it.
     func supportsSettings(_ cli: String) async -> Bool { await supports(ClaudePlugin.settingsCapability, cli) }

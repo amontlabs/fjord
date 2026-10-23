@@ -41,10 +41,11 @@ import Testing
         var hold: [String: CheckedContinuation<Void, Never>] = [:]
         var holdOn: Set<String> = []
         var finished: [UUID] = []
-        /// A start the app has but doesn't run yet; its finish, held until the test lets it go (nil: it fails with `finishError`).
-        var heldStart: SessionStart.Held?
-        var finishHeld: CheckedContinuation<Void, Never>?
-        var finishError: String?
+        /// A start held until the test lets it go (to change things between a session being started and its first message).
+        var holdStart = false
+        var startHeld: CheckedContinuation<Void, Never>?
+        /// The first message a start comes with (empty: the session is only started).
+        var startText: String? = nil
         var forked: [SessionFork.Request] = []
         /// The dispatcher holds its store weakly: the test's stand-ins keep it.
         var store: Store?
@@ -100,8 +101,9 @@ import Testing
                 start: { [self] _, folder, title, settings in
                     started.append((folder, title))
                     startSettings.append(settings)
-                    if let heldStart { throw heldStart }
-                    return .delivery(RouterDispatcher.Delivery(to: "peer-new", text: "⟦signed⟧\nhello", body: "hello", original: "hello",
+                    if holdStart { await withCheckedContinuation { startHeld = $0 } }
+                    let first = startText ?? "hello"
+                    return .delivery(RouterDispatcher.Delivery(to: "peer-new", text: first.isEmpty ? "" : "⟦signed⟧\n" + first, body: first, original: first,
                                                                rephrased: false, session: "local_new", newSessionIn: "x",
                                                                settings: settings, settingsSigned: settingsSigned))
                 },
@@ -119,13 +121,6 @@ import Testing
                     runs.append((intent, input))
                     await whileRunning?(tools)
                     return answer
-                },
-                finish: { [self] _, held in
-                    await withCheckedContinuation { finishHeld = $0 }
-                    if let finishError { throw RouterTools.Failure(finishError) }
-                    return RouterDispatcher.Delivery(to: "peer-late", text: held.ready == nil ? "" : "⟦signed⟧\nhello", body: "hello",
-                                                     original: "hello", rephrased: false, session: held.waiting.sessionID, newSessionIn: held.project,
-                                                     settings: held.settings, settingsSigned: settingsSigned)
                 },
                 fork: { [self] _, request in
                     forked.append(request)
@@ -929,91 +924,22 @@ import Testing
         #expect(RouterDispatcher.title(for: "") == "New session")
     }
 
-    @Test func aStartTheAppDoesntRunYetIsStartedAndItsFirstMessageFollows() async {
+    @Test func aStartIsFollowedAtOnceByItsFirstMessageWhetherOrNotTheAppRunsTheSessionYet() async {
         let (s, d, f) = setup()
-        let ready = Prepared(text: "fix the typo", original: "fix the typo", rephrased: false)
-        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "fix the typo", project: "lookout",
-                                        ready: ready, settings: nil)
+        // The app has the session (it is known as started); nothing waits for its process, the first message is what starts it.
         let a = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        await waitUntil { f.finishHeld != nil }
-        // Started, not failed; the run is over (you may send meanwhile) and the line says what its first message waits for.
-        #expect(decision(s, a)?.done == [.started(session: "local_late", project: "lookout", model: nil, effort: nil)])
-        #expect(!d.isBusy && decision(s, a)?.outcome == .pending && s.router.fjordStarted["local_late"] != nil)
-        #expect(d.held[a!] == RouterDispatcher.heldWords && RouterDispatcher.heldWords.contains("waits for Fjord's relay to start the session"))
-        // The app runs it: the first message goes, and the line says so.
-        f.finishHeld?.resume()
-        await waitUntil { decision(s, a)?.outcome == .done }
-        #expect(f.sent.map(\.to) == ["peer-late"] && d.held.isEmpty)
-        #expect(decision(s, a)?.doneLines == ["started a session in lookout", "sent to peer-late: hello"])
-        // It never does: the session stays, the line says the message wasn't sent.
-        f.finishHeld = nil
-        f.finishError = "The Claude app didn't run the new session within 30 min; nothing was sent to it"
-        let b = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        await waitUntil { f.finishHeld != nil }
-        f.finishHeld?.resume()
-        await waitUntil { decision(s, b)?.outcome == .done }
-        #expect(decision(s, b)?.doneLines.last == "failed: The Claude app didn't run the new session within 30 min; nothing was sent to it")
-        #expect(f.sent.count == 1)
-        // Stop, for other runs, leaves a held start be: its message still goes.
-        f.finishHeld = nil
-        f.finishError = nil
-        let c = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        await waitUntil { f.finishHeld != nil }
-        d.stopAll()
-        #expect(d.held[c!] != nil)
-        f.finishHeld?.resume()
-        await waitUntil { decision(s, c)?.outcome == .done }
-        #expect(f.sent.count == 2 && decision(s, c)?.doneLines.last == "sent to peer-late: hello")
-        // Its line's "Don't send" drops it: nothing sent, the session stays, the line says so.
-        f.finishHeld = nil
-        let e = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        await waitUntil { f.finishHeld != nil }
-        d.dropHeld(e!)
-        f.finishHeld?.resume()
-        await waitUntil { decision(s, e)?.outcome == .done }
-        #expect(f.sent.count == 2 && d.held.isEmpty)
-        #expect(decision(s, e)?.doneLines == ["started a session in lookout", "failed: its first message wasn't sent: you chose not to send it"])
+        await finish(d, f, a)
+        #expect(f.sent.map(\.to) == ["peer-new"] && d.held.isEmpty && decision(s, a)?.outcome == .done)
+        #expect(decision(s, a)?.doneLines == ["started a session in lookout"])
+        #expect(s.router.fjordStarted["local_new"] != nil)
     }
 
-    @Test func aHeldStartIsKeptAsWaitingAndOneLostInAQuitIsSettledAtTheNextStart() async {
+    @Test func aStartWithNoFirstMessageIsOnlyStartedAndSendsNothing() async {
         let (s, d, f) = setup()
-        let ready = Prepared(text: "fix the typo", original: "fix the typo", rephrased: false)
-        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "fix the typo", project: "lookout",
-                                        ready: ready, settings: nil)
+        f.startText = ""
         let a = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        await waitUntil { f.finishHeld != nil }
-        // What is kept with the entry says it waits, with no help from this process; the live line says why itself.
-        let kept = try? #require(decision(s, a))
-        #expect(kept?.parts[0].isWaitingToSend == true && kept?.summary == "started in lookout · first message waiting")
-        #expect(kept?.summary(waiting: false) == "started in lookout")
-        // Fjord quits and starts again: nothing runs that wait any more, and the entry says it was lost, not waiting.
-        let again = RouterDispatcher(store: s)
-        _ = again
-        let lost = decision(s, a)
-        #expect(lost?.outcome == .done && lost?.parts[0].isWaitingToSend == false)
-        #expect(lost?.doneLines.last == "failed: its first message wasn't sent: Fjord quit while the session was starting")
-        f.finishHeld?.resume()
-    }
-
-    @Test func aStartOrForkWithNoFirstMessageIsStillWokenAndSendsNothing() async {
-        let (s, d, f) = setup()
-        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "fix the typo", project: "lookout",
-                                        ready: nil, settings: nil)
-        let a = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        // Its finish is the wake (RouterTools.finishStart); nothing is held, nothing is waiting, nothing is sent.
-        await waitUntil { f.finishHeld != nil }
-        #expect(d.held[a!] == nil && decision(s, a)?.parts[0].isWaitingToSend == false)
-        f.finishHeld?.resume()
-        await waitUntil { d.heldTasks[a!] == nil }
+        await finish(d, f, a)
         #expect(f.sent.isEmpty && decision(s, a)?.outcome == .done && decision(s, a)?.doneLines == ["started a session in lookout"])
-        // A wake that fails says so on the line.
-        f.finishHeld = nil
-        f.finishError = "Fjord's relay isn't running: start it in Claude"
-        let b = d.submit("start a new session to fix the typo", context: RouterContext(projects: ["/code/lookout"]))
-        await waitUntil { f.finishHeld != nil }
-        f.finishHeld?.resume()
-        await waitUntil { d.heldTasks[b!] == nil }
-        #expect(decision(s, b)?.doneLines.last == "failed: Fjord's relay isn't running: start it in Claude")
     }
 
     @Test func aForkAskedForInWordsOrFromThePageIsLoggedAndItsFirstMessageSent() async {
@@ -1746,27 +1672,24 @@ import Testing
         var tools: [RouterTools] = []
         d.configure = { tools.append($0) }
         let (text, context) = fromAction(s, [.text("Address what "), .pointer(.notification("pr:o/lookout#7")), .text(" is waiting on.")])
-        // Sure of a new session, which the app runs only later.
+        // Sure of a new session; Triage is switched off once it is started, before its first message goes.
         f.ranked = [.init(target: "new:/code/lookout-2", p: 0.97), .init(target: "unclear", p: 0.03)]
-        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "o/lookout#7 Login fails", project: "lookout-2",
-                                        ready: Prepared(text: text, original: text, rephrased: false), settings: nil)
+        f.holdStart = true
         let id = try #require(d.submit(text, context: context))
         let category = UUID(), action = UUID()
         s.actionLedger.set(ActionRun(category: category, thing: "pr:o/lookout#7", action: action, trigger: "enter", state: .running,
                                      at: Date(), message: id))
-        await waitUntil { f.finishHeld != nil }
-        #expect(s.actionLedger.run(category, "pr:o/lookout#7", action, "enter")?.detail == "session started")
-        // Triage is switched off meanwhile: when the app runs the session, its first message doesn't go.
+        await waitUntil { f.startHeld != nil }
         s.settings.triage = false
         #expect(tools.last?.deliveryCheck?() == RouterDispatcher.unlinkedWords, "the send's own gate says so too")
-        f.finishHeld?.resume()
+        f.startHeld?.resume()
         await waitUntil { decision(s, id)?.outcome == .done }
         #expect(f.sent.isEmpty && decision(s, id)?.done.last == .failed(RouterDispatcher.unlinkedWords))
         let run = s.actionLedger.run(category, "pr:o/lookout#7", action, "enter")
-        #expect(run?.state == .failed && run?.detail == RouterDispatcher.unlinkedWords && run?.sessionID == "local_late")
+        #expect(run?.state == .failed && run?.detail == RouterDispatcher.unlinkedWords && run?.sessionID == "local_new")
         // A reply: switched off between its preparation and its send.
         s.settings.triage = true
-        f.heldStart = nil
+        f.holdStart = false
         f.holdOn = ["local_a"]
         s.router.cards = []
         f.ranked = [.init(target: "session:local_a", p: 0.97), .init(target: "unclear", p: 0.03)]
@@ -1870,19 +1793,11 @@ import Testing
         #expect(d.askBacks.isEmpty && decision(s, id)?.done.last == .failed(RouterDispatcher.unlinkedWords))
     }
 
-    @Test func aHeldStartIsntOfferedToTheNextActionAndASessionThatCantTakeItAsksInstead() async throws {
+    @Test func aSessionThatCantTakeAnActionsMessageAsksInstead() async throws {
         let (s, d, f) = setup()
         await cloned(s)
         let (text, context) = fromAction(s, [.text("Address "), .pointer(.notification("pr:o/lookout#7"))])
-        f.ranked = [.init(target: "new:/code/lookout-2", p: 0.97), .init(target: "unclear", p: 0.03)]
-        f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "o/lookout#7 Login fails", project: "lookout-2",
-                                        ready: Prepared(text: text, original: text, rephrased: false), settings: nil)
-        let a = try #require(d.submit(text, context: context))
-        await finish(d, f, a)
-        #expect(s.claudeSessions["local_late"] == nil, "the app doesn't run it yet: nothing can be sent to it")
-        #expect(RouterDispatcher.repoWorld(context, store: s)?.targets.contains("session:local_late") == false)
         // A session the message can't reach (it doesn't run in the Claude app): nothing went, you pick where instead.
-        f.heldStart = nil
         s.router.cards = []
         f.ranked = [.init(target: "session:local_a", p: 0.97), .init(target: "unclear", p: 0.03)]
         d.effects.prepare = { _, _ in throw RouterTools.Failure("“Fix the login bug” isn't running in the Claude app: open it first") }
@@ -1899,9 +1814,6 @@ import Testing
         await finish(d, f, c)
         let again = try #require(d.askBacks.first { $0.id == c })
         #expect(!again.options.contains { $0.target == "new:/code/lookout-2" || $0.target == "session:local_a" })
-        await waitUntil { f.finishHeld != nil }
-        f.finishHeld?.resume()
-        await waitUntil { decision(s, a)?.outcome == .done }
     }
 
     @Test func triageSwitchedOffWhileAnActionsAskWaitsDismissesItSayingWhy() async throws {
@@ -2419,309 +2331,5 @@ import Testing
         #expect(!RouterRun.schema.contains("leftover") && RouterRun.schema.contains("\"required\":[\"reply\",\"done\"]"))
         #expect(throws: (any Error).self) { try RouterRun.parse(output(["is_error": true, "result": "overloaded"])) }
         #expect(throws: (any Error).self) { try RouterRun.parse(OneShot.Output(stdout: Data("nope".utf8), stderr: Data("boom\n".utf8), status: 1)) }
-    }
-
-    @Test func theDeliveryProcessIsGatedLikeTheRoutersOwn() {
-        let args = RouterSender.arguments()
-        #expect(args.contains("--permission-prompt-tool") && args.contains("stdio") && args.contains("manual"))
-        #expect(args.firstIndex(of: "--tools").map { args[$0 + 1] } == "SendMessage")
-        #expect(args.firstIndex(of: "--settings").map { args[$0 + 1] }?.contains("\"ask\":[\"SendMessage\"]") == true)
-        #expect(args.contains("--no-session-persistence") && !args.contains("--resume"))
-        let ask = RouterSender.request(to: "Docs", text: "⟦fjord⟧\nShip it.")
-        #expect(ask.contains("---BEGIN---\n⟦fjord⟧\nShip it.\n---END---") && ask.hasPrefix("SendMessage to: Docs"))
-    }
-
-    // MARK: The delivery process, against a stand-in for Claude Code
-
-    /// A program that speaks Claude Code's stream the way a SendMessage turn does: it asks for permission, and reports what
-    /// the answer allowed.
-    private func standIn(_ dir: TempDir) -> String {
-        let script = dir.path("claude")
-        let body = """
-        #!/bin/bash
-        read -r first
-        echo "$first" > "$(dirname "$0")/stdin.txt"
-        echo "$@" > "$(dirname "$0")/args.txt"
-        echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"SendMessage","input":{"to":"Docs","message":"hello"}}]}}'
-        echo '{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"SendMessage","input":{"to":"Docs","message":"hello"}}}'
-        read -r answer
-        echo "$answer" > "$(dirname "$0")/answer.txt"
-        if echo "$answer" | grep -q '"behavior":"allow"'; then
-          echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"{\\"success\\":true}"}]}}'
-        else
-          echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"refused"}]}}'
-        fi
-        echo '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
-        """
-        try! Data(body.utf8).write(to: script)
-        try! FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        return script.path
-    }
-
-    @Test func theDeliveryGoesThroughTheGateAndOnlyAsPrepared() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        tools.prepared["Docs"] = Prepared(text: "hello", original: "hello", rephrased: false)
-        try await RouterSender.send(binary: standIn(dir), cwd: dir.url, to: "Docs", text: "hello", tools: tools, timeout: 30)
-        let asked = try String(contentsOf: dir.path("stdin.txt"), encoding: .utf8)
-        #expect(asked.contains("SendMessage to: Docs") && asked.contains("---BEGIN---"))
-        let answer = try String(contentsOf: dir.path("answer.txt"), encoding: .utf8)
-        #expect(answer.contains("\"allow\"") && answer.contains("control_response"))
-        withExtendedLifetime(f) {}
-    }
-
-    /// A plugin in a task: waits for the message in the inbox, answers.
-    private func fakePlugin(_ inbox: RelayInbox, session: String, nonce: String, answer: String) -> Task<String?, Never> {
-        Task.detached {
-            let folder = inbox.folder(for: session)
-            for _ in 0..<300 {
-                if let text = try? String(contentsOf: folder.appendingPathComponent("\(nonce).msg"), encoding: .utf8) {
-                    try? Data((answer + "\n").utf8).write(to: folder.appendingPathComponent("\(nonce).ack"))
-                    return text
-                }
-                try? await Task.sleep(nanoseconds: 10_000_000)
-            }
-            return nil
-        }
-    }
-
-    @Test func aPluginWithAnInboxTakesTheMessageWithNoProcessAndThroughTheSameGate() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        let signed = RelaySigner.sign(body: "hello", target: "cli-a", key: "k1")
-        let nonce = try #require(RelayInbox.header(of: signed)?.nonce)
-        let inbox = RelayInbox(root: dir.path("relay"))
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        tools.prepared["cli-a"] = Prepared(text: signed, original: "hello", rephrased: false)
-        let plugin = fakePlugin(inbox, session: "cli-a", nonce: nonce, answer: "ok")
-        // No binary exists: a process would fail.
-        try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "cli-a", text: signed, tools: tools, inbox: inbox)
-        #expect(await plugin.value == signed)
-        #expect(tools.prepared["cli-a"] == nil)
-        // The gate holds: other words than the prepared ones are not written.
-        tools.prepared["cli-a"] = Prepared(text: signed, original: "hello", rephrased: false)
-        await #expect(throws: (any Error).self) {
-            try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "cli-a",
-                                        text: RelaySigner.sign(body: "other", target: "cli-a", key: "k1"), tools: tools, inbox: inbox)
-        }
-        // Not prepared: not written.
-        let bare = RouterTools(store: s)
-        bare.beginTurn("hello")
-        await #expect(throws: (any Error).self) {
-            try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "cli-a", text: signed, tools: bare, inbox: inbox)
-        }
-        withExtendedLifetime(f) {}
-    }
-
-    @Test func aPluginRefusalFailsTheSendWithItsReason() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        let signed = RelaySigner.sign(body: "hello", target: "cli-a", key: "k1")
-        let nonce = try #require(RelayInbox.header(of: signed)?.nonce)
-        let inbox = RelayInbox(root: dir.path("relay"))
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        tools.prepared["cli-a"] = Prepared(text: signed, original: "hello", rephrased: false)
-        _ = fakePlugin(inbox, session: "cli-a", nonce: nonce, answer: "refused: stale")
-        do {
-            try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "cli-a", text: signed, tools: tools, inbox: inbox)
-            Issue.record("a refused message counted as sent")
-        } catch {
-            #expect(error.localizedDescription.contains("stale"), "\(error.localizedDescription)")
-        }
-        withExtendedLifetime(f) {}
-    }
-
-    @Test func aPluginThatDoesNotAnswerFallsBackToSendMessageWithTheGateIntact() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        var inbox = RelayInbox(root: dir.path("relay"))
-        inbox.timeout = 0.2
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        let signed = RelaySigner.sign(body: "hello", target: "Docs", key: "k1")
-        tools.prepared["Docs"] = Prepared(text: signed, original: "hello", rephrased: false)
-        let input = String(decoding: try JSONSerialization.data(withJSONObject: ["to": "Docs", "message": signed]), as: UTF8.self)
-        let script = dir.path("claude")
-        let body = """
-        #!/bin/bash
-        read -r first
-        echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"SendMessage","input":\(input)}]}}'
-        echo '{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"SendMessage","input":\(input)}}'
-        read -r answer
-        echo "$answer" > "$(dirname "$0")/answer.txt"
-        echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"{\\"success\\":true}"}]}}'
-        echo '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
-        """
-        try Data(body.utf8).write(to: script)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        try await RouterSender.send(binary: script.path, cwd: dir.url, to: "Docs", text: signed, tools: tools, timeout: 30, inbox: inbox)
-        let answer = try String(contentsOf: dir.path("answer.txt"), encoding: .utf8)
-        #expect(answer.contains("\"allow\""))
-        withExtendedLifetime(f) {}
-    }
-
-    /// Stop ends a run's turn at once, not once the run sees it: a send already let through by the approval, on its way
-    /// (its folder made, its inbox looked up), is refused right before it would be written, with no reason of its own.
-    @Test func stopEndsTheTurnAtOnceSoASendOnItsWayIsNeverWritten() async throws {
-        let dir = TempDir()
-        let (s, d, f) = setup()
-        var seen: RouterTools?
-        let prepare = d.effects.prepare
-        d.effects.prepare = { tools, session in
-            seen = tools
-            return try await prepare(tools, session)
-        }
-        f.holdOn = ["local_a"]
-        let id = d.submit("use sqlite", context: RouterContext(replyTo: "local_a#w1"))
-        await waitUntil { f.hold["local_a"] != nil }
-        let tools = try #require(seen)
-        let ticket = tools.ticket()
-        d.stopAll()
-        #expect(throws: (any Error).self) { try tools.live(ticket) }
-        f.release("local_a")
-        await finish(d, f, id)
-
-        // Approved, then its turn ends before the inbox's write: refused there, the plugin never sees it.
-        let signed = RelaySigner.sign(body: "hello", target: "cli-a", key: "k1")
-        let nonce = try #require(RelayInbox.header(of: signed)?.nonce)
-        var inbox = RelayInbox(root: dir.path("relay"))
-        inbox.timeout = 0.3
-        let other = RouterTools(store: s)
-        other.beginTurn("hello")
-        other.prepared["cli-a"] = Prepared(text: signed, original: "hello", rephrased: false)
-        let plugin = fakePlugin(inbox, session: "cli-a", nonce: nonce, answer: "ok")
-        let send = Task {
-            try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "cli-a", text: signed, tools: other, inbox: inbox)
-        }
-        while other.prepared["cli-a"] != nil { await Task.yield() }
-        other.endTurn()
-        await #expect(throws: (any Error).self) { try await send.value }
-        plugin.cancel()
-        #expect(await plugin.value == nil)
-        #expect(!FileManager.default.fileExists(atPath: inbox.folder(for: "cli-a").appendingPathComponent("\(nonce).msg").path))
-        withExtendedLifetime(f) {}
-    }
-
-    /// What the send is for may be over by the time it would go (a wait handled, the session going on): every gate asks
-    /// again, after every wait, so nothing goes then, by the inbox or by the process it falls back to.
-    @Test func aSendWhoseReasonIsGoneMeanwhileGoesByNoGate() async throws {
-        final class Reason { var gone = false; var asked = 0 }
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        let signed = RelaySigner.sign(body: "hello", target: "cli-a", key: "k1")
-        let nonce = try #require(RelayInbox.header(of: signed)?.nonce)
-        // Gone once the approval let it through, before the inbox's write.
-        let reason = Reason()
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        tools.prepared["cli-a"] = Prepared(text: signed, original: "hello", rephrased: false)
-        tools.deliveryCheck = {
-            reason.asked += 1
-            defer { reason.gone = true }
-            return reason.gone ? "Not sent: it no longer waits for this" : nil
-        }
-        var inbox = RelayInbox(root: dir.path("relay"))
-        inbox.timeout = 0.3
-        let plugin = fakePlugin(inbox, session: "cli-a", nonce: nonce, answer: "ok")
-        do {
-            try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "cli-a", text: signed, tools: tools, inbox: inbox)
-            Issue.record("sent after its reason was gone")
-        } catch {
-            #expect(error.localizedDescription.contains("no longer waits"), "\(error.localizedDescription)")
-        }
-        plugin.cancel()
-        let seen = await plugin.value
-        #expect(reason.asked == 2 && seen == nil)
-        #expect(!FileManager.default.fileExists(atPath: inbox.folder(for: "cli-a").appendingPathComponent("\(nonce).msg").path))
-
-        // The plugin doesn't answer, so the process would take it: gone by its permission, it is denied.
-        let docs = RelaySigner.sign(body: "hello", target: "Docs", key: "k1")
-        let fallback = RouterTools(store: s)
-        fallback.beginTurn("hello")
-        fallback.prepared["Docs"] = Prepared(text: docs, original: "hello", rephrased: false)
-        let late = Reason()
-        fallback.deliveryCheck = {
-            late.asked += 1
-            return late.asked > 2 ? "Not sent: it no longer waits for this" : nil
-        }
-        let input = String(decoding: try JSONSerialization.data(withJSONObject: ["to": "Docs", "message": docs]), as: UTF8.self)
-        let script = dir.path("claude")
-        let body = """
-        #!/bin/bash
-        read -r first
-        echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"SendMessage","input":\(input)}]}}'
-        echo '{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"SendMessage","input":\(input)}}'
-        read -r answer
-        echo "$answer" > "$(dirname "$0")/answer.txt"
-        echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"refused"}]}}'
-        echo '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
-        """
-        try Data(body.utf8).write(to: script)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        await #expect(throws: (any Error).self) {
-            try await RouterSender.send(binary: script.path, cwd: dir.url, to: "Docs", text: docs, tools: fallback, timeout: 30, inbox: inbox)
-        }
-        let answer = try String(contentsOf: dir.path("answer.txt"), encoding: .utf8)
-        #expect(late.asked == 3 && !answer.contains("\"allow\"") && answer.contains("no longer waits"))
-        withExtendedLifetime(f) {}
-    }
-
-    /// The live bug: callers hold the peer's name ("fix the tests"), the plugin's inbox is the CLI session id the text is
-    /// signed for. The delivery must go to the folder of the signed target, not of the name.
-    @Test func aPeerNamedDeliveryGoesToTheInboxOfTheSessionTheTextIsSignedFor() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        let cli = "5e2e5d8c-a1af-4b40-b288-3657cdb175cf"
-        let signed = RelaySigner.sign(body: "hello", target: cli, key: "k1")
-        let nonce = try #require(RelayInbox.header(of: signed)?.nonce)
-        let inbox = RelayInbox(root: dir.path("relay"))
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        tools.prepared["reply with exactly the word pong"] = Prepared(text: signed, original: "hello", rephrased: false)
-        let plugin = fakePlugin(inbox, session: cli, nonce: nonce, answer: "ok")
-        try await RouterSender.send(binary: "/nonexistent/claude", cwd: dir.url, to: "reply with exactly the word pong", text: signed,
-                                    tools: tools, inbox: inbox)
-        #expect(await plugin.value == signed)
-        withExtendedLifetime(f) {}
-    }
-
-    @Test func aDeliveryTheGateRefusesIsNotSent() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        // Not prepared at all.
-        let bare = RouterTools(store: s)
-        bare.beginTurn("hello")
-        await #expect(throws: (any Error).self) {
-            try await RouterSender.send(binary: self.standIn(dir), cwd: dir.url, to: "Docs", text: "hello", tools: bare, timeout: 30)
-        }
-        // Prepared, but the process asks to send other words.
-        let other = RouterTools(store: s)
-        other.beginTurn("hello")
-        other.prepared["Docs"] = Prepared(text: "something else", original: "x", rephrased: true)
-        do {
-            try await RouterSender.send(binary: standIn(dir), cwd: dir.url, to: "Docs", text: "something else", tools: other, timeout: 30)
-            Issue.record("sent words that weren't the prepared ones")
-        } catch {
-            #expect(error.localizedDescription.contains("isn't the prepared text"), "\(error.localizedDescription)")
-        }
-        withExtendedLifetime(f) {}
-    }
-
-    @Test func aProcessThatNeverAnswersIsGivenUpOn() async throws {
-        let dir = TempDir()
-        let (s, _, f) = setup()
-        let script = dir.path("claude")
-        try Data("#!/bin/bash\nread -r x\nexec sleep 30\n".utf8).write(to: script)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        let tools = RouterTools(store: s)
-        tools.beginTurn("hello")
-        await #expect(throws: (any Error).self) {
-            try await RouterSender.send(binary: script.path, cwd: dir.url, to: "Docs", text: "hello", tools: tools, timeout: 0.5)
-        }
-        withExtendedLifetime(f) {}
     }
 }

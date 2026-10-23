@@ -731,10 +731,10 @@ export async function carry($: EngineInterface, text: string, taken: (nonce: str
   const own = await $.session.id()
   if (order.carrier !== own) return 'refused: addressed to another session'
   if (!(Math.abs(now - ts) < WINDOW_MS)) return 'refused: stale'
-  // What is carried is a message of Fjord's, signed for another session: never this one's own (nor a session this one is).
+  // What is carried is a message of Fjord's, signed for another session: never this one's own.
   const inner = parse(order.message)
   if (!inner) return 'refused: not a signed message'
-  if (inner.target === own || order.local === `local_${own}`) return 'refused: a session does not carry to itself'
+  if (inner.target === own) return 'refused: a session does not carry to itself'
   if (!(await claim($, order.nonce, ts, now))) return 'refused: already delivered'
   await taken(order.nonce)
   try {

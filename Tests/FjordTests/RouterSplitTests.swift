@@ -875,31 +875,6 @@ import Testing
 
     // MARK: Held parts
 
-    @Test func aProjectPartTheAppHoldsIsHeldAloneAndDontSendDropsOnlyIt() async throws {
-        let w = World()
-        w.f.heldStart = SessionStart.Held(waiting: .init(sessionID: "local_late"), title: "add a badge", project: "web",
-                                          ready: Prepared(text: "add a badge", original: "add a badge", rephrased: false), settings: nil)
-        let (text, context) = w.message([c, .text(" rerun it. "), .pointer(.project("/code/web")), .text(" add a badge")])
-        let id = try #require(w.dispatcher.submit(text, context: context))
-        await waitUntil { w.f.finishHeld != nil }
-        await w.finishAll(id)
-        let parts = try #require(w.entry(id)?.parts)
-        #expect(parts.count == 2 && w.words(of: "local_c") == ["rerun it."])
-        let held = try #require(parts.first { $0.place == "project:/code/web" })
-        #expect(w.dispatcher.held[held.id] == RouterDispatcher.heldWords && w.dispatcher.held.count == 1)
-        #expect(w.record(held.id)?.done == [.started(session: "local_late", project: "web", model: nil, effort: nil)])
-        // Stop leaves it be.
-        w.dispatcher.stopAll()
-        #expect(w.dispatcher.held[held.id] != nil)
-        // Don't send: only that part.
-        w.dispatcher.dropHeld(held.id)
-        w.f.finishHeld?.resume()
-        await waitUntil { w.record(held.id)?.outcome == .done }
-        #expect(w.record(held.id)?.doneLines.last == "failed: its first message wasn't sent: you chose not to send it")
-        let other = try #require(parts.first { $0.id != held.id })
-        #expect(w.record(other.id)?.doneLines.contains { $0.hasPrefix("sent to") } == true && w.f.sent.count == 1)
-    }
-
     /// A message divided into two parts by hand, the second waiting for the first's place.
     private func waiting(_ w: World) async throws -> (id: UUID, first: UUID, second: UUID) {
         let text = "ask CI which version, then tell docs to use it"
@@ -956,7 +931,7 @@ import Testing
         await waitUntil { w.record(late)?.outcome == .done }
         #expect(w.record(late)?.doneLines.last?.hasPrefix("failed: wasn't sent: it waited too long for") == true)
 
-        w.dispatcher.heldPartWait = SessionStart.heldWait
+        w.dispatcher.heldPartWait = RouterDispatcher.partWait
         let (_, _, off) = try await waiting(w)
         w.dispatcher.stopAll(reason: RouterDispatcher.unlinkedWords, actions: true)
         await waitUntil { w.record(off)?.outcome == .done }

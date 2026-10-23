@@ -1143,13 +1143,13 @@ extension RouterDecision {
     }
 
     /// While a typed run is under way, how far it is (classifying, sending…); else how it ended. Only a run under way reads
-    /// the dispatcher (a held start too: what its first message waits for). The history's line and the canvas's pending
+    /// the dispatcher (a held part too: what it waits for). The history's line and the canvas's pending
     /// line say it.
     @MainActor func status(_ store: Store) -> String {
         guard outcome == .pending else { return summary }
         if let progress = store.routerDispatcher.progress[id] { return progress + "…" }
-        // A start whose first message waits for the relay to start the session: started, and what it waits for.
-        if let held = store.routerDispatcher.held[id] { return summary(waiting: false) + " · " + held }
+        // A part held for another place's answer: what it waits for.
+        if let held = store.routerDispatcher.held[id] { return summary + " · " + held }
         return summary
     }
 }
@@ -1189,7 +1189,7 @@ private struct HistoryDecisionLine: View, Equatable {
 
     private var key: String { decision.id.uuidString }
     /// While a typed run is under way, how far it is (classifying, sending…); else how it ended. Only a run under way reads
-    /// the dispatcher (a held start too: what its first message waits for).
+    /// the dispatcher (a held part too: what it waits for).
     private var status: (text: String, held: Bool) {
         // The message that went to several places: its parts say how each stands.
         if let places = decision.placesWords { return (places, false) }
@@ -1202,12 +1202,11 @@ private struct HistoryDecisionLine: View, Equatable {
         if let progress = store.routerDispatcher.progress[decision.id] {
             read = (progress + "…", held != nil)
         } else if let held {
-            // A start whose first message waits for the relay to start the session: started, and what it waits for. A part
-            // held for another place's answer: held, and what it waits for.
+            // A part held for another place's answer: held, and what it waits for.
             // The line names just the place it waits for; the rest is in its details.
             let holding = RouterFlights.holds(decision)
             let waitsFor = holding ? RouterFlights.destination(decision.parts.first?.waitsFor, store: store) : nil
-            read = (holding ? "held" + (waitsFor.map { " · waits for \($0)" } ?? " · " + held) : decision.summary(waiting: false) + " · " + held, true)
+            read = (holding ? "held" + (waitsFor.map { " · waits for \($0)" } ?? " · " + held) : decision.summary + " · " + held, true)
         } else {
             read = (decision.summary, false)
         }
@@ -1233,11 +1232,11 @@ private struct HistoryDecisionLine: View, Equatable {
                             .buttonStyle(.link).font(CDS.sans(12)).fixedSize()
                             .help("Sends it now, without waiting for the answer it needs")
                     }
-                    // A held start's first message: yours to drop (Stop leaves it be).
+                    // A held part: yours to drop (Stop leaves it be).
                     if held {
                         Button("Don't send") { store.routerDispatcher.dropHeld(decision.id) }
                             .buttonStyle(.link).font(CDS.sans(12)).fixedSize()
-                            .help(RouterFlights.holds(decision) ? "It isn't sent" : "Its first message isn't sent; the session stays in the Claude app")
+                            .help("It isn't sent")
                     }
                     StatusCaret(hot: hovered, open: open)
                     Spacer(minLength: 8)

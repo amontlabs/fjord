@@ -211,58 +211,22 @@ enum RouterRun {
 
 // MARK: - A delivery
 
-/// One SendMessage of a prepared, signed message, by a Claude Code process that lives for it alone. Same gate as the
-/// Router's long-lived process: every call asks first, and Fjord answers (`RouterTools.approveSend`): only exactly the
-/// prepared text to the prepared target, once.
+/// One send of a prepared, signed message, through the same gate as the Router's own: every send asks first, and Fjord answers
+/// (`RouterTools.approveSend`): only exactly the prepared text to the prepared target, once. No Claude Code process and no model
+/// is run for it: a local session gets it through a carrier (`RouterCarry`); a session on a computer through its guest inbox.
 enum RouterSender {
-    static let role = """
-    You deliver one message for Fjord. Call SendMessage once, with `to` and `message` exactly as given and no other field. \
-    If the call is refused, correct it to exactly what was given and try once more. Say nothing else.
-    """
-
-    static func arguments() -> [String] {
-        ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-         "--model", RouterRun.model, "--permission-mode", "manual", "--permission-prompt-tool", "stdio",
-         "--tools", "SendMessage", "--name", "Fjord", "--setting-sources", "", "--settings", String(decoding: RouterAgent.gateSettings(), as: UTF8.self),
-         "--strict-mcp-config", "--no-session-persistence", "--append-system-prompt", role]
-    }
-
-    /// What the process is asked: the target and the text between two marker lines (the text may have lines of its own).
-    static func request(to: String, text: String) -> String {
-        "SendMessage to: \(to)\nmessage: everything between the lines ---BEGIN--- and ---END---, exactly, without those lines:\n---BEGIN---\n\(text)\n---END---"
-    }
-
-    /// The last lines a process wrote on stderr.
-    private final class Tail: @unchecked Sendable {
-        private let lock = NSLock()
-        private var lines: [String] = []
-        func add(_ new: [String]) { lock.withLock { lines = Array((lines + new).suffix(10)) } }
-        var last: String? { lock.withLock { lines.last } }
-    }
-
-    /// Holds the process so a cancelled caller can end it.
-    private final class Box: @unchecked Sendable {
-        private let lock = NSLock()
-        private var process: Process?
-        private var cancelled = false
-        func set(_ p: Process) -> Bool { lock.withLock { process = p; return !cancelled } }
-        func cancel() {
-            let running: Process? = lock.withLock { cancelled = true; return process }
-            running?.terminate()
-        }
-    }
-
-    /// Sends `text` to `to` through `tools`' gate. Throws why it wasn't delivered.
+    /// Sends `text` to `to` through `tools`' gate. Throws why it wasn't delivered. Returns the target plugin's answer (what it
+    /// applied of the message's settings), else nil.
     ///
-    /// With an `inbox` (the target's plugin takes messages directly, see `RelayInbox`) the signed text goes there, with no
-    /// Claude Code process and no model, behind the same gate: only exactly the prepared text, once. A refusal by the plugin
-    /// fails the send (the peer channel would be refused the same way); a plugin that doesn't answer in time leaves the
-    /// message to the process below, the gate's approval given back first.
-    /// Returns the plugin's ack when it went through the inbox (what it applied of the message's settings), else nil.
+    /// - `session`: the Claude app's id for the target (`local_<uuid>`), which its send tool takes.
+    /// - `kind`: whether it is a session's first message.
+    ///
+    /// Each local message is kept as an operation before anything is ordered (`DeliveryOperation`) and settled by what the
+    /// target's plugin says; a failure carries the state it ended in in its words.
     @MainActor @discardableResult
-    static func send(binary: String?, cwd: URL?, to: String, text: String, tools: RouterTools, timeout: TimeInterval = 45,
-                     inbox: RelayInbox? = nil, decisionID: UUID? = nil, hostSessionID: String? = nil,
-                     body: String? = nil) async throws -> String? {
+    static func send(store: Store, to: String, text: String, tools: RouterTools, session: String? = nil,
+                     kind: DeliveryOperation.Kind = .message, decisionID: UUID? = nil, hostSessionID: String? = nil,
+                     body: String? = nil, waits: RouterCarry.Waits = RouterCarry.Waits()) async throws -> String? {
         if let ready = tools.prepared[to], let location = ready.guestLocation {
             guard case .computer(let deviceId, let computerId) = location,
                   let target = RelayInbox.header(of: text)?.target else {
@@ -289,110 +253,71 @@ enum RouterSender {
                 tools.prepared[to] = ready
                 throw RouterTools.Failure(failure.localizedDescription)
             } catch {
-                // A guest timeout or refusal never enters the host peer-channel fallback.
+                // A guest timeout or refusal is the guest's to settle, never another way.
                 throw RouterTools.Failure(error.localizedDescription)
             }
         }
-        if let inbox {
-            let ready = tools.prepared[to]
-            let ticket = tools.ticket()
-            if let refusal = tools.approveSend(["to": to, "message": text], otherFields: []) { throw RouterTools.Failure(refusal) }
-            // Asked again right before it is written, every send alike: still its turn (Stop ends it), the Router on, the
-            // send not cancelled, and what it was for not over.
-            let gate: @MainActor () -> String? = {
-                do { try tools.live(ticket) } catch { return error.localizedDescription }
-                return tools.deliveryCheck?()
-            }
-            do {
-                // The inbox is the session's, by the CLI session id the text is signed for: `to` is the name the peer channel knows it by.
-                return try await inbox.deliver(text, to: RelayInbox.header(of: text)?.target ?? to, gate: gate)
-            } catch RelayInbox.Failure.unanswered {
-                tools.prepared[to] = ready
-            } catch let failure as RelayInbox.Failure {
-                throw RouterTools.Failure(failure.localizedDescription)
-            }
+        guard let header = RelayInbox.header(of: text), let paths = store.routerFiles else {
+            throw RouterTools.Failure("Fjord isn't ready: nothing was sent")
         }
-        guard let binary, let cwd else { throw RouterTools.Failure("Claude Code wasn't found, so nothing can be sent") }
-        signal(SIGPIPE, SIG_IGN)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = arguments()
-        process.currentDirectoryURL = cwd
-        let input = Pipe(), output = Pipe(), errors = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = errors
-        let (events, feed) = AsyncStream.makeStream(of: RouterStream.Event.self)
-        let buffer = LineBuffer(), errorBuffer = LineBuffer(), tail = Tail()
-        output.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil; feed.finish(); return }
-            for event in buffer.take(data).flatMap(RouterStream.parse) { feed.yield(event) }
+        let ready = tools.prepared[to]
+        let ticket = tools.ticket()
+        if let refusal = tools.approveSend(["to": to, "message": text], otherFields: []) { throw RouterTools.Failure(refusal) }
+        // Asked again right before each order is written, every send alike: still its turn (Stop ends it), the Router on, the
+        // send not cancelled, and what it was for not over.
+        let gate: @MainActor () -> String? = {
+            do { try tools.live(ticket) } catch { return error.localizedDescription }
+            return tools.deliveryCheck?()
         }
-        errors.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil; return }
-            tail.add(errorBuffer.take(data).compactMap { String(data: $0, encoding: .utf8) }
-                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+        guard let local = session ?? ready?.local, local.hasPrefix("local_") else {
+            throw RouterTools.Failure("That session isn't one of the Claude app's, so Fjord can't send to it")
         }
-        process.terminationHandler = { _ in
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { feed.finish() }
+        let words = body ?? ready?.body ?? text
+        let began = Date()
+        store.noteOperation(DeliveryOperation(nonce: header.nonce, target: header.target, kind: kind,
+                                              bodyHash: DeliveryOperation.hash(of: words), state: .waiting, decisionID: decisionID,
+                                              createdAt: began, updatedAt: began))
+        func settle(_ state: DeliveryOperation.State, _ reason: String? = nil) {
+            store.updateOperation(header.nonce) { $0.state = state; $0.reason = reason }
         }
-        let box = Box()
-        try process.run()
-        guard box.set(process) else { process.terminate(); throw CancellationError() }
-        let stdin = input.fileHandleForWriting
-        defer {
-            output.fileHandleForReading.readabilityHandler = nil
-            errors.fileHandleForReading.readabilityHandler = nil
-            try? stdin.close()
-            if process.isRunning {
-                process.terminate()
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
-            }
+        let (plan, up) = await store.carryPlan(target: header.target)
+        // A session with a process but no plugin up reads the message as a peer's: it never goes to one.
+        if ready?.asleep != true, !up {
+            let why = "Fjord's plugin isn't running in that session: restart it or run /reload-plugins in it; nothing was sent"
+            settle(.refused, why)
+            throw RouterTools.Failure(why)
         }
-        let timer = Task {
-            try await Task.sleep(nanoseconds: UInt64(RouterTools.bounded(timeout) * 1_000_000_000))
-            feed.finish()
-        }
-        defer { timer.cancel() }
-        try stdin.write(contentsOf: RouterStream.userLine(request(to: to, text: text)))
-
-        var calls: [String: String] = [:]
-        var delivered = false
-        var failure: String?
-        try await withTaskCancellationHandler {
-            loop: for await event in events {
-                switch event {
-                case .permission(let id, let tool, let input, let others):
-                    let refusal: String? = tool == "SendMessage" ? tools.approveSend(input, otherFields: others)
-                        : "\(tool) isn't something the Router may do"
-                    try? stdin.write(contentsOf: RouterStream.permissionLine(id: id, allow: refusal == nil ? input : nil, deny: refusal ?? ""))
-                    if let refusal { failure = refusal }
-                case .toolUse(let id, let name, _):
-                    calls[id] = name
-                case .toolResult(let id, let isError, let result):
-                    guard calls[id] == "SendMessage" else { continue }
-                    let refused = RouterAgent.undelivered(result)
-                    if isError || refused != nil {
-                        // The gate's own reason (what it refused) is the useful one; the tool's result only repeats it.
-                        failure = failure ?? refused ?? result.split(separator: "\n").first.map(String.init) ?? "SendMessage failed"
-                    } else {
-                        delivered = true
-                        failure = nil
+        let title = store.claudeSessions[local]?.title ?? local
+        let cli = header.target
+        do {
+            let ack = try await RouterCarry.deliver(
+                signed: text, plan: plan, asleep: !up, inbox: RelayInbox(root: paths.relay), waits: waits,
+                sign: { [weak store] carrier in
+                    guard let store else { throw RouterTools.Failure("Fjord isn't ready") }
+                    return try await store.localSigned { key in
+                        RelaySigner.signCarry(message: text, local: local, carrier: carrier, key: key)
                     }
-                case .result(let isError, let message):
-                    if !delivered, failure == nil, isError { failure = message.isEmpty ? nil : message }
-                    break loop
-                case .started, .text, .peer:
-                    continue
-                }
-            }
-        } onCancel: { box.cancel() }
-        try Task.checkCancellation()
-        guard delivered else {
-            throw RouterTools.Failure(failure ?? tail.last ?? "The message wasn't delivered")
+                },
+                isUp: { [weak store] in await store?.pluginUp(cli) ?? false },
+                open: { [weak store] in
+                    tools.stage?("opening \(title)")
+                    if let intercept = store?.interceptOpen { intercept("Open in Claude · \(title)") } else { Claude.open(local) }
+                },
+                gate: gate,
+                update: { [weak store] update in
+                    store?.updateOperation(header.nonce) { $0.route = update.route; $0.carrier = update.carrier }
+                })
+            settle(.sent)
+            return ack
+        } catch let failure as RouterCarry.Failure {
+            settle(failure.state, failure.message)
+            throw RouterTools.Failure(failure.message)
+        } catch is CancellationError {
+            settle(.refused, "Stopped; nothing was sent")
+            throw CancellationError()
+        } catch {
+            settle(.refused, error.localizedDescription)
+            throw error
         }
-        return nil
     }
 }

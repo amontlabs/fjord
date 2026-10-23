@@ -105,8 +105,8 @@ extension Store {
     /// The turn `sessionID` runs now, if its plugin says so.
     func runningTurn(sessionID: String) -> ClaudePlugin.Presence.Turn? { controlTarget(sessionID)?.turn }
 
-    /// Stops the turn `sessionID` is running. A session with no plugin presence has no turn to stop, so it is never woken for
-    /// this (nor for `interrupt`, which stops a running turn first): only a message to it (`RouterTools.prepare`) wakes it. The turn named is the one presence shows now: a plugin whose running turn is
+    /// Stops the turn `sessionID` is running. A session with no plugin presence has no turn to stop, so nothing is sent for
+    /// this (nor for `interrupt`, which stops a running turn first): only a message to it starts it (`RouterCarry`). The turn named is the one presence shows now: a plugin whose running turn is
     /// another one leaves it alone (`.notRunning`). A session whose presence says it is idle is not written to (`.idle`).
     /// `turn`: the turn the caller saw (the one the stop was judged on); a plugin whose running turn is another leaves it alone.
     func stopTurn(sessionID: String, turn expected: String? = nil, gate: (@MainActor @Sendable () -> String?)? = nil) async -> StopOutcome {
@@ -266,7 +266,7 @@ extension Store {
     }
 
     /// `sign` applied to the relay key (read again when the cached one is stale).
-    private func localSigned(_ sign: (String) -> String) async throws -> String {
+    func localSigned(_ sign: (String) -> String) async throws -> String {
         guard let paths = routerFiles else { throw RouterTools.Failure("The Router is off") }
         if let cached = relayKeyCache, cached.matches(paths.relayKey) { return sign(cached.key) }
         guard await reloadRelayKey(), let key = relayKeyCache?.key else { throw RouterTools.Failure("The Router is off") }

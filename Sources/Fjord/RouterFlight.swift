@@ -133,8 +133,11 @@ struct FlightFramesKey: PreferenceKey {
                 if let why = Self.failure(entry) {
                     let stopped = why.hasPrefix("Stopped")
                     let relay = store.router.guestRelayDeliveries.last { $0.decisionID == pill.id }
-                    let canRetry = relay.map { ($0.state == .inFlight || $0.state == .unconfirmed) && $0.signedPayload != nil
-                        && $0.hostSessionID != nil } ?? true
+                    // A message that may have gone (no answer from its session's plugin) is never ordered again by Retry: it would
+                    // be a second copy if it had. Look in the session, and send it again yourself if it isn't there.
+                    let unsure = store.router.operations.last { $0.decisionID == pill.id }?.state == .unsure
+                    let canRetry = !unsure && (relay.map { ($0.state == .inFlight || $0.state == .unconfirmed) && $0.signedPayload != nil
+                        && $0.hostSessionID != nil } ?? true)
                     // Sent again and failing again is a new attempt, not nothing happening: the pill says so.
                     let again = pill.retries > 0 && !stopped ? " · tried again" + (pill.retries > 1 ? " (\(pill.retries)×)" : "") : ""
                     set(pill.id, .failed(stopped ? "Stopped · nothing was sent" : why + again, retry: !stopped && canRetry))
@@ -151,9 +154,9 @@ struct FlightFramesKey: PreferenceKey {
     func status(_ id: UUID, store: Store) -> String {
         let dispatcher = store.routerDispatcher
         let entry = store.router.record(id)
-        if dispatcher.held[id] != nil { return entry.map(Self.holds) == true ? "held until you send it" : "waiting for the relay to start it" }
-        // A sleeping session being started through the relay: said while it takes.
-        if let waking = dispatcher.progress[id], waking.hasPrefix("waking ") { return waking + "…" }
+        if dispatcher.held[id] != nil { return "held until you send it" }
+        // A sleeping session being opened in the Claude app: said while it takes.
+        if let opening = dispatcher.progress[id], opening.hasPrefix("opening ") { return opening + "…" }
         if let title = Self.destination(entry?.decision.targetID, store: store) { return "→ " + title }
         return "finding where it goes"
     }
@@ -492,10 +495,6 @@ private struct FlightPill: View {
                 Text(pill.text).cdsText((13, 18), .regular, CDS.Text.secondary).lineLimit(1).truncationMode(.tail)
                 Text(why).cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).truncationMode(.tail)
                 if retry {
-                    // The relay that wakes sleeping sessions isn't running: Claude opens with it ready to send.
-                    if why.hasPrefix(RouterTools.relayDown) {
-                        ClaudeButton("Start it", variant: .ghost, size: .sm) { Task { await store.startRelay() } }
-                    }
                     ClaudeButton("Retry", variant: .ghost, size: .sm) { flights.retry(pill.id, store: store) }
                     ChipClose(label: "Dismiss") { flights.dismiss(pill.id, store: store) }
                 }

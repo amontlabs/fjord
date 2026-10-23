@@ -448,7 +448,7 @@ extension Store {
 
     /// The Router's send path with the words as they are (nothing taken out): prepared and signed for the session's plugin, then
     /// through the gate, which lets only exactly this text go, once. `check` stops it by throwing: run after the preparing,
-    /// and again at each of the gate's own (the approval, right before the inbox's write, the fallback's permission), after
+    /// and again at each of the gate's own (the approval, right before each order is written), after
     /// every wait, so a wait handled meanwhile sends nothing.
     static func sendVerbatim(store: Store, check: @escaping @MainActor () throws -> Void) -> RouterTriager.Sender {
         { [weak store] session, text in
@@ -464,23 +464,8 @@ extension Store {
             let answer = try await tools.prepare(store, session: session, ticket: tools.ticket())
             guard let to = (try? JSONSerialization.jsonObject(with: Data(answer.utf8)) as? [String: Any])?["to"] as? String,
                   let ready = tools.prepared[to] else { throw RouterTools.Failure("Not prepared") }
-            let guest = ready.guestLocation != nil
-            let binary: String?
-            let home: URL?
-            if guest {
-                binary = nil
-                home = nil
-            } else {
-                guard let localBinary = store.routerStatus.latestPath(), let localHome = store.routerFiles?.routerHome else {
-                    throw RouterTools.Failure("Claude Code wasn't found, so nothing can be sent")
-                }
-                binary = localBinary
-                home = localHome
-            }
-            if let home { await PrivateFile.makeFolder(home) }
             try await check()
-            try await RouterSender.send(binary: binary, cwd: home, to: to, text: ready.text, tools: tools,
-                                        inbox: guest ? nil : await store.relayInbox(forSigned: ready.text))
+            try await RouterSender.send(store: store, to: to, text: ready.text, tools: tools, session: session)
         }
     }
 }

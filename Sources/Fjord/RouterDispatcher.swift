@@ -240,8 +240,8 @@ struct RouterAskBack: Identifiable, Equatable {
         var rank: @MainActor (RouterTools, _ message: String, _ projects: [String]) async throws -> Ranking
         /// The message for a session with its addressing taken out (`Addressing`), and its signature.
         var prepare: @MainActor (RouterTools, _ session: String) async throws -> Delivery
-        /// A new session in a project (folder) with the prepared first message. Throws `SessionStart.Held` when the Claude
-        /// app has the session but doesn't run it yet.
+        /// A new session in a project (folder) with the prepared first message. The app has the session; whether it runs yet
+        /// doesn't matter, the first message is what starts it (`RouterCarry`).
         var start: @MainActor (RouterTools, _ folder: String, _ title: String, _ settings: SessionSettings?) async throws -> StartResult
         /// The signed send, through the gate: the plugin's ack when it went through the inbox.
         var send: @MainActor (RouterTools, Delivery) async throws -> String?
@@ -256,11 +256,7 @@ struct RouterAskBack: Identifiable, Equatable {
         var cancel: @MainActor (RouterDecision.Delivered) async throws -> RouterDecision.Cancelled = { _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
-        /// A held start's first message, prepared once the app runs its session (`finishStart`).
-        var finish: @MainActor (RouterTools, SessionStart.Held) async throws -> Delivery = { _, _ in
-            throw RouterTools.Failure("The Router isn't ready")
-        }
-        /// A session forked, with the prepared first message (none: `text` is empty). Throws `SessionStart.Held` as `start` does.
+        /// A session forked, with the prepared first message (none: `text` is empty).
         var fork: @MainActor (RouterTools, SessionFork.Request) async throws -> Delivery = { _, _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
@@ -311,19 +307,18 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored private var actionRuns: Set<UUID> = []
     /// Sends being taken back, by their entry in the log.
     private(set) var cancelling: Set<UUID> = []
-    /// Starts whose session the Claude app has but doesn't run yet, by their entry: what their first message waits for. Not
-    /// a run under way (you may send meanwhile); Stop ends them too.
+    /// Parts of a divided message held for another place's answer, by their entry: what each waits for. Not a run under way (you
+    /// may send meanwhile); Stop leaves them be.
     var held: [UUID: String] = [:]
     @ObservationIgnored var heldTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored var heldTools: [UUID: RouterTools] = [:]
-    /// Held starts you chose not to send (`dropHeld`): their line says so.
-    @ObservationIgnored var dropped: Set<UUID> = []
     /// Held parts of a divided message (`holdPart`), by their id: what ends the wait, once.
     @ObservationIgnored var releases: [UUID: CheckedContinuation<PartRelease, Never>] = [:]
     /// Held parts sent now whose task hasn't taken up the release yet: Stop reaches them here, not through `tasks`.
     @ObservationIgnored var releasing: Set<UUID> = []
-    /// How long a part waits for you to send it (`SessionStart.heldWait`); a test gives a shorter one.
-    @ObservationIgnored var heldPartWait: TimeInterval = SessionStart.heldWait
+    /// How long a part waits for you to send it; a test gives a shorter one.
+    @ObservationIgnored var heldPartWait: TimeInterval = RouterDispatcher.partWait
+    static let partWait: TimeInterval = 30 * 60
 
     @ObservationIgnored weak var store: Store?
     @ObservationIgnored var effects: Effects
@@ -365,21 +360,7 @@ struct RouterAskBack: Identifiable, Equatable {
         // An entry whose ask-back card is still up is not pruned from the history (its pick needs the record).
         store.decisionsInUse = { [weak self] in Set(self?.askBacks.map(\.id) ?? []) }
         store.routerRunReverted = { [weak self] id in self?.reverted(id) }
-        settleLostHolds()
-    }
-
-    /// A held start is kept with its entry (started, first message waiting), but its wait is this process's: one still waiting
-    /// when Fjord starts again was lost with the quit. Said so on its line, not left "waiting" for good.
-    func settleLostHolds() {
-        guard let store else { return }
-        for entry in store.router.decisions {
-            for part in entry.parts where part.isWaitingToSend && held[part.id] == nil && heldTasks[part.id] == nil {
-                store.updateDecision(part.id) {
-                    $0.add(.failed("its first message wasn't sent: Fjord quit while the session was starting"))
-                    $0.outcome = .done
-                }
-            }
-        }
+        store.settleLostOperations()
     }
 
     struct Job {
@@ -611,8 +592,8 @@ struct RouterAskBack: Identifiable, Equatable {
     /// An action's message moved on: its run says so (`Store.followActionRun`).
     func follow(_ id: UUID) { store?.followActionRun(id, dispatcher: self) }
 
-    /// Stops every run under way (nothing more is sent by them) and drops the asks waiting for you. A held start's first
-    /// message isn't a run, nor is a held part of a divided message: its own line's "Don't send" drops it (`dropHeld`).
+    /// Stops every run under way (nothing more is sent by them) and drops the asks waiting for you. A held part of a divided
+    /// message isn't a run: its own line's "Don't send" drops it (`dropHeld`).
     /// `reason`: what an action's entry says of it (its run fails with why). `actions`: the inbox's actions' messages too,
     /// their runs and their asks (the Router switched off); Stop is for yours, and leaves those be (they weren't sent by
     /// you, and go on in the background).
@@ -627,7 +608,7 @@ struct RouterAskBack: Identifiable, Equatable {
         divisionPending = [:]
         // A part sent now, not yet running: stopped too, its turn ended and its task told.
         for id in releasing { heldTools[id]?.endTurn(); heldTasks[id]?.cancel() }
-        // A held part of a divided message is kept by Stop, like a held start; the Router switched off drops it.
+        // A held part of a divided message is kept by Stop; the Router switched off drops it.
         if actions { for id in Array(releases.keys) { release(id, .drop("the Router was switched off")) } }
     }
 
@@ -1134,17 +1115,12 @@ struct RouterAskBack: Identifiable, Equatable {
             else { SessionSettings.parse(SessionStart.request(job.text, pills: job.context.pills)) }
         let delivery: Delivery
         try linked(job.context)
-        do {
-            switch try await effects.start(job.tools, folder, job.context.action?.title ?? Self.title(for: task), settings) {
-            case .delivery(let prepared):
-                delivery = prepared
-            case .guestPrepared(let project, let location, let pendingStart):
-                note(job, .preparedGuest(project: project, location: location, pendingStart: pendingStart))
-                return
-            }
-        } catch let waiting as SessionStart.Held {
-            // Not known as a session yet: the app doesn't run it, so it can't take the next action's message.
-            return hold(job, waiting)
+        switch try await effects.start(job.tools, folder, job.context.action?.title ?? Self.title(for: task), settings) {
+        case .delivery(let prepared):
+            delivery = prepared
+        case .guestPrepared(let project, let location, let pendingStart):
+            note(job, .preparedGuest(project: project, location: location, pendingStart: pendingStart))
+            return
         }
         if let session = delivery.session { know(session, for: job, in: folder) }
         // Started for an action: its cards say where it came from.
@@ -1215,13 +1191,7 @@ struct RouterAskBack: Identifiable, Equatable {
             $0.decision.target = describe("session:\(request.session)", store: store)
             $0.decision.targetID = "session:\(request.session)"
         }
-        let delivery: Delivery
-        do {
-            delivery = try await effects.fork(job.tools, request)
-        } catch var waiting as SessionStart.Held {
-            waiting.project = label
-            return hold(job, waiting)
-        }
+        let delivery = try await effects.fork(job.tools, request)
         if let session = delivery.session { store.noteFjordStarted(session) }
         note(job, .started(session: delivery.session, project: label, model: nil, effort: nil), session: delivery.session)
         guard !delivery.text.isEmpty else { return }
@@ -1230,72 +1200,9 @@ struct RouterAskBack: Identifiable, Equatable {
         note(job, .sent(to: delivery.to, text: delivery.body, original: nil), session: delivery.session)
     }
 
-    /// A start the Claude app has but doesn't run yet: done as a start (the session is there), its first message sent once
-    /// the app runs it, in a turn of its own and not as a run under way (the composer is free meanwhile, and Stop leaves
-    /// it be: its line's "Don't send" drops it). Waiting too long, the Router switched off or reset, says the message wasn't
-    /// sent; the session stays.
-    func hold(_ job: Job, _ waiting: SessionStart.Held) {
-        guard let store else { return }
-        let id = job.id
-        let session = waiting.waiting.sessionID
-        store.noteFjordStarted(session)
-        if let action = job.context.action { store.noteOrigin(action.origin, for: session) }
-        store.updateDecision(id) { $0.add(.started(session: session, project: waiting.project, model: nil, effort: nil), session: session) }
-        // With no first message (a start or fork with nothing to say) there is nothing to hold: the session is only woken.
-        let sends = waiting.ready != nil
-        if !sends, waiting.settings != nil { store.updateDecision(id) { $0.add(.failed("model/effort: no first message to set them with")) } }
-        if sends { held[id] = Self.heldWords }
-        let tools = makeTools(id, job.text, pills: job.context.pills, mentions: job.context.mentions,
-                              action: job.context.action != nil)
-        let context = job.context
-        heldTools[id] = tools
-        heldTasks[id] = Task { [weak self] in
-            do {
-                guard let self else { return }
-                let delivery = try await effects.finish(tools, waiting)
-                try Task.checkCancellation()
-                if sends {
-                    // The session ran only now: an action's first message goes only if Triage and the Router are still on.
-                    try linked(context)
-                    held[id] = "sending"
-                    let ack = try await effects.send(tools, delivery)
-                    store.updateDecision(id) { entry in
-                        if let settings = waiting.settings {
-                            entry.done.removeAll { if case .started = $0 { true } else { false } }
-                            AppliedSettings.from(ack: ack, requested: settings, supported: delivery.settingsSigned)
-                                .record(session: session, project: waiting.project, in: &entry)
-                        }
-                        entry.add(.sent(to: delivery.to, text: delivery.body, original: nil), session: session)
-                    }
-                }
-            } catch {
-                let dropped = self?.dropped.remove(id) != nil
-                let reason = dropped ? "its first message wasn't sent: you chose not to send it"
-                    : error is CancellationError ? "its first message wasn't sent"
-                    : error.localizedDescription.split(separator: "\n").first.map(String.init) ?? "failed"
-                store.updateDecision(id) { $0.add(.failed(RouterDecision.clip(reason, 120))) }
-            }
-            tools.endTurn()
-            self?.held[id] = nil
-            self?.heldTasks[id] = nil
-            self?.heldTools[id] = nil
-            store.updateDecision(id) { if $0.outcome == .pending { $0.outcome = .done } }
-            self?.follow(id)
-            self?.onFinish?(id)
-        }
-    }
-
-    /// What a held start's line says while its first message waits.
-    static let heldWords = "the first message waits for Fjord's relay to start the session"
-
-    /// "Don't send" on a held start's line: its first message is dropped (the session stays), its turn ended at once so
-    /// nothing of it can still go.
+    /// "Don't send" on a held part's line: it is dropped, and nothing of it can still go.
     func dropHeld(_ id: UUID) {
-        if releases[id] != nil { return release(id, .drop("you chose not to send it")) }
-        guard let task = heldTasks[id] else { return }
-        dropped.insert(id)
-        heldTools[id]?.endTurn()
-        task.cancel()
+        if releases[id] != nil { release(id, .drop("you chose not to send it")) }
     }
 
     /// Haiku, fresh, for what needs judgment or tools; its reply is what the history shows.
@@ -2001,23 +1908,9 @@ extension RouterDispatcher.Effects {
             send: { [weak dispatcher] tools, delivery in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
-                let guest = tools.prepared[delivery.to]?.guestLocation != nil
-                let binary: String?
-                let home: URL?
-                if guest {
-                    binary = nil
-                    home = nil
-                } else {
-                    guard let localBinary = dispatcher.claudePath(), let localHome = store.routerFiles?.routerHome else {
-                        throw RouterTools.Failure("Claude Code wasn't found, so nothing can be sent")
-                    }
-                    binary = localBinary
-                    home = localHome
-                }
-                if let home { await PrivateFile.makeFolder(home) }
-                return try await RouterSender.send(binary: binary, cwd: home, to: delivery.to, text: delivery.text, tools: tools,
-                    inbox: guest ? nil : await store.relayInbox(forSigned: delivery.text), decisionID: tools.decision,
-                    hostSessionID: delivery.session, body: delivery.body)
+                return try await RouterSender.send(store: store, to: delivery.to, text: delivery.text, tools: tools,
+                                                   session: delivery.session, kind: delivery.newSessionIn == nil ? .message : .firstMessage,
+                                                   decisionID: tools.decision, hostSessionID: delivery.session, body: delivery.body)
             },
             answer: { [weak dispatcher] tools, card, answers, snapshot in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
@@ -2053,12 +1946,6 @@ extension RouterDispatcher.Effects {
             cancel: { [weak dispatcher] sent in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 return try await store(dispatcher).cancelDelivery(sent)
-            },
-            finish: { [weak dispatcher] tools, held in
-                guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
-                let store = try store(dispatcher)
-                let answer = object(try await tools.finishStart(store, held, ticket: tools.ticket()))
-                return try started(answer, tools, project: held.project, settings: held.settings)
             },
             fork: { [weak dispatcher] tools, request in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }

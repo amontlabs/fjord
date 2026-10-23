@@ -188,36 +188,23 @@ import Testing
         #expect(SessionStart.cleanTitle("  Bump\nthe   version  ") == "Bump the version")
     }
 
-    @Test func theNewSessionsProcessIsWaitedFor() async throws {
+    @Test func aNewSessionIsWaitedForOnlyUntilTheAppHasItNotUntilItRuns() async throws {
         let dir = TempDir()
-        let peers = dir.path("sessions")
-        try FileManager.default.createDirectory(at: peers, withIntermediateDirectories: true)
-        Task.detached {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            let data = try? JSONSerialization.data(withJSONObject: ["pid": Int(getpid()), "hostSessionId": "local_u-9", "name": "Bump the version"])
-            try? data?.write(to: peers.appendingPathComponent("\(getpid()).json"))
-        }
-        #expect(try await SessionStart.waitForPeer(uuid: "u-9", dir: peers, timeout: 120) == "Bump the version")
-        await #expect(throws: RouterTools.Failure.self) { try await SessionStart.waitForPeer(uuid: "other", dir: peers, timeout: 0.5) }
-    }
-
-    @Test func aSessionTheAppHasButDoesntRunIsNotAFailedStart() async throws {
-        let dir = TempDir()
-        let peers = dir.path("sessions")
-        try FileManager.default.createDirectory(at: peers, withIntermediateDirectories: true)
-        let data = try JSONSerialization.data(withJSONObject: ["pid": Int(getpid()), "hostSessionId": "local_busy", "name": "Busy"])
-        try data.write(to: peers.appendingPathComponent("\(getpid()).json"))
-        // The app has it but doesn't run it by the end of the wait: said as such, never as a failed start; nothing said
-        // of how full the app is (Fjord can't count its sessions as it does).
-        await #expect(throws: SessionStart.NotRunning(sessionID: "local_u-1")) {
-            try await SessionStart.waitForPeer(uuid: "u-1", dir: peers, timeout: 0.5, imported: { true })
-        }
-        #expect(SessionStart.NotRunning(sessionID: "local_u-1").localizedDescription
-                == "The new session is in the Claude app, but the app hasn't run it yet: Fjord starts it through its relay, nothing needs opening in the app")
         // Whether the app has it: its file under the app's sessions folder (account/org/local_<uuid>.json).
         let root = dir.path("claude-code-sessions")
         let org = root.appendingPathComponent("acct/org")
         try FileManager.default.createDirectory(at: org, withIntermediateDirectories: true)
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? Data("{}".utf8).write(to: org.appendingPathComponent("local_u-9.json"))
+        }
+        // No process is looked for: the app having the session is all there is to wait for.
+        try await SessionStart.waitForImport(uuid: "u-9", timeout: 120, root: root)
+        await #expect(throws: RouterTools.Failure.self) { try await SessionStart.waitForImport(uuid: "other", timeout: 0.5, root: root) }
+        // Stop, a reset or the Router off ends the wait as itself.
+        struct Stopped: Error {}
+        await #expect(throws: Stopped.self) { try await SessionStart.waitForImport(uuid: "other", timeout: 120, root: root, check: { throw Stopped() }) }
+        // Whether the app has it: its file under the app's sessions folder (account/org/local_<uuid>.json).
         #expect(!SessionStart.imported("u-1", root: root))
         try Data("{}".utf8).write(to: org.appendingPathComponent("local_u-1.json"))
         #expect(SessionStart.imported("u-1", root: root) && !SessionStart.imported("u-2", root: root))

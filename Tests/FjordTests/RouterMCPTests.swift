@@ -443,9 +443,9 @@ import Testing
         #expect(first["to"] as? String == "Fix the login bug" && first["rephrased"] as? Bool == true)
         #expect(text.hasPrefix("⟦fjord v1 cli-local_a ") && text.hasSuffix("⟧\n" + Data("bump the version".utf8).base64EncodedString()))
         #expect(t.prepared["Fix the login bug"]?.body == "bump the version")
-        // A session with no process can't get your words: refused.
+        // A session with no process is asleep, not refused: the app starts it with the message (`RouterCarry`).
         let away = try #require(await t.tool("prepare", ["session": "Write the README"]))
-        #expect(away.isError && away.text.contains("isn't running"))
+        #expect(!away.isError && t.prepared["Write the README"]?.asleep == true)
         #expect(await t.tool("prepare", ["session": "nobody"])?.isError == true)
     }
 
@@ -706,237 +706,66 @@ import Testing
                                 body: "bump the version") == String(parts[5]))
     }
 
-    @Test func aNewSessionIsWaitedForUntilItsPluginRuns() async throws {
+    @Test func aNewSessionsFirstMessageIsSignedForItWithoutWaitingForItsPlugin() async throws {
         let dir = TempDir()
         let s = await store(dir)
         let t = tools(s, turn: "start a session in lookout to bump the version")
-        t.starter = { _, title in SessionStart.Started(sessionID: "local_late", peer: title) }
-        let pluginWaiting = RouterGate()
-        let pluginReady = RouterGate()
-        let support = dir.path("support"), claude = dir.path("claude")
-        t.pluginReadiness = { _ in
-            pluginWaiting.open()
-            await pluginReady.wait()
-            PluginFixture.live("late", support: support, claude: claude)
-            return true
-        }
-        let starting = Task { await t.tool("start_session", ["project": "lookout", "title": "Bump it"]) }
-        await pluginWaiting.wait()
-        #expect(t.prepared["Bump it"] == nil)
-        pluginReady.open()
-        let out = try #require(await starting.value)
+        // The app has the session; whether it runs is the first message's business (it starts it): no process, no plugin yet.
+        t.starter = { _, title in SessionStart.Started(sessionID: "local_late", peer: "local_late") }
+        let out = try #require(await t.tool("start_session", ["project": "lookout", "title": "Bump it"]))
         #expect(!out.isError, "\(out.text)")
-        #expect(t.prepared["Bump it"]?.text.hasPrefix("⟦fjord v1 late ") == true)
-        // It never comes up: nothing to send, said.
-        t.starter = { _, title in SessionStart.Started(sessionID: "local_never", peer: title) }
-        t.pluginReadiness = { _ in false }
-        let never = try #require(await t.tool("start_session", ["project": "lookout", "title": "Never"]))
-        #expect(never.isError && never.text.contains("plugin didn't come up") && t.prepared["Never"] == nil)
+        let ready = try #require(t.prepared["local_late"])
+        #expect(ready.text.hasPrefix("⟦fjord v1 late ") && ready.asleep && ready.local == "local_late" && ready.newSessionIn == "lookout")
+        // With settings the first message is v2: a sleeping session loads the plugin installed now, which takes them.
+        let withSettings = tools(s, turn: "start a session in lookout with opus, high effort: bump the version")
+        withSettings.starter = { _, title in SessionStart.Started(sessionID: "local_other", peer: "local_other") }
+        _ = try await withSettings.startSession(s, project: "lookout", title: "Bump it", ticket: withSettings.ticket(),
+                                                settings: SessionSettings(model: "opus", effort: "high"))
+        #expect(withSettings.prepared["local_other"]?.text.hasPrefix("⟦fjord v2 other ") == true)
+        // No task left in the words: the session is started, nothing to send.
+        let bare = tools(s, turn: "start a session in lookout")
+        bare.starter = { _, _ in SessionStart.Started(sessionID: "local_bare", peer: "local_bare") }
+        let none = try #require(await bare.tool("start_session", ["project": "lookout", "title": "Nothing"]))
+        #expect(!none.isError && bare.prepared.isEmpty)
     }
 
-    @Test func aStartTheAppDoesntRunYetIsHeldNotFailed() async throws {
+    // MARK: A session with no process
+
+    @Test func aSleepingSessionIsSignedForAndLeftForTheAppToStart() async throws {
         let dir = TempDir()
         let s = await store(dir)
-        let t = tools(s, turn: "start a session in lookout to bump the version")
-        t.starter = { _, _ in throw SessionStart.NotRunning(sessionID: "local_late") }
-        // The start is done (the app has the session); its first message is held, prepared but not signed.
-        var held: SessionStart.Held?
-        do {
-            _ = try await t.startSession(s, project: "lookout", title: "Bump it", ticket: t.ticket())
-        } catch let error as SessionStart.Held {
-            held = error
-        }
-        let waiting = try #require(held)
-        #expect(waiting.waiting.sessionID == "local_late" && waiting.project == "lookout" && waiting.title == "Bump it")
-        #expect(waiting.ready?.text == "bump the version" && t.prepared.isEmpty)
-        // Once the app runs it, in a turn of its own: its plugin, then the message signed for it and prepared for its peer.
-        let later = tools(s, turn: "start a session in lookout to bump the version")
-        later.processWaiter = { id in id == "local_late" ? "Bump it" : "?" }
-        let support = dir.path("support"), claude = dir.path("claude")
-        later.pluginReadiness = { _ in
-            PluginFixture.live("late", support: support, claude: claude)
-            return true
-        }
-        let out = try await later.finishStart(s, waiting, ticket: later.ticket())
-        #expect(out.contains("local_late") && later.prepared["Bump it"]?.text.hasPrefix("⟦fjord v1 late ") == true)
-        #expect(later.prepared["Bump it"]?.newSessionIn == "lookout")
-        // The app never runs it: said, nothing prepared.
-        let never = tools(s, turn: "start a session in lookout to bump the version")
-        never.processWaiter = { _ in throw RouterTools.Failure("The Claude app didn't run the new session within 30 min; nothing was sent to it") }
-        await #expect(throws: RouterTools.Failure.self) { try await never.finishStart(s, waiting, ticket: never.ticket()) }
-        #expect(never.prepared.isEmpty)
-        // The Router switched off while it waits: said as that, not as the app never running it.
-        let off = tools(s, turn: "start a session in lookout to bump the version")
-        s.router.enabled = false
-        do {
-            _ = try await off.finishStart(s, waiting, ticket: off.ticket())
-            Issue.record("sent")
-        } catch {
-            #expect(error.localizedDescription.contains("The Router is off"), "\(error.localizedDescription)")
-        }
-        s.router.enabled = true
-    }
-
-    // MARK: Waking a session with no process
-
-    /// Fjord's relay in the Claude app, as the app lists it, with its plugin running.
-    private func relay(_ s: Store, _ dir: TempDir, running: Bool = true) {
-        let folder = s.relayFolder?.path
-        s.claudeSessions["local_relay"] = ClaudeSession(id: "local_relay", title: "Fjord", folder: folder, completedTurns: 1,
-                                                        lastActivity: now, running: false, cliID: "cli-relay")
-        if running { PluginFixture.live("cli-relay", support: dir.path("support"), claude: dir.path("claude")) }
-    }
-
-    @Test func aSleepingSessionIsWokenThroughTheRelayThenTheMessageIsSigned() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        relay(s, dir)
         let t = tools(s, turn: "tell them to ship")
-        var orders: [(order: String, relay: String)] = []
-        var stages: [String] = []
-        t.stage = { stages.append($0) }
-        var named: String?
-        t.relayOrders = { order, relay in
-            orders.append((order, relay))
-            named = ClaudePlugin.relay(in: dir.path("support/claude-plugin"))
-        }
-        let support = dir.path("support"), claude = dir.path("claude")
-        // local_b has no process: its plugin isn't up until the wake is sent.
-        t.pluginReadiness = { cli in
-            switch cli {
-            case "cli-relay": return true
-            default:
-                guard !orders.isEmpty else { return false }
-                PluginFixture.live(cli, support: support, claude: claude)
-                return true
-            }
-        }
+        // local_b has no process and no plugin up: nothing wakes it first, the message is signed for its Claude Code id and the
+        // app starts it with the message.
         let out = try #require(await t.tool("prepare", ["session": "local_b"]))
         #expect(!out.isError, "\(out.text)")
-        #expect(stages == ["waking Write the README"])
-        // One order, into the relay's inbox, signed for it; the wake in it is for local_b's CLI id and checks out.
-        let sent = try #require(orders.first)
-        #expect(orders.count == 1 && sent.relay == "cli-relay" && RelayInbox.header(of: sent.order)?.target == "cli-relay")
-        let order = RelaySigner.readable(sent.order)
-        #expect(order.contains("`to` exactly local_b"))
-        let fields = try #require(order.components(separatedBy: "`message` exactly ").last?.components(separatedBy: ",").first?
-            .split(separator: " ").map(String.init))
-        #expect(fields.count == 5 && fields[0] == "fjord-wake" && fields[1] == "cli-local_b")
-        let key = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-        #expect(RelaySigner.wakeMac(key: key, target: "cli-local_b", nonce: fields[2], ts: fields[3]) == fields[4])
-        // The plugin is told which session is the relay, and the message is signed for the woken session as always.
-        #expect(named == "cli-relay")
-        #expect(t.prepared["Write the README"]?.text.hasPrefix("⟦fjord v1 cli-local_b ") == true)
-        #expect(s.router.relay == RouterRelay(sessionID: "local_relay", cliID: "cli-relay"))
+        let ready = try #require(t.prepared["Write the README"])
+        #expect(ready.text.hasPrefix("⟦fjord v1 cli-local_b ") && ready.asleep && ready.local == "local_b")
     }
 
-    @Test func findingTheRelayTellsThePluginWhichSessionItIsBeforeAnyWake() async throws {
+    @Test func aSessionWithAProcessAndNoPluginIsNotSentTo() async throws {
         let dir = TempDir()
         let s = await store(dir)
-        let plugin = try #require(s.routerFiles?.plugin)
-        try ClaudePlugin.write(to: plugin, version: "1.0.0-rabc", presence: dir.path("support/plugin-sessions"),
-                               key: dir.path("support/relay.key"), registry: dir.path("claude/sessions"))
-        #expect(ClaudePlugin.relay(in: plugin) == nil)
-        relay(s, dir)
-        #expect(s.relaySession()?.cliID == "cli-relay")
-        for _ in 0..<100 where ClaudePlugin.relay(in: plugin) == nil { try await Task.sleep(nanoseconds: 20_000_000) }
-        #expect(ClaudePlugin.relay(in: plugin) == "cli-relay")
-    }
-
-    @Test func theRelaysPrefillSaysWhatItIsForThenGivesTheRole() throws {
-        let lines = Store.relayRole.components(separatedBy: "\n\n")
-        #expect(lines.count == 2 && !lines[0].contains("\n") && lines[0].count < 120 && lines[0].contains("Fjord"))
-        #expect(lines[1].hasPrefix("You are Fjord's relay.") && lines[1].hasSuffix("Ready."))
-        let folder = URL(fileURLWithPath: "/tmp/fjord relay")
-        let url = try #require(Store.relayLink(folder: folder))
-        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-        #expect(items?.first { $0.name == "q" }?.value == Store.relayRole && items?.first { $0.name == "folder" }?.value == folder.path)
-    }
-
-    @Test func aSessionWhosePluginIsUpIsNotWoken() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        relay(s, dir)
+        // local_a runs (a process in Claude Code's registry), but Fjord's plugin isn't up in it: it would read a carried message
+        // as a peer's, so nothing is prepared.
+        for url in (try? FileManager.default.contentsOfDirectory(at: dir.path("support/plugin-sessions"), includingPropertiesForKeys: nil)) ?? [] {
+            try? FileManager.default.removeItem(at: url)
+        }
         let t = tools(s, turn: "tell them to ship")
-        var orders = 0
-        t.relayOrders = { _, _ in orders += 1 }
-        // No process in Fjord's registry read, but the plugin says it runs in it.
-        PluginFixture.live("cli-local_b", support: dir.path("support"), claude: dir.path("claude"))
-        let out = try #require(await t.tool("prepare", ["session": "local_b"]))
-        #expect(!out.isError && orders == 0)
+        let out = try #require(await t.tool("prepare", ["session": "local_a"]))
+        #expect(out.isError && out.text.contains("Fjord's plugin was installed") && t.prepared.isEmpty, "\(out.text)")
     }
 
-    @Test func aSessionTwoProcessesClaimIsNotWokenAndNothingIsSent() async throws {
+    @Test func aSessionTwoProcessesClaimIsNotStartedAndNothingIsSent() async throws {
         let dir = TempDir()
         let s = await store(dir)
-        relay(s, dir)
         // A second live process under the same Claude app session as local_a's.
         let other = try JSONSerialization.data(withJSONObject: ["pid": Int(getppid()), "hostSessionId": "local_a",
                                                                 "sessionId": "cli-local_a-2", "name": "Fix the login bug", "status": "busy"])
         try other.write(to: dir.path("claude/sessions/\(getppid()).json"))
         let t = tools(s, turn: "tell them to ship")
-        var orders = 0
-        t.relayOrders = { _, _ in orders += 1 }
         let out = try #require(await t.tool("prepare", ["session": "local_a"]))
-        #expect(out.isError && out.text.contains("two processes claim it") && orders == 0)
-    }
-
-    @Test func withoutAnyRelayTheFailureSaysSoAndNothingIsSent() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        var orders = 0
-        let t = tools(s, turn: "tell them to ship")
-        t.relayOrders = { _, _ in orders += 1 }
-        // Never made.
-        let none = try #require(await t.tool("prepare", ["session": "local_b"]))
-        #expect(none.isError && none.text.contains(RouterTools.relayDown))
-        // Made, but no process or no plugin in it now.
-        relay(s, dir, running: false)
-        let down = try #require(await t.tool("prepare", ["session": "local_b"]))
-        #expect(down.isError && down.text.contains(RouterTools.relayDown))
-        #expect(orders == 0 && t.prepared.isEmpty)
-        // Woken but its plugin never comes up: said, nothing prepared.
-        relay(s, dir)
-        t.pluginReadiness = { $0 == "cli-relay" }
-        let silent = try #require(await t.tool("prepare", ["session": "local_b"]))
-        #expect(silent.isError && silent.text.contains("didn't wake") && orders == 1 && t.prepared.isEmpty)
-    }
-
-    @Test func aHeldStartIsWokenInsteadOfWaitedFor() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        relay(s, dir)
-        let t = tools(s, turn: "start a session in lookout to bump the version")
-        t.starter = { _, _ in throw SessionStart.NotRunning(sessionID: "local_late") }
-        var held: SessionStart.Held?
-        do { _ = try await t.startSession(s, project: "lookout", title: "Bump it", ticket: t.ticket()) } catch let error as SessionStart.Held { held = error }
-        let waiting = try #require(held)
-        let later = tools(s, turn: "start a session in lookout to bump the version")
-        var orders: [String] = []
-        later.relayOrders = { order, _ in orders.append(RelaySigner.readable(order)) }
-        later.processWaiter = { _ in "Bump it" }
-        let support = dir.path("support"), claude = dir.path("claude")
-        later.pluginReadiness = { cli in
-            if cli == "cli-relay" { return true }
-            guard !orders.isEmpty else { return false }
-            PluginFixture.live("late", support: support, claude: claude)
-            return true
-        }
-        let out = try await later.finishStart(s, waiting, ticket: later.ticket())
-        #expect(out.contains("local_late") && later.prepared["Bump it"]?.text.hasPrefix("⟦fjord v1 late ") == true)
-        #expect(orders.count == 1 && orders[0].contains("`to` exactly local_late") && orders[0].contains("fjord-wake late "))
-        // The relay isn't there: the first message isn't waited for 30 minutes, it fails now and says what to do.
-        let down = tools(s, turn: "start a session in lookout to bump the version")
-        var other = waiting
-        other.waiting = SessionStart.NotRunning(sessionID: "local_other")
-        s.claudeSessions["local_relay"] = nil
-        s.router.relay = nil
-        do {
-            _ = try await down.finishStart(s, other, ticket: down.ticket())
-            Issue.record("waited")
-        } catch {
-            #expect(error.localizedDescription == RouterTools.relayDown)
-        }
+        #expect(out.isError && out.text.contains("two processes claim it") && t.prepared.isEmpty)
     }
 
     @Test func aForkIsCutFromTheOriginalsTranscriptAndItsFirstMessagePrepared() async throws {
@@ -977,41 +806,6 @@ import Testing
         await #expect(throws: SessionFork.Failure.self) {
             try await none.forkSession(s, .init(session: "local_a", point: .before("never sent", after: nil)), ticket: none.ticket())
         }
-    }
-
-    @Test func aForkTheAppDoesNotRunIsWokenThroughTheRelayLikeAHeldStart() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        relay(s, dir)
-        let project = dir.path("projects/-code-lookout")
-        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-        let cli = "0b0e9b9e-3c1f-4c55-9a52-1d1a3b7c9e01"
-        s.claudeSessions["local_a"]?.cliID = cli
-        try RouterForkTests.transcript().write(to: project.appendingPathComponent("\(cli).jsonl"))
-        let t = tools(s, turn: "try SQLite instead")
-        t.transcriptsRoot = dir.path("projects")
-        t.forker = { _ in throw SessionStart.NotRunning(sessionID: "local_forked") }
-        var held: SessionStart.Held?
-        do {
-            _ = try await t.forkSession(s, .init(session: "local_a", point: .beforeLast, message: "try SQLite instead"), ticket: t.ticket())
-        } catch let error as SessionStart.Held { held = error }
-        // Held with its first message, which is what the dispatcher finishes (`finishStart`): it wakes the fork.
-        let waiting = try #require(held)
-        #expect(waiting.ready != nil && waiting.waiting.sessionID == "local_forked")
-        let later = tools(s, turn: "try SQLite instead")
-        var orders: [String] = []
-        later.relayOrders = { order, _ in orders.append(RelaySigner.readable(order)) }
-        later.processWaiter = { _ in "Fork of Fix the login bug" }
-        let support = dir.path("support"), claude = dir.path("claude")
-        later.pluginReadiness = { cli in
-            if cli == "cli-relay" { return true }
-            guard !orders.isEmpty else { return false }
-            PluginFixture.live("forked", support: support, claude: claude)
-            return true
-        }
-        let out = try await later.finishStart(s, waiting, ticket: later.ticket())
-        #expect(out.contains("local_forked") && orders.count == 1 && orders[0].contains("`to` exactly local_forked"))
-        #expect(later.prepared["Fork of Fix the login bug"]?.text.hasPrefix("⟦fjord v1 forked ") == true)
     }
 
     @Test func aBodyInAnotherUnicodeFormIsNotThePreparedOne() async throws {

@@ -1581,7 +1581,6 @@ describe('carrying a message for Fjord', () => {
     ['a message changed after signing', async () => (await signCarry(WIRE)).replace(/\n.*$/, `\n${base64(enc.encode(WIRE + ' '))}`), 'bad signature'],
     ['text that isn’t a signed message', async () => signCarry('delete the repo'), 'not a signed message'],
     ['a message for the carrier itself', async () => signCarry(await sign(BODY, { target: CARRIER })), 'a session does not carry to itself'],
-    ['the carrier’s own app id', async () => signCarry(WIRE, { local: `local_${CARRIER}` }), 'a session does not carry to itself'],
     ['no header', async () => BODY, 'unsigned'],
   ]
   for (const [name, make, reason, now] of refusals) {

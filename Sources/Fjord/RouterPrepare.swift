@@ -337,6 +337,11 @@ struct Prepared: Equatable, Sendable {
     var body: String? = nil
     /// A guest-delivered message never falls back to the controller's Claude peer channel.
     var guestLocation: SessionLocation? = nil
+    /// The Claude app's id for the target (`local_<uuid>`), which the app's send tool takes.
+    var local: String? = nil
+    /// The target has no process now: the app starts it with the message (its plugin comes up with it), so there is no plugin
+    /// presence to check before it goes.
+    var asleep = false
 }
 
 /// The only edit a message gets before it goes to a session as your words: what addresses the session or the Router is
@@ -554,19 +559,6 @@ enum SessionStart {
     }
 
     static let wait: TimeInterval = 20
-
-    /// A start the Claude app has but doesn't run yet (`NotRunning`): done as a start, its first message held until the
-    /// session runs (`RouterTools.finishStart`).
-    struct Held: LocalizedError {
-        var waiting: NotRunning
-        var title: String
-        /// The project's name.
-        var project: String
-        /// The first message, prepared but not signed yet; nil when there is none.
-        var ready: Prepared?
-        var settings: SessionSettings?
-        var errorDescription: String? { waiting.errorDescription }
-    }
 
     // MARK: The task of a start
 
@@ -878,25 +870,8 @@ enum SessionStart {
         return String(words.prefix(80))
     }
 
-    /// How long a new session has to run in the Claude app before it is reported: the import takes a second, its process
-    /// a few more.
-    static let processWait: TimeInterval = 30
-    /// How long a held part of a divided message waits for you to send it (`RouterDispatcher.heldPartWait`).
-    static let heldWait: TimeInterval = 30 * 60
-
-    /// The Claude app has the session (it imported it) but doesn't run it: its process isn't there to take a message
-    /// yet. Usually the app is at its limit of sessions run at once (its CLI governor: one per 3 GB of memory, at least
-    /// 6): an imported session's start is then given up, not retried, and opening it in the app doesn't start it either.
-    /// Fjord starts it through its relay (`RouterTools.wake`). Fjord can't count the app's sessions as the app does, so it
-    /// never says the app is full.
-    struct NotRunning: LocalizedError, Equatable {
-        /// `local_<uuid>`.
-        var sessionID: String
-        var errorDescription: String? {
-            "The new session is in the Claude app, but the app hasn't run it yet" + Self.reason
-        }
-        static let reason = ": Fjord starts it through its relay, nothing needs opening in the app"
-    }
+    /// How long the Claude app has to import a new session (its file appears under the app's sessions folder).
+    static let importWait: TimeInterval = 30
 
     /// Whether the Claude app has `local_<uuid>` (imported): its file under the app's sessions folder (account/org/<id>.json).
     nonisolated static func imported(_ uuid: String, root: URL = Claude.sessionsDir) -> Bool {
@@ -908,25 +883,20 @@ enum SessionStart {
         return false
     }
 
-    /// Waits (polling the registry off the main thread) for the app's process of `local_<uuid>`; its peer name.
-    /// `check` is asked between polls (Stop, a reset): it throws to end the wait. `imported` says whether the app has the
-    /// session: one it has but doesn't run by `timeout` throws `NotRunning`; one it never got, `RouterTools.Failure`.
-    static func waitForPeer(uuid: String, dir: URL, timeout: TimeInterval = processWait,
-                            imported: @escaping @Sendable () -> Bool = { false },
-                            check: @MainActor () throws -> Void = {}) async throws -> String {
-        let host = "local_\(uuid)"
+    /// Waits (polling off the main thread) for the app to have `local_<uuid>` (imported), and no longer: whether it runs it
+    /// is not waited for, the first message (`RouterCarry`) is what starts it. `check` is asked between polls (Stop, a reset):
+    /// it throws to end the wait. One the app never got by `timeout` throws `RouterTools.Failure`.
+    static func waitForImport(uuid: String, timeout: TimeInterval = importWait, root: URL = Claude.sessionsDir,
+                              imported: (@Sendable () -> Bool)? = nil, check: @MainActor () throws -> Void = {}) async throws {
         let deadline = Date().addingTimeInterval(timeout)
-        var there = false
+        let has = imported ?? { SessionStart.imported(uuid, root: root) }
         repeat {
             try Task.checkCancellation()
             try await check()
-            let (peers, has) = await OffMain.run { (ClaudePeers.read(dir: dir), imported()) }
-            if let peer = peers[host] { return peer.name }
-            there = has
+            if await OffMain.run({ has() }) { return }
             if Date() >= deadline { break }
             try await Task.sleep(nanoseconds: 250_000_000)
         } while true
-        if there { throw NotRunning(sessionID: host) }
         throw RouterTools.Failure("The Claude app didn't open the new session in \(Int(RouterTools.bounded(timeout))) s")
     }
 }
