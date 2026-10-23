@@ -250,7 +250,11 @@ enum RouterCarry {
                     }
                     if !took, fm.fileExists(atPath: theirs.taken.path) { took = true }
                     if !took, !handed, Date().timeIntervalSince(started) > waits.taken {
-                        // Nobody picked the order up: withdrawn, and a look once more for one that came as it went.
+                        // Nobody seems to have picked the order up. A plugin that has read it may still be checking it: the order is
+                        // withdrawn by saying so where that plugin looks after it says it took it (`withdrawn`, written first),
+                        // and only then is `taken` looked for. One that took it is seen here; one that didn't sees `withdrawn` and
+                        // never carries it out. It is never taken for unsent on the file's absence alone.
+                        try? Data("withdrawn\n".utf8).write(to: theirs.withdrawn)
                         try? fm.removeItem(at: theirs.message)
                         if fm.fileExists(atPath: theirs.taken.path) || answer(theirs.ack) != nil { took = true; continue }
                         reasons.append("its plugin didn't pick the order up")

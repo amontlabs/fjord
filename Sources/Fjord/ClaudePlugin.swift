@@ -949,6 +949,13 @@ export async function carry($: EngineInterface, text: string, taken: (nonce: str
   if (inner.target === own) return 'refused: a session does not carry to itself'
   if (!(await claim($, order.nonce, ts, now))) return 'refused: already delivered'
   await taken(order.nonce)
+  // Fjord withdraws an order nobody picked up by writing `<nonce>.withdrawn` and then looking for `<nonce>.taken`; this plugin
+  // writes `taken` and then looks for `withdrawn`. Whichever wrote first is seen by the other, so an order is either carried
+  // out here with Fjord knowing it was taken, or withdrawn here and never carried out: never both, never neither.
+  const { inboxDir: folder } = await config($)
+  if (folder && (await $.fs.read(`${folder}/${own}/${order.nonce}.withdrawn`).then(() => true, () => false))) {
+    return 'refused: withdrawn'
+  }
   // Only the app's own refusals before it handed anything over are proof that nothing went ("Message not delivered: …", no
   // session named). Everything after is not: its "undelivered" for a session slow to start or waiting on approval says it can
   // still pick the message up later, and a call that failed may have got there. Those are told as `unsure:`, and the target's
@@ -1616,7 +1623,8 @@ extension ClaudePlugin {
 /// other session can carry it (`RouterCarry`). A plugin that doesn't answer in time leaves the message withdrawn and its fate
 /// unsure: nothing else is tried, and if the plugin gets to it after all, a second copy is refused as a replay. The plugin also
 /// answers there, at the same name, for a message the app handed its session (`RouterCarry`), and `<nonce>.taken` marks a
-/// carry order it began on.
+/// carry order it began on. Fjord withdraws a carry order nobody picked up by writing `<nonce>.withdrawn` and only then looking
+/// for `taken`; the plugin writes `taken` and only then looks for `withdrawn`: whichever came first is seen by the other.
 struct RelayInbox: Sendable {
     var root: URL
     /// How long the plugin has to answer.
@@ -1663,11 +1671,11 @@ struct RelayInbox: Sendable {
 
     func folder(for session: String) -> URL { root.appendingPathComponent(session, isDirectory: true) }
 
-    /// The message file and the answer file of the message with `nonce` in `session`'s folder.
-    func files(for session: String, nonce: String) -> (message: URL, ack: URL, taken: URL) {
+    /// The message, answer, `taken` and `withdrawn` files of the message with `nonce` in `session`'s folder.
+    func files(for session: String, nonce: String) -> (message: URL, ack: URL, taken: URL, withdrawn: URL) {
         let dir = folder(for: session)
         return (dir.appendingPathComponent("\(nonce).msg"), dir.appendingPathComponent("\(nonce).ack"),
-                dir.appendingPathComponent("\(nonce).taken"))
+                dir.appendingPathComponent("\(nonce).taken"), dir.appendingPathComponent("\(nonce).withdrawn"))
     }
 
     /// Puts `text` where `session`'s plugin looks, and returns its message and answer files; the plugin's answer is the caller's

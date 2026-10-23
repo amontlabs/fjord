@@ -76,6 +76,8 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
     dropSubmit: false,
     /** Holds prompt.submit beneath until let go. */
     holdSubmit: undefined as Promise<void> | undefined,
+    /** Told every path written (a stand-in for what happens meanwhile on disk). */
+    onWrite: undefined as ((path: string) => void) | undefined,
     /** Makes prompt.submit beneath fail with this. */
     failSubmit: undefined as string | undefined,
     /** Holds turn.start beneath until let go. */
@@ -117,6 +119,7 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
   on('fs.write', ($, e) => {
     w.written[e.path] = e.text
     if (e.path.startsWith('/inbox/')) w.inbox[e.path.slice('/inbox/'.length)] = e.text
+    w.onWrite?.(e.path)
     return { value: undefined }
   })
   on('mcp.call', async ($, e) => {
@@ -1635,6 +1638,25 @@ describe('carrying a message for Fjord', () => {
     expect(ack(w)).toBe('ok Message delivered to session local_abc-123; its turn has started on it\n')
     expect(w.submitted).toEqual([])
     expect(w.queued).toEqual([])
+  })
+
+  test('an order Fjord withdrew while this plugin was still checking it is not carried out: it answers refused', async ($, on) => {
+    const w = carrierWorld(on)
+    // Fjord's wait ran out between the plugin reading the order and writing that it took it: Fjord wrote `withdrawn`.
+    w.onWrite = (path) => {
+      if (path.endsWith(`${CARRY_NONCE}.taken`)) w.inbox[`${CARRIER}/${CARRY_NONCE}.withdrawn`] = 'withdrawn\n'
+    }
+    await put(w, await signCarry(WIRE))
+    await look($, w)
+    expect(w.mcp).toEqual([])
+    expect(ack(w)).toBe('refused: withdrawn\n')
+  })
+
+  test('an order not withdrawn is carried out as before', async ($, on) => {
+    const w = carrierWorld(on)
+    await put(w, await signCarry(WIRE))
+    await look($, w)
+    expect(w.mcp.length).toBe(1)
   })
 
   test('says it started before the app answers, which can take a cold start', async ($, on) => {

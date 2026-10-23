@@ -70,6 +70,9 @@ import Testing
         case refuses(String)
         /// Takes it, and the app answers with an error after it had the message (`unsure:`): the target answers `target` (nil: never).
         case appUnsure(String, target: String?, after: TimeInterval = 0)
+        /// As a plugin that has read the order and is slow to check it: writes `taken` only after `after` s, then looks for
+        /// `withdrawn` (it carries the order out only when there is none), and delivers like `.delivers`.
+        case slow(after: TimeInterval)
         /// Never looks at its inbox.
         case silent
         /// Takes it, and the app never answers.
@@ -79,8 +82,12 @@ import Testing
     final class Seen: @unchecked Sendable {
         private let lock = NSLock()
         private var _orders: [(carrier: String, text: String)] = []
+        private var _carriedOut: [String] = []
         func add(_ carrier: String, _ text: String) { lock.withLock { _orders.append((carrier, text)) } }
         var orders: [(carrier: String, text: String)] { lock.withLock { _orders } }
+        /// The carriers that handed the message to the app.
+        func carriedOut(_ carrier: String) { lock.withLock { _carriedOut.append(carrier) } }
+        var carriedOutBy: [String] { lock.withLock { _carriedOut } }
     }
 
     nonisolated private static func answer(_ url: URL, _ text: String) {
@@ -102,6 +109,22 @@ import Testing
                     seen.add(cli, text)
                     let base = String(name.dropLast(4))
                     if case .silent = behavior { continue }
+                    if case .slow(let after) = behavior {
+                        try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+                        Self.answer(folder.appendingPathComponent("\(base).taken"), "taken")
+                        if FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(base).withdrawn").path) {
+                            Self.answer(folder.appendingPathComponent("\(base).ack"), "refused: withdrawn")
+                            continue
+                        }
+                        let inner = text.split(separator: "\n", maxSplits: 1).last.flatMap { Data(base64Encoded: String($0)) }
+                            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                        seen.carriedOut(cli)
+                        if let header = RelayInbox.header(of: inner) {
+                            Self.answer(inbox.files(for: header.target, nonce: header.nonce).ack, "ok")
+                        }
+                        Self.answer(folder.appendingPathComponent("\(base).ack"), "ok delivered")
+                        continue
+                    }
                     Self.answer(folder.appendingPathComponent("\(base).taken"), "taken")
                     let inner = text.split(separator: "\n", maxSplits: 1).last.flatMap { Data(base64Encoded: String($0)) }
                         .flatMap { String(data: $0, encoding: .utf8) } ?? ""
@@ -114,11 +137,12 @@ import Testing
                             Self.answer(inbox.files(for: header.target, nonce: header.nonce).ack, target)
                         }
                     case .delivers(let app, let target):
+                        seen.carriedOut(cli)
                         if let header = RelayInbox.header(of: inner), let target {
                             Self.answer(inbox.files(for: header.target, nonce: header.nonce).ack, target)
                         }
                         Self.answer(folder.appendingPathComponent("\(base).ack"), "ok \(app)")
-                    case .stuck, .silent: break
+                    case .stuck, .silent, .slow: break
                     }
                 }
                 try? await Task.sleep(nanoseconds: 10_000_000)
@@ -217,9 +241,40 @@ import Testing
         let message = signed()
         let ack = try await deliver(message, plan: .carry(["c1", "c2"]), inbox: inbox)
         #expect(ack == "ok" && seen.orders.map(\.carrier) == ["c2"])
-        // The order for c1 was taken back: its plugin must never find it later.
-        #expect(((try? FileManager.default.contentsOfDirectory(atPath: inbox.folder(for: "c1").path)) ?? []).isEmpty)
+        // The order for c1 was taken back: its plugin must never find it later, and one that has read it already is told.
+        let left = (try? FileManager.default.contentsOfDirectory(atPath: inbox.folder(for: "c1").path)) ?? []
+        #expect(!left.contains { $0.hasSuffix(".msg") } && left.contains { $0.hasSuffix(".withdrawn") })
         working.cancel()
+    }
+
+    @Test func aPluginThatReadTheOrderBeforeItWasWithdrawnButWritesTakenLaterDoesNotCarryItOut() async throws {
+        let dir = TempDir()
+        let inbox = RelayInbox(root: dir.path("relay"))
+        let seen = Seen()
+        // c1 read the order, then pauses past the wait for it to be taken; Fjord withdraws it and asks c2. c1 resumes: it
+        // writes `taken`, finds `withdrawn`, and must not hand the message to the app (the words would arrive twice).
+        let slow = carrier("c1", inbox, behavior: .slow(after: 0.8), seen: seen)
+        let working = carrier("c2", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let ack = try await deliver(signed(), plan: .carry(["c1", "c2"]), inbox: inbox)
+        #expect(ack == "ok")
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        #expect(seen.carriedOutBy == ["c2"])
+        slow.cancel(); working.cancel()
+    }
+
+    @Test func anOrderTakenAsItIsWithdrawnIsWaitedForNotTakenForUnsent() async throws {
+        let dir = TempDir()
+        let inbox = RelayInbox(root: dir.path("relay"))
+        let seen = Seen()
+        // c1 writes `taken` just after the wait ends, but before Fjord could have looked again: it carried the order out.
+        let slow = carrier("c1", inbox, behavior: .slow(after: 0.42), seen: seen)
+        let working = carrier("c2", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let message = signed()
+        // Whichever way the race falls, the message is carried out exactly once.
+        _ = try? await deliver(message, plan: .carry(["c1", "c2"]), inbox: inbox)
+        try await Task.sleep(nanoseconds: 800_000_000)
+        #expect(seen.carriedOutBy.count == 1)
+        slow.cancel(); working.cancel()
     }
 
     @Test func aTargetThatRefusesEndsItAndNoOtherCarrierIsAsked() async throws {

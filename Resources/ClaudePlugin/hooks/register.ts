@@ -749,6 +749,13 @@ export async function carry($: EngineInterface, text: string, taken: (nonce: str
   if (inner.target === own) return 'refused: a session does not carry to itself'
   if (!(await claim($, order.nonce, ts, now))) return 'refused: already delivered'
   await taken(order.nonce)
+  // Fjord withdraws an order nobody picked up by writing `<nonce>.withdrawn` and then looking for `<nonce>.taken`; this plugin
+  // writes `taken` and then looks for `withdrawn`. Whichever wrote first is seen by the other, so an order is either carried
+  // out here with Fjord knowing it was taken, or withdrawn here and never carried out: never both, never neither.
+  const { inboxDir: folder } = await config($)
+  if (folder && (await $.fs.read(`${folder}/${own}/${order.nonce}.withdrawn`).then(() => true, () => false))) {
+    return 'refused: withdrawn'
+  }
   // Only the app's own refusals before it handed anything over are proof that nothing went ("Message not delivered: …", no
   // session named). Everything after is not: its "undelivered" for a session slow to start or waiting on approval says it can
   // still pick the message up later, and a call that failed may have got there. Those are told as `unsure:`, and the target's
