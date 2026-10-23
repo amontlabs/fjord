@@ -365,7 +365,7 @@ private struct PredictionChip: View {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
                     .accessibilityHidden(true)
-                Text(prediction.title).font(CDS.mono(13)).foregroundStyle(hovering ? CDS.Text.secondary : CDS.Text.muted)
+                Text(prediction.title + (prediction.unsure ? "?" : "")).font(CDS.mono(13)).foregroundStyle(hovering ? CDS.Text.secondary : CDS.Text.muted)
                     .lineLimit(1).truncationMode(.tail)
             }
             .padding(.horizontal, CDS.Density.compact.pad.md)
@@ -376,8 +376,8 @@ private struct PredictionChip: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .tip("Jev thinks this goes to \(prediction.detail)", "Click to fix it, Esc to clear")
-        .accessibilityLabel("Jev thinks this goes to \(prediction.detail)")
+        .tip("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)", "Click to fix it, Esc to clear")
+        .accessibilityLabel("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)")
         .accessibilityHint("Fixes it as where the message goes")
     }
 }

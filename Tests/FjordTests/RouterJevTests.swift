@@ -45,9 +45,13 @@ import Testing
         #expect(calls() == 0 && model.live.prediction == nil, "too short to ask")
         type("I don't know yet, maybe later", model, s)
         await waitUntil { calls() == 1 }
-        #expect(model.live.prediction == nil, "not sure: nothing shown")
+        await waitUntil { model.live.prediction != nil }
+        #expect(model.live.prediction?.unsure == true, "not sure: shown with a ?, nothing marked on the page")
+        #expect(model.live.prediction?.mark == nil)
+        #expect(model.context(s).shown == nil && model.context(s).jev == nil, "and a send goes as it would without it")
         type("use sqlite for the database", model, s)
         await waitUntil { model.live.prediction != nil }
+        #expect(model.live.prediction?.unsure == false)
         #expect(model.live.prediction?.target == "answer:local_a#w1" && model.live.prediction?.title == "Fix the login bug")
         #expect(model.live.prediction?.mark == "local_a#w1")
         #expect(model.context(s).shown == "answer:local_a#w1", "sending these words goes with the pick shown")

@@ -43,6 +43,8 @@ final class RouterLiveTarget {
         var mark: String?
         /// What Jev made of the draft: sent as shown, the send goes with it without asking him again.
         var found: RouterDispatcher.Classification? = nil
+        /// Jev isn't sure of it (the dispatcher would ask): shown with a "?", and a send still decides as it does without it.
+        var unsure = false
     }
 
     private(set) var prediction: Prediction?
@@ -175,14 +177,14 @@ final class RouterLiveTarget {
         return division
     }
 
-    /// Shown only when Jev is sure, as the dispatcher would send it, and not to what you waved off.
+    /// Shown when Jev answered, with a "?" when he isn't sure (`unsure`: the dispatcher would ask), and not to what you waved off.
     private func prediction(from found: RouterDispatcher.Classification, text: String, store: Store) -> Prediction? {
-        guard found.assisted, found.sure, let top = found.top, top.target != dismissed,
+        guard found.assisted, let top = found.top, top.target != dismissed,
               top.target != RouteLabel.compound.rawValue, store.routerDispatcher.eligible(top.target, store: store),
               let option = store.routerDispatcher.option(top.target, store: store) else { return nil }
         return Prediction(target: top.target, title: Self.title(top.target, option),
                           detail: store.routerDispatcher.describe(top.target, store: store),
-                          text: text, mark: Self.mark(top.target, store: store), found: found)
+                          text: text, mark: found.sure ? Self.mark(top.target, store: store) : nil, found: found, unsure: !found.sure)
     }
 
     /// The chip's words for a target's option: a new session's with its folder.
@@ -286,8 +288,10 @@ extension RouterModel {
         // Jev's pick shown over the composer for the draft as it is now: sending it goes with it, as it was shown (the
         // dispatcher's copy of it may have expired, and asking again could go elsewhere).
         let shown = live.valid(text: sent.text, context: context, store: store)
-        context.shown = shown?.target
-        context.jev = shown?.found
+        // Only a pick Jev was sure of is sent as shown; one with a "?" goes as it would without it (asking if it must).
+        let sure = shown.flatMap { $0.unsure ? nil : $0 }
+        context.shown = sure?.target
+        context.jev = sure?.found
         // Recipients each get the whole message; the parts shown for these very words are sent as shown, asking nobody again.
         context.recipients = live.recipients
         context.division = live.validDivision(text: sent.text, context: context, store: store)
@@ -407,7 +411,7 @@ extension RouterLiveTarget {
             return true
         }
         let before = p
-        p.mark = Self.mark(p.target, store: store)
+        if !p.unsure { p.mark = Self.mark(p.target, store: store) }
         // Its words from the target as it is now (a session renamed while the pick was kept), without asking Jev again.
         if let option = dispatcher.option(p.target, store: store) {
             p.title = Self.title(p.target, option)
