@@ -73,6 +73,8 @@ import Testing
         /// As a plugin that has read the order and is slow to check it: writes `taken` only after `after` s, then looks for
         /// `withdrawn` (it carries the order out only when there is none), and delivers like `.delivers`.
         case slow(after: TimeInterval)
+        /// As `.slow`, paused until Fjord has withdrawn the order however long that takes, rather than for a set time.
+        case pausedUntilWithdrawn
         /// Never looks at its inbox.
         case silent
         /// Takes it, and the app never answers.
@@ -109,10 +111,21 @@ import Testing
                     seen.add(cli, text)
                     let base = String(name.dropLast(4))
                     if case .silent = behavior { continue }
+                    let withdrawn = folder.appendingPathComponent("\(base).withdrawn")
+                    var paused = false
                     if case .slow(let after) = behavior {
                         try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+                        paused = true
+                    } else if case .pausedUntilWithdrawn = behavior {
+                        var watchdog = Watchdog()
+                        while !FileManager.default.fileExists(atPath: withdrawn.path), !watchdog.expired() {
+                            try? await Task.sleep(nanoseconds: 10_000_000)
+                        }
+                        paused = true
+                    }
+                    if paused {
                         Self.answer(folder.appendingPathComponent("\(base).taken"), "taken")
-                        if FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(base).withdrawn").path) {
+                        if FileManager.default.fileExists(atPath: withdrawn.path) {
                             Self.answer(folder.appendingPathComponent("\(base).ack"), "refused: withdrawn")
                             continue
                         }
@@ -142,7 +155,7 @@ import Testing
                             Self.answer(inbox.files(for: header.target, nonce: header.nonce).ack, target)
                         }
                         Self.answer(folder.appendingPathComponent("\(base).ack"), "ok \(app)")
-                    case .stuck, .silent, .slow: break
+                    case .stuck, .silent, .slow, .pausedUntilWithdrawn: break
                     }
                 }
                 try? await Task.sleep(nanoseconds: 10_000_000)
@@ -255,11 +268,15 @@ import Testing
         let seen = Seen()
         // c1 read the order, then pauses past the wait for it to be taken; Fjord withdraws it and asks c2. c1 resumes: it
         // writes `taken`, finds `withdrawn`, and must not hand the message to the app (the words would arrive twice).
-        let slow = carrier("c1", inbox, behavior: .slow(after: 0.8), seen: seen)
+        let slow = carrier("c1", inbox, behavior: .pausedUntilWithdrawn, seen: seen)
         let working = carrier("c2", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
         let ack = try await deliver(signed(), plan: .carry(["c1", "c2"]), inbox: inbox)
         #expect(ack == "ok")
-        try await Task.sleep(nanoseconds: 1_200_000_000)
+        // Once c1 has answered its order, whichever way.
+        let c1 = inbox.folder(for: "c1")
+        await waitUntilAnywhere {
+            ((try? FileManager.default.contentsOfDirectory(atPath: c1.path)) ?? []).contains { $0.hasSuffix(".ack") }
+        }
         #expect(seen.carriedOutBy == ["c2"])
         slow.cancel(); working.cancel()
     }
