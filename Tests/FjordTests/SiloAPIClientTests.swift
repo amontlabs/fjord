@@ -423,7 +423,9 @@ import Testing
         }
         await server.requestLog.waitForCount(2)
         cancelled.cancel()
-        try await Task.sleep(for: .milliseconds(150))
+        // The late reply is only sent once the next request arrives: the cancelled call must finish without it.
+        var watchdog = Watchdog()
+        while await !cancelledStatus.didFinish, !watchdog.expired() { try await Task.sleep(for: .milliseconds(10)) }
         let resumedAsCancelled = await cancelledStatus.wasCancelled
 
         let second = try await client.operationsJobGet(jobId: "job:456", deviceId: nil)
@@ -442,9 +444,8 @@ import Testing
         }
         alreadyCancelled.cancel()
         await beforeSendGate.release()
-        try await Task.sleep(for: .milliseconds(150))
-        let rejectedBeforeSend = await alreadyCancelledStatus.wasCancelled
         _ = await alreadyCancelled.result
+        let rejectedBeforeSend = await alreadyCancelledStatus.wasCancelled
 
         #expect(resumedAsCancelled)
         #expect(second.jobId == "job:456")

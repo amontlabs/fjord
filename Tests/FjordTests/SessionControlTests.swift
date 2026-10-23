@@ -258,10 +258,8 @@ import Testing
         func release() { lock.lock(); if start == nil { start = Date() }; lock.unlock() }
     }
 
-    /// Lets the main queue run what the presence scan handed it.
-    private func drain() async {
-        for _ in 0..<5 { try? await Task.sleep(nanoseconds: 20_000_000) }
-    }
+    /// Lets the main queue run what the presence scan handed it: ordered, not timed.
+    private func drain() async { await drainMainQueue() }
 
     @Test func aHeartbeatRenewsTheLeaseWithoutAReadOfTheSessionsButATurnChangeAsksForOne() async throws {
         let l = try local(extra: Self.capable)
@@ -305,7 +303,7 @@ import Testing
         #expect(l.store.canStop(sessionID: "local_a"))
         clock.release()
         var watchdog = Watchdog()
-        while l.store.canStop(sessionID: "local_a"), !watchdog.expired() { try? await Task.sleep(nanoseconds: 20_000_000) }
+        while l.store.canStop(sessionID: "local_a"), !watchdog.expired() { try? await Task.sleep(for: .milliseconds(20)) }
         await drain()
         #expect(!l.store.canStop(sessionID: "local_a") && l.store.claudeFeed.presence["cli-a"] == nil)
         #expect(calls.count == base + 1)

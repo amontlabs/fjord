@@ -189,6 +189,8 @@ final class HubController {
     /// Where the pointer is and which buttons are down: the system's, or a test's.
     var mouseLocation: () -> NSPoint = { NSEvent.mouseLocation }
     var mouseButtons: () -> Int = { NSEvent.pressedMouseButtons }
+    /// Waits out the grace before a leave closes the hub: the clock, or a test's.
+    var leaveGrace: (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     /// What hears the pointer now, for tests: the system-wide monitor, and the arming window's frame while it's up.
     var watchesGlobally: Bool { globalMouse != nil }
     var triggerFrame: NSRect? { trigger.isVisible ? trigger.frame : nil }
@@ -389,9 +391,9 @@ final class HubController {
         // Passing over the bar on the way somewhere else shouldn't open it; nor should a drag from elsewhere.
         guard !inside || mouseButtons() == 0 else { pendingHover = nil; return }
         pendingHover = inside
-        let delay: Duration = inside ? .zero : .milliseconds(120)
+        let grace = leaveGrace
         hoverTask = Task { [weak self] in
-            try? await Task.sleep(for: delay)
+            if !inside { await grace(.milliseconds(120)) }
             guard let self, !Task.isCancelled else { return }
             self.pendingHover = nil
             self.hub.hovering = inside

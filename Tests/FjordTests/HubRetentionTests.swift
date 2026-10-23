@@ -44,6 +44,9 @@ extension WindowSeams {
             var hoveredSection: HubSection?
             /// What `drawn` last read: the edges a walk steps either side of.
             var lastDrawn: [Drawn] = []
+            /// The leave grace, run out by the test (`graceElapsed`, `leave`) rather than the clock: a slow runner can't stretch
+            /// a moment off the panel past it.
+            let grace = ManualGrace()
 
             init(edge: DockEdge, scenario: Demo.Scenario, origin: NSPoint? = nil) async {
                 _ = NSApplication.shared
@@ -60,12 +63,14 @@ extension WindowSeams {
                 if let origin { window.setFrameOrigin(origin) }
                 #expect(!NSScreen.screens.contains { $0.frame.intersects(window.frame) })
                 controller.mouseLocation = { [unowned self] in pointer }
+                controller.leaveGrace = { [grace] _ in await grace.wait() }
                 await settle()
                 // At rest, off the hub: nothing system-wide watches the pointer.
                 await move(to: away)
             }
 
             func close() {
+                grace.runOut()
                 hub.section = nil
                 window.orderOut(nil)
             }
@@ -227,7 +232,7 @@ extension WindowSeams {
                 // Off the hub, the window lets clicks through to what's under it at once, even before the panel closes.
                 #expect(window.ignoresMouseEvents, "\(edge): off the hub, the window still takes the mouse")
                 await move(to: away)
-                await waitUntil { hub.section == nil }
+                await waitUntil { grace.runOut(); return hub.section == nil }
                 if settling { await waitUntil { !hub.pieces.allObjects.contains { $0.section != nil && $0.screenFrame != nil } } }
                 await move(to: away)
             }
@@ -259,9 +264,12 @@ extension WindowSeams {
                 store.entries(in: store.hubTab(hub)).first { label.hasPrefix($0.thing.title + ",") }?.id
             }
 
-            /// Waits out the leave grace: what's open then stays open.
+            /// Runs the leave grace out: what's open then stays open.
             func graceElapsed() async {
-                try? await Task.sleep(for: .milliseconds(200))
+                // A leave the last move started waits for it from its own task, on the next turns.
+                await drainMainQueue()
+                grace.runOut()
+                await drainMainQueue()
             }
         }
 
@@ -323,7 +331,7 @@ extension WindowSeams {
                 case .bottom: NSPoint(x: back.x, y: rig.panelItems().map(\.frame.maxY).max()! + 30)
                 }
                 await rig.move(to: off)
-                try? await Task.sleep(for: .milliseconds(40))
+                await drainMainQueue()
                 await rig.move(to: back)
                 await rig.graceElapsed()
                 #expect(rig.hub.section == .inbox, "\(edge): a moment off the panel closed it though the pointer came back")
@@ -396,4 +404,28 @@ extension WindowSeams {
             }
         }
     }
+}
+
+/// The hub's leave grace as the test runs it out: each wait holds until `runOut`, or until its task is cancelled (the pointer
+/// came back).
+@MainActor final class ManualGrace {
+    private var waiting: [UUID: CheckedContinuation<Void, Never>] = [:]
+
+    func wait() async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiting[id] = $0 }
+        } onCancel: {
+            Task { @MainActor in self.resume(id) }
+        }
+    }
+
+    /// Ends every wait begun so far.
+    func runOut() {
+        let all = waiting.values
+        waiting = [:]
+        all.forEach { $0.resume() }
+    }
+
+    private func resume(_ id: UUID) { waiting.removeValue(forKey: id)?.resume() }
 }
