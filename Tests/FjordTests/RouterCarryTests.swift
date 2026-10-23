@@ -399,6 +399,69 @@ import Testing
         #expect(silent?.state == .unsure)
     }
 
+    /// A target's plugin that reads what is in its inbox and takes its time to answer (nil: never).
+    private func slowOwner(_ cli: String, _ inbox: RelayInbox, reply: String?, after: TimeInterval, seen: Seen) -> Task<Void, Never> {
+        Task.detached {
+            var handled: Set<String> = []
+            for _ in 0..<600 {
+                if Task.isCancelled { return }
+                let folder = inbox.folder(for: cli)
+                for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasSuffix(".msg") && !handled.contains(name) {
+                    guard let text = try? String(contentsOfFile: folder.appendingPathComponent(name).path, encoding: .utf8) else { continue }
+                    handled.insert(name)
+                    seen.add(cli, text)
+                    if let reply {
+                        try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+                        Self.answer(folder.appendingPathComponent(String(name.dropLast(4)) + ".ack"), reply)
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+        }
+    }
+
+    @Test func stoppingADirectDeliveryAfterThePluginReadItIsUnsureNotNothingWasSent() async throws {
+        let dir = TempDir()
+        let inbox = RelayInbox(root: dir.path("relay"))
+        let seen = Seen()
+        let plugin = slowOwner("cli-target", inbox, reply: nil, after: 0, seen: seen)
+        let task = Task { try await self.deliver(self.signed(), plan: .direct, inbox: inbox, waits: .init(taken: 5, running: 30, cold: 30, opened: 5, interval: 0.01)) }
+        while seen.orders.isEmpty { try await Task.sleep(nanoseconds: 10_000_000) }
+        task.cancel()
+        do { _ = try await task.value; Issue.record("sent") } catch let failure as RouterCarry.Failure {
+            #expect(failure.state == .unsure && !failure.message.contains("nothing was sent"))
+        }
+        plugin.cancel()
+    }
+
+    @Test func stoppingADirectDeliveryBeforeItIsInPlaceStillSaysNothingWasSent() async throws {
+        let dir = TempDir()
+        let inbox = RelayInbox(root: dir.path("relay"))
+        // The gate refuses: nothing was ever written.
+        let gated = await failure { try await self.deliver(self.signed(), plan: .direct, inbox: inbox, gate: { "Stopped; nothing was done" }) }
+        #expect(gated?.state == .refused)
+    }
+
+    @Test func aSendStoppedAfterTheTargetReadItIsKeptUnsureAndNeverClaimsNothingWasSent() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        // Only the target runs: its own inbox is used.
+        running("cli-target", dir, carries: false)
+        let (tools, text) = tools(s, "hello")
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        let seen = Seen()
+        let plugin = slowOwner("cli-target", inbox, reply: nil, after: 0, seen: seen)
+        let task = Task { try await RouterSender.send(store: s, to: "Target", text: text, tools: tools, session: "local_t", body: "hello", waits: Self.fast) }
+        while seen.orders.isEmpty { try await Task.sleep(nanoseconds: 10_000_000) }
+        task.cancel()
+        do { _ = try await task.value; Issue.record("sent") } catch {
+            #expect(!(error is CancellationError) && !error.localizedDescription.contains("nothing was sent"), "\(error.localizedDescription)")
+        }
+        let kept = try #require(s.router.operations.first)
+        #expect(kept.state == .unsure && kept.route == .direct && kept.reason?.contains("nothing was sent") != true)
+        plugin.cancel()
+    }
+
     @Test func aSleepingTargetWithNoCarrierIsOpenedThenGivenItsMessageInItsOwnInbox() async throws {
         let dir = TempDir()
         let inbox = RelayInbox(root: dir.path("relay"))

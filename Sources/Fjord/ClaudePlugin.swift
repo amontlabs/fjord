@@ -1710,10 +1710,13 @@ struct RelayInbox: Sendable {
     /// `gate` says, on the main actor and right before the message is put in place (nothing awaited between the two), why it
     /// may no longer go: a reason refuses it, unwritten. The file is written aside off the main thread first (the folder, the
     /// write, its mode); only the gate and the rename that puts it where the plugin looks are on the main actor.
+    /// `placed` is called once the message is where the plugin looks: from then on a `CancellationError` leaves its fate
+    /// unknown (the plugin may have read it already), which the caller tells from one that came before.
     @discardableResult
     func deliver(_ text: String, to session: String, interval: TimeInterval = 0.03,
-                 gate: (@MainActor () -> String?)? = nil) async throws -> String {
+                 gate: (@MainActor () -> String?)? = nil, placed: (@Sendable () -> Void)? = nil) async throws -> String {
         let (message, ack) = try await place(text, to: session, gate: gate)
+        placed?()
         let fm = FileManager.default
         func withdraw() { try? fm.removeItem(at: message); try? fm.removeItem(at: ack) }
         func answer() -> String? {
@@ -1734,7 +1737,9 @@ struct RelayInbox: Sendable {
                 try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
             }
         } catch is CancellationError {
-            withdraw()
+            // The message is withdrawn; a plugin that read it already may still answer, and that answer is left where
+            // Fjord looks for it when it next starts (`Store.settleLostOperations`; the folder is swept in time).
+            try? fm.removeItem(at: message)
             throw CancellationError()
         }
         // Withdrawn, then looked at once more: an answer that came as the file went counts.

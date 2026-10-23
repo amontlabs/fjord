@@ -178,13 +178,27 @@ enum RouterCarry {
         guard let header = RelayInbox.header(of: signed) else {
             throw Failure(state: .refused, message: "That isn't a message signed for a session; nothing was sent")
         }
+        let placed = Flag()
         do {
-            return try await inbox.deliver(signed, to: header.target, gate: gate)
+            return try await inbox.deliver(signed, to: header.target, gate: gate, placed: { placed.set() })
+        } catch is CancellationError {
+            // Stopped before the message was in place: nothing was sent. After: the plugin may have read it already, and
+            // withdrawing the file can't take back what it submitted.
+            guard placed.isSet else { throw CancellationError() }
+            throw Failure(state: .unsure, message: unsure("it was stopped while it was being delivered"))
         } catch RelayInbox.Failure.unanswered {
             throw Failure(state: .unsure, message: unsure("the session's plugin didn't answer"))
         } catch RelayInbox.Failure.refused(let why) {
             throw Failure(state: .refused, message: "The session's plugin refused the message: \(why)")
         }
+    }
+
+    /// Set once, from any thread.
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() { lock.withLock { value = true } }
+        var isSet: Bool { lock.withLock { value } }
     }
 
     static func unsure(_ why: String) -> String {
