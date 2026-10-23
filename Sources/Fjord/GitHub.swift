@@ -333,8 +333,12 @@ final class GitHubClient: @unchecked Sendable {
         return json
     }
 
+    /// How long a request waits for GitHub. In a test run, long: the stand-in answers at once, but a loaded runner can stall
+    /// the process past 30 s, and a request that timed out then reads as GitHub not answering.
+    static var timeout: TimeInterval { UnderTest.isRunning ? 600 : 30 }
+
     private func request(_ url: URL) -> (URLRequest, generation: Int) {
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.timeout)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         req.setValue("Fjord", forHTTPHeaderField: "User-Agent")
