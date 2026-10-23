@@ -949,13 +949,22 @@ export async function carry($: EngineInterface, text: string, taken: (nonce: str
   if (inner.target === own) return 'refused: a session does not carry to itself'
   if (!(await claim($, order.nonce, ts, now))) return 'refused: already delivered'
   await taken(order.nonce)
+  // Only the app's own refusals before it handed anything over are proof that nothing went ("Message not delivered: …", no
+  // session named). Everything after is not: its "undelivered" for a session slow to start or waiting on approval says it can
+  // still pick the message up later, and a call that failed may have got there. Those are told as `unsure:`, and the target's
+  // own answer decides.
   try {
     const result = await $.mcp.call('ccd_session_mgmt', 'send_message', { session_id: order.local, message: order.message })
-    return result.isError ? `refused: ${said(result)}` : `ok ${said(result)}`.trimEnd()
+    if (!result.isError) return `ok ${said(result)}`.trimEnd()
+    const words = said(result)
+    return NOT_HANDED_OVER.test(words) ? `refused: ${words}` : `unsure: ${words}`
   } catch (error) {
-    return `refused: ${String((error as { message?: unknown })?.message ?? error).replace(/\s+/g, ' ').slice(0, 300)}`
+    return `unsure: ${String((error as { message?: unknown })?.message ?? error).replace(/\s+/g, ' ').slice(0, 300)}`
   }
 }
+
+/** What the app's send tool says when it refused a message before handing it to any session. */
+const NOT_HANDED_OVER = /^Message not delivered:/
 
 /** When the look in progress began (0: none). A look that hangs is given up on after `POLL_STUCK_MS`, so one stuck call can't
  * silence the inbox for good; two looks at once never happen otherwise (each message gets exactly one ack). */

@@ -68,6 +68,8 @@ import Testing
         /// Takes it, calls the app, which delivers: the target's plugin answers `target` (nil: it never does), the carrier `app`.
         case delivers(app: String, target: String?)
         case refuses(String)
+        /// Takes it, and the app answers with an error after it had the message (`unsure:`): the target answers `target` (nil: never).
+        case appUnsure(String, target: String?, after: TimeInterval = 0)
         /// Never looks at its inbox.
         case silent
         /// Takes it, and the app never answers.
@@ -105,6 +107,12 @@ import Testing
                         .flatMap { String(data: $0, encoding: .utf8) } ?? ""
                     switch behavior {
                     case .refuses(let why): Self.answer(folder.appendingPathComponent("\(base).ack"), "refused: \(why)")
+                    case .appUnsure(let why, let target, let after):
+                        Self.answer(folder.appendingPathComponent("\(base).ack"), "unsure: \(why)")
+                        if let header = RelayInbox.header(of: inner), let target {
+                            try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+                            Self.answer(inbox.files(for: header.target, nonce: header.nonce).ack, target)
+                        }
                     case .delivers(let app, let target):
                         if let header = RelayInbox.header(of: inner), let target {
                             Self.answer(inbox.files(for: header.target, nonce: header.nonce).ack, target)
@@ -242,6 +250,31 @@ import Testing
         let cold = Date()
         let late = await failure { try await self.deliver(self.signed("later"), plan: .carry(["c1"]), inbox: inbox, asleep: true) }
         #expect(late?.state == .unsure && Date().timeIntervalSince(cold) >= Self.fast.cold)
+        a.cancel(); b.cancel()
+    }
+
+    @Test func anErrorFromTheAppAfterItHadTheMessageIsUnsureNotRefusedAndNoOtherCarrierIsAsked() async throws {
+        let dir = TempDir()
+        let inbox = RelayInbox(root: dir.path("relay"))
+        let seen = Seen()
+        // The app's "undelivered / no_turn": the target may still pick the message up. The second carrier would deliver it twice.
+        let a = carrier("c1", inbox, behavior: .appUnsure("that session gave no sign of starting on it; it can still pick it up later", target: nil), seen: seen)
+        let b = carrier("c2", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let ended = await failure { try await self.deliver(self.signed(), plan: .carry(["c1", "c2"]), inbox: inbox) }
+        #expect(ended?.state == .unsure && ended?.message.contains("can still pick it up later") == true)
+        #expect(ended?.message.contains("nothing was sent") != true)
+        #expect(seen.orders.map(\.carrier) == ["c1"])
+        a.cancel(); b.cancel()
+    }
+
+    @Test func aTargetThatAnswersAfterTheAppsUncertainErrorStillSettlesItAsSentWithoutAnotherOrder() async throws {
+        let dir = TempDir()
+        let inbox = RelayInbox(root: dir.path("relay"))
+        let seen = Seen()
+        let a = carrier("c1", inbox, behavior: .appUnsure("no sign of starting", target: "ok", after: 0.3), seen: seen)
+        let b = carrier("c2", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let ack = try await deliver(signed(), plan: .carry(["c1", "c2"]), inbox: inbox)
+        #expect(ack == "ok" && seen.orders.map(\.carrier) == ["c1"])
         a.cancel(); b.cancel()
     }
 

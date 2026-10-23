@@ -1647,23 +1647,44 @@ describe('carrying a message for Fjord', () => {
 
   test('acks what the app says of a message it did not count as delivered: the target’s ack decides', async ($, on) => {
     const w = carrierWorld(on)
-    w.mcpAnswer = { content: [{ type: 'text', text: 'Message not delivered to session local_abc-123: "that session did no turn"' }], isError: false }
+    w.mcpAnswer = { content: [{ type: 'text', text: 'Message delivered to session local_abc-123; its turn has started on it.' }], isError: false }
     await put(w, await signCarry(WIRE))
     await look($, w)
-    expect(ack(w)).toMatch(/^ok Message not delivered/)
+    expect(ack(w)).toMatch(/^ok Message delivered/)
   })
 
-  test('refuses when the app’s tool reports an error or fails', async ($, on) => {
+  test('refuses only what the app refused before handing it to any session', async ($, on) => {
     const w = carrierWorld(on)
-    w.mcpAnswer = { content: [{ type: 'text', text: 'session is archived' }], isError: true }
+    w.mcpAnswer = { content: [{ type: 'text', text: 'Message not delivered: session local_abc-123 is archived; unarchive it first. (This message was not delivered.)' }], isError: true }
     await put(w, await signCarry(WIRE))
     await look($, w)
-    expect(ack(w)).toBe('refused: session is archived\n')
+    expect(ack(w)).toMatch(/^refused: Message not delivered: session local_abc-123 is archived/)
+  })
+
+  test('says unsure, never refused, of an error from the app after it had the message: the session can still pick it up', async ($, on) => {
+    const w = carrierWorld(on)
+    // The app's own words when the target gave no sign of starting in time: it can still pick the message up later.
+    w.mcpAnswer = {
+      content: [{ type: 'text', text: 'Message not delivered to session local_abc-123 (Title): that session gave no sign of starting on it within 30s (it may be waiting for approval there, or slow to start); it can still pick it up later. Do not resend.' }],
+      isError: true,
+    }
+    await put(w, await signCarry(WIRE))
+    await look($, w)
+    expect(ack(w)).toMatch(/^unsure: Message not delivered to session local_abc-123/)
+    expect(ack(w)).not.toMatch(/^refused/)
+  })
+
+  test('says unsure of an error that is not the app’s own, and of a call that failed', async ($, on) => {
+    const w = carrierWorld(on)
+    w.mcpAnswer = { content: [{ type: 'text', text: 'something else went wrong' }], isError: true }
+    await put(w, await signCarry(WIRE))
+    await look($, w)
+    expect(ack(w)).toBe('unsure: something else went wrong\n')
     w.mcpFails = 'tool unavailable'
     const second = '623e4567-e89b-12d3-a456-426614174000'
     await put(w, await signCarry(WIRE, { nonce: second }), second)
     await look($, w)
-    expect(ack(w, second)).toMatch(/^refused: .*tool unavailable\n$/)
+    expect(ack(w, second)).toMatch(/^unsure: .*tool unavailable\n$/)
   })
 
   test('is taken once: a replay calls nothing', async ($, on) => {

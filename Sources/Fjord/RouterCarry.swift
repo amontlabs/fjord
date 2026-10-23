@@ -13,7 +13,8 @@ import Foundation
 
 /// One message's journey from Fjord to a session, kept before anything is ordered and settled by what the target's plugin said:
 /// `waiting` (persisted, ordered), `sent` (the target's plugin answered ok), `unsure` (no answer: it may have gone, and is never
-/// ordered again by Fjord itself), `refused` (the target's plugin, or every carrier, said no: nothing was sent) or `needsYou`
+/// ordered again by Fjord itself), `refused` (the target's plugin said no, or every carrier refused before the app had it:
+/// nothing was sent) or `needsYou`
 /// (nothing can send it until you open the session).
 struct DeliveryOperation: Codable, Equatable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable {
@@ -228,6 +229,7 @@ enum RouterCarry {
             await update(Update(route: .carried, carrier: carrier))
             let started = Date()
             var took = false, handed = false
+            var appSaid: String?
             do {
                 while true {
                     if let reply = answer(mine.ack) { clean(); return try settle(reply) }
@@ -238,9 +240,13 @@ enum RouterCarry {
                             clean()
                             break
                         }
-                        // The app took it (or says it did not count it: a running session whose plugin takes the message does
-                        // no turn, which the app reports as undelivered): the target's own answer settles it.
+                        // The app took it, or may have: "unsure:" is the app's word after it had the message (a session slow to
+                        // start says it "can still pick it up later"; a call that failed may have got there). Neither is a
+                        // refusal, and no other carrier is asked: the target's own answer settles it, else it ends unsure.
                         handed = true
+                        if reply.hasPrefix("unsure:"), appSaid == nil {
+                            appSaid = String(reply.dropFirst("unsure:".count)).trimmingCharacters(in: .whitespaces)
+                        }
                     }
                     if !took, fm.fileExists(atPath: theirs.taken.path) { took = true }
                     if !took, !handed, Date().timeIntervalSince(started) > waits.taken {
@@ -253,7 +259,8 @@ enum RouterCarry {
                     }
                     if Date().timeIntervalSince(started) > total {
                         clean()
-                        throw Failure(state: .unsure, message: unsure("the session's plugin hasn't answered within \(Int(total)) s"))
+                        let why = "the session's plugin hasn't answered within \(Int(total)) s" + (appSaid.map { " (the app said: \($0))" } ?? "")
+                        throw Failure(state: .unsure, message: unsure(why))
                     }
                     try await Task.sleep(nanoseconds: UInt64(waits.interval * 1_000_000_000))
                 }
