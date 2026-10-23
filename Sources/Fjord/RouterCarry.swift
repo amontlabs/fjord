@@ -60,6 +60,36 @@ struct DeliveryOperation: Codable, Equatable, Identifiable, Sendable {
     static let kept = 500
 }
 
+/// A session Fjord began to make for a message, kept on disk before the first step (the bootstrap run): the id is the session's
+/// for good, so a Retry after any later failure (the app was slow to import it, the first message was refused) continues
+/// with it. Only the first message going (or being unsure) ends it.
+struct StartReservation: Codable, Equatable, Identifiable, Sendable {
+    enum Stage: String, Codable, Sendable {
+        /// The id is chosen; nothing has run.
+        case reserved
+        /// Claude Code has the session (the bootstrap ran).
+        case bootstrapped
+        /// The Claude app has the session.
+        case imported
+        /// Its first message went, or may have: nothing more to continue.
+        case delivered
+    }
+
+    /// The new session's Claude Code id; the app's is `local_<uuid>`.
+    var uuid: String
+    /// The run (decision) it was made for.
+    var decisionID: UUID?
+    var folder: String
+    var title: String
+    var stage: Stage
+    var createdAt: Date
+
+    var id: String { uuid }
+
+    /// How many are kept.
+    static let kept = 50
+}
+
 enum RouterCarry {
     /// How long each part of a delivery waits.
     struct Waits: Sendable {
@@ -342,6 +372,30 @@ extension Store {
             if state.operations.count > DeliveryOperation.kept { state.operations.removeFirst(state.operations.count - DeliveryOperation.kept) }
         }
         router = state
+    }
+
+    /// Keeps `reservation` (added, or replaced by its id); only the latest are kept.
+    func noteStart(_ reservation: StartReservation) {
+        var state = router
+        if let i = state.starts.firstIndex(where: { $0.uuid == reservation.uuid }) {
+            state.starts[i] = reservation
+        } else {
+            state.starts.append(reservation)
+            if state.starts.count > StartReservation.kept { state.starts.removeFirst(state.starts.count - StartReservation.kept) }
+        }
+        router = state
+    }
+
+    /// Moves the reservation of `uuid` on (or ends it).
+    func moveStart(_ uuid: String, to stage: StartReservation.Stage) {
+        guard var reservation = router.starts.first(where: { $0.uuid == uuid }) else { return }
+        reservation.stage = stage
+        noteStart(reservation)
+    }
+
+    /// The session made for the run `decision` that its first message has not gone to: what a Retry of that run continues.
+    func openStart(for decision: UUID) -> StartReservation? {
+        router.starts.last { $0.decisionID == decision && $0.stage != .delivered }
     }
 
     /// Moves the operation with `nonce` to `state`.

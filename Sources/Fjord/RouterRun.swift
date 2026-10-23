@@ -292,6 +292,10 @@ enum RouterSender {
         /// The outcome is kept on disk, and only then is the target's answer (the evidence of it) removed.
         func finish(_ state: DeliveryOperation.State, _ reason: String? = nil) async {
             settle(state, reason)
+            // A new session's first message that went, or may have, ends its start: a Retry makes no more of it.
+            if kind == .firstMessage, state == .sent || state == .unsure, local.hasPrefix("local_") {
+                store.moveStart(String(local.dropFirst(6)), to: .delivered)
+            }
             if await store.persistNow() == nil { RouterCarry.discardAnswer(inbox: inbox, target: header.target, nonce: header.nonce) }
         }
         let (plan, up) = await store.carryPlan(target: header.target)

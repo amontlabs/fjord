@@ -64,12 +64,18 @@ permission auto-approval for scheduled-task sessions.
 
 ## Operations
 
-Each message has a nonce and a signed payload. Fjord persists `{nonce, target, kind, body hash, state}` before giving the
-order. States: **waiting** (persisted, ordered), **sent** (the target's plugin acked), **unsure** (no ack in time: resolved by
-the plugin's late ack, found when Fjord next starts, never by sending again), **refused** or **needs you**, with the
-reason. The app's own receipt says "not delivered … did no turn" for a running target whose plugin consumed it:
-the target plugin's ack, not the app's receipt, says it went. A new session's id is persisted before its bootstrap, so a
-retry reuses it.
+Each message has a nonce and a signed payload. Fjord persists `{nonce, target, kind, body hash, state}` and **waits for the
+write to reach the disk** before giving the order (a message that can't be recorded is not sent). States: **waiting**
+(persisted, ordered), **sent** (the target's plugin acked), **unsure** (no ack in time, or an error from the app after it had the
+message: resolved by the plugin's late ack, found when Fjord next starts, never by sending again), **refused** or **needs you**,
+with the reason. The app's own receipt says "not delivered … did no turn" for a running target whose plugin consumed it, and
+"no sign of starting" for one slow to start that can still pick the message up: the target plugin's ack, not the app's receipt,
+says it went. The ack is written only once the engine took the words in (a prompt a hook beneath drops, or the engine rejects,
+is refused). The target's ack file is removed only after the outcome it gave is on disk. A late ack found at the next launch
+also updates the run in the history (delivered, refused or unsure), not only the operation.
+
+A new session's id is persisted (`StartReservation`) before its bootstrap and followed through bootstrapped, imported and
+delivered; a Retry of the message continues from the step the reservation reached, with the same session.
 
 ## What the build settled
 
@@ -79,8 +85,14 @@ retry reuses it.
 - **Answers.** The target's plugin writes `<nonce>.ack` ("ok …", or "refused: why" once the signature held; never for a
   forgery) in its inbox folder, for a message that came by the app as for one that came from the inbox. A carrier writes
   `<nonce>.taken` as it begins (the app answers a send only once the target's turn started, which a cold start makes long) and
-  `<nonce>.ack` with the app's own words. The app calls a running target's consumed message "not delivered": only the target's
-  ack counts.
+  `<nonce>.ack` with the app's own words: `ok …`, `refused: …` only for what the app refused before handing the message to any
+  session ("Message not delivered: …", no session named), and `unsure: …` for every other error and for a failed call (the
+  session can still pick the message up, so no second carrier is asked). The app calls a running target's consumed message
+  "not delivered": only the target's ack counts.
+- **Withdrawing an order.** Fjord withdraws a carry order nobody has taken in six seconds by writing `<nonce>.withdrawn` and
+  only then looking for `<nonce>.taken`; the carrier's plugin writes `taken` and only then looks for `withdrawn` (and answers
+  `refused: withdrawn`, calling nothing). Whoever wrote first is seen by the other, so a plugin that read the order but was
+  slow to check it never carries out a message Fjord called unsent.
 - **A cold start with settings.** The engine refuses `$.command.run` inside a `prompt.submit` hook, so a first prompt with a
   model or effort can't set them there. Such a prompt is dropped (no turn) and its words submitted from the plugin's next look,
   after the settings, with the app's guidance ahead of the words in the text (a plugin's submit takes no context). Without

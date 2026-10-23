@@ -232,6 +232,22 @@ import Testing
         if case .failed(let why, _)? = flights.pills.first?.phase { #expect(why.hasSuffix("tried again")) } else { Issue.record("not failed again") }
     }
 
+    @Test func aRetryOfAMessageThatStartedASessionContinuesWithItAndOnceDeliveredDoesNot() async {
+        let (s, flights, f) = setup()
+        f.ranked = [.init(target: "session:local_a", p: 0.9), .init(target: "unclear", p: 0.1)]
+        f.failSend = "the session's inbox is closed"
+        var context = RouterContext()
+        context.flies = true
+        let id = s.routerDispatcher.submit("start a session to add a changelog entry", context: context)!
+        await waitUntil { f.finished.contains(id) }
+        flights.sync(store: s)
+        #expect(s.routerDispatcher.resendContext(id)?.reuseStart == nil)
+        s.noteStart(StartReservation(uuid: "made-before", decisionID: id, folder: "/code/api", title: "T", stage: .imported, createdAt: Date()))
+        #expect(s.routerDispatcher.resendContext(id)?.reuseStart == "made-before")
+        s.moveStart("made-before", to: .delivered)
+        #expect(s.routerDispatcher.resendContext(id)?.reuseStart == nil)
+    }
+
     @Test func whereARunLands() {
         func entry(target: String?, done: [RouterDecision.Done], sessions: [String] = [], cards: [String] = []) -> RouterDecision {
             var e = RouterDecision(trigger: .you("x"), decision: .init(intent: "message"))

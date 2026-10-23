@@ -808,6 +808,118 @@ import Testing
         #expect(items.count == 2 && !items.contains { if case .failed = $0 { true } else { false } })
     }
 
+    // MARK: A start's session survives a Retry
+
+    /// A stand-in for Claude Code that counts its runs (one line each, in `runs`) and answers like a bootstrap.
+    private func counting(_ dir: TempDir) -> String {
+        let path = dir.path("claude").path
+        let script = "#!/bin/sh\necho run >> \"\(dir.path("runs").path)\"\ncat <<'EOF'\n{\"type\":\"result\",\"is_error\":false,\"result\":\"\"}\nEOF\n"
+        FileManager.default.createFile(atPath: path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o755])
+        return path
+    }
+
+    private func runs(_ dir: TempDir) -> Int {
+        ((try? String(contentsOf: dir.path("runs"), encoding: .utf8)) ?? "").split(separator: "\n").count
+    }
+
+    @Test func aSessionIsReservedOnDiskBeforeItIsMadeAndARetryContinuesWithItNotAnotherOne() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        try FileManager.default.createDirectory(at: dir.path("code"), withIntermediateDirectories: true)
+        let binary = counting(dir)
+        let opened = Seen()
+        s.interceptOpen = { opened.add($0, "") }
+        let writes = Writes()
+        s.persistStandIn = { [weak s] in
+            let kept = await MainActor.run { s?.router.starts.last }
+            return writes.add((self.runs(dir), 0, kept.map { "\($0.uuid) \($0.stage.rawValue)" } ?? "none"))
+        }
+        // The first attempt: the app never imports it.
+        let first = RouterTools(store: s)
+        first.beginTurn("make it")
+        first.decision = UUID()
+        first.claudePath = { binary }
+        first.importedStandIn = { _ in false }
+        first.importTimeout = 0.3
+        await #expect(throws: (any Error).self) {
+            _ = try await first.start(s, folder: dir.path("code").path, name: "code", title: "T", ticket: first.ticket())
+        }
+        // The reservation was on disk before the bootstrap ran, and the bootstrap ran once.
+        let reserved = try #require(writes.seen.first)
+        #expect(reserved.orders == 0 && reserved.state.hasSuffix(" reserved"))
+        #expect(runs(dir) == 1)
+        let kept = try #require(s.openStart(for: first.decision!))
+        #expect(kept.stage == .bootstrapped)
+        // Retry: the same session, no second run of Claude Code, and the app is asked to open it again.
+        let again = RouterTools(store: s)
+        again.beginTurn("make it")
+        again.decision = UUID()
+        again.claudePath = { binary }
+        again.importedStandIn = { _ in true }
+        again.reuseStart = kept.uuid
+        let started = try await again.start(s, folder: dir.path("code").path, name: "code", title: "T", ticket: again.ticket())
+        #expect(started.sessionID == "local_\(kept.uuid)" && runs(dir) == 1 && s.router.starts.count == 1)
+        #expect(s.router.starts.first?.stage == .imported && s.router.starts.first?.decisionID == again.decision)
+        // Imported already, and its first message failed: a third attempt neither runs nor opens anything.
+        let opens = opened.orders.count
+        let third = RouterTools(store: s)
+        third.beginTurn("make it")
+        third.decision = UUID()
+        third.claudePath = { binary }
+        third.importedStandIn = { _ in false }
+        third.importTimeout = 0.1
+        third.reuseStart = kept.uuid
+        let last = try await third.start(s, folder: dir.path("code").path, name: "code", title: "T", ticket: third.ticket())
+        #expect(last.sessionID == started.sessionID && runs(dir) == 1 && opened.orders.count == opens && s.router.starts.count == 1)
+    }
+
+    @Test func aReservationForAnotherFolderOrAlreadyDeliveredIsNotContinued() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        try FileManager.default.createDirectory(at: dir.path("code"), withIntermediateDirectories: true)
+        let binary = counting(dir)
+        s.interceptOpen = { _ in }
+        s.noteStart(StartReservation(uuid: "old", decisionID: nil, folder: "/elsewhere", title: "T", stage: .imported, createdAt: Date()))
+        s.noteStart(StartReservation(uuid: "done", decisionID: nil, folder: dir.path("code").path, title: "T", stage: .delivered, createdAt: Date()))
+        for reuse in ["old", "done"] {
+            let tools = RouterTools(store: s)
+            tools.beginTurn("make it")
+            tools.claudePath = { binary }
+            tools.importedStandIn = { _ in true }
+            tools.reuseStart = reuse
+            let started = try await tools.start(s, folder: dir.path("code").path, name: "code", title: "T", ticket: tools.ticket())
+            #expect(started.sessionID != "local_\(reuse)")
+        }
+        #expect(runs(dir) == 2)
+    }
+
+    @Test func aFirstMessageThatWentEndsItsStartAndOneThatFailedLeavesItOpen() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        running("cli-target", dir)
+        running("cli-carrier", dir)
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        let seen = Seen()
+        s.noteStart(StartReservation(uuid: "t", decisionID: nil, folder: "/code/api", title: "T", stage: .imported, createdAt: Date()))
+        let (tools, text) = tools(s, "hello")
+        // Refused by the target: nothing went, the session is still there for a Retry.
+        let refusing = carrier("cli-carrier", inbox, behavior: .delivers(app: "ok", target: "refused: stale"), seen: seen)
+        await #expect(throws: (any Error).self) {
+            try await RouterSender.send(store: s, to: "Target", text: text, tools: tools, session: "local_t", kind: .firstMessage, waits: Self.fast)
+        }
+        #expect(s.router.starts.first?.stage == .imported)
+        refusing.cancel()
+        // The retry's message is sent.
+        let second = RelaySigner.sign(body: "hello", target: "cli-target", key: Self.key)
+        let t2 = RouterTools(store: s)
+        t2.beginTurn("hello")
+        t2.prepared["Target"] = Prepared(text: second, original: "hello", rephrased: false, body: "hello", local: "local_t")
+        let working = carrier("cli-carrier", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        _ = try await RouterSender.send(store: s, to: "Target", text: second, tools: t2, session: "local_t", kind: .firstMessage, waits: Self.fast)
+        #expect(s.router.starts.first?.stage == .delivered)
+        working.cancel()
+    }
+
     @Test func operationsAreKeptInTheRoutersStateAndOnlyTheLatestAreKept() throws {
         let s = Store()
         s.persists = false

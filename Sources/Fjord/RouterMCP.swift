@@ -506,6 +506,13 @@ final class RouterMCPServer: @unchecked Sendable {
     var chosenFolder: String?
     /// Making a session (folder, title) and waiting for the app to have it; tests answer for it.
     var starter: ((String, String) async throws -> SessionStart.Started)?
+    /// The session a Retry continues (`StartReservation.uuid`): used when it was made for the folder asked for and its first
+    /// message has not gone.
+    var reuseStart: String?
+    /// Whether the Claude app has the session of this id; tests answer for it.
+    var importedStandIn: (@Sendable (String) -> Bool)?
+    /// How long the Claude app has to import a new session.
+    var importTimeout: TimeInterval = SessionStart.importWait
     /// Tells the pill what is under way ("opening …"); the dispatcher sets it.
     var stage: ((String) -> Void)?
     /// Making a fork and waiting for the app to have it; tests answer for it.
@@ -1465,28 +1472,55 @@ final class RouterMCPServer: @unchecked Sendable {
 
     /// The verified way to make a desktop session: a CLI session with no model call, imported by the app, then its process.
     /// `arguments`: the CLI run for the new session's uuid (a fork's, `SessionFork.arguments`); nil: a plain start.
-    private func start(_ store: Store, folder: String, name: String, title: String, ticket: Ticket,
-                       arguments: ((String) -> [String])? = nil) async throws -> SessionStart.Started {
+    /// The session's id is kept on disk before anything runs (`StartReservation`), and a Retry (`reuseStart`) continues from
+    /// the step it reached: no second session is made for the same message.
+    func start(_ store: Store, folder: String, name: String, title: String, ticket: Ticket,
+               arguments: ((String) -> [String])? = nil) async throws -> SessionStart.Started {
         guard let binary = claudePath() else {
             throw Failure("Claude Code wasn't found, so no session can be started")
         }
-        let uuid = UUID().uuidString.lowercased()
-        try live(ticket)
-        let output: OneShot.Output
-        do {
-            output = try await tracked { handle in
-                try await OneShot.run(binary, arguments?(uuid) ?? SessionStart.bootstrapArguments(uuid: uuid, title: title),
-                                      cwd: URL(fileURLWithPath: folder), timeout: SessionStart.wait, handle: handle)
+        var reservation: StartReservation
+        if let uuid = reuseStart, arguments == nil,
+           let kept = store.router.starts.first(where: { $0.uuid == uuid && $0.folder == folder && $0.stage != .delivered }) {
+            reservation = kept
+            // Now the run of this attempt's: a Retry of this one continues with the same session in turn.
+            reservation.decisionID = decision
+            store.noteStart(reservation)
+        } else {
+            reservation = StartReservation(uuid: UUID().uuidString.lowercased(), decisionID: decision, folder: folder, title: title,
+                                           stage: .reserved, createdAt: Date())
+            store.noteStart(reservation)
+            if let why = await store.persistNow() {
+                throw Failure("Fjord couldn't save a record of this session before making it, so nothing was started: \(why)")
             }
-        } catch is CancellationError {
-            throw Failure("Stopped; nothing was done")
         }
-        _ = try OneShot.result(output)
-        guard let url = SessionStart.importURL(uuid: uuid) else { throw Failure("Couldn't make the link") }
+        let uuid = reservation.uuid
         try live(ticket)
-        if let intercept = store.interceptOpen { intercept("New Claude session in \(name)") } else { Link.open(url) }
-        // The app has the session once it imported it; running it is the first message's job (`RouterCarry`).
-        try await SessionStart.waitForImport(uuid: uuid, check: { [weak self] in try self?.live(ticket) })
+        if reservation.stage == .reserved {
+            let output: OneShot.Output
+            do {
+                output = try await tracked { handle in
+                    try await OneShot.run(binary, arguments?(uuid) ?? SessionStart.bootstrapArguments(uuid: uuid, title: reservation.title),
+                                          cwd: URL(fileURLWithPath: folder), timeout: SessionStart.wait, handle: handle)
+                }
+            } catch is CancellationError {
+                throw Failure("Stopped; nothing was done")
+            }
+            _ = try OneShot.result(output)
+            store.moveStart(uuid, to: .bootstrapped)
+            reservation.stage = .bootstrapped
+            _ = await store.persistNow()
+        }
+        if reservation.stage != .imported {
+            guard let url = SessionStart.importURL(uuid: uuid) else { throw Failure("Couldn't make the link") }
+            try live(ticket)
+            if let intercept = store.interceptOpen { intercept("New Claude session in \(name)") } else { Link.open(url) }
+            // The app has the session once it imported it; running it is the first message's job (`RouterCarry`).
+            try await SessionStart.waitForImport(uuid: uuid, timeout: importTimeout, imported: importedStandIn.map { check in { check(uuid) } },
+                                                 check: { [weak self] in try self?.live(ticket) })
+            store.moveStart(uuid, to: .imported)
+            _ = await store.persistNow()
+        }
         return SessionStart.Started(sessionID: "local_\(uuid)", peer: "local_\(uuid)")
     }
 

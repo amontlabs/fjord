@@ -49,6 +49,9 @@ struct RouterContext: Equatable {
     var recipients: [String] = []
     /// The run is one part of a divided message: it goes where it was given and is never divided again.
     var part = false
+    /// A Retry of a message that started a session: the session it made (`StartReservation.uuid`), which the new start
+    /// continues with instead of making another.
+    var reuseStart: String?
 
     init(replyTo: String? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil,
          predicted: String? = nil, jev: RouterDispatcher.Classification? = nil, shown: String? = nil, pills: [Range<Int>] = []) {
@@ -396,6 +399,8 @@ struct RouterAskBack: Identifiable, Equatable {
         context.predicted = nil
         context.division = nil
         context.turns = [:]
+        // A start whose session was made but whose first message did not go continues with that session.
+        context.reuseStart = store?.openStart(for: id)?.uuid
         // A session you confirmed (picked, pinned or went with) is where it goes again: no new ask.
         if context.target == nil, context.replyTo == nil, let entry = store?.router.record(id), entry.decision.confirmed == true,
            let target = entry.decision.targetID, target.hasPrefix("session:") {
@@ -1115,6 +1120,7 @@ struct RouterAskBack: Identifiable, Equatable {
             else { SessionSettings.parse(SessionStart.request(job.text, pills: job.context.pills)) }
         let delivery: Delivery
         try linked(job.context)
+        job.tools.reuseStart = job.context.reuseStart
         switch try await effects.start(job.tools, folder, job.context.action?.title ?? Self.title(for: task), settings) {
         case .delivery(let prepared):
             delivery = prepared
