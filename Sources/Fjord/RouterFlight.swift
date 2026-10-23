@@ -30,6 +30,9 @@ struct FlightFramesKey: PreferenceKey {
             case pending
             /// It ended without going anywhere: why, and whether it is yours to retry (a stop isn't).
             case failed(String, retry: Bool)
+            /// It went and has no place in sight to fly to: it says where, for a moment, then leaves. Clicked, it opens that
+            /// session (nil: a card's answer, nothing to open).
+            case sent(String, session: String?)
             /// Fading out of the stack (dismissed, or stopped and said so).
             case leaving
         }
@@ -96,6 +99,8 @@ struct FlightFramesKey: PreferenceKey {
 
     /// How long a flight waits for the row it goes to (one coming into Working) before it lands on its section's chip.
     static let waitForPlace: Duration = .milliseconds(450)
+    /// How long a pill that went says where, before it leaves.
+    static let confirmation: Duration = .seconds(2)
 
     // MARK: Following the runs
 
@@ -192,8 +197,15 @@ struct FlightFramesKey: PreferenceKey {
             let landing = to ?? fallback(for: target)
             let from = frames["pill:\(pill.id)"] ?? frames["composer"] ?? .zero
             launching.remove(pill.id)
+            guard let landing else {
+                // Nowhere in sight to land (the Brief has no row for it): the pill says where it went before it leaves.
+                guard let title = Self.destination(of: target, store: store) else { return finish(pill.id, store: store) }
+                set(pill.id, .sent(title, session: target.hasPrefix("session:") ? String(target.dropFirst(8)) : nil))
+                try? await Task.sleep(for: Self.confirmation)
+                if case .sent? = pills.first(where: { $0.id == pill.id })?.phase { leave(pill.id, store: store) }
+                return
+            }
             pills.removeAll { $0.id == pill.id }
-            guard let landing else { return finish(pill.id, store: store) }
             flights.append(Flight(id: pill.id, text: pill.text, status: status, from: from, to: landing.rect, target: landing.target))
         }
     }
@@ -338,6 +350,13 @@ struct FlightFramesKey: PreferenceKey {
         if let session = entry.links.sessions.first { return "session:\(session)" }
         if target.hasPrefix("session:") { return target }
         return "history"
+    }
+
+    /// The title of a landing's session or card, for a pill that says where it went.
+    static func destination(of landing: String, store: Store) -> String? {
+        if landing.hasPrefix("session:") { return destination(landing, store: store) }
+        if landing.hasPrefix("card:") { return store.router.cards.first { $0.id == String(landing.dropFirst(5)) }?.title }
+        return nil
     }
 
     /// A destination as the pill names it: the session's or card's title, "New session in lcu", the Router.
@@ -488,6 +507,23 @@ private struct FlightPill: View {
             FlightPillFace(text: pill.text, status: status)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(pill.text), \(status)")
+        case .sent(let title, let session):
+            let said = "Sent to \(title) ✓"
+            Button {
+                guard let session else { return }
+                if let intercept = store.interceptOpen { intercept("Open in Claude · \(title)") } else { Claude.open(session) }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(CDS.Text.accent)
+                        .frame(width: 14, height: 14)
+                    Text(pill.text).cdsText((13, 18), .regular, CDS.Text.secondary).lineLimit(1).truncationMode(.tail)
+                    Text(said).cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).fixedSize()
+                }
+                .flightPillShape()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(pill.text), \(said)")
+            .accessibilityHint(session == nil ? "" : "Opens the session")
         case .failed(let why, let retry):
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 11, weight: .medium))

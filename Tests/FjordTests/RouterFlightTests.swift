@@ -110,6 +110,22 @@ import Testing
         #expect(s.routerDispatcher.flying.isEmpty)
     }
 
+    @Test func aMessageWithNoPlaceInSightSaysWhereItWentForAMomentThenLeaves() async {
+        let (s, flights, f) = setup()
+        // The Brief: no row to fly to.
+        flights.frames = [:]
+        f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]
+        let id = send("add a changelog entry to the docs", s)
+        flights.sync(store: s)
+        await waitUntil { f.finished.contains(id!) }
+        flights.sync(store: s)
+        await waitUntil { flights.pills.first?.phase == .sent("Update the docs", session: "local_b") }
+        #expect(flights.pills.first?.phase == .sent("Update the docs", session: "local_b"))
+        #expect(flights.flights.isEmpty)
+        await waitUntil { flights.pills.isEmpty }
+        #expect(flights.pills.isEmpty && s.routerDispatcher.flying.isEmpty)
+    }
+
     @Test func aCanvasFlightWaitsForItsNewWorkingRowAndLandsOnlyOnce() async throws {
         let (store, flights, fake) = setup()
         let model = RouterModel()

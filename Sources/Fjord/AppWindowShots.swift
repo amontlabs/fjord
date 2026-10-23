@@ -459,6 +459,15 @@ enum AppWindowShots {
              size: CGSize(width: 1600, height: 1420), compose: { model, store in
                  Demo.routerDigest(store); model.pickBrief(); briefSent(store)
              }, appearance: .darkAqua),
+        // A message that went to a session the Brief has no row for: its pill says where, then leaves.
+        Shot(name: "router-brief-pill-sent", destination: { _ in .router }, sidebarHidden: true,
+             size: CGSize(width: 1600, height: 1000), compose: { model, store in
+                 Demo.routerDigest(store); model.pickBrief(); briefPillSent(store)
+             }, appearance: .aqua),
+        Shot(name: "router-brief-pill-sent-dark", destination: { _ in .router }, sidebarHidden: true,
+             size: CGSize(width: 1600, height: 1000), compose: { model, store in
+                 Demo.routerDigest(store); model.pickBrief(); briefPillSent(store)
+             }, appearance: .darkAqua),
         // No brief yet, the Router on: it is about to be written.
         Shot(name: "router-brief-empty", destination: { _ in .router }, sidebarHidden: true,
              size: CGSize(width: 1400, height: 800), compose: { model, store in
@@ -785,6 +794,22 @@ enum AppWindowShots {
         send("local_demo-bump", "ping me when CI is green", .sent, running: false)
         send("local_demo-zig", "put it in a new file, fs/walk_test.zig", .unsure, ago: 300)
         send("local_demo-theme", "merge it", .sent, running: false, replied: true, ago: 120)
+    }
+
+    /// The demo's message being sent, then sent to its session a moment later.
+    private static func briefPillSent(_ store: Store) {
+        let runs = store.routerDispatcher.progress
+        store.routerDispatcher.preview(ask: nil, progress: runs, flying: Array(runs.keys))
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let i = store.router.decisions.lastIndex(where: { store.routerDispatcher.flying.contains($0.id) && $0.outcome == .pending }) else { return }
+            var decisions = store.router.decisions
+            decisions[i].add(.sent(to: "Repository ownership transfer setup", text: decisions[i].triggerText, original: nil),
+                             session: "local_demo-transfer")
+            decisions[i].outcome = .done
+            decisions[i].decision.targetID = "session:local_demo-transfer"
+            store.router.decisions = decisions
+        }
     }
 
     private static func pending(_ model: RouterModel, _ store: Store, asks: Bool = true) {
