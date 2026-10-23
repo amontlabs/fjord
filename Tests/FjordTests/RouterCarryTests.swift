@@ -208,7 +208,9 @@ import Testing
         // Its base64 line is the signed message, unchanged.
         let carried = try #require(order.text.split(separator: "\n", maxSplits: 1).last.flatMap { Data(base64Encoded: String($0)) }.flatMap { String(data: $0, encoding: .utf8) })
         #expect(carried == message)
-        // Nothing is left behind in either folder.
+        // The target's answer stays until the caller has the outcome on disk; nothing else is left behind in either folder.
+        #expect(FileManager.default.fileExists(atPath: inbox.files(for: header.target, nonce: header.nonce).ack.path))
+        RouterCarry.discardAnswer(inbox: inbox, target: header.target, nonce: header.nonce)
         #expect(!FileManager.default.fileExists(atPath: inbox.files(for: header.target, nonce: header.nonce).ack.path))
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: inbox.folder(for: "cli-carrier").path)) ?? []).isEmpty)
         plugin.cancel()
@@ -546,6 +548,92 @@ import Testing
         // What it says is not the words.
         #expect(kept.bodyHash.count == 16 && !kept.bodyHash.contains("hello"))
         plugin.cancel()
+    }
+
+    /// What the persistence stand-in saw each time it was asked.
+    final class Writes: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _seen: [(orders: Int, answers: Int, state: String)] = []
+        var fail: [String?] = []
+        func add(_ item: (orders: Int, answers: Int, state: String)) -> String? {
+            lock.withLock { _seen.append(item); return fail.isEmpty ? nil : fail.removeFirst() }
+        }
+        var seen: [(orders: Int, answers: Int, state: String)] { lock.withLock { _seen } }
+    }
+
+    private func files(_ inbox: RelayInbox, _ cli: String, _ suffix: String) -> Int {
+        ((try? FileManager.default.contentsOfDirectory(atPath: inbox.folder(for: cli).path)) ?? []).filter { $0.hasSuffix(suffix) }.count
+    }
+
+    @Test func theOperationIsOnDiskBeforeAnyOrderIsPublishedAndAMessageThatCantBeRecordedIsNotSent() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        running("cli-target", dir)
+        running("cli-carrier", dir)
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        let seen = Seen()
+        let carrying = carrier("cli-carrier", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let writes = Writes()
+        writes.fail = ["disk full"]
+        s.persistStandIn = { [weak s] in
+            let state = await MainActor.run { s?.router.operations.last?.state.rawValue ?? "none" }
+            return writes.add((self.files(inbox, "cli-carrier", ".msg"), self.files(inbox, "cli-target", ".ack"), state))
+        }
+        let (tools, text) = tools(s, "hello")
+        do {
+            _ = try await RouterSender.send(store: s, to: "Target", text: text, tools: tools, session: "local_t", body: "hello", waits: Self.fast)
+            Issue.record("sent")
+        } catch {
+            #expect(error.localizedDescription.contains("couldn't save") && error.localizedDescription.contains("nothing was sent"))
+        }
+        // Asked once, with the operation waiting and no order anywhere; then nothing was ever ordered.
+        #expect(writes.seen.first?.orders == 0 && writes.seen.first?.state == "waiting")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        #expect(seen.orders.isEmpty && s.router.operations.last?.state == .refused)
+        carrying.cancel()
+    }
+
+    @Test func theOutcomeIsOnDiskBeforeTheTargetsAnswerIsRemoved() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        running("cli-target", dir)
+        running("cli-carrier", dir)
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        let seen = Seen()
+        let carrying = carrier("cli-carrier", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let writes = Writes()
+        s.persistStandIn = { [weak s] in
+            let state = await MainActor.run { s?.router.operations.last?.state.rawValue ?? "none" }
+            return writes.add((self.files(inbox, "cli-carrier", ".msg"), self.files(inbox, "cli-target", ".ack"), state))
+        }
+        let (tools, text) = tools(s, "hello")
+        let header = try #require(RelayInbox.header(of: text))
+        _ = try await RouterSender.send(store: s, to: "Target", text: text, tools: tools, session: "local_t", body: "hello", waits: Self.fast)
+        // The terminal write saw `sent` with the target's answer still in its folder; the answer is gone once it is written.
+        let last = try #require(writes.seen.last)
+        #expect(writes.seen.count == 2 && last.state == "sent" && last.answers == 1)
+        #expect(files(inbox, "cli-target", ".ack") == 0)
+        _ = header
+        carrying.cancel()
+    }
+
+    @Test func anOutcomeThatCouldntBeWrittenLeavesTheTargetsAnswerForTheNextLaunch() async throws {
+        let dir = TempDir()
+        let s = store(dir)
+        running("cli-target", dir)
+        running("cli-carrier", dir)
+        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
+        let seen = Seen()
+        let carrying = carrier("cli-carrier", inbox, behavior: .delivers(app: "ok", target: "ok"), seen: seen)
+        let writes = Writes()
+        writes.fail = [nil, "disk full"]
+        s.persistStandIn = { writes.add((0, 0, "")) }
+        let (tools, text) = tools(s, "hello")
+        let header = try #require(RelayInbox.header(of: text))
+        _ = try await RouterSender.send(store: s, to: "Target", text: text, tools: tools, session: "local_t", body: "hello", waits: Self.fast)
+        // The record of `sent` didn't reach the disk: the evidence stays, for `settleLostOperations`.
+        #expect(inbox.leftover(target: header.target, nonce: header.nonce) == "ok")
+        carrying.cancel()
     }
 
     @Test func aSendTheTargetRefusesOrDoesntAnswerIsKeptWithItsReasonAndItsStateNeverSent() async throws {

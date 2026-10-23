@@ -1213,26 +1213,44 @@ final class Store {
     @ObservationIgnored private var saveFailures = 0
     private static let stateLog = Logger(subsystem: InboxLog.subsystem, category: "state")
 
-    private func writeSnapshot(wait: Bool) {
+    /// Stands in for `persistNow()` (tests): told when it is asked, answers why it failed, or nil when it was written.
+    @ObservationIgnored var persistStandIn: (() async -> String?)?
+
+    /// Writes the state now and waits for the write to finish (off the main thread): why it failed, or nil when it is on disk
+    /// (or there is nothing to write, or this Store writes nothing). For what must be on disk before something else
+    /// happens, such as a message being ordered (`RouterSender`).
+    func persistNow() async -> String? {
+        if let persistStandIn { return await persistStandIn() }
+        guard persists, !loading, file != nil else { return nil }
+        saveTask?.cancel()
+        return await withCheckedContinuation { done in writeSnapshot(wait: false, completion: { done.resume(returning: $0) }) }
+    }
+
+    private func writeSnapshot(wait: Bool, completion: ((String?) -> Void)? = nil) {
         guard persistedRevision != savedRevision, persists, !loading else {
             if wait { writer.sync {} }
+            completion?(nil)
             return
         }
-        guard let url = file else { return }
+        guard let url = file else { completion?(nil); return }
         let revision = persistedRevision
         if let unreadable {
             do {
                 if let data = try Self.readExisting(unreadable) { keepAside(unreadable, data, dropped: ["everything"]) }
                 self.unreadable = nil
             } catch {
-                wrote(revision, failure: "the saved state can't be read, so it isn't written over: \(error.localizedDescription)", retry: !wait)
+                let why = "the saved state can't be read, so it isn't written over: \(error.localizedDescription)"
+                wrote(revision, failure: why, retry: !wait)
+                completion?(why)
                 return
             }
         }
         if let unkept {
             keepAside(unkept.file, unkept.data, dropped: unkept.dropped)
             guard self.unkept == nil else {
-                wrote(revision, failure: "the file read only in part isn't kept aside yet, so it isn't written over", retry: !wait)
+                let why = "the file read only in part isn't kept aside yet, so it isn't written over"
+                wrote(revision, failure: why, retry: !wait)
+                completion?(why)
                 return
             }
         }
@@ -1259,7 +1277,10 @@ final class Store {
         } else {
             writer.async {
                 let failure = write()
-                Task { @MainActor [weak self] in self?.wrote(revision, failure: failure, retry: true) }
+                Task { @MainActor [weak self] in
+                    self?.wrote(revision, failure: failure, retry: true)
+                    completion?(failure)
+                }
             }
         }
     }

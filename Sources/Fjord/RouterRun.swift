@@ -280,18 +280,31 @@ enum RouterSender {
         func settle(_ state: DeliveryOperation.State, _ reason: String? = nil) {
             store.updateOperation(header.nonce) { $0.state = state; $0.reason = reason }
         }
+        // Kept on disk before anything is ordered: a crash after the order goes must find the operation, and a message that
+        // can't be recorded isn't sent.
+        if let why = await store.persistNow() {
+            let message = "Fjord couldn't save a record of this message before sending it, so nothing was sent: \(why)"
+            settle(.refused, message)
+            throw RouterTools.Failure(message)
+        }
+        let inbox = RelayInbox(root: paths.relay)
+        /// The outcome is kept on disk, and only then is the target's answer (the evidence of it) removed.
+        func finish(_ state: DeliveryOperation.State, _ reason: String? = nil) async {
+            settle(state, reason)
+            if await store.persistNow() == nil { RouterCarry.discardAnswer(inbox: inbox, target: header.target, nonce: header.nonce) }
+        }
         let (plan, up) = await store.carryPlan(target: header.target)
         // A session with a process but no plugin up reads the message as a peer's: it never goes to one.
         if ready?.asleep != true, !up {
             let why = "Fjord's plugin isn't running in that session: restart it or run /reload-plugins in it; nothing was sent"
-            settle(.refused, why)
+            await finish(.refused, why)
             throw RouterTools.Failure(why)
         }
         let title = store.claudeSessions[local]?.title ?? local
         let cli = header.target
         do {
             let ack = try await RouterCarry.deliver(
-                signed: text, plan: plan, asleep: !up, inbox: RelayInbox(root: paths.relay), waits: waits,
+                signed: text, plan: plan, asleep: !up, inbox: inbox, waits: waits,
                 sign: { [weak store] carrier in
                     guard let store else { throw RouterTools.Failure("Fjord isn't ready") }
                     return try await store.localSigned { key in
@@ -307,16 +320,16 @@ enum RouterSender {
                 update: { [weak store] update in
                     store?.updateOperation(header.nonce) { $0.route = update.route; $0.carrier = update.carrier }
                 })
-            settle(.sent)
+            await finish(.sent)
             return ack
         } catch let failure as RouterCarry.Failure {
-            settle(failure.state, failure.message)
+            await finish(failure.state, failure.message)
             throw RouterTools.Failure(failure.message)
         } catch is CancellationError {
-            settle(.refused, "Stopped; nothing was sent")
+            await finish(.refused, "Stopped; nothing was sent")
             throw CancellationError()
         } catch {
-            settle(.refused, error.localizedDescription)
+            await finish(.refused, error.localizedDescription)
             throw error
         }
     }

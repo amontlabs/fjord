@@ -135,7 +135,8 @@ enum RouterCarry {
     // MARK: Delivering
 
     /// Orders `signed` (a message of Fjord's for the Claude Code session in its header) to `local`'s plugin by `plan`, and
-    /// returns the target's answer ("ok", with what its settings did). Throws `Failure` with the state it ends in.
+    /// returns the target's answer ("ok", with what its settings did). Throws `Failure` with the state it ends in. The target's
+    /// answer file is left in its folder for the caller to remove (`discardAnswer`) once the outcome is kept on disk.
     /// - `sign`: the signed carry order for a carrier (`RelaySigner.signCarry`), made when one is chosen.
     /// - `isUp`: whether the target's plugin is up (for a target opened in the app); `open` opens it.
     /// - `gate`: asked on the main actor right before each order is put in place (`RelayInbox.place`).
@@ -180,7 +181,7 @@ enum RouterCarry {
         }
         let placed = Flag()
         do {
-            return try await inbox.deliver(signed, to: header.target, gate: gate, placed: { placed.set() })
+            return try await inbox.deliver(signed, to: header.target, gate: gate, placed: { placed.set() }, keepAnswer: true)
         } catch is CancellationError {
             // Stopped before the message was in place: nothing was sent. After: the plugin may have read it already, and
             // withdrawing the file can't take back what it submitted.
@@ -199,6 +200,11 @@ enum RouterCarry {
         private var value = false
         func set() { lock.withLock { value = true } }
         var isSet: Bool { lock.withLock { value } }
+    }
+
+    /// Removes the target's answer file for `nonce`: after the outcome it gave is on disk, never before.
+    static func discardAnswer(inbox: RelayInbox, target: String, nonce: String) {
+        try? FileManager.default.removeItem(at: inbox.files(for: target, nonce: nonce).ack)
     }
 
     static func unsure(_ why: String) -> String {
@@ -221,7 +227,7 @@ enum RouterCarry {
             return trimmed.isEmpty ? nil : trimmed
         }
         func settle(_ reply: String) throws -> String {
-            try? fm.removeItem(at: mine.ack)
+            // The target's answer stays where it is: the caller removes it once the outcome it says is on disk.
             if reply == "ok" || reply.hasPrefix("ok ") { return reply }
             throw Failure(state: .refused, message: "The session's plugin refused the message: "
                           + (reply.hasPrefix("refused: ") ? String(reply.dropFirst("refused: ".count)) : reply))

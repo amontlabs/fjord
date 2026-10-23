@@ -1710,11 +1710,12 @@ struct RelayInbox: Sendable {
     /// `gate` says, on the main actor and right before the message is put in place (nothing awaited between the two), why it
     /// may no longer go: a reason refuses it, unwritten. The file is written aside off the main thread first (the folder, the
     /// write, its mode); only the gate and the rename that puts it where the plugin looks are on the main actor.
-    /// `placed` is called once the message is where the plugin looks: from then on a `CancellationError` leaves its fate
+    /// `keepAnswer`: the plugin's answer file is left in place (the caller removes it). `placed` is called once the message is where the plugin looks: from then on a `CancellationError` leaves its fate
     /// unknown (the plugin may have read it already), which the caller tells from one that came before.
     @discardableResult
     func deliver(_ text: String, to session: String, interval: TimeInterval = 0.03,
-                 gate: (@MainActor () -> String?)? = nil, placed: (@Sendable () -> Void)? = nil) async throws -> String {
+                 gate: (@MainActor () -> String?)? = nil, placed: (@Sendable () -> Void)? = nil,
+                 keepAnswer: Bool = false) async throws -> String {
         let (message, ack) = try await place(text, to: session, gate: gate)
         placed?()
         let fm = FileManager.default
@@ -1726,7 +1727,9 @@ struct RelayInbox: Sendable {
             return trimmed.isEmpty ? nil : trimmed
         }
         func outcome(_ reply: String) throws -> String {
-            withdraw()
+            // `keepAnswer`: the caller removes it once what it says is on disk (a crash in between must not lose it).
+            try? fm.removeItem(at: message)
+            if !keepAnswer { try? fm.removeItem(at: ack) }
             if reply == "ok" || reply.hasPrefix("ok ") { return reply }
             throw Failure.refused(reply.hasPrefix("refused: ") ? String(reply.dropFirst("refused: ".count)) : reply)
         }
