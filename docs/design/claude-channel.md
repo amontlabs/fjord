@@ -109,5 +109,8 @@ delivered; a Retry of the message continues from the step the reservation reache
    carrier's Claude and conversation are untouched; asked afterwards, neither session's Claude knew of the other.
 2. **Passed 2026-10-23.** Carrying the words: asleep (rewritten first prompt) and running (`session.receive` + `asUser`):
    Claude said both were typed by the user; the app shows both as ordinary messages of the user's.
-3. To do: a new session at the cap end to end; carrier and target in different permission modes; no session running after
+3. **Passed 2026-10-23, installed Fjord, sent from the Router page.** To a sleeping session and to a running one: each
+   carried by another running session (one an ordinary working session of the owner's, untouched), each received as exactly
+   the typed words, each answered, each operation `sent`.
+4. To do: a new session at the cap end to end; carrier and target in different permission modes; no session running after
    a relaunch; a sleeping SSH session.
