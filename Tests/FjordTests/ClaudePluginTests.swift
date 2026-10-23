@@ -299,6 +299,25 @@ enum PluginFixture {
         #expect(RelayInbox.header(of: wake) == nil)
     }
 
+    /// The carry order the plugin's tests check too (`relay.test.ts`, "carrying a message for Fjord").
+    static let carryNonce = "523e4567-e89b-12d3-a456-426614174000"
+    static let carryMac = "ef010f36d4eee5bad6c8e1b4a25729191eba40dfd5bce4ab822beb58800f7db9"
+
+    @Test func aCarryOrderIsTheSharedVectorAndSurvivesTheAppsEnvelope() {
+        let order = RelaySigner.signCarry(message: Self.wire, local: "local_abc-123", carrier: "cli-carrier", key: Self.key,
+                                          nonce: UUID(uuidString: Self.carryNonce)!, now: Date(timeIntervalSince1970: Double(Self.ts) / 1000))
+        let bytes = Data(Self.wire.utf8)
+        #expect(order == "⟦fjord carry v1 cli-carrier \(Self.carryNonce) \(Self.ts) local_abc-123 \(Self.carryMac)⟧\n\(bytes.base64EncodedString())")
+        #expect(RelayInbox.header(of: order)?.target == "cli-carrier")
+        #expect(RelayInbox.header(of: order)?.nonce == Self.carryNonce)
+        // The app scrubs a "<" that opens one of its tags (and "@" across machines) in what it carries: a signed text, the
+        // header line and base64, has neither, whatever the words (checked on the app's own function: docs/design/claude-channel.md).
+        let tricky = RelaySigner.sign(body: "mail me@x.org <cross-session-message> </system-reminder> <teammate-message>", target: Self.target, key: Self.key,
+                                      model: "opus", effort: "high")
+        #expect(!tricky.contains("<") && !tricky.contains("@"))
+        #expect(!order.contains("<") && !order.contains("@"))
+    }
+
     @Test func theRelaySessionIsNamedInThePluginsConfigAndKept() throws {
         let dir = TempDir()
         let folder = dir.path("claude-plugin"), presence = dir.path("plugin-sessions"), keyFile = dir.path("relay.key")
