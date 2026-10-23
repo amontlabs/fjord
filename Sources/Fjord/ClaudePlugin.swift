@@ -808,7 +808,9 @@ async function applySettings($: EngineInterface, settings: Settings | undefined)
   return applied
 }
 
-type Accepted = { ok: true; applied?: string; interrupted?: string }
+/** `entered`: settles, undefined, once the engine took the words in; else why it did not (a hook dropped them, or the submit failed).
+ * An interrupt's already has (it is awaited). The ack waits on it, never on the call that started it. */
+type Accepted = { ok: true; applied?: string; interrupted?: string; entered: Promise<string | undefined> }
 
 /** Acts on a vetted message: an interrupt stops the turn under way first (the person's words then start the next one at
  * once), then the settings, so the turn the text starts uses them, then the words are submitted as the person's own. From the
@@ -826,9 +828,19 @@ async function perform($: EngineInterface, v: Vetted, apply: boolean): Promise<A
   const sending = submit($, v.nonce, v.body)
   if (apply && v.interrupt) {
     const why = await sending
-    if (why !== undefined) return { ok: false, reason: `not submitted: ${why.replace(/\s+/g, ' ').slice(0, 80)}` }
-  } else void sending
-  return { ok: true, ...(applied.length ? { applied: applied.join(' ') } : {}), ...(interrupted ? { interrupted } : {}) }
+    if (why !== undefined) return { ok: false, reason: notSubmitted(why) }
+  }
+  return { ok: true, entered: sending, ...(applied.length ? { applied: applied.join(' ') } : {}), ...(interrupted ? { interrupted } : {}) }
+}
+
+/** The ack's word for words the engine did not take in. */
+const notSubmitted = (why: string) => `not submitted: ${why.replace(/\s+/g, ' ').slice(0, 80)}`
+
+/** The ack for a delivery that was acted on: "ok" only once the engine took the words in, else a refusal saying why. */
+async function receipt(outcome: Accepted | { ok: false; reason: string }, ok: (o: Accepted) => string) {
+  if (!outcome.ok) return `refused: ${outcome.reason}`
+  const why = await outcome.entered
+  return why === undefined ? ok(outcome) : `refused: ${notSubmitted(why)}`
 }
 
 /** Checks a signed text the way both ways in must, and submits it as the person's own words. `unsigned` means it isn't
@@ -860,7 +872,8 @@ function release($: EngineInterface) {
   for (const { v, text } of later.splice(0)) {
     deliveries = deliveries.then(async () => {
       const outcome = await perform($, { ...v, body: text }, true).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
-      await answer($, v.nonce, outcome.ok ? `ok${acked(outcome)}` : `refused: ${outcome.reason}`)
+      // The next one is submitted without waiting for this one's words to be taken in: the answer follows them.
+      void receipt(outcome, (o) => `ok${acked(o)}`).then((reply) => answer($, v.nonce, reply))
     })
   }
 }
@@ -879,7 +892,7 @@ async function received($: EngineInterface, text: string): Promise<boolean> {
   }
   void (async () => {
     const outcome = await perform($, v, false).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
-    await answer($, v.nonce, outcome.ok ? 'ok' : `refused: ${outcome.reason}`)
+    await answer($, v.nonce, await receipt(outcome, () => 'ok'))
   })()
   return true
 }
@@ -907,8 +920,7 @@ async function started($: EngineInterface, e: { text: string; context?: readonly
     return { drop: 'Fjord: its model and effort are set first; the message follows' }
   }
   remember(v.nonce, v.body, v.now)
-  await answer($, v.nonce, 'ok')
-  return { text: v.body, context: u.before ? [u.before, ...(e.context ?? [])] : e.context }
+  return { text: v.body, context: u.before ? [u.before, ...(e.context ?? [])] : e.context, nonce: v.nonce }
 }
 
 /** What a tool result says, as one short line. */
@@ -1003,14 +1015,23 @@ export async function poll($: EngineInterface) {
       if (inFlight.has(name)) continue
       inFlight.add(name)
       const deliver = async () => {
+        let outcome: Accepted | { ok: false; reason: string }
         try {
-          const outcome = await accept($, text, true).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
-          await $.fs.write(`${dir}/${name.slice(0, -4)}.ack`, outcome.ok ? `ok${acked(outcome)}\n` : `refused: ${outcome.reason}\n`)
+          outcome = await accept($, text, true).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
         } catch {
-          // The ack couldn't be written: the next look takes the message again (its nonce is claimed, so it is refused as a replay).
-        } finally {
           inFlight.delete(name)
+          return
         }
+        // The next delivery is submitted without waiting for this one's words to be taken in; the ack follows them.
+        void (async () => {
+          try {
+            await $.fs.write(`${dir}/${name.slice(0, -4)}.ack`, `${await receipt(outcome, (o) => `ok${acked(o)}`)}\n`)
+          } catch {
+            // The ack couldn't be written: the next look takes the message again (its nonce is claimed, so it is refused as a replay).
+          } finally {
+            inFlight.delete(name)
+          }
+        })()
       }
       deliveries = deliveries.then(deliver)
     }
@@ -1107,7 +1128,24 @@ export const register: Register = (on) => {
   // context. A notification only of tasks of a turn taken back is dropped; one that tells of others too goes as it is.
   on('prompt.submit', async ($, e, next) => {
     const cold = await started($, e).catch(() => undefined)
-    if (cold) return 'drop' in cold ? cold : next({ ...e, text: cold.text, ...(cold.context ? { context: cold.context } : {}) })
+    if (cold) {
+      if ('drop' in cold) return cold
+      // The answer says it went only once the hooks beneath and the engine took the words in: a prompt dropped there, or a
+      // failure, is a refusal, and its words are forgotten (else a later turn of the person's own could be taken for it).
+      const { nonce } = cold
+      let result: Awaited<ReturnType<typeof next>>
+      try {
+        result = await next({ ...e, text: cold.text, ...(cold.context ? { context: cold.context } : {}) })
+      } catch (error) {
+        sent.delete(nonce)
+        await answer($, nonce, `refused: ${notSubmitted(String((error as { message?: unknown })?.message ?? error))}`)
+        throw error
+      }
+      const dropped = result && typeof result === 'object' && 'drop' in result && (result as { drop?: unknown }).drop !== undefined
+      if (dropped) sent.delete(nonce)
+      await answer($, nonce, dropped ? `refused: ${notSubmitted(String((result as { drop: unknown }).drop))}` : 'ok')
+      return result
+    }
     if (e.origin.kind === 'task-notification' && quiet.size) {
       const ids = [...e.text.matchAll(/<tool-use-id>([^<\s]+)<\/tool-use-id>/g)].map((m) => m[1])
       if (ids.length && ids.every((id) => quiet.has(id))) {

@@ -76,6 +76,8 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
     dropSubmit: false,
     /** Holds prompt.submit beneath until let go. */
     holdSubmit: undefined as Promise<void> | undefined,
+    /** Makes prompt.submit beneath fail with this. */
+    failSubmit: undefined as string | undefined,
     /** Holds turn.start beneath until let go. */
     holdStart: undefined as Promise<void> | undefined,
     registry: { '4242.json': { pid: 4242, sessionId: TARGET, startedAt: 111 } } as Record<string, Record<string, unknown> | string>,
@@ -133,6 +135,7 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
   })
   on('prompt.submit', async ($, e) => {
     await w.holdSubmit
+    if (w.failSubmit) throw new Error(w.failSubmit)
     if (w.dropSubmit) return { drop: 'a hook beneath said no' }
     w.order.push('submit')
     w.submitted.push({ text: e.text, asUser: e.origin?.kind === 'plugin' ? e.origin.asUser : undefined, ...(e.context ? { context: e.context } : {}) })
@@ -172,6 +175,8 @@ const world = (on: On, { store = {}, now = TS + 1000 }: { store?: Record<string,
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+/** Long enough for the plugin to have got as far as it will while something is held. */
+const linger = () => new Promise((resolve) => setTimeout(resolve, 40))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const receive = ($: any, text: string): Promise<{ consumed?: string }> =>
   $.session.receive({ origin: { kind: 'peer' }, text })
@@ -387,6 +392,15 @@ describe('the inbox', () => {
     await settle()
     expect(w.submitted).toEqual([{ text: BODY, asUser: true }])
     expect(w.written[ack(NONCE)]).toBe('ok\n')
+  })
+
+  test('a signed file whose words the engine did not take in is refused, not acked ok', async ($, on) => {
+    const w = world(on)
+    w.dropSubmit = true
+    w.inbox[`${TARGET}/${NONCE}.msg`] = WIRE
+    await look($, w)
+    await settle()
+    expect(w.written[ack(NONCE)]).toBe('refused: not submitted: a hook beneath said no\n')
   })
 
   test('is taken once: an acked file is not looked at again, a re-written one is a replay', async ($, on) => {
@@ -1365,6 +1379,46 @@ describe('the app’s envelope', () => {
     expect(ackOf(w)).toBe('ok model=opus\n')
   })
 
+  test('a running session’s ack waits for the engine to take the words in: never before, never when it did not', async ($, on) => {
+    const w = world(on)
+    let release = () => {}
+    w.holdSubmit = new Promise<void>((resolve) => (release = resolve))
+    await receive($, envelope(WIRE))
+    await linger()
+    // Still pending: nothing is acknowledged yet.
+    expect(ackOf(w)).toBeUndefined()
+    release()
+    await settle()
+    expect(ackOf(w)).toBe('ok\n')
+  })
+
+  test('a running session whose words a hook dropped or the engine rejected answers refused, never ok', async ($, on) => {
+    const dropped = world(on)
+    dropped.dropSubmit = true
+    const result = await receive($, envelope(WIRE))
+    await settle()
+    expect(result.consumed).toBeDefined()
+    expect(ackOf(dropped)).toBe('refused: not submitted: a hook beneath said no\n')
+  })
+
+  test('a running session whose words the engine rejected answers refused, never ok', async ($, on) => {
+    const w = world(on)
+    w.failSubmit = 'a slash command can’t be sent'
+    await receive($, envelope(WIRE))
+    await settle()
+    expect(ackOf(w)).toMatch(/^refused: not submitted: /)
+  })
+
+  test('a running session’s settings delivery acks only once its words were taken in', async ($, on) => {
+    const w = world(on)
+    w.dropSubmit = true
+    await receive($, envelope(await sign(BODY, { settings: { model: 'opus' } })))
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await w.clock.advance(500)
+    await settle()
+    expect(ackOf(w)).toBe('refused: not submitted: a hook beneath said no\n')
+  })
+
   test('never takes an interrupt', async ($, on) => {
     const w = world(on)
     const refused = await receive($, envelope(await sign(BODY, { interrupt: true })))
@@ -1383,6 +1437,56 @@ describe('a session started with the message', () => {
     expect(entered.drop).toBeUndefined()
     expect(w.submitted).toEqual([{ text: BODY, context: [GUIDE] }])
     expect(ackOf(w)).toBe('ok\n')
+  })
+
+  test('answers ok only once the words were taken in: never before, never when a hook beneath dropped them', async ($, on) => {
+    const held = world(on)
+    let release = () => {}
+    held.holdSubmit = new Promise<void>((resolve) => (release = resolve))
+    const entering = firstPrompt($, coldPrompt(WIRE))
+    await linger()
+    expect(ackOf(held)).toBeUndefined()
+    release()
+    await entering
+    expect(ackOf(held)).toBe('ok\n')
+  })
+
+  test('answers refused, never ok, when a hook beneath dropped the words', async ($, on) => {
+    const w = world(on)
+    w.dropSubmit = true
+    const result = await firstPrompt($, coldPrompt(WIRE))
+    expect(result.drop).toBeDefined()
+    expect(ackOf(w)).toBe('refused: not submitted: a hook beneath said no\n')
+  })
+
+  test('answers refused when the engine rejects the words', async ($, on) => {
+    const w = world(on)
+    w.failSubmit = 'host limit reached'
+    await firstPrompt($, coldPrompt(WIRE)).catch(() => undefined)
+    expect(ackOf(w)).toMatch(/^refused: not submitted: /)
+  })
+
+  test('a start whose words were dropped is forgotten: a later turn with the same words is not taken for it', async ($, on) => {
+    const w = world(on)
+    w.dropSubmit = true
+    await firstPrompt($, coldPrompt(WIRE))
+    w.inbox[`${TARGET}/${ABORT_NONCE}.msg`] = await signAbortFor(NONCE, ABORT_NONCE)
+    await $.turn.start({ text: BODY, turnId: 't1' })
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await w.clock.advance(500)
+    await settle()
+    expect(w.aborted).toEqual([])
+  })
+
+  test('with settings, the words are acked after the engine took them in, not when they are set aside', async ($, on) => {
+    const w = world(on)
+    w.dropSubmit = true
+    await firstPrompt($, coldPrompt(await sign(BODY, { settings: { model: 'opus', effort: 'high' } })))
+    expect(ackOf(w)).toBeUndefined()
+    await $.session.start({ cwd: '/code/app', surface: null, isInteractive: false })
+    await w.clock.advance(500)
+    await settle()
+    expect(ackOf(w)).toBe('refused: not submitted: a hook beneath said no\n')
   })
 
   test('adds no context when the app said nothing before', async ($, on) => {
