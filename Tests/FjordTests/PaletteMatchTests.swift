@@ -346,13 +346,13 @@ import Testing
     }
 
     @Test func hugeTextsAndQueriesAreScannedInLinearTime() {
-        let clock = ContinuousClock()
         let title = String(repeating: "a", count: 64_000) + "xb"
         let items = [item("t", title, keywords: [title]), item("k", "Other", keywords: [title])]
         for query in [String(repeating: "a", count: 32_000) + "b", String(repeating: "a", count: 200) + "b",
                       String(repeating: "a ", count: 100) + "b"] {
             var hits: [PaletteHit] = []
-            let took = clock.measure { hits = ranked(query, items) }
+            // As in `fiveThousandItemsRankQuickly`: CPU time, best of three. Quadratic work would take seconds however it is counted.
+            let took = (0..<3).map { _ in threadTime { hits = ranked(query, items) } }.min()!
             #expect(took < .milliseconds(500), "\(query.count) letters took \(took)")
             _ = hits
         }
@@ -430,19 +430,29 @@ import Testing
             let keywords = (0..<10).map { _ in "\(words[next(words.count)])/\(words[next(words.count)])#\(next(9000))" }
             items.append(item("item:\(n)", title.capitalized, keywords: keywords, date: Date(timeIntervalSince1970: Double(n))))
         }
-        let clock = ContinuousClock()
         var index = PaletteIndex([])
-        let build = clock.measure { index = PaletteIndex(items) }
+        let build = threadTime { index = PaletteIndex(items) }
         let usage = PaletteUsage(defaults: nil)
         usage.record("item:3", query: "ro")
         var timings: [String] = []
         for query in ["ro", "git hub", "tri ses", "rts", "#4821", "x"] {
             var hits: [PaletteHit] = []
-            let took = clock.measure { hits = PaletteRanker.rank(query, in: index, usage: usage) }
+            // The CPU time the ranking itself used, at its best of three: a loaded or throttled runner that takes the core
+            // away mid-ranking doesn't count against it. A slower core still does: about 27 ms here on a performance core
+            // takes 100 on an efficiency one, so the limit leaves room for that and still fails a ranking gone quadratic.
+            let took = (0..<3).map { _ in threadTime { hits = PaletteRanker.rank(query, in: index, usage: usage) } }.min()!
             timings.append("\(query): \(took) (\(hits.count) hits)")
-            #expect(took < .milliseconds(100), "\(query) took \(took)")
+            #expect(took < .milliseconds(250), "\(query) took \(took)")
         }
         print("palette matcher, 5000 items: index \(build); " + timings.joined(separator: "; "))
         #expect(build < .seconds(2))
     }
+}
+
+/// The CPU time this thread spent running `body`, not the time that passed meanwhile.
+private func threadTime(_ body: () -> Void) -> Duration {
+    func now() -> UInt64 { clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) }
+    let start = now()
+    body()
+    return .nanoseconds(Int64(now() - start))
 }
