@@ -407,17 +407,30 @@ import Testing
         calls.data = Self.transcript([("A", "a.")])
         store.claudeSessions[id]?.completedTurns = 1
         store.claudeSessions[id]?.running = false
+        // Held until the newer leaf has landed, however slow the machine: the call is in flight when it does.
+        final class Gate: @unchecked Sendable {
+            private let lock = NSLock()
+            private var waiting: [CheckedContinuation<Void, Never>] = [], open = false, entered = 0
+            var calls: Int { lock.withLock { entered } }
+            func wait() async {
+                await withCheckedContinuation { c in
+                    let now = lock.withLock { entered += 1; if !open { waiting.append(c) }; return open }
+                    if now { c.resume() }
+                }
+            }
+            func release() { lock.withLock { open = true; defer { waiting = [] }; return waiting }.forEach { $0.resume() } }
+        }
+        let gate = Gate()
         store.routerLife.runner = { _, context, _ in
-            try? await Task.sleep(for: .milliseconds(40))
+            await gate.wait()
             return context.contains("Its turns so far") ? "Whole." : "Slow."
         }
         store.routerLife.sync(store: store)
-        await Task.yield()
-        await MainActor.run {
-            var state = store.router
-            state.lives[id]?.add(RouterLeaf(turn: 2, at: Date(), text: "Newer."))
-            store.router = state
-        }
+        await waitUntil { gate.calls > 0 }
+        var state = store.router
+        state.lives[id]?.add(RouterLeaf(turn: 2, at: Date(), text: "Newer."))
+        store.router = state
+        gate.release()
         await store.routerLife.idle()
         #expect(store.router.lives[id]?.leaves.map(\.text) == ["Newer."])
     }
