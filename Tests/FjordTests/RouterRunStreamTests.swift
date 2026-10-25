@@ -164,15 +164,18 @@ import Testing
         }
     }
 
+    @MainActor
     @Test func theLiveFeedPassesOnTheNewestAtMostTenTimesASecond() async {
-        final class Seen: @unchecked Sendable { var all: [String] = [] }
-        let seen = Seen()
-        let feed = await MainActor.run { LiveFeed { seen.all.append($0.reply) } }
+        var seen: [String] = []
+        let feed = LiveFeed { seen.append($0.reply) }
+        func wait(for last: String) async {
+            for _ in 0..<500 where seen.last != last { try? await Task.sleep(for: .milliseconds(10)) }
+        }
         for i in 1...50 { feed.push(RouterRunLive(reply: "\(i)")) }
-        try? await Task.sleep(for: .milliseconds(400))
-        #expect(seen.all.last == "50" && seen.all.count <= 3, "got \(seen.all)")
+        await wait(for: "50")
+        #expect(seen.last == "50" && seen.count <= 3, "got \(seen)")
         feed.push(RouterRunLive(reply: "51"))
-        try? await Task.sleep(for: .milliseconds(300))
-        #expect(seen.all.last == "51")
+        await wait(for: "51")
+        #expect(seen.last == "51")
     }
 }
