@@ -78,13 +78,15 @@ enum OneShot {
     /// may hold the pipes open: they're not waited for past this).
     static let grace: TimeInterval = 1
 
+    /// `onOutput`: told of each new chunk of stdout as it is read, on the reader's thread (the stream of a `stream-json` run);
+    /// the output returned is still the bounded whole.
     static func run(_ path: String, _ arguments: [String], cwd: URL, input: Data = Data(), timeout: TimeInterval,
-                    handle: Handle = Handle()) async throws -> Output {
+                    handle: Handle = Handle(), onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> Output {
         try await withTaskCancellationHandler {
             // On a plain thread: the waits block it, which Swift's own pool of threads must not be.
             try await withCheckedThrowingContinuation { (finished: CheckedContinuation<Output, Error>) in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    finished.resume(with: Result { try blocking(path, arguments, cwd: cwd, input: input, timeout: timeout, handle) })
+                    finished.resume(with: Result { try blocking(path, arguments, cwd: cwd, input: input, timeout: timeout, handle, onOutput) })
                 }
             }
         } onCancel: {
@@ -93,7 +95,7 @@ enum OneShot {
     }
 
     private static func blocking(_ path: String, _ arguments: [String], cwd: URL, input: Data, timeout: TimeInterval,
-                                 _ handle: Handle) throws -> Output {
+                                 _ handle: Handle, _ onOutput: (@Sendable (Data) -> Void)?) throws -> Output {
         // Bounded: a huge or odd timeout must not trap when it's turned into nanoseconds.
         let deadline = DispatchTime.now() + RouterTools.bounded(timeout)
         defer { handle.finish() }
@@ -110,6 +112,7 @@ enum OneShot {
         // One reader per pipe, each the only one ever to touch its descriptor: checked read(2), never a FileHandle
         // callback (which can't be stopped while one is under way). Stopped and waited for before the pipe is closed.
         let out = PipeReader(stdout.fileHandleForReading), err = PipeReader(stderr.fileHandleForReading)
+        out.onChunk = onOutput
         signal(SIGPIPE, SIG_IGN)
         try process.run()
         handle.started(process.processIdentifier)
@@ -234,6 +237,8 @@ enum OneShot {
         private var reachedEnd = false
         /// Called around each read (tests hold a read in flight to see the stop wait for it).
         var aroundRead: (() -> Void)?
+        /// Told of each chunk read, outside the lock, the last drain's included.
+        var onChunk: (@Sendable (Data) -> Void)?
 
         init(_ file: FileHandle) { fd = file.fileDescriptor }
 
@@ -264,6 +269,7 @@ enum OneShot {
         private var isStopping: Bool { lock.withLock { stopping } }
 
         private func append(_ bytes: UnsafeMutableRawBufferPointer, _ n: Int) {
+            if let onChunk { onChunk(Data(bytes[0..<n])) }
             lock.withLock {
                 guard buffer.count < Self.maxBytes else { return }
                 buffer.append(contentsOf: UnsafeRawBufferPointer(rebasing: bytes[0..<min(n, Self.maxBytes - buffer.count)]))

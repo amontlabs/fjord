@@ -1883,6 +1883,37 @@ import Testing
         #expect(f.sent.isEmpty && f.prepared.isEmpty)
     }
 
+    @Test func aRunsLiveStateIsShownWhileItGoesAndGoneWhenItEnds() async {
+        let (_, d, f) = setup()
+        f.ranked = [.init(target: "question", p: 0.9), .init(target: "unclear", p: 0.1)]
+        f.whileRunning = { tools in
+            tools.watch?(RouterRunLive(reply: "One session", steps: [.init(tool: "board")]))
+            for _ in 0..<200 where d.live.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+            #expect(d.live.values.map(\.reply) == ["One session"] && d.live.values.first?.steps.map(\.tool) == ["board"])
+        }
+        let id = d.submit("what is going on")
+        await finish(d, f, id)
+        #expect(d.live.isEmpty, "nothing of it stays once the run ended")
+        // A late report from the reader's thread, after the end, shows nothing.
+        d.show(RouterRunLive(reply: "late"), for: id!)
+        #expect(d.live.isEmpty)
+    }
+
+    @Test func stoppingARunClearsItsLiveState() async {
+        let (_, d, f) = setup()
+        f.ranked = [.init(target: "question", p: 0.9), .init(target: "unclear", p: 0.1)]
+        f.whileRunning = { tools in
+            tools.watch?(RouterRunLive(reply: "Half an answ"))
+            try? await Task.sleep(for: .seconds(30))
+        }
+        let id = d.submit("what is going on")
+        await waitUntil { !d.live.isEmpty }
+        #expect(d.live.values.map(\.reply) == ["Half an answ"])
+        d.stopAll()
+        await finish(d, f, id)
+        #expect(d.live.isEmpty)
+    }
+
     @Test func aQuestionRunAnswersWithoutChangingAnything() async {
         let (s, d, f) = setup()
         f.ranked = [.init(target: "question", p: 0.9), .init(target: "unclear", p: 0.1)]
@@ -2307,7 +2338,8 @@ import Testing
         #expect(value(after: "--model") == "claude-haiku-5-5" && value(after: "--tools") == "")
         #expect(value(after: "--mcp-config") == "/tmp/mcp.json" && args.contains("--strict-mcp-config"))
         #expect(args.contains("--no-session-persistence") && !args.contains("--resume") && !args.contains("--continue"))
-        #expect(value(after: "--output-format") == "json" && value(after: "--setting-sources") == "")
+        #expect(value(after: "--output-format") == "stream-json" && value(after: "--setting-sources") == "")
+        #expect(args.contains("--verbose") && args.contains("--include-partial-messages"), "the reply streams as it is written")
         #expect(value(after: "--allowedTools") == "mcp__fjord")
         let schema = (try? JSONSerialization.jsonObject(with: Data((value(after: "--json-schema") ?? "").utf8))) as? [String: Any]
         #expect((schema?["required"] as? [String])?.sorted() == ["done", "reply"])

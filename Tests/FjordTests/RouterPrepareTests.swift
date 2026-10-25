@@ -163,6 +163,19 @@ import Testing
         #expect(try String(contentsOf: dir.path("stdin"), encoding: .utf8) == "hello")
     }
 
+    @Test func aRunTellsOfEachChunkOfItsOutputAsItIsRead() async throws {
+        final class Seen: @unchecked Sendable {
+            let lock = NSLock()
+            var data = Data()
+            func add(_ chunk: Data) { lock.withLock { data.append(chunk) } }
+        }
+        let dir = TempDir()
+        let binary = fake(dir, output: "one\ntwo")
+        let seen = Seen()
+        let out = try await OneShot.run(binary, ["-p"], cwd: dir.url, timeout: 120, onOutput: { seen.add($0) })
+        #expect(seen.lock.withLock { seen.data } == out.stdout && String(decoding: out.stdout, as: UTF8.self) == "one\ntwo\n")
+    }
+
     @Test func aFailedOrSlowRunIsAnError() async throws {
         let dir = TempDir()
         let failed = fake(dir, output: #"{"type":"result","is_error":true,"errors":["Model not available"]}"#)

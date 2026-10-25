@@ -301,6 +301,11 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored private var sentWith: [UUID: RouterContext] = [:]
     /// How far each run under way is, by its entry in the log ("classifying", "sending"…).
     private(set) var progress: [UUID: String] = [:]
+    /// What each Haiku run under way has shown so far: the reply as far as it is written, what it thought, the tools it
+    /// called. Updated at most ten times a second; gone when the run ends.
+    private(set) var live: [UUID: RouterRunLive] = [:]
+    /// The last of a composer run's, kept for its pill (answered, it still lists what the run did) until the pill is done with.
+    private(set) var lastLive: [UUID: RouterRunLive] = [:]
     /// A run of yours is under way: the composer shows Stop. An action's message being placed, or waiting its turn, is the
     /// inbox's, in the background (`actionRuns`): you send meanwhile, and Stop leaves it be.
     var isBusy: Bool { progress.keys.contains { !actionRuns.contains($0) } }
@@ -383,6 +388,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// A composer pill is done with (landed, failed or dismissed): its run is no longer one of `flying`.
     func forgetFlying(_ id: UUID) {
         flying.removeAll { $0 == id }
+        lastLive[id] = nil
         sentWith[id] = nil
     }
 
@@ -626,6 +632,8 @@ struct RouterAskBack: Identifiable, Equatable {
         tools.claudePath = { [weak self] in self?.claudePath() }
         tools.decision = id
         tools.stage = { [weak self] in self?.progress[id] = $0 }
+        let feed = LiveFeed { [weak self] in self?.show($0, for: id) }
+        tools.watch = { feed.push($0) }
         tools.beginTurn(text, pills: pills)
         tools.tagged = RouterPointers.context(mentions, store: store!)
         tools.checkpointBeforeGuestStart = action
@@ -698,10 +706,17 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
+    /// A run's live state, as the reader's thread reports it (coalesced by `LiveFeed`): only while the run is under way.
+    func show(_ run: RouterRunLive, for id: UUID) {
+        guard progress[id] != nil, live[id] != run else { return }
+        live[id] = run
+    }
+
     func end(_ job: Job) {
         job.tools.endTurn()
         actionRuns.remove(job.id)
         progress[job.id] = nil
+        if let last = live.removeValue(forKey: job.id), flying.contains(job.id) { lastLive[job.id] = last }
         tasks[job.id] = nil
         runTools[job.id] = nil
         // Waiting for your pick is not over; anything else not settled is done.
@@ -1793,6 +1808,41 @@ struct RouterAskBack: Identifiable, Equatable {
         let sessions = store.claudeSessions.values.filter { !$0.isArchived }.sorted { $0.lastActivity > $1.lastActivity }.prefix(30)
         return (sessions.compactMap { option("session:\($0.id)", store: store) },
                 store.knownFolders.filter { !$0.isEmpty }.prefix(30).compactMap { option("new:\($0)", store: store) })
+    }
+}
+
+// MARK: - A run's live state, coalesced
+
+/// Takes a run's live state from the reader's thread and hands it to the main actor at most ten times a second, the newest
+/// each time: the reply streams in dozens of small pieces, which the page would otherwise redraw for.
+final class LiveFeed: @unchecked Sendable {
+    static let interval: TimeInterval = 0.1
+
+    private let lock = NSLock()
+    private var latest: RouterRunLive?
+    private var scheduled = false
+    private var lastShown = Date.distantPast
+    private let deliver: @MainActor (RouterRunLive) -> Void
+
+    init(_ deliver: @escaping @MainActor (RouterRunLive) -> Void) { self.deliver = deliver }
+
+    func push(_ live: RouterRunLive) {
+        let wait: TimeInterval? = lock.withLock {
+            latest = live
+            guard !scheduled else { return nil }
+            scheduled = true
+            return max(0, Self.interval - Date().timeIntervalSince(lastShown))
+        }
+        guard let wait else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [self] in
+            let next: RouterRunLive? = lock.withLock {
+                scheduled = false
+                lastShown = Date()
+                defer { latest = nil }
+                return latest
+            }
+            if let next { MainActor.assumeIsolated { deliver(next) } }
+        }
     }
 }
 

@@ -515,6 +515,8 @@ final class RouterMCPServer: @unchecked Sendable {
     var importTimeout: TimeInterval = SessionStart.importWait
     /// Tells the pill what is under way ("opening …"); the dispatcher sets it.
     var stage: ((String) -> Void)?
+    /// Told what a Haiku run has shown so far as it streams (`RouterRunLive`), from the reader's thread; the dispatcher sets it.
+    var watch: (@Sendable (RouterRunLive) -> Void)?
     /// Making a fork and waiting for the app to have it; tests answer for it.
     var forker: ((SessionFork.Plan) async throws -> SessionStart.Started)?
     /// Where Claude Code keeps transcripts (`<project>/<id>.jsonl`); a test gives its own.
