@@ -59,7 +59,10 @@ struct CanvasPage: View {
                     .overlay(shape.strokeBorder(CDS.border, lineWidth: 1))
                     .shadow(color: CDS.PanelShadow.near.color.opacity(0.6), radius: CDS.PanelShadow.near.radius, y: CDS.PanelShadow.near.y)
                     .shadow(color: CDS.PanelShadow.far.color.opacity(0.6), radius: CDS.PanelShadow.far.radius, y: CDS.PanelShadow.far.y)
-                    .offset(x: open ? size.width - width - CanvasMetrics.pad : size.width + 32, y: Self.panelTop)
+                    // Moved in by its padding, not an offset: text selection follows the layout, so an offset panel's text
+                    // couldn't be selected.
+                    .padding(.leading, open ? size.width - width - CanvasMetrics.pad : size.width + 32)
+                    .padding(.top, Self.panelTop)
                     .opacity(open ? 1 : 0)
                     .motion(.spatial, value: open)
                     .allowsHitTesting(open)

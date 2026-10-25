@@ -299,7 +299,9 @@ struct RouterPageView: View {
                         .flightTarget(historyHidden ? nil : "history", flashes: false)
                         .column(historyWidth)
                         .frame(width: historyWidth, height: height)
-                        .offset(x: wide ? nowWidth + CDS.hairline : 0)
+                        // Placed on the right by its frame, not an offset: text selection follows the layout, so an offset
+                        // column's text couldn't be selected.
+                        .frame(width: width, height: height, alignment: wide ? .trailing : .leading)
                         .opacity(historyHidden ? 0 : 1)
                         .allowsHitTesting(!historyHidden)
                         .accessibilityHidden(historyHidden)
