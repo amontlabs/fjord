@@ -110,6 +110,8 @@ enum AppWindowShots {
         var palette: PaletteShot?
         /// A view drawn on its own in the window instead of the app (for what the app's pages don't show by themselves).
         var standalone: ((Store, RouterModel) -> AnyView)?
+        /// A tooltip shown at once: the one whose title starts with this.
+        var tip: String?
     }
 
     /// How a shot opens the palette: with a query typed, on the first row's actions page, on fixture items rather than the
@@ -293,6 +295,17 @@ enum AppWindowShots {
             model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
                                      text: model.draft, mark: nil, unsure: true))
         }),
+        // The chip's tooltip open on a long card title: it wraps inside its box.
+        Shot(name: "router-predicting-tip", destination: { _ in .router }, compose: { model, store in
+            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
+            model.draft = "use sqlite for now, and add an index on the user id"
+            let target = "answer:\(card.id)"
+            let long = "Migrate the authentication middleware to the new session token format and keep the legacy cookie working"
+            model.live.preview(.init(target: target, title: long,
+                                     detail: "card “\(long)” (Question · lookout-with-a-rather-long-project-name)",
+                                     text: model.draft, mark: card.id))
+            model.highlighted = card.id
+        }, tip: "Jev thinks"),
         Shot(name: "router-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
             store.router.cards = store.router.cards.map { var c = $0; if c.isOpen { c.addressedAt = Date(); c.addressedBy = .you }; return c }
             if let d = store.router.decisions.first(where: { !$0.links.changes.isEmpty }) { model.expanded.insert(d.id.uuidString) }
@@ -1131,7 +1144,7 @@ enum AppWindowShots {
                                sidebar: SidebarState(defaults: nil, collapsed: shot.sidebarHidden),
                                // Glass can't be captured: shots draw the opaque chrome, whatever the Mac's settings.
                                chrome: Chrome(mode: .opaque))
-        let controller = NSHostingController(rootView: root)
+        let controller = NSHostingController(rootView: root.environment(\.previewTip, shot.tip))
         controller.sizingOptions = []
         let window = ShotWindow(contentRect: NSRect(origin: .zero, size: shot.size),
                                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],

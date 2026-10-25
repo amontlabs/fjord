@@ -470,7 +470,7 @@ private struct Tip: ViewModifier {
                 }
             }
             .onAppear {
-                if previewTip == title {
+                if let previewTip, title.hasPrefix(previewTip) {
                     measuring = true
                     DispatchQueue.main.async { show() }
                 }
@@ -526,7 +526,7 @@ private struct TipBubble: View {
             Text(request.title)
                 .font(CDS.sans(CDS.Tooltip.text.0))
                 .foregroundStyle(CDS.Text.primary)
-                .frame(maxWidth: Self.inner, alignment: .leading)
+                .frame(width: Self.width(of: request.title), alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             if let detail {
                 Text(detail)
