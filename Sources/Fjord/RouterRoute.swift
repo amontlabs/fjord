@@ -90,8 +90,8 @@ extension RouterTools {
     static let nextLatest = 3
 
 
-    /// What Jev routes among: the sessions (working, then the 20 most recent others), the cards of sessions not among them,
-    /// a new session per project, and the intents. `projects`: folders you tagged; only theirs then. `including`: targets
+    /// What Jev routes among: the sessions (working, then the 20 most recent others), the cards waiting on you of sessions
+    /// not among them, a new session per project, and the intents. `projects`: folders you tagged; only theirs then. `including`: targets
     /// (`session:<id>`, `answer:<card>`, `new:<folder>`) that are there whatever the limits leave out.
     func destinations(_ store: Store, projects: Set<String>? = nil, including: [String] = [], now: Date = Date()) -> [Destination] {
         let cards = store.routerShownOpenCards.filter {
@@ -126,9 +126,12 @@ extension RouterTools {
             out.append(Destination(target: mine.last.map { "answer:\($0.id)" } ?? "session:\(s.id)", name: unique(title),
                                    criteria: criteria, sessionID: s.id))
         }
-        // A card whose session isn't offered (gone from the list): itself.
+        // A card whose session isn't offered (gone from the list): itself, when it waits on you. A finished turn's card
+        // stays open until you archive it, so these were every old session you never archived (35 of 53 offered
+        // sessions on one of your boards were idle a day or more), each one more pull away from a new session; the
+        // measured boards (evals/router) never offered them.
         let offered = Set(sessions.map(\.id))
-        for card in cards where !offered.contains(card.sessionID) {
+        for card in cards where !offered.contains(card.sessionID) && Self.waitsOnYou.contains(card.kind) {
             let project = store.routerSessionProject(card.sessionID).name
             let criteria: [String: Any] = ["kind": "Claude Code session", "project": Self.hinted(project, 80),
                                            "now": Self.cardStatus(store, card) ?? "finished: \(Self.hinted(card.text, 300))"]
