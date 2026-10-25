@@ -699,6 +699,35 @@ enum AppWindowShots {
             store.router.decisions[i].outcome = .done
             store.routerDispatcher.preview(flying: [id])
         }, appearance: .aqua),
+        // The Router's run in its pill over the composer: the reply streaming into a small box (its end in sight), what the run
+        // is at before any reply, the box opened out to the thinking and tool calls, and the answer kept after the run.
+        Shot(name: "router-pill-doing", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .doing)
+        }, appearance: .aqua),
+        Shot(name: "router-pill-streaming", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .streaming)
+        }, appearance: .aqua),
+        Shot(name: "router-pill-streaming-dark", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .streaming)
+        }, appearance: .darkAqua),
+        Shot(name: "router-pill-expanded", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .streaming, expanded: true)
+        }, appearance: .aqua),
+        Shot(name: "router-pill-expanded-dark", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .streaming, expanded: true)
+        }, appearance: .darkAqua),
+        Shot(name: "router-pill-answered", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .answered)
+        }, appearance: .aqua),
+        Shot(name: "router-pill-answered-dark", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .answered)
+        }, appearance: .darkAqua),
+        Shot(name: "router-pill-answered-expanded", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .answered, expanded: true)
+        }, appearance: .aqua),
+        Shot(name: "router-pill-answered-expanded-dark", destination: { _ in .router }, compose: { model, store in
+            runPill(model, store, .answered, expanded: true)
+        }, appearance: .darkAqua),
         // The message being sent goes to its session once the canvas is up, held mid-arc; an earlier one landed on a card.
         Shot(name: "router-canvas-flight", destination: { _ in .router }, size: canvasSize, compose: { model, store in
             flight(model, store)
@@ -855,6 +884,32 @@ enum AppWindowShots {
             decisions[i].outcome = .done
             decisions[i].decision.targetID = "session:local_demo-transfer"
             store.router.decisions = decisions
+        }
+    }
+
+    private enum RunPillState { case doing, streaming, answered }
+
+    /// The demo's message as a Router run: its live state (or, `answered`, the reply it ended with and the state it kept).
+    private static func runPill(_ model: RouterModel, _ store: Store, _ state: RunPillState, expanded: Bool = false) {
+        pending(model, store, asks: false)
+        model.layout = .list
+        guard let id = store.routerDispatcher.flying.first,
+              let i = store.router.decisions.firstIndex(where: { $0.id == id }) else { return }
+        let reply = "Two sessions are working: the CI fix on lookout, which is rerunning the build, and the docs update. "
+            + "Nothing needs you right now, and the one card waiting is the release notes review, which can wait for tomorrow."
+        let steps: [RouterRunLive.Step] = [.init(tool: "board"), .init(tool: "explain_entry", summary: "entry: card-12, deep: true")]
+        let thinking = "The user asks what is going on. I should read the board, then look at the one card waiting."
+        let run = RouterRunLive(reply: state == .doing ? "" : state == .streaming ? String(reply.prefix(150)) : reply,
+                                thinking: thinking, steps: state == .doing ? [steps[0]] : steps)
+        if expanded { model.flights.toggle(id) }
+        let runs = store.routerDispatcher.progress
+        if state == .answered {
+            store.router.decisions[i].decision.targetID = "question"
+            store.router.decisions[i].reply = reply
+            store.router.decisions[i].outcome = .done
+            store.routerDispatcher.preview(flying: [id], kept: [id: run])
+        } else {
+            store.routerDispatcher.preview(progress: runs, flying: [id], live: [id: run])
         }
     }
 

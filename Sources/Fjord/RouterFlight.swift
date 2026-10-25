@@ -33,12 +33,17 @@ struct FlightFramesKey: PreferenceKey {
             /// It went and has no place in sight to fly to: it says where, for a moment, then leaves. Clicked, it opens that
             /// session (nil: a card's answer, nothing to open).
             case sent(String, session: String?)
+            /// The Router answered (a question, a change to Fjord) and the answer is in the history: the pill stays, with the
+            /// reply, until it is dismissed or you send your next message.
+            case answered(String)
             /// Fading out of the stack (dismissed, or stopped and said so).
             case leaving
         }
         var id: UUID
         var text: String
         var phase: Phase = .pending
+        /// An answered pill fading out keeps its look.
+        var fading = false
         /// How many times it was sent again (Retry) before this one: a failure that comes at once says so.
         var retries = 0
     }
@@ -74,6 +79,12 @@ struct FlightFramesKey: PreferenceKey {
     /// Whether the places are measured (`frames`): only while a message is on its way (a pill pending, or flying), so the
     /// page's cards and rows carry no measuring the rest of the time. Written only when it changes.
     private(set) var tracking = false
+    /// The pills whose run is opened out (its thinking and tool calls listed, the reply whole).
+    private(set) var expanded: Set<UUID> = []
+
+    func toggle(_ id: UUID) {
+        if !expanded.insert(id).inserted { expanded.remove(id) }
+    }
 
     private func track() {
         // A pill that failed (waiting for its Retry or dismissal) or is leaving goes nowhere: it measures nothing.
@@ -111,6 +122,8 @@ struct FlightFramesKey: PreferenceKey {
             seen.insert(id)
             // A part of a divided message is read as an entry of its own: its words are the pill's.
             guard let entry = store.router.record(id), case .you(let text) = entry.trigger else { continue }
+            // Your next message: the answers still shown have been read.
+            for old in pills { if case .answered = old.phase { drop(old.id, store: store) } }
             // The parts take the place of the message's pill, in its order.
             if let parent = store.router.parent(of: id), let at = pills.firstIndex(where: { $0.id == parent }) {
                 pills.insert(Pill(id: id, text: text, retries: retried[id] ?? 0), at: at)
@@ -133,7 +146,11 @@ struct FlightFramesKey: PreferenceKey {
             // A part held for another place's answer is in the history, with Send now: its pill goes there, not on spinning.
             let holding = dispatcher.held[pill.id] != nil && Self.holds(entry)
             if Self.went(entry) || holding || (!running && !asking && entry.outcome != .pending && entry.reply != nil && !Self.failed(entry)) {
-                launch(pill, to: holding ? "history" : Self.landing(entry), store: store)
+                let target = holding ? "history" : Self.landing(entry)
+                // An answer in the history stays where it was said, readable, rather than flying into a history out of sight.
+                if target == "history", !holding, let reply = entry.reply, !reply.isEmpty { set(pill.id, .answered(reply)) } else {
+                    launch(pill, to: target, store: store)
+                }
             } else if !running, !asking, entry.outcome != .pending {
                 if let why = Self.failure(entry) {
                     let stopped = why.hasPrefix("Stopped")
@@ -303,7 +320,11 @@ struct FlightFramesKey: PreferenceKey {
     }
 
     private func leave(_ id: UUID, store: Store) {
-        set(id, .leaving)
+        if case .answered? = pills.first(where: { $0.id == id })?.phase {
+            if let i = pills.firstIndex(where: { $0.id == id }) { pills[i].fading = true }
+        } else {
+            set(id, .leaving)
+        }
         Task {
             try? await Task.sleep(for: .milliseconds(160))
             drop(id, store: store)
@@ -312,6 +333,7 @@ struct FlightFramesKey: PreferenceKey {
 
     private func drop(_ id: UUID, store: Store) {
         pills.removeAll { $0.id == id }
+        expanded.remove(id)
         finish(id, store: store)
     }
 
@@ -467,7 +489,7 @@ struct FlightStack: View {
                     }
                 }
                 .flightFrame("pill:\(pill.id)")
-                .opacity(pill.phase == .leaving ? 0 : 1)
+                .opacity(pill.phase == .leaving || pill.fading ? 0 : 1)
                 // Rises out of the composer; gone at once when it flies (the flying copy takes its place).
                 .transition(.asymmetric(insertion: reduce ? .opacity : .offset(y: 26).combined(with: .opacity), removal: .identity))
             }
@@ -479,7 +501,8 @@ struct FlightStack: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .motion(.glass, value: flights.pills.map { "\($0.id)\($0.phase)" } + asks.map(\.id.uuidString))
+        .motion(.glass, value: flights.pills.map { "\($0.id)\($0.phase)\($0.fading)" } + asks.map(\.id.uuidString)
+                + flights.expanded.map(\.uuidString).sorted())
         .onChange(of: signature, initial: true) { flights.sync(store: store) }
     }
 
@@ -505,9 +528,16 @@ private struct FlightPill: View {
         switch pill.phase {
         case .pending, .leaving:
             let status = flights.status(pill.id, store: store)
-            FlightPillFace(text: pill.text, status: status)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(pill.text), \(status)")
+            if pill.phase == .pending, let live = store.routerDispatcher.live[pill.id], !live.isEmpty {
+                FlightRunCard(flights: flights, pill: pill, status: status, live: live, answer: nil) { }
+            } else {
+                FlightPillFace(text: pill.text, status: status)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(pill.text), \(status)")
+            }
+        case .answered(let reply):
+            FlightRunCard(flights: flights, pill: pill, status: "", live: store.routerDispatcher.lastLive[pill.id] ?? RouterRunLive(),
+                          answer: reply) { flights.dismiss(pill.id, store: store) }
         case .sent(let title, let session):
             let said = "Sent to \(title) ✓"
             Button {
@@ -538,6 +568,173 @@ private struct FlightPill: View {
             }
             .flightPillShape()
         }
+    }
+}
+
+/// A Router run in its pill: the pill grown into a small box under its face. Pending, the reply streams into the box (its
+/// last lines; before any, what the run is at, muted); answered, the reply stays in it, with a × to dismiss it. The chevron
+/// opens the box out to the run's thinking and tool calls, live or as recorded.
+private struct FlightRunCard: View {
+    let flights: RouterFlights
+    let pill: RouterFlights.Pill
+    /// What a pending pill says after its words.
+    let status: String
+    let live: RouterRunLive
+    /// The reply once the run ended; nil while it goes.
+    let answer: String?
+    let dismiss: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    private var expanded: Bool { flights.expanded.contains(pill.id) }
+    /// Everything the box has to show past the pill.
+    private var reply: String { answer ?? live.reply }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                if answer == nil {
+                    FjordLoader(color: CDS.Text.secondary, label: status).frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(CDS.Text.accent)
+                        .frame(width: 14, height: 14)
+                }
+                Text(pill.text).cdsText((13, 18), .regular, answer == nil ? CDS.Text.primary : CDS.Text.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+                if answer == nil {
+                    Text(status).cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).fixedSize()
+                }
+                Spacer(minLength: 0)
+                FlightChevron(expanded: expanded) {
+                    withAnimation(Motion.spatial.resolved(reduce: reduce)) { flights.toggle(pill.id) }
+                }
+                if answer != nil { ChipClose(label: "Dismiss the answer", action: dismiss) }
+            }
+            .padding(.horizontal, 12).frame(height: 34)
+            Rectangle().fill(CDS.border).frame(height: 1)
+            Group {
+                if expanded {
+                    FlightRunLog(live: live, answer: answer)
+                } else {
+                    FlightRunPeek(live: live, answer: answer)
+                }
+            }
+            .transition(.opacity)
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+        .flightPillGround()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(answer == nil ? "\(pill.text), \(status)" : "\(pill.text), answered")
+    }
+}
+
+private struct FlightChevron: View {
+    let expanded: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @State private var focused = false
+
+    var body: some View {
+        let help = expanded ? "Hide what it did" : "Show what it did"
+        Button(action: action) {
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .medium))
+                .rotationEffect(.degrees(expanded ? 180 : 0))
+                .foregroundStyle(hovering ? CDS.Text.primary : CDS.Text.muted)
+                .frame(width: CDS.Density.compact.controlNested, height: CDS.Density.compact.controlNested)
+                .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(hovering ? CDS.Fill.ghostHover : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .tip(help)
+        .accessibilityLabel(help)
+        .accessibilityValue(expanded ? "Shown" : "Hidden")
+    }
+}
+
+/// The box closed: about three lines. Streaming, the reply's end (the line being written is always in sight); answered, its
+/// start. Before any reply, the run's latest step or thought, muted.
+private struct FlightRunPeek: View {
+    let live: RouterRunLive
+    let answer: String?
+    /// The text's whole height: the box is that, up to its lines.
+    @State private var natural: CGFloat = 0
+    private static let lines: CGFloat = 3
+    private static let line: CGFloat = 18
+
+    /// What the box says, and whether it is only what the run is at.
+    private var shown: (text: String, doing: Bool) {
+        let reply = answer ?? live.reply
+        if !reply.isEmpty { return (reply, false) }
+        if let step = live.steps.last { return (FlightRunLog.words(step), true) }
+        let thought = live.thinking.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
+        return (thought, true)
+    }
+
+    var body: some View {
+        let (text, doing) = shown
+        let tail = answer == nil && !doing
+        Text(text).cdsText((13, Self.line), .regular, doing ? CDS.Text.muted : CDS.Text.primary)
+            .lineLimit(tail ? nil : Int(Self.lines))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { natural = $0 }
+            .frame(height: min(max(natural, Self.line), Self.lines * Self.line), alignment: tail ? .bottomLeading : .topLeading)
+            .clipped()
+            .mask {
+                // The first line fades into the top when the reply runs past the box.
+                VStack(spacing: 0) {
+                    if tail && text.count > 120 {
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 10)
+                    }
+                    Color.black
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .accessibilityLabel(text)
+    }
+}
+
+/// The box opened out: the run's thinking (muted), its tool calls in order, then the reply; up to a height, then it
+/// scrolls, and keeps to the bottom while the run goes.
+private struct FlightRunLog: View {
+    let live: RouterRunLive
+    let answer: String?
+    @State private var height: CGFloat = 0
+    static let maxHeight: CGFloat = 220
+
+    /// A tool call as a line: "explain_entry · entry: card-12".
+    static func words(_ step: RouterRunLive.Step) -> String { step.summary.isEmpty ? step.tool : step.tool + " · " + step.summary }
+
+    var body: some View {
+        let thinking = live.thinking.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reply = answer ?? live.reply
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !thinking.isEmpty {
+                        Text(thinking).cdsText((12, 16), .regular, CDS.Text.muted).italic()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ForEach(Array(live.steps.enumerated()), id: \.offset) { _, step in
+                        Text(Self.words(step)).cdsText((12, 16), .regular, CDS.Text.secondary).lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !reply.isEmpty {
+                        Text(reply).cdsText((13, 18), .regular, CDS.Text.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, thinking.isEmpty && live.steps.isEmpty ? 0 : 2)
+                    }
+                    Color.clear.frame(height: 0).id("end")
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            }
+            .frame(height: min(max(height, 1), Self.maxHeight))
+            .onChange(of: live) { if answer == nil { proxy.scrollTo("end", anchor: .bottom) } }
+            .onAppear { if answer == nil { proxy.scrollTo("end", anchor: .bottom) } }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("What the Router did")
     }
 }
 

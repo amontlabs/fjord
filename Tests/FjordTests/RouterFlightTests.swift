@@ -126,20 +126,51 @@ import Testing
         #expect(flights.pills.isEmpty && s.routerDispatcher.flying.isEmpty)
     }
 
-    @Test func anAnswerWithItsHistoryOutOfSightLeavesTheStack() async {
+    @Test func anAnswerStaysInItsPillReadableUntilDismissed() async {
         let (s, flights, f) = setup()
-        // The canvas with its history pane closed: nowhere for an answer to land, and nothing to name.
+        // The canvas with its history pane closed: nowhere for an answer to land.
         flights.frames = [:]
         f.ranked = [.init(target: "question", p: 0.9), .init(target: "unclear", p: 0.1)]
-        s.routerDispatcher.effects.run = { _, _, _ in RouterRun.Answer(reply: "Nothing is unread.", done: "answered") }
+        s.routerDispatcher.effects.run = { tools, _, _ in
+            tools.watch?(RouterRunLive(reply: "Nothing is unread.", steps: [.init(tool: "board")]))
+            for _ in 0..<200 where s.routerDispatcher.live.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+            return RouterRun.Answer(reply: "Nothing is unread.", done: "answered")
+        }
         let id = send("is anything unread?", s)
         flights.sync(store: s)
         await waitUntil { f.finished.contains(id!) }
         #expect(s.router.record(id!)?.reply == "Nothing is unread.")
         flights.sync(store: s)
+        #expect(flights.pills.first?.phase == .answered("Nothing is unread."), "the answer stays, it doesn't spin on or leave")
+        #expect(s.routerDispatcher.live.isEmpty && s.routerDispatcher.lastLive[id!]?.steps.map(\.tool) == ["board"], "what the run did is kept for it")
+        #expect(!flights.tracking && flights.flights.isEmpty)
+        flights.toggle(id!)
+        #expect(flights.expanded == [id!])
+        flights.sync(store: s)
+        #expect(flights.pills.count == 1, "syncing again changes nothing")
+        flights.dismiss(id!, store: s)
         await waitUntil { flights.pills.isEmpty }
-        #expect(flights.pills.isEmpty, "the answered pill doesn't spin on over the composer")
-        #expect(s.routerDispatcher.flying.isEmpty)
+        #expect(flights.pills.isEmpty && flights.expanded.isEmpty && s.routerDispatcher.flying.isEmpty)
+        #expect(s.routerDispatcher.lastLive[id!] == nil)
+    }
+
+    @Test func yourNextMessageTakesAnAnswerAway() async {
+        let (s, flights, f) = setup()
+        f.ranked = [.init(target: "question", p: 0.9), .init(target: "unclear", p: 0.1)]
+        s.routerDispatcher.effects.run = { _, _, _ in RouterRun.Answer(reply: "Nothing is unread.", done: "answered") }
+        let first = send("is anything unread?", s)
+        flights.sync(store: s)
+        await waitUntil { f.finished.contains(first!) }
+        flights.sync(store: s)
+        #expect(flights.pills.first?.phase == .answered("Nothing is unread."))
+        f.hold = true
+        f.ranked = [.init(target: "session:local_b", p: 0.9), .init(target: "unclear", p: 0.1)]
+        let second = send("add a changelog entry to the docs", s)
+        flights.sync(store: s)
+        #expect(flights.pills.map(\.id) == [second!], "the answer was read: it goes when the next message is sent")
+        await waitUntil { f.held != nil }
+        f.held?.resume()
+        await waitUntil { f.finished.contains(second!) }
     }
 
     @Test func aCanvasFlightWaitsForItsNewWorkingRowAndLandsOnlyOnce() async throws {
