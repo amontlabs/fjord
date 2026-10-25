@@ -199,7 +199,8 @@ struct FlightFramesKey: PreferenceKey {
             launching.remove(pill.id)
             guard let landing else {
                 // Nowhere in sight to land (the Brief has no row for it): the pill says where it went before it leaves.
-                guard let title = Self.destination(of: target, store: store) else { return finish(pill.id, store: store) }
+                // Nothing to name either (an answer, its history out of sight): it leaves, never spinning on in the stack.
+                guard let title = Self.destination(of: target, store: store) else { return leave(pill.id, store: store) }
                 set(pill.id, .sent(title, session: target.hasPrefix("session:") ? String(target.dropFirst(8)) : nil))
                 try? await Task.sleep(for: Self.confirmation)
                 if case .sent? = pills.first(where: { $0.id == pill.id })?.phase { leave(pill.id, store: store) }

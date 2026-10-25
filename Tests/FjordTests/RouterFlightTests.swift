@@ -126,6 +126,22 @@ import Testing
         #expect(flights.pills.isEmpty && s.routerDispatcher.flying.isEmpty)
     }
 
+    @Test func anAnswerWithItsHistoryOutOfSightLeavesTheStack() async {
+        let (s, flights, f) = setup()
+        // The canvas with its history pane closed: nowhere for an answer to land, and nothing to name.
+        flights.frames = [:]
+        f.ranked = [.init(target: "question", p: 0.9), .init(target: "unclear", p: 0.1)]
+        s.routerDispatcher.effects.run = { _, _, _ in RouterRun.Answer(reply: "Nothing is unread.", done: "answered") }
+        let id = send("is anything unread?", s)
+        flights.sync(store: s)
+        await waitUntil { f.finished.contains(id!) }
+        #expect(s.router.record(id!)?.reply == "Nothing is unread.")
+        flights.sync(store: s)
+        await waitUntil { flights.pills.isEmpty }
+        #expect(flights.pills.isEmpty, "the answered pill doesn't spin on over the composer")
+        #expect(s.routerDispatcher.flying.isEmpty)
+    }
+
     @Test func aCanvasFlightWaitsForItsNewWorkingRowAndLandsOnlyOnce() async throws {
         let (store, flights, fake) = setup()
         let model = RouterModel()
