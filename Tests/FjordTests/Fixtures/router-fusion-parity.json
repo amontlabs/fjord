@@ -3114,8 +3114,8 @@
 "D1": 0
 }
 },
-"sure": true,
-"top": "session:L12"
+"sure": false,
+"top": null
 },
 {
 "id": "ev-13",
@@ -6492,8 +6492,8 @@
 "S1": 0
 }
 },
-"sure": true,
-"top": "session:L5"
+"sure": false,
+"top": null
 },
 {
 "id": "ev-27",
@@ -7729,8 +7729,8 @@
 "C2": 0.0
 }
 },
-"sure": true,
-"top": "session:M1"
+"sure": false,
+"top": null
 },
 {
 "id": "ev-34",
@@ -10457,8 +10457,8 @@
 "M1": 0.0
 }
 },
-"sure": false,
-"top": null
+"sure": true,
+"top": "new:lcu"
 },
 {
 "id": "ev-51",
@@ -13963,8 +13963,8 @@
 "C2": 0.0
 }
 },
-"sure": true,
-"top": "session:L6"
+"sure": false,
+"top": null
 },
 {
 "id": "ev-70",
@@ -14134,8 +14134,8 @@
 "M2": 0.0
 }
 },
-"sure": true,
-"top": "session:C4"
+"sure": false,
+"top": null
 },
 {
 "id": "hd-01",
@@ -23969,8 +23969,8 @@
 "s2": 0
 }
 },
-"sure": false,
-"top": null
+"sure": true,
+"top": "new:lookout"
 },
 {
 "id": "hd-51",
@@ -33535,8 +33535,8 @@
 "s14": 0.4335979475374046
 }
 },
-"sure": false,
-"top": null
+"sure": true,
+"top": "new:lookout"
 },
 {
 "id": "tr-proj-02",
@@ -36182,8 +36182,8 @@
 "s6": 0
 }
 },
-"sure": true,
-"top": "session:s8"
+"sure": false,
+"top": null
 },
 {
 "id": "tr-comp-05",
@@ -49324,8 +49324,8 @@
 "a18": 0.0
 }
 },
-"sure": true,
-"top": "question"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-020",
@@ -69819,8 +69819,8 @@
 "b17": 0.0
 }
 },
-"sure": true,
-"top": "session:b7"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-071",
@@ -80966,8 +80966,8 @@
 "c18": 0.0
 }
 },
-"sure": true,
-"top": "question"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-098",
@@ -82203,8 +82203,8 @@
 "c18": 0
 }
 },
-"sure": true,
-"top": "session:c10"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-101",
@@ -86081,8 +86081,8 @@
 "d15": 0
 }
 },
-"sure": true,
-"top": "session:d4"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-112",
@@ -95789,8 +95789,8 @@
 "e5": 0.0
 }
 },
-"sure": true,
-"top": "session:a5"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-135",
@@ -98633,8 +98633,8 @@
 "e5": 0
 }
 },
-"sure": true,
-"top": "session:a10"
+"sure": false,
+"top": null
 },
 {
 "id": "ho-141",
@@ -100597,8 +100597,8 @@
 "d15": 0.2907371118953714
 }
 },
-"sure": false,
-"top": null
+"sure": true,
+"top": "new:fjord-site"
 },
 {
 "id": "ho-146",

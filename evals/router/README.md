@@ -219,3 +219,49 @@ Caveats: one Haiku sample per line (no variance across rewrites); 20 of the 610 
 line in any format; shuffled leaves a board with a single described session unchanged; real/data/tree_*.json hold
 redacted (real/boards.redact) text derived lines only on this machine.
 
+
+## A new session, or the latest one (2026-10-25, explore/v2_new)
+
+Your report: the Router keeps sending what is plainly new work to an existing session, often an old one. Your Router
+traffic agrees (`python3 -m v2.build.traffic export`, 18 routings with an outcome since 2026-10-15): 8 went to a new
+session, 5 of them after a correction, and RouteFusion's pick was a new session for 3 of the 8. Why:
+
+1. **The fusion pulls toward the latest session.** Every session option can carry `fin0`–`fin2`, `run`, `told0`, `nxt`
+   and the BM25 fields (always 1 for the best match, however weak); a new session had a constant 0.66 and Jev's log p
+   at 0.84. Jev at 0.75 for "New session in lookout: …" came out 0.45 against 0.37 for the session told a minute
+   before (an ask); Jev at 0.54 for a new session came out 0.32 against 0.47 for a session he gave 0.22.
+2. **Recency had no age.** The only session of a narrowed project, idle a week, took `fin0` and `told0` and was the pick
+   at 0.97 where Jev gave it 0.25 ("is it a real one?", corrected to a new session).
+3. **Old sessions were offered.** A card whose session is beyond the 20 latest was offered as itself, and a finished
+   turn's card stays open until you archive it: on 2026-10-25, 35 of the 53 sessions offered were idle a day or more.
+   The measured boards never offered them (formats.sessions_ordered).
+4. Not the cause here: the instruction's "start a new session only when … no existing session does that work" (Jev's
+   own top was the new session for most of your new-session messages), nor a refit: refit on real moments, where 5% of
+   messages start a session, `new` moves only to 0.84 and an age feature to −0.35 (`experiments.py`).
+
+What changed (RouterRoute.swift): a session beyond the 20 latest is offered only while its card waits on you;
+`new` 0.66 → 1.5; a finished session idle `oldHours` (12 h) or more, not waiting on you, has none of the recency
+features. The replay reads `oldHours` from Swift as it reads the weights.
+
+| your traffic (18) | pick right | sent right | sent wrong | asked | new session: picked | session: new picked |
+|---|---|---|---|---|---|---|
+| before | 12 | 9 | 0 | 9 | 3/8 | 0/10 |
+| now | 12 | 5 | 0 | 13 | 5/8 | 2/10 |
+
+The two "session: new picked" and the four sends that became asks are one thread: the PR conflicts you kept sending
+to the week-old session; those are asks now, with that session on the card.
+
+| dev replay, cached (`v2.run.episodes`, 800 submits, 6 new calls) | before | now |
+|---|---|---|
+| real moments, gold new session: fused pick new / sent there | 2 / 1 of 20 | 5 / 1 of 20 |
+| real moments, gold session: fused pick new | 0 of 373 | 5 of 373 |
+| real moments: sent right / wrong / asked | 92 / 7 / 294 | 87 / 4 / 302 |
+| rewrites, gold new session: fused pick new / sent there | 11 / 5 of 20 | 13 / 7 of 20 |
+| all dev, natural weighting: loss per submit (paired Δ, 95% CI) | 2.37 | 2.25 (−0.12 [−0.26, −0.01]) |
+| all dev: wrong sends per send | 5.9% | 4.7% (−1.3 [−2.7, −0.2]) |
+
+Real moments rarely start a session (20 of 393) and Jev reads them poorly there (his top was a new session for 8 of
+the 20 and for 19 of the 373 others), so most of them still ask. The parity fixture (Tests/FjordTests/Fixtures/
+router-fusion-parity.json) is decided again with `python3 -m explore.v2_new.parity --write` (the written sets that made
+it are gone; their inputs are in it): 17 of 360 change, 4 asks become new-session sends ("start a session in lookout
+to port…", "fjord-site: start a changelog page"), 11 session sends and 2 questions become asks.

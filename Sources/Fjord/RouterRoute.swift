@@ -220,6 +220,8 @@ extension RouterTools {
         var message = ""
         /// The sessions whose last message asks you something or proposes a next step.
         var leavesItToYou: Set<String> = []
+        /// The sessions whose card waits on you: never old (`RouteFusion.oldHours`), however long they have waited.
+        var waiting: Set<String> = []
     }
 
     func facts(_ store: Store, destinations: [Destination], message: String, now: Date = Date()) -> Facts {
@@ -233,6 +235,7 @@ extension RouterTools {
         // A session stopped on what it asks you (its turn still open) waits on you: not working.
         let waits = Set(store.routerShownOpenCards.filter { Self.waitsOnYou.contains($0.kind) }.map(\.sessionID))
         f.running = Set(sessions.filter { $0.running && !waits.contains($0.id) }.map(\.id))
+        f.waiting = Set(sessions.map(\.id)).intersection(waits)
         f.latest = sessions.filter { !f.running.contains($0.id) }.sorted { $0.lastActivity > $1.lastActivity }.map(\.id)
         for s in sessions { f.idleMinutes[s.id] = max(0, now.timeIntervalSince(s.lastActivity) / 60) }
         f.lastTold = store.lastTold().filter { f.targetOf[$0.key] != nil }.max { $0.value.at < $1.value.at }?.key
@@ -436,12 +439,18 @@ enum RouteFusion {
         "f_said": 1.11, "f_old": 1.36,                // the message's words in the session's last answer, older turns
         "f_you": -0.64,                               // …in what you last told it: a message repeating it starts anew
         "f_title": -0.57,                             // …in its title (it already weighs in Jev's reading)
-        "new": 0.66,
+        "new": 1.5,                                   // a new session (at 0.66 the latest session outweighed Jev)
         "question": -0.57, "compound": 1.03, "change_fjord": 0.63,
         "g_q": 1.26, "g_c": 2.11, "g_s": 2.26, "c2": 0.18,   // an intent's own gate
         "you": -1.46,                                 // "does it speak to one agent as you?" yes, against intents
         "ilong": -1.51,                               // an intent for a message over 80 characters
     ]
+    /// A finished session idle this many hours is old: what makes the latest sessions likely (`fin0`…, `told0`, `fin0u`,
+    /// `nxt`) says nothing of it, so it has none of them. A session working or waiting on you is never old. On real
+    /// moments a message went to a session idle 12 h or more once in 363, to one idle a day never; on your Router traffic
+    /// a session idle a week took `fin0` and `told0` as the only one in its project and was sent to at 0.98
+    /// (evals/router/explore/v2_new).
+    static let oldHours = 12.0
     static let sureness: [String: Double] = [
         "bias": -0.47, "lPtop": 0.69, "lgap": 0.09, "ljev": -0.10, "agree": 0.06, "u": -0.47, "lenlog": 0.00,
         "recent2": 0.10, "top_fin0": 0.07, "top_intent": 0.46, "top_new": 0.81, "top_reply": 0.32,
@@ -482,15 +491,16 @@ enum RouteFusion {
         for (target, p) in s.route where target != "unclear" {
             var x: [String: Double] = ["lp": log(max(p, 0.001))]
             if let id = sessionOf(target) {
-                let rank = f.latest.firstIndex(of: id)
+                let old = !f.running.contains(id) && !f.waiting.contains(id) && (f.idleMinutes[id] ?? 0) >= oldHours * 60
+                let rank = old ? nil : f.latest.firstIndex(of: id)
                 if let rank, rank <= 2 { x["fin\(rank)"] = 1 }
                 if f.running.contains(id) { x["run"] = 1 }
                 let idle5 = !f.running.contains(id) && (f.idleMinutes[id] ?? .infinity) <= 5
                 x["reply"] = s.reply[id] ?? 0
-                if f.lastTold == id { x["told0"] = 1 }
+                if f.lastTold == id && !old { x["told0"] = 1 }
                 x["fin0u"] = (rank == 0 ? 1 : 0) * u
                 x["idle5u"] = (idle5 ? 1 : 0) * u
-                x["nxt"] = s.next[id] ?? 0
+                x["nxt"] = old ? 0 : s.next[id] ?? 0
                 for (field, byID) in s.lexical { x[field] = byID[id] ?? 0 }
                 x["session"] = 1
             } else if target.hasPrefix("new:") {
