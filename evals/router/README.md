@@ -235,13 +235,15 @@ session, 5 of them after a correction, and RouteFusion's pick was a new session 
 3. **Old sessions were offered.** A card whose session is beyond the 20 latest was offered as itself, and a finished
    turn's card stays open until you archive it: on 2026-10-25, 35 of the 53 sessions offered were idle a day or more.
    The measured boards never offered them (formats.sessions_ordered).
-4. Not the cause here: the instruction's "start a new session only when … no existing session does that work" (Jev's
-   own top was the new session for most of your new-session messages), nor a refit: refit on real moments, where 5% of
-   messages start a session, `new` moves only to 0.84 and an age feature to −0.35 (`experiments.py`).
+4. **The instruction leaned on existing sessions**: "start a new session only when the message asks for one or no
+   existing session does that work". Jev's own top was a new session for 3 of your 8 (`question` twice, `unclear`,
+   an existing session twice for the rest), and for 8 of the 20 real moments that start a session. A refit doesn't
+   reach this: on real moments, where 5% of messages start a session, `new` refits only to 0.84 and an age feature to
+   −0.35 (`experiments.py`).
 
 What changed (RouterRoute.swift): a session beyond the 20 latest is offered only while its card waits on you;
 `new` 0.66 → 1.5; a finished session idle `oldHours` (12 h) or more, not waiting on you, has none of the recency
-features. The replay reads `oldHours` from Swift as it reads the weights.
+features (the replay reads `oldHours` from Swift as it reads the weights); then the focus's last sentence (below).
 
 | your traffic (18) | pick right | sent right | sent wrong | asked | new session: picked | session: new picked |
 |---|---|---|---|---|---|---|
@@ -265,3 +267,20 @@ the 20 and for 19 of the 373 others), so most of them still ask. The parity fixt
 router-fusion-parity.json) is decided again with `python3 -m explore.v2_new.parity --write` (the written sets that made
 it are gone; their inputs are in it): 17 of 360 change, 4 asks become new-session sends ("start a session in lookout
 to port…", "fjord-site: start a changelog page"), 11 session sends and 2 questions become asks.
+
+The focus's last sentence, then (`focus.py`; formats.ROUTE_INSTRUCTIONS_V2 and RouterRoute.swift carry it): "A message
+that starts a task none of the sessions has been doing goes to a new session in its project, even when that project has
+sessions; one that continues, corrects or answers a session's own work goes to that session." With the fusion above,
+one new call per submit (393 real moments, 208 rewrites):
+
+| | old sentence | new sentence |
+|---|---|---|
+| real moments, gold new session: fused pick new / sent there | 5 / 1 of 20 | 9 / 1 of 20 |
+| real moments, gold session: fused pick new | 5 of 373 | 4 of 373 |
+| real moments: sent right / wrong / asked | 87 / 4 / 302 | 100 / 4 / 289 |
+| real moments: loss per submit (paired Δ, 95% CI) | 1.94 | 1.78 (−0.16 [−0.57, +0.22]) |
+| rewrites, gold new session: fused pick new | 13 of 20 | 14 of 20 |
+| rewrites: loss per submit | 2.33 | 1.90 (−0.44 [−1.31, +0.20]) |
+| your traffic (18 requests asked again) | 12 picks right, 5 sent right, 0 wrong | the same totals: 2 new-session asks now send, 2 session sends now ask |
+
+One sample of Jev per request: the losses are within noise; more new sessions picked right, no more wrong sends.

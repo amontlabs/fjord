@@ -238,9 +238,13 @@ ROUTE_INSTRUCTIONS_V2 = {
     "question": "Where does the user's `message` go?",
     "focus": ("Decide about `message` alone; `earlier messages` only say what it refers to. A message addressed to a "
               "session (\"tell the CI one to…\", \"lcu: …\") goes to that existing session. A question about a session or "
-              "about what is going on (\"is the CI one done?\") is `question`, not a message to the session. Start a new "
-              "session only when the message asks for one or no existing session does that work."),
+              "about what is going on (\"is the CI one done?\") is `question`, not a message to the session. A message "
+              "that starts a task none of the sessions has been doing goes to a new session in its project, even when "
+              "that project has sessions; one that continues, corrects or answers a session's own work goes to that "
+              "session."),
 }
+# Until 2026-10-25 (explore/v2_new/focus.py) the shipped focus ended "Start a new session only when the message asks for
+# one or no existing session does that work."
 ROUTE_INSTRUCTIONS_V2B = {
     "question": "Where does the user's `message` go?",
     "focus": ("Decide about `message` alone. A message addressed to a session (\"tell the CI one to…\", \"lcu: …\") goes "
