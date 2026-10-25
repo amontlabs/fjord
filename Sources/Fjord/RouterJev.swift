@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // What the Router asks Jev besides where a sent message goes: the same question while you type (the composer shows his
@@ -62,6 +63,9 @@ final class RouterLiveTarget {
     var pinnedTitle: String?
     /// The prediction you clicked: while it is still where the draft goes, the send logs his pick as confirmed.
     var chosen: Prediction?
+    /// The chip's menu of other places is open (a click on the pick), and the row ↑↓ has lit.
+    var redirecting = false
+    var redirectIndex = 0
     /// The target you waved off for this draft: it isn't shown again, and the message doesn't go there unasked.
     private(set) var dismissed: String?
 
@@ -255,6 +259,7 @@ final class RouterLiveTarget {
         pinned = nil
         pinnedTitle = nil
         chosen = nil
+        redirecting = false
         dismissed = nil
         recipients = []
         previewing = false
@@ -270,6 +275,7 @@ final class RouterLiveTarget {
     /// The prediction and the parts go (they no longer hold), with nothing waved off.
     func clear() {
         prediction = nil
+        redirecting = false
         if division != nil { division = nil }
         if !chips.isEmpty { chips = [] }
         predicted = nil
@@ -356,16 +362,70 @@ extension RouterModel {
             live.clear()
             return predictTarget(store: store)
         }
+        pin(p, as: p.target)
+    }
+
+    /// Where the message can go instead of Jev's pick, as the chip's menu lists them: his pick first, then the other places
+    /// he ranked (as an ask would offer them), a new session in each project the draft is about (else the latest folders),
+    /// and "Choose folder…" last.
+    func redirectOptions(store: Store, limit: Int = 5) -> [RouterAskBack.Option] {
+        let context = context(store)
+        guard let p = live.valid(text: plainDraft(store), context: context, store: store) else { return [] }
+        let dispatcher = store.routerDispatcher
+        var options: [RouterAskBack.Option] = []
+        var seen = Set<String>()
+        func add(_ target: String) {
+            guard target != "unclear", target != RouteLabel.compound.rawValue, dispatcher.eligible(target, store: store),
+                  let option = dispatcher.option(target, store: store), seen.insert(option.id).inserted else { return }
+            options.append(option)
+        }
+        add(p.target)
+        for target in (p.found?.card ?? []) + (p.found?.ranked.map(\.target) ?? []) where options.count < limit { add(target) }
+        let folders = context.projects.isEmpty ? Array(store.knownFolders.filter { !$0.isEmpty }.prefix(2)) : context.projects
+        for folder in folders where options.count < limit + 2 { add("new:\(folder)") }
+        if let choose = dispatcher.option(RouterAskBack.chooseFolder, store: store) { options.append(choose) }
+        return options
+    }
+
+    /// A place picked from the chip's menu: pinned as Jev's pick is (a card becomes the reply). Only his own pick is logged as
+    /// confirmed.
+    func redirect(to target: String, store: Store) {
+        guard let p = live.valid(text: plainDraft(store), context: context(store), store: store) else {
+            live.clear()
+            return predictTarget(store: store)
+        }
+        guard target != p.target else { return pin(p, as: target) }
+        guard let option = store.routerDispatcher.option(target, store: store) else { return }
+        pin(RouterLiveTarget.Prediction(target: target, title: RouterLiveTarget.title(target, option),
+                                        detail: store.routerDispatcher.describe(target, store: store), text: p.text,
+                                        mark: RouterLiveTarget.mark(target, store: store)), as: target, jevs: false)
+    }
+
+    /// "Choose folder…" on the chip: a folder picked in the open panel gets a new session with the message.
+    func redirectToChosenFolder(store: Store) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Start a session here"
+        panel.message = "Choose the folder a new session should work in."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        redirect(to: "new:\(url.path)", store: store)
+    }
+
+    private func pin(_ p: RouterLiveTarget.Prediction, as target: String, jevs: Bool = true) {
         // A target picked ends an edit: the draft goes there instead.
         editing = nil
-        if p.target.hasPrefix("answer:") {
-            replyTo = String(p.target.dropFirst("answer:".count))
+        if target.hasPrefix("answer:") {
+            replyTo = String(target.dropFirst("answer:".count))
+            live.pinned = nil
+            live.pinnedTitle = nil
         } else {
-            live.pinned = p.target
+            live.pinned = target
             live.pinnedTitle = p.title
         }
         live.reset(keepingPin: true)
-        live.chosen = p
+        live.chosen = jevs ? p : nil
         focusRequest &+= 1
     }
 

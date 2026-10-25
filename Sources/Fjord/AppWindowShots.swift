@@ -306,6 +306,31 @@ enum AppWindowShots {
                                      text: model.draft, mark: card.id))
             model.highlighted = card.id
         }, tip: "Jev thinks"),
+        // A click on Jev's pick: the places the message can go instead, his pick first.
+        Shot(name: "router-predicting-redirect", destination: { _ in .router }, compose: { model, store in
+            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
+            model.draft = "use sqlite for now, and add an index on the user id"
+            let target = "answer:\(card.id)"
+            let others = store.claudeSessions.values.sorted { $0.lastActivity > $1.lastActivity }.prefix(2).map { "session:\($0.id)" }
+            let found = RouterDispatcher.Classification(ranked: ([target] + others).enumerated().map { .init(target: $1, p: 0.6 / Double($0 + 1)) },
+                                                        sure: true, assisted: true)
+            model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
+                                     text: model.draft, mark: card.id, found: found))
+            model.highlighted = card.id
+            model.live.redirecting = true
+            model.live.redirectIndex = 1
+        }),
+        Shot(name: "router-predicting-redirect-dark", destination: { _ in .router }, compose: { model, store in
+            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
+            model.draft = "use sqlite for now, and add an index on the user id"
+            let target = "answer:\(card.id)"
+            let others = store.claudeSessions.values.sorted { $0.lastActivity > $1.lastActivity }.prefix(2).map { "session:\($0.id)" }
+            let found = RouterDispatcher.Classification(ranked: ([target] + others).enumerated().map { .init(target: $1, p: 0.6 / Double($0 + 1)) },
+                                                        sure: true, assisted: true)
+            model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
+                                     text: model.draft, mark: card.id, found: found))
+            model.live.redirecting = true
+        }, appearance: .darkAqua),
         Shot(name: "router-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
             store.router.cards = store.router.cards.map { var c = $0; if c.isOpen { c.addressedAt = Date(); c.addressedBy = .you }; return c }
             if let d = store.router.decisions.first(where: { !$0.links.changes.isEmpty }) { model.expanded.insert(d.id.uuidString) }

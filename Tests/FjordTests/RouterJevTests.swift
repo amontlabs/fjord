@@ -142,6 +142,32 @@ import Testing
         #expect(model.removeLastChip() && model.live.pinned == nil, "Backspace at the start takes the pin off")
     }
 
+    @Test func theChipsMenuListsJevsPickFirstThenWhatHeRankedAndRedirectsPinTheOneChosen() {
+        let (s, model, _) = setup()
+        let read = RouterDispatcher.Classification(ranked: [.init(target: "answer:local_a#w1", p: 0.6), .init(target: "session:local_b", p: 0.3),
+                                                            .init(target: "unclear", p: 0.05), .init(target: "session:gone", p: 0.05)],
+                                                   sure: true, assisted: true)
+        func shown() {
+            model.live.preview(.init(target: "answer:local_a#w1", title: "Fix the login bug", detail: "card", text: "use sqlite", mark: "local_a#w1", found: read))
+            model.draft = "use sqlite"
+        }
+        shown()
+        let targets = model.redirectOptions(store: s).map(\.target)
+        #expect(targets.first == "answer:local_a#w1" && targets[1] == "session:local_b", "his pick, then what he ranked next")
+        #expect(!targets.contains("unclear") && !targets.contains("session:gone"), "nothing that can't be sent to")
+        #expect(targets.last == RouterAskBack.chooseFolder && Set(targets).count == targets.count)
+
+        model.redirect(to: "session:local_b", store: s)
+        #expect(model.live.pinned == "session:local_b" && model.replyTo == nil && model.live.prediction == nil)
+        #expect(model.live.chosen == nil, "not his pick: not logged as confirmed")
+        #expect(model.context(s).target == "session:local_b" && model.context(s).predicted == nil)
+
+        model.live.reset()
+        shown()
+        model.redirect(to: "answer:local_a#w1", store: s)
+        #expect(model.replyTo == "local_a#w1" && model.live.chosen?.target == "answer:local_a#w1", "his own pick is confirmed as before")
+    }
+
     @Test func aPinnedDraftEditedSinceKeepsItsTarget() {
         let (s, model, _) = setup()
         let read = RouterDispatcher.Classification(ranked: [.init(target: "session:local_b", p: 0.9)], sure: true, assisted: true)

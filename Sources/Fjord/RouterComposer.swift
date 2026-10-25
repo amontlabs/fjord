@@ -166,7 +166,7 @@ struct RouterComposer: View {
                 } else if model.live.dividing {
                     DividingChip()
                 } else if let prediction = model.live.prediction {
-                    PredictionChip(prediction: prediction) { model.pinPrediction(store: store) }
+                    PredictionChip(prediction: prediction, store: store, model: model)
                 }
             }
         }
@@ -353,32 +353,122 @@ struct ComposerChip: View {
     }
 }
 
-/// Jev's pick while you type: a ghost of the reply chip (dashed, no fill, no ×), muted; a click fixes it as the target.
+/// Jev's pick while you type: a ghost of the reply chip (dashed, no fill, no ×), muted. A click opens the places the message
+/// can go instead (`RedirectMenu`): his pick first, a pick there fixes it as the target.
 private struct PredictionChip: View {
     let prediction: RouterLiveTarget.Prediction
-    let pin: () -> Void
+    let store: Store
+    let model: RouterModel
     @State private var hovering = false
+    @State private var menuHeight: CGFloat = 0
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
-        Button(action: pin) {
+        Button { open() } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
                     .accessibilityHidden(true)
                 Text(prediction.title + (prediction.unsure ? "?" : "")).font(CDS.mono(13)).foregroundStyle(hovering ? CDS.Text.secondary : CDS.Text.muted)
                     .lineLimit(1).truncationMode(.tail)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .medium)).foregroundStyle(CDS.Text.muted)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, CDS.Density.compact.pad.md)
             .frame(height: CDS.Density.compact.control)
-            .background(shape.fill(hovering ? CDS.Fill.ghostHover : .clear))
+            .background(shape.fill(hovering || model.live.redirecting ? CDS.Fill.ghostHover : .clear))
             .overlay(shape.strokeBorder(CDS.border, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
             .contentShape(shape)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .tip("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)", "Click to fix it, Esc to clear")
+        .overlay(alignment: .topLeading) {
+            if model.live.redirecting {
+                RedirectMenu(store: store, model: model)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
+                    .offset(y: -menuHeight - 4)
+            }
+        }
+        .tip("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)", "Click to change where it goes, Esc to clear")
         .accessibilityLabel("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)")
-        .accessibilityHint("Fixes it as where the message goes")
+        .accessibilityHint("Opens the places it can go instead")
+    }
+
+    private func open() {
+        model.live.redirectIndex = 0
+        model.live.redirecting.toggle()
+    }
+}
+
+/// The places the message can go instead of Jev's pick, styled as the @ suggestions: his pick lit first, ↑↓ and Return (or a
+/// click) fix one as the target, Esc closes it.
+private struct RedirectMenu: View {
+    let store: Store
+    let model: RouterModel
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let d = CDS.Density.compact
+        let shape = RoundedRectangle(cornerRadius: d.panelRadius, style: .continuous)
+        let options = model.redirectOptions(store: store)
+        let index = min(model.live.redirectIndex, max(0, options.count - 1))
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.element.id) { i, option in
+                Button { pick(option) } label: {
+                    HStack(spacing: d.gap.xs) {
+                        Image(systemName: Self.symbol(option.target)).font(.system(size: 12)).foregroundStyle(CDS.Text.secondary)
+                            .frame(width: d.icon, height: d.icon)
+                        Text(option.title).font(CDS.sans(d.body.0)).foregroundStyle(CDS.Text.primary).lineLimit(1).layoutPriority(1)
+                        if !option.detail.isEmpty {
+                            Text(option.detail).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        if i == 0 { Text("Jev").font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted) }
+                    }
+                    .padding(.horizontal, d.pad.md)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: d.control)
+                    .background(RoundedRectangle(cornerRadius: d.radius, style: .continuous).fill(i == index ? CDS.Fill.ghostHover : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { if $0 { model.live.redirectIndex = i } }
+                .accessibilityLabel("\(option.title) \(option.detail)")
+                .accessibilityAddTraits(i == index ? .isSelected : [])
+            }
+        }
+        .padding(d.pad.xs)
+        .frame(width: 400)
+        .fixedSize(horizontal: true, vertical: true)
+        .background(shape.fill(CDS.Surface.s3))
+        .overlay(shape.strokeBorder(CDS.border, lineWidth: 1))
+        .shadow(color: CDS.PanelShadow.near.color, radius: CDS.PanelShadow.near.radius, y: CDS.PanelShadow.near.y)
+        .shadow(color: CDS.PanelShadow.far.color, radius: CDS.PanelShadow.far.radius, y: CDS.PanelShadow.far.y)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onAppear { focused = true }
+        .onKeyPress(.upArrow) { model.live.redirectIndex = max(0, index - 1); return .handled }
+        .onKeyPress(.downArrow) { model.live.redirectIndex = min(options.count - 1, index + 1); return .handled }
+        .onKeyPress(.return) { if options.indices.contains(index) { pick(options[index]) }; return .handled }
+        .onKeyPress(.escape) { close(); return .handled }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Where this goes")
+    }
+
+    private func pick(_ option: RouterAskBack.Option) {
+        model.live.redirecting = false
+        if option.target == RouterAskBack.chooseFolder { model.redirectToChosenFolder(store: store) }
+        else { model.redirect(to: option.target, store: store) }
+    }
+
+    private func close() {
+        model.live.redirecting = false
+        model.focusRequest &+= 1
+    }
+
+    static func symbol(_ target: String) -> String {
+        if target == RouterAskBack.chooseFolder { return "folder" }
+        return DivisionChips.glyph(target)
     }
 }
 
