@@ -282,7 +282,26 @@ def features(r, case):
             for d, f in out.items():
                 if f.get("sess"):
                     f[name] = fsc.get(d, 0) / m if m else 0
+    if STATE.get("old_hours") is not None:
+        old_out(out, case, STATE["old_hours"])
     return out
+
+
+RECENCY = ("fin0", "fin1", "fin2", "told0", "told10", "fin0u", "fin1u", "told0u", "nxt")
+
+
+def old_out(fs, case, hours):
+    """RouteFusion.oldHours: a finished session (not running, not waiting on you) idle `hours` or more has none of the
+    features that make the latest sessions likely."""
+    board = {s["id"]: s for s in case["board"]["sessions"]}
+    waiting = {c["session"] for c in case["board"].get("cards", []) if c.get("kind") in ("question", "plan", "asks", "approval", "permission")}
+    for d, f in fs.items():
+        s = board.get(d)
+        if not f.get("sess") or not s or s.get("running") or s.get("waits_on_you") or d in waiting:
+            continue
+        if (s.get("idle_min") or 0) >= hours * 60:
+            for k in RECENCY:
+                f.pop(k, None)
 
 
 FIELDS = {"f_said": dict(n=1, w_you=0, w_title=0, b=0.3, board="turns"),

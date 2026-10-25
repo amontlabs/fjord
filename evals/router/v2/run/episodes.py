@@ -113,6 +113,13 @@ def _shipped_weights():
     return weights, {**sureness, "_intent": intent}
 
 
+def _shipped_old_hours():
+    """RouteFusion.oldHours: a finished session idle this long has no recency features. None before it existed."""
+    source = Path(os.environ.get("ROUTER_SWIFT") or ROUTER.parents[1] / "Sources" / "Fjord" / "RouterRoute.swift")
+    match = re.search(r"static let oldHours = ([\d.]+)", source.read_text())
+    return float(match[1]) if match else None
+
+
 def _legacy_modules(format_name, policy_name):
     import formats
     import jev
@@ -126,6 +133,7 @@ def _legacy_modules(format_name, policy_name):
     formats.FORMATS.update(capabilities.FORMATS)
     lexical.install()
     lexical.STATE["fields"] = True
+    lexical.STATE["old_hours"] = _shipped_old_hours()
     fusion.case_features = final3.case_features
     final3._FIT["combo-o"] = _shipped_weights()
     if policy_name == "explore.final3:best":
