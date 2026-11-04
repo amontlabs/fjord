@@ -625,6 +625,10 @@ final class Store {
     var routerProposal: RouterProjectProposal?
     /// Proposals for later messages, waiting for the one up to end; the next shows then.
     var routerProposalQueue: [RouterProjectProposal] = []
+    /// A dropped proposal's message is back in the composer: the next proposal waits until it is sent or cleared.
+    var routerProposalHeld = false
+    /// Proposals were restored at launch (the dispatcher reattaches their history entries, `reattachProposals`).
+    @ObservationIgnored var onProposalsRestored: () -> Void = {}
     /// A proposal changed what is saved of it (`routerProposalsSaved`): written like any other persisted change.
     func routerProposalsChanged() { persistedRevision &+= 1 }
     /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.

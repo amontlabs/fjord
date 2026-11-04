@@ -147,8 +147,9 @@ import Testing
         #expect(engine.sent.map(\.project) == ["chan_A"])
     }
 
-    // 3: a second proposal waits its turn and shows when the first ends; neither message is orphaned.
-    @Test func aSecondProposalWaitsForTheFirst() {
+    // 3: a second proposal waits its turn; after Escape on the first, it shows only once that message leaves the composer,
+    // so a Return there is the message's, not a revision of the next.
+    @Test func aSecondProposalWaitsForTheFirstAndItsDroppedMessage() {
         let store = quiet()
         let model = RouterModel()
         let a = store.proposeProject(for: "first", first: first, reviser: RouterProjectFakeReviser(), engine: RouterProjectFakeEngine())
@@ -158,6 +159,10 @@ import Testing
         #expect(store.routerProposalQueue.map(\.message) == ["second"])
         #expect(model.dropProposal(store: store))
         #expect(model.draft == "first")
+        #expect(store.routerProposal == nil)
+        #expect(!model.answerProposal(store: store))
+        model.draft = ""
+        model.proposalDraftChanged(store: store)
         #expect(store.routerProposal === b)
         #expect(store.routerProposalQueue.isEmpty)
     }
@@ -185,8 +190,9 @@ import Testing
         p.confirm()
         await p.settled()
         #expect(p.nameFixed)
+        engine.board["fjord-ios-companion"] = ["chan_A"]
         engine.outcomes[.createProject] = .init(ok: false, cause: "a project named fjord-ios-companion already exists",
-                                                project: "chan_A", refused: true)
+                                                refused: true)
         p.confirm()
         await p.settled()
         #expect(p.phase == .created)
@@ -196,8 +202,9 @@ import Testing
     // 4: a name someone else's project has (refused at once) is not adopted.
     @Test func aNameTakenBeforeIsNotAdopted() async {
         let engine = RouterProjectFakeEngine()
+        engine.board["fjord-ios-companion"] = ["chan_other"]
         engine.outcomes[.createProject] = .init(ok: false, cause: "a project named fjord-ios-companion already exists",
-                                                project: "chan_other", refused: true)
+                                                refused: true)
         let p = make(engine)
         p.confirm()
         await p.settled()
@@ -260,6 +267,133 @@ import Testing
         await q.settled()
         #expect(engine2.ran.map(\.tool) == [.addRepo, .setInstructions, .preapproveFolder])
         #expect(engine2.sent.map(\.project) == ["chan_A"])
+    }
+
+    // Round 2, 1: a create the engine didn't take proves nothing: a later "name taken" isn't adopted.
+    @Test func aCreateNotTakenIsNotOurs() async {
+        let engine = RouterProjectFakeEngine()
+        engine.outcomes[.createProject] = .init(ok: false, cause: "Fjord's engine for claude.ai isn't running", refused: true)
+        let p = make(engine)
+        p.confirm()
+        await p.settled()
+        #expect(!p.nameFixed)
+        engine.board["fjord-ios-companion"] = ["chan_other"]
+        engine.outcomes[.createProject] = .init(ok: false, cause: "a project named fjord-ios-companion already exists", refused: true)
+        p.confirm()
+        await p.settled()
+        #expect(engine.sent.isEmpty)
+        guard case .failed = p.phase else { Issue.record("adopted: \(p.phase)"); return }
+    }
+
+    // Round 2, 1: after a taken but unconfirmed create, only a project that wasn't there before is adopted.
+    @Test func onlyAProjectNewSinceTheFirstCreateIsAdopted() async {
+        let engine = RouterProjectFakeEngine()
+        engine.board["fjord-ios-companion"] = ["chan_old"]
+        engine.outcomes[.createProject] = .init(ok: false, cause: "the create wasn't confirmed")
+        let p = make(engine)
+        p.confirm()
+        await p.settled()
+        engine.outcomes[.createProject] = .init(ok: false, cause: "a project named fjord-ios-companion already exists", refused: true)
+        p.confirm()
+        await p.settled()
+        #expect(engine.sent.isEmpty)
+        engine.board["fjord-ios-companion"] = ["chan_new", "chan_old"]
+        p.confirm()
+        await p.settled()
+        #expect(p.phase == .created)
+        #expect(engine.sent.map(\.project) == ["chan_new"])
+    }
+
+    // Round 2, 2: a delivery handed over before a quit is reconciled with the engine, never sent twice.
+    @Test func aRestoredDeliveryIsReconciledNotResent() async throws {
+        func restored(_ state: CourierState?) async throws -> (RouterProjectProposal, RouterProjectFakeEngine) {
+            let engine = RouterProjectFakeEngine()
+            if let state { engine.states[7] = state }
+            let store = quiet()
+            store.restoreProposals([.init(message: "m", fields: first, made: [.create, .repo, .instructions, .folder], project: "chan_A",
+                                          createIssued: true, stopped: "Fjord quit as your message went", sent: 7)],
+                                   reviser: RouterProjectFakeReviser(), engine: engine)
+            let p = try #require(store.routerProposal)
+            p.settleAfter = nil
+            p.confirm()
+            await p.settled()
+            return (p, engine)
+        }
+        let (delivered, e1) = try await restored(.delivered)
+        #expect(delivered.phase == .created && e1.sent.isEmpty && e1.ran.isEmpty)
+        let (pending, e2) = try await restored(.taken)
+        #expect(pending.phase == .created && e2.sent.isEmpty)
+        let (unknown, e3) = try await restored(nil)
+        #expect(e3.sent.isEmpty)
+        guard case .failed = unknown.phase else { Issue.record("not stopped: \(unknown.phase)"); return }
+        let (failed, e4) = try await restored(.failed)
+        #expect(failed.phase == .created && e4.sent.map(\.project) == ["chan_A"])
+    }
+
+    // Round 2, 4: words a revision hadn't taken in when the app quit come back in the composer.
+    @Test func pendingRevisionsAreSavedAndComeBackInTheComposer() async throws {
+        let store = quiet()
+        let p = store.proposeProject(for: "m", first: first, reviser: RouterProjectFakeReviser(delay: .seconds(5)),
+                                     engine: RouterProjectFakeEngine())
+        p.refine(with: "call it x")
+        p.refine(with: "no repo")
+        await Task.yield()
+        let saved = store.routerProposalsSaved
+        #expect(saved.first?.words == ["call it x", "no repo"])
+        _ = p.drop()
+        let again = quiet()
+        again.restoreProposals(saved, reviser: RouterProjectFakeReviser(), engine: RouterProjectFakeEngine())
+        let model = RouterModel()
+        model.proposalDraftChanged(store: again)
+        #expect(model.draft == "call it x no repo")
+        #expect(again.routerProposalsSaved.first?.words == nil)
+    }
+
+    // Round 2, 5: only the model's copy is redacted; a placeholder it keeps stands for the original again.
+    @Test func redactionRoundTripsThroughTheReviser() async throws {
+        let secret = "sk-ant-api03-" + String(repeating: "a", count: 40)
+        let f = RouterProjectFields(name: "n", folder: "/p/\(secret)/x", repo: "o/r", instructions: "use \(secret) now")
+        let reviser = RouterProjectModelReviser(ask: { _, prompt, _ in
+            #expect(!prompt.contains(secret))
+            return ["name": "n", "folder": "/p/[redacted]/x", "repo": "o/new", "instructions": "use [redacted] now, quickly"]
+        })
+        let out = try await reviser.revise(f, with: "repo o/new", message: "m")
+        #expect(out.folder == f.folder)
+        #expect(out.repo == "o/new")
+        #expect(out.instructions == "use \(secret) now, quickly")
+    }
+
+    // Round 2, 6: Escape while waiting on claude.ai drops it: the message is back, and the history can say what may still happen.
+    @Test func escapeWhileWaitingDropsIt() async {
+        let store = quiet()
+        let model = RouterModel()
+        let engine = RouterProjectFakeEngine()
+        engine.waits[.createProject] = "Chrome isn't connected"
+        engine.pause = .milliseconds(150)
+        let p = store.proposeProject(for: "set up the iOS app", first: first, reviser: RouterProjectFakeReviser(), engine: engine)
+        p.settleAfter = nil
+        p.confirm()
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(p.phase == .waiting("Chrome isn't connected"))
+        #expect(model.dropProposal(store: store))
+        #expect(model.draft == "set up the iOS app")
+        #expect(store.routerProposal == nil)
+        #expect(p.endNote?.contains("may still create") == true)
+        await p.settled()
+        #expect(engine.sent.isEmpty)
+        #expect(engine.ran.count == 1)
+    }
+
+    // The message's tags go after your words to the engine.
+    @Test func whatTheMessageTagsGoesAfterIt() async {
+        let engine = RouterProjectFakeEngine()
+        let p = RouterProjectProposal(message: "look at it", tagged: "@CI: a category", first: .init(name: "s"),
+                                      reviser: RouterProjectFakeReviser(), engine: engine)
+        p.settleAfter = nil
+        p.confirm()
+        await p.settled()
+        #expect(engine.sent.first?.words == "look at it")
+        #expect(engine.delivered == ["look at it\n\n@CI: a category"])
     }
 
     @Test func returnInTheComposerRevisesWithWordsAndCreatesWithout() async {

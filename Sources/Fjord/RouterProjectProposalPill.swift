@@ -9,6 +9,8 @@ struct RouterProjectProposalPill: View {
     let proposal: RouterProjectProposal
     /// Proposals for later messages waiting for this one to end.
     var queued = 0
+    /// The ×: the composer's drop (the message back in it, `RouterModel.dropProposal`).
+    var onDrop: () -> Void = {}
 
     var body: some View {
         let f = proposal.fields
@@ -50,13 +52,15 @@ struct RouterProjectProposalPill: View {
             switch proposal.phase {
             case .proposed:
                 ClaudeButton("Create", primary: true, size: .sm, shortcut: ["↩"]) { proposal.confirm() }.fixedSize()
-                ChipClose(label: "Drop the project") { _ = proposal.drop() }
+                ChipClose(label: "Drop the project") { onDrop() }
             case .revising:
-                ChipClose(label: "Drop the project") { _ = proposal.drop() }
+                ChipClose(label: "Drop the project") { onDrop() }
             case .failed:
                 ClaudeButton("Try again", primary: true, size: .sm, shortcut: ["↩"]) { proposal.confirm() }.fixedSize()
-                ChipClose(label: "Drop the project") { _ = proposal.drop() }
-            case .creating, .waiting, .created:
+                ChipClose(label: "Drop the project") { onDrop() }
+            case .waiting:
+                ChipClose(label: "Drop the project") { onDrop() }
+            case .creating, .created:
                 EmptyView()
             }
         }

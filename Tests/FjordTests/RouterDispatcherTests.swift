@@ -275,6 +275,43 @@ import Testing
         #expect(decision(s, id)?.outcome == .done && decision(s, id)?.reply == "Dropped: nothing was sent.")
     }
 
+    @Test func aNewProjectsProposalCarriesWhatTheMessageTagsAfterYourWords() async {
+        let (s, d, f) = setup()
+        f.decisions = [decided(.newProject(name: "fjord-ios"))]
+        var context = RouterContext()
+        context.tag([RouterMention(range: 8..<11, pointer: .category(s.categories[0].id), name: "CI")])
+        let id = d.submit("look at @CI please", context: context)
+        await finish(f, id)
+        let proposal = s.routerProposal
+        #expect(proposal?.tagged?.contains("@CI: a category") == true)
+        #expect(proposal?.message.contains("@CI: a category") == false)
+        // The pills' engine: the tags after your words, the pill showing your words alone.
+        let engine = RouterProjectPillsEngine(pills: s.routerCourier)
+        let intent = await engine.send("look at it", tagged: "@CI: a category", to: "chan_x", named: "x")
+        #expect(intent > 0)
+        #expect(sentWords(f).last?.words == "look at it\n\n@CI: a category")
+        #expect(s.routerCourier.items.last.map { if case .send(let w, _, _) = $0.work { w } else { "" } } == "look at it")
+    }
+
+    @Test func aRestoredProposalReattachesToItsEntry() async throws {
+        let (s, d, _) = setup()
+        let entry = s.logDecision(RouterDecision(trigger: .you("start an iOS app"), outcome: .done))
+        let engine = RouterProjectFakeEngine()
+        s.restoreProposals([.init(message: "start an iOS app", fields: .init(name: "fjord-ios"), made: [.create], project: "chan_i",
+                                  createIssued: true, stopped: "Fjord quit while making it", decision: entry)],
+                           reviser: RouterProjectFakeReviser(), engine: engine)
+        let p = try #require(s.routerProposal)
+        p.settleAfter = nil
+        #expect(!p.restored)
+        #expect(decision(s, entry)?.outcome == .pending)
+        p.confirm()
+        await p.settled()
+        #expect(engine.sent.map(\.project) == ["chan_i"])
+        #expect(decision(s, entry)?.decision.target == "new claude.ai project “fjord-ios”")
+        #expect(decision(s, entry)?.outcome == .done)
+        _ = d
+    }
+
     @Test func aProposalTakesTheFolderTheMessageNames() {
         let (s, _, _) = setup()
         let dir = FileManager.default.temporaryDirectory.path

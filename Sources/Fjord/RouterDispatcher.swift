@@ -174,6 +174,8 @@ struct RouterAskBack: Identifiable, Equatable {
         // An entry whose ask-back card is still up is not pruned from the history (its pick needs the record).
         store.decisionsInUse = { [weak self] in Set(self?.askBacks.map(\.id) ?? []).union(self?.proposing ?? []) }
         store.settleLostOperations()
+        store.onProposalsRestored = { [weak self] in self?.reattachProposals() }
+        reattachProposals()
     }
 
     struct Job {
@@ -602,17 +604,35 @@ struct RouterAskBack: Identifiable, Equatable {
         guard let store else { return }
         let first = RouterProjectProposalSeed.fields(name: name, message: job.text, context: job.context, store: store)
         let id = job.id
+        let proposal = store.proposeProject(for: Self.courierWords(job.text, pills: job.context.pills), tagged: job.tools.tagged,
+                                            first: first, reviser: effects.reviser(), decision: id)
+        watch(proposal, entry: id, original: job.text)
+        progress[id] = nil
+        follow(id)
+    }
+
+    /// The proposals restored at launch go on writing their history entries, as they did before the quit.
+    func reattachProposals() {
+        store?.reattachProposals { proposal, id in
+            store?.updateDecision(id) { $0.outcome = .pending }
+            watch(proposal, entry: id, original: proposal.message)
+        }
+    }
+
+    /// The entry follows the proposal: made, where the message went (and what you changed of the decider's proposal);
+    /// dropped, that nothing was sent (and what the engine may still do).
+    private func watch(_ proposal: RouterProjectProposal, entry id: UUID, original: String) {
+        let first = proposal.first
         proposing.insert(id)
-        let proposal = store.proposeProject(for: Self.courierWords(job.text, pills: job.context.pills), first: first,
-                                            reviser: effects.reviser())
         var made = false
-        proposal.onCreated = { [weak store] fields in
+        proposal.onCreated = { [weak store, weak proposal] fields in
             made = true
+            guard let proposal else { return }
             store?.updateDecision(id) {
                 let target = RouterCourier.Target.project(fields.name).targetID
                 $0.decision.target = "new claude.ai project “\(fields.name)”"
                 $0.decision.targetID = target
-                $0.add(.sent(to: fields.name, text: proposal.message, original: proposal.message == job.text ? nil : job.text))
+                $0.add(.sent(to: fields.name, text: proposal.message, original: proposal.message == original ? nil : original))
                 // What you changed of the decider's proposal is a correction of it.
                 let changed = fields.changes(from: first)
                 if !changed.isEmpty {
@@ -624,19 +644,18 @@ struct RouterAskBack: Identifiable, Equatable {
             }
         }
         let ended = proposal.onEnd
-        proposal.onEnd = { [weak self, weak store] in
+        proposal.onEnd = { [weak self, weak store, weak proposal] in
+            let note = proposal?.endNote
             ended()
             guard let self, self.proposing.remove(id) != nil else { return }
             if !made {
                 store?.updateDecision(id) {
-                    $0.reply = "Dropped: nothing was sent."
+                    $0.reply = note ?? "Dropped: nothing was sent."
                     $0.outcome = .done
                 }
             }
             self.follow(id)
         }
-        progress[id] = nil
-        follow(id)
     }
 
     /// A claude.ai target goes to the engine, its pill over the composer taking over from the message's own. False: the target

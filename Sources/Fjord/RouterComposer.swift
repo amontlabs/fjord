@@ -7,7 +7,7 @@ import SwiftUI
 /// categories over the caret (↑↓, Return or Tab picks, Esc dismisses); a pick is a pill in the text where the @ was (see
 /// `MentionField`, `RouterPointer`). Once typing pauses, Jev's
 /// pick of where the message goes is a ghost chip in the strip, its card or row marked on the page: a click fixes it, Esc
-/// waves it off (see `RouterLiveTarget`). Stop while the Router works. On macOS 26 it floats over the page (glass-plan
+/// waves it off. Stop while the Router works. On macOS 26 it floats over the page (glass-plan
 /// §5.4): the card and the strip are Regular glass (their field and chips as they are), or `s3` where the chrome is opaque.
 struct RouterComposer: View {
     let store: Store
@@ -48,7 +48,9 @@ struct RouterComposer: View {
         VStack(alignment: .leading, spacing: 0) {
             // A project proposed for the message that fit none.
             if let proposal = store.routerProposal {
-                RouterProjectProposalPill(proposal: proposal, queued: store.routerProposalQueue.count).padding(.bottom, C.dockGap)
+                RouterProjectProposalPill(proposal: proposal, queued: store.routerProposalQueue.count) {
+                    _ = model.dropProposal(store: store)
+                }.padding(.bottom, C.dockGap)
                     .transition(.opacity)
             }
             // What the engine is doing for claude.ai, over your messages still finding where they go.
@@ -80,8 +82,12 @@ struct RouterComposer: View {
         .motion(.fade, value: suggestions.map(\.id))
         .onAppear {
             if on { requestFocus() }
+            model.proposalDraftChanged(store: store)
         }
         .onChange(of: model.focusRequest) { requestFocus() }
+        // A dropped proposal's message leaving the composer shows the next one; a restored one's words come back.
+        .onChange(of: model.draft) { model.proposalDraftChanged(store: store) }
+        .onChange(of: store.routerProposal.map(ObjectIdentifier.init)) { model.proposalDraftChanged(store: store) }
         .onDisappear {
             focused = false
             model.composerFocused = false
