@@ -35,6 +35,22 @@ function box(which) {
   return halfMounted() ? null : boxes[0] ?? null;
 }
 
+// Where the page offers no composer, it shows a note in the composer's place (`data-composer-stand-in`, role="note"): an archived
+// project's sides show one with a button to unarchive it (measured). A side's note is in the composer's slot `box` would read: the first
+// slot for the project side, the last of two for the thread's. Its text goes to routerd as written, as a notice does, never read here.
+const standIns = () => [...document.querySelectorAll("[data-composer-stand-in]")];
+function standIn(which) {
+  const slots = [...document.querySelectorAll('[data-testid="code-prompt-input"], [data-composer-stand-in]')];
+  const slot = which === "thread" ? (slots.length >= 2 ? slots.at(-1) : null) : (threadParam() && slots.length < 2 ? null : slots[0]);
+  return slot?.hasAttribute("data-composer-stand-in") ? slot : null;
+}
+function noComposer(note) {
+  const copy = note.cloneNode(true);
+  copy.querySelectorAll('button, [aria-hidden="true"]').forEach((node) => node.remove());
+  const words = squash([...copy.querySelectorAll("*")].filter((node) => !node.children.length).map((node) => node.textContent).join(" "));
+  return { ok: false, refused: true, error: `the page shows a note instead of the composer: ${words || squash(copy.textContent)}` };
+}
+
 // The Send button that shares the nearest ancestor with the composer, or else the one at the same position.
 function sendFor(composer) {
   for (let node = composer?.parentElement; node; node = node.parentElement) {
@@ -534,7 +550,7 @@ function openStep(command) {
   let moved = false, first = true, away = null;  // away: while bouncing, when it left and the project's sizers then
   let left = null;  // the latest move (`moving`)
   const go = (to, project) => {
-    left = moving = { at: performance.now(), project, thread: project ? command.thread ?? null : null, composers: composers(), sizers: { project: sizerOf(false), thread: sizerOf(true) },
+    left = moving = { at: performance.now(), project, thread: project ? command.thread ?? null : null, composers: composers(), notes: standIns(), sizers: { project: sizerOf(false), thread: sizerOf(true) },
       stale: { project: null, thread: null }, shown: { project: false, thread: false }, by: step };
     oldView = [...all("transcript-sizer"), ...composers()];
     history.pushState(history.state, "", to + (tagged ? TAG : ""));
@@ -574,13 +590,16 @@ function openStep(command) {
     // (`moveShown`), not the old view's still up (as the bounce does for sizers): the address changes at once, the view a render later.
     // The move in progress (`moving`) counts too: a superseded open's, which this one may find already at its place.
     const crumb = all("overview-thread-crumb-back")[0];
-    const after = (move, node, side) => !move || (lastFlush.at > move.at && (!move.composers.includes(node) || moveShown(move, side)));
+    const after = (move, node, side) => !move || (lastFlush.at > move.at && (![...move.composers, ...(move.notes ?? [])].includes(node) || moveShown(move, side)));
     const arrived = (node, side) => !!node && after(left, node, side) && after(moving, node, side);
     // The projects page: a flush since the move, the old view gone (`oldView`), and its own list (or, with no project, its new project
     // button), never the sidebar's links alone, which the last view still shows.
     const ready = !command.project ? (!left || lastFlush.at > left.at) && (ownList() || !!newProjectButton())
       : command.thread ? composers().length >= 2 && crumb && arrived(box("thread"), "thread") : arrived(box("project"), "project");
-    return ready ? shown(moved) : undefined;
+    if (ready) return shown(moved);
+    // The place shows a note where its composer would be (`standIn`), arrived as a composer would: nothing can be sent there.
+    const side = command.thread ? "thread" : "project", note = command.project ? standIn(side) : null;
+    if (arrived(note, side)) return noComposer(note);
   };
   // Its move lasts no longer than it: over or cut off, the move is dropped; superseded, the newer open takes it over (above). A dropped
   // move is scanned again once (a microtask: after the step's `done`): a composer event `scan` held back for it is sent now, not at
@@ -623,7 +642,10 @@ function sendStep(command) {
       return { ok: false, error: "not on that place" };
     }
     const composer = box(command.side);
-    if (!composer) return;  // a reload is under way; the deadline covers a composer that never comes
+    if (!composer) {  // a reload is under way; the deadline covers a composer that never comes
+      const note = standIn(command.side);  // a note in its place (an archived project): none will come
+      return note && !(moving?.notes?.includes(note) && !moveShown(moving, command.side)) ? noComposer(note) : undefined;
+    }
     if (moving?.composers.includes(composer) && !moveShown(moving, command.side)) return;  // the old view's, still up after an open's move
     const draft = loose(composer.textContent), words = loose(command.text);
     const button = sendFor(composer);

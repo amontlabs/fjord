@@ -1687,9 +1687,10 @@ class Core:
             elif event.get("id") == run.get("open"):
                 # Another open replaced it (`superseded`), or the page failed it (no tab to be had, say): the run lost the tab, and opens
                 # again at its deadline, as background.js says routerd does. A second error in a row fails it with that error.
-                if error != "superseded" and run.get("open_error"):
+                # A refused one (the place shows a note instead of its composer: an archived project) is refused at once: no new open makes one.
+                if event.get("refused") or (error != "superseded" and run.get("open_error")):
                     run["open"] = None
-                    self.finish(run, "failed", error)
+                    self.finish(run, "refused" if event.get("refused") else "failed", error)
                     continue
                 run["open"], run["open_error"], run["moving_to"] = None, error != "superseded", None
                 run.pop("hold_until", None)

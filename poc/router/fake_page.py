@@ -36,6 +36,7 @@ save got no answer). A repository or folder the page doesn't offer is refused at
 folder's list is read at once), as are several exact matches. A step cut off (`cancel`) says what it lacked and its `before`, as the real one does.
 """
 ATTEMPT = 20  # seconds: content.js's ATTEMPT, routerd's do.TIMEOUT
+ARCHIVED = "the page shows a note instead of the composer: this project is archived."
 TOOLS = ("create_project", "set_field", "add_repo", "preapprove_folder", "remove_folder", "read_settings")
 
 
@@ -48,6 +49,7 @@ class FakePage:
         self.swallow = False  # a click empties the draft, but the message never shows
         self.composerless = False  # no composer (a reload under way) until `settle()`: sends wait
         self.slow_opens = False  # an open waits until `settle()`, as one waits for its place's composer
+        self.archived = set()  # projects that show a note where their composer would be: an open there is refused, as content.js's is
         # The server's answer to a setting's save: "ok", "refused", "unanswered", "nothing" (no save was made), "nothing_took" (the save
         # came after the short wait and took), "hang" (an older page that waits until cut off), or "neither" (a removal neither saved nor confirmed).
         self.save = "ok"
@@ -333,6 +335,8 @@ class FakePage:
             if self.signed_in and self.page_ok and shows and self.at not in (None, place):  # the project shown, a thread beside it: left open, a full scan
                 pid = self.at[0]
                 return events + [self._stamp(done), *self.load(*self.at), self.whole(pid), self._composer(self._place(pid, None), "project")]
+            if self.signed_in and self.page_ok and command["project"] in self.archived:
+                return events + [self._stamp({**done, "ok": False, "refused": True, "error": ARCHIVED}, command["project"], command["thread"])]
             if self.signed_in and self.page_ok:
                 return events + [self._stamp(done, command["project"], command["thread"]), *self.load(command["project"], command["thread"])]
             return events + [{**done, "ok": False, "error": "the page can't be read"}]

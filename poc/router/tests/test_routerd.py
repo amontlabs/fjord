@@ -2179,6 +2179,16 @@ class OpenErrors(unittest.TestCase):
         intent = store.intents(core.db, 1)[-1]
         self.assertEqual((intent["status"], intent["cause"]), ("failed", "the page can't be read"))
 
+    def test_an_open_the_page_refuses_refuses_the_send_at_once(self):
+        """An archived project shows a note where its composer would be: nothing can be sent there, so nothing is opened again."""
+        core, page = support.world()
+        page.archived.add("chan_b")
+        core.say("plain test words", project="chan_b")
+        page.pump(core)
+        intent = store.intents(core.db, 1)[-1]
+        self.assertEqual((intent["status"], intent["cause"]), ("refused", fake_page.ARCHIVED))
+        self.assertEqual([c[0] for c in page.calls], ["open"])
+
     def test_a_relink_sends_nothing_before_the_worker_says_there_is_a_page(self):
         """The health kept from before the link is stale: an open sent on it would fail if the worker finds no tab."""
         core, page = support.world()

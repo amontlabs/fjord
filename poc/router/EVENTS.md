@@ -172,6 +172,11 @@ command waiting in the page, so it never holds the tab or a run. The worker drop
 (b) the draft is empty and Send is enabled: the page is settling (a click now does nothing), wait; (c) the draft is empty and
 Send is disabled or missing (a turn runs, and typing brings Send back): type, once; (d) the words are in the draft and Send is enabled:
 click once and report `done`. A missing composer waits like a disabled Send (a reload is under way); the 20 s deadline covers "never".
+Where the page offers no composer it shows a note in its place (`data-composer-stand-in`, role="note": an archived project shows one on
+each side, with a button to unarchive it, which Fjord never presses). An `open` whose place shows one, arrived as a composer would, and a
+`send` that finds one where its composer would be, end at once with `refused: true` and the error "the page shows a note instead of the
+composer: …", the note's words as written (data, like a notice: never read for meaning). routerd refuses the run at once on such an
+open: no new open would bring a composer.
 A page refusal, or a draft that differs from the words after typing, is an error. A newer `send` on the same side replaces the one still
 waiting (`done` says `superseded`), so a retry is just another `send`: with the words already in the draft it only clicks. A `send` names
 its place, and the step refuses it ("not on that place") while the tab shows another, before typing. After a click was reported, routerd's

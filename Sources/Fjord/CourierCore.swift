@@ -1224,9 +1224,10 @@ extension CourierCore {
             } else if id == run.get("open") {
                 // Another open replaced it (`superseded`), or the page failed it (no tab to be had, say): the run lost the tab, and opens
                 // again at its deadline, as background.js says routerd does. A second error in a row fails it with that error.
-                if error != "superseded" && run.flag("open_error") {
+                // A refused one (the place shows a note instead of its composer: an archived project) is refused at once: no new open makes one.
+                if event.flag("refused") || (error != "superseded" && run.flag("open_error")) {
                     run["open"] = .null
-                    try finish(run, "failed", error)
+                    try finish(run, event.flag("refused") ? "refused" : "failed", error)
                     continue
                 }
                 run["open"] = .null; run["open_error"] = .bool(error != "superseded"); run["moving_to"] = .null
