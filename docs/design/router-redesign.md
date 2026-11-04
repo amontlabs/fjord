@@ -230,6 +230,27 @@ over the 182 (53% against 53%).
   the model, not the context. At equal coverage Jev's wrong sends are 4 of 97 against 2 of 96 for Sonnet.
 - Top-1 doesn't depend on the bar. New work stays at 2 of 19 for D against 8 of 19 for C.
 
+**E: Fable's context recipe (same day).** Most recent first, a one-line "what it was just doing / done: its last answer" per
+destination (inside each option's criterion for Jev), last-told only for the top 3, sessions idle over 12 h dropped, a "new in
+<project>" option with content per project, the last 8 routings; Sonnet keeps full detail for the top 5. Chosen on the 120 dev
+moments, confirmed once on the 62 realB; sealed groups untouched.
+
+| Set | Variant | Project top-1 | Session top-1 | Sent | Wrong project of sent | New work right | Median latency |
+|---|---|---|---|---|---|---|---|
+| 120 dev | E Jev, 0.7 | 49% | 34% | 18% | 2 of 21 | 2 of 12 | 0.16 s |
+| 120 dev | E Jev without the one-liner in its criteria | 46% | 30% | 14% | 2 of 17 | 2 of 12 | 0.16 s |
+| 120 dev | E Sonnet | 89% | 71% | 45% | 0 of 54 | 4 of 12 | 5.7 s |
+| 62 realB | C Sonnet (rich, before) | 95% | 79% | 55% | 0 of 34 | 4 of 7 | 5.4 s |
+| 62 realB | D Jev (C's context), 0.7 | 63% | 42% | 23% | 0 of 14 | 1 of 7 | |
+| 62 realB | E Jev, 0.7 | 52% | 27% | 13% | 0 of 8 | 3 of 7 | 0.16 s |
+| 62 realB | E Sonnet | 95% | 79% | 52% | 0 of 32 | 4 of 7 | 6.0 s |
+
+- The recipe doesn't help Jev: it is 11-12 points under D on project top-1 (realB −11, CI −24 to 0; dev −12, −21 to −2). Jev
+  stays 40+ points under Sonnet at any context tried.
+- Sonnet is the same with the recipe as with its rich board (realB: project +0, session +0), with a shorter input.
+- Choice: Sonnet decides, with either board. Jev's only edge is latency (0.16 s against ~6 s).
+
+
 ### The coordinator on new vs existing
 
 10 read-only messages sent to the real `lcu` project, expected outcomes written first
