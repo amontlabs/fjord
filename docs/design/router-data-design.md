@@ -221,6 +221,35 @@ one core.
 Read: live enough, CPU acceptable, memory too high to keep one tab for every project. One tab per project with a turn under way,
 opened when Fjord sends and closed after a quiet spell, keeps the liveness for a few hundred MB at a time.
 
+## Live project-activity signals (2026-11-04)
+
+Hidden, pinned, inactive observer tabs on `/code/projects/browse` (its list and the sidebar) and `/code` (the sidebar only), and,
+for comparison, on test projects' own pages. Each observer logged per project row, by its id (`a[href^="/code/project/chan_"]`),
+its place, rows added or gone, and every element of the row as tag, class tokens and `data-*`, `aria-*`, `role` and `datetime`
+attributes. It also logged its own fetches by path. No text was logged. Fjord's tab did the sends. There were 4 test sends:
+a reply in test-a, a thread asked of test-b, the test-a reply again after the observers had been hidden for 7 min or more, and a
+thread in test-a.
+
+| Surface | Activity: a reply, a turn, a thread started, running and finished | At load |
+|---|---|---|
+| Sidebar row (`[data-group-list=<id>]`, on every page; lists 5 projects, not all) | Nothing changed, in either observer, for any send, over up to 6 min each | `[role=status]` holds `[data-cds=Pulse]` first, then `span.status-dot[data-kind=ready]` on 3 of 5 rows (both test projects and one real one), the same whether a turn was running or not |
+| Projects page card (`.group/card`) | Nothing changed | `time[datetime]` is not the last activity: it stayed 2 days old after today's sends. The first 5 cards (the sidebar's) have 6 more elements; the order is the same for both |
+| Order of the rows | Never changed | |
+| The observers' own fetches | Only at load (`/v1/code/channels`, `/v1/code/sessions`, …), then nothing: no polling | |
+| A project's own page, overview (`[data-testid=overview-thread-row]`) | A new thread row 5.9 s after the send (Fjord's tab: 6.0 s); its status icon swapped from an `svg` circle to `span.animate-spin[data-cds=Icon]` at 6.8 s (Fjord's tab: 6.8 s); its `time[datetime]` changed at 13.2 s; the row left the list at 13.5 s when the thread finished | Thread rows with section, status mark and `time[datetime]` |
+
+- Neither list surface gives a reliable signal. A hidden list page is a snapshot of its load: it gets no updates while it stays
+  hidden, and `status-dot[data-kind]` showed `ready` both during a turn and when idle. An observer reloaded during test-b's
+  turn showed the same.
+- Only a project's own page shows activity: thread rows appear, a spinner marks a running thread, and finished threads leave the
+  list. That is the one-tab-per-project cost above. test-b's page always reopens its last thread (`?thread=`), where the
+  overview's thread rows aren't shown. An observer of such a project sees no threads without a navigation.
+- Throttling doesn't matter for the list: it never updates, hidden 1 min or 9 min.
+- Found on the way: content.js sends `threads` only when there is at least one row (`if (threads.length)`), so a project's last
+  active thread leaving (finished) is never said. Fjord's Board still held it as `unknown` (running) after it had finished.
+- Caveats: one account and 5 sidebar projects; `data-kind` values other than `ready` were never seen, and what sets `ready` is
+  unknown; a page shown in front may update its list (not tried: no focus was taken).
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
