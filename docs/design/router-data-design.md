@@ -423,6 +423,58 @@ and stopped.
 answers in about 2 s with one short-lived frame, and leaves the overview frame stable. The transition can come about 12 s after
 the card, so the check is late by that much.
 
+## Five more page facts (2026-11-04)
+
+Observed from frames in Fjord's hidden tab, Fjord's own top-frame sidebar, and one pinned, inactive observer tab on
+`/code/projects/browse`.
+
+1. **A new project elsewhere.** The project was made with `create_project` through Fjord's tab and confirmed. Only the tab that
+   made it changed: its sidebar got a new `[data-group-list=<id>]` row at the top within 1.3 s, and its `projects` event grew from
+   5 to 6. The observer tab's sidebar and list showed nothing in 30 s; an observer tab opened later shows the project at load.
+   Framed pages render no sidebar at all (no `[data-group-list]`, no `[data-testid=sidebar]`). So a project made elsewhere is seen
+   only by a fresh load of the projects page.
+2. **Read marks.** A thread whose row is `needs` and unread shows its title as `bdi.text-prose-semibold` plus a `span.sr-only`; read,
+   it shows `bdi.text-prose-medium`, with no `sr-only`.
+   - When the thread went `needs` while a thread-view frame of it was open, the row turned up as read.
+   - After both frames were loaded again, with the thread-view frame loaded 34 s before the overview, the overview showed the row
+     unread. Loading the thread in a frame does not clear the mark.
+   - The mark cleared when the row went back to `running`.
+   - The sidebar has no per-thread mark.
+3. **Empty versus loading.**
+   - Loading: `[data-testid=overview-tab-strip]` and `[data-home-section=active]` only, with no rows.
+   - Loaded: the sections `needs`, `active` and `done`, with `section[data-testid=home-empty-band]` and
+     `div[data-home-empty-line=true]` in `needs` when nothing needs you, `section[data-home-group=default]` and
+     `section[data-home-group=done]`, and `div[data-home-sort=priority][data-home-state=ready]` once the list has rows. It took
+     0.1 s after the tab strip on test-a and 6 s on test-b.
+   - A project with no active threads (test-b, earlier census): `home-empty-band`, `data-home-empty-line`, two
+     `data-home-section` and one `data-home-group`, with no `data-home-state`.
+4. **Coordinator rows and threads.**
+   - The coordinator's report row carries a `channel-created-thread` card: `-box`, `-glyph`, `-title`, with `data-glyph` and
+     `data-display` attributes. While the thread works it adds `channel-created-thread-step`; when the thread waits or ends it has
+     `channel-created-thread-summary` instead.
+   - That row's links and `data-*` hold only its own entry id (`data-entry-key`, `data-turn-key`, `data-item-key`), never the
+     thread's.
+   - The link is elsewhere: the thread's id (`data-home-card`) equals the `data-entry-key` of the project-chat row that opened it
+     (`data-perf-row=human`). That row carries `working-activity-row`, `channel-overview-working-status` and
+     `TurnStatusClayMark` while the thread starts, and `thread-step-text` while it works.
+5. **A plain-words request to proceed** (no card). The row went `active`/`dashed` (new, 0.9 s), then `running` with the spinner
+   (on its first step, 30 s). Then it went straight to `needs` (mark `svg.text-warning`, `a[data-home-status-line]`), 15 s after
+   its last reply, without passing through `active`/`dashed`.
+   - A thread-view frame meanwhile showed no card and no approval slot content.
+   - The thread's composer kept `code-prompt-stop` for a while after `needs`; it was gone at the next load.
+6. **A tool running in a thread's view** (`sleep`, then `date`).
+   - The thread's composer dock (the second `rail-composer-dock`) shows `[data-testid=code-prompt-stop]` from the turn's start, with
+     `code-prompt-send` disabled.
+   - The thread view has no `.animate-spin` and no `aria-busy` during the tool.
+   - The reply after it comes as a row with `data-perf-row-streaming=true`, `data-busy` and `data-is-streaming`, which goes once
+     written.
+   - Idle: no `code-prompt-stop`.
+   - The overview row's spinner is the only spinner. The row's `time[datetime]` moves with each reply.
+
+Left in the account: the test project `chan_01HwRR6j4vFs3JsEyrPKAXuu` (fjord-measure-temp); no tool archives a project. After the
+extension reload at the end, the page read as unreadable (`page_ok: false`) until a `reload_tab`. The send queued meanwhile then
+went through (confirmed).
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
