@@ -198,6 +198,38 @@ Paired differences in points, bootstrap 95% CI (4,000 resamples over moments):
   than the session-level figures above. A realB set limited to dev/calib groups (62 extra) is small. Raw answers (with message
   text) stay in the scratchpad.
 
+**D: Jev given C's rich context (same day).** B wasn't fair: Jev got titles and status lines, Sonnet got summaries, last
+answers and what you last told each session. D is one Jev call per moment (182 calls) with the same lines C reads, put in
+each session's option (running/idle and age, doing, summary, you last told it, its last answer, waiting cards; the same
+truncations and `redact()`), over the same candidates: every session of the board, a new session and a claude.ai project
+per project (no purposes: C had none either), and the intents. Jev's input took a median 3.6k tokens (max 8.0k; 11.8k
+characters median, 28k max) and nothing was cut or refused. Sent at 0.7, and at 0.39, the bar that matches C's send rate
+over the 182 (53% against 53%).
+
+| Set | Variant | n | Project top-1 | Sent | Wrong of sent | New work right |
+|---|---|---|---|---|---|---|
+| 120 dev | D at 0.7 | 120 | 61% | 32% | 0 of 39 | 1 of 12 |
+| 120 dev | D at 0.39 | 120 | 61% | 55% | 4 of 66 | 1 of 12 |
+| 62 realB | D at 0.7 | 62 | 63% | 23% | 0 of 14 | 1 of 7 |
+| 62 realB | D at 0.39 | 62 | 63% | 50% | 0 of 31 | 1 of 7 |
+| 182 | D at 0.7 | 182 | 62% | 29% | 0 of 53 | 2 of 19 |
+| 182 | D at 0.39 | 182 | 62% | 53% | 4 of 97 | 2 of 19 |
+| 182 | C (0.8) | 182 | 93% | 53% | 2 of 96 | 8 of 19 |
+| 83 with shipped | D at 0.7 | 83 | 60% | 37% | 0 of 31 | 0 of 5 |
+| 83 with shipped | D at 0.39 | 83 | 60% | 57% | 2 of 47 | 0 of 5 |
+
+| Pair (points, 95% CI) | Set | Project top-1 | Sent | Wrong sends per message |
+|---|---|---|---|---|
+| D(0.7) − C | 182 | −31 (−38 to −25) | −24 (−30 to −17) | −1 (−3 to 0) |
+| D(0.39) − C, equal coverage | 182 | −31 (−38 to −24) | +1 (−7 to +8) | +1 (−2 to +4) |
+| D(0.7) − B | 182 | +2 (−3 to +7) | +13 (+7 to +20) | 0 |
+| D(0.7) − A | 83 with shipped | −23 (−34 to −12) | +6 (−5 to +17) | 0 |
+| D(0.39) − A | 83 with shipped | −23 (−34 to −12) | +25 (+14 to +36) | +2 (0 to +6) |
+
+- Rich context lets Jev send more at 0.7 (29% against 16%), but its top-1 barely moves (+2, CI spans 0): the gap to Sonnet is
+  the model, not the context. At equal coverage Jev's wrong sends are 4 of 97 against 2 of 96 for Sonnet.
+- Top-1 doesn't depend on the bar. New work stays at 2 of 19 for D against 8 of 19 for C.
+
 ### The coordinator on new vs existing
 
 10 read-only messages sent to the real `lcu` project, expected outcomes written first
