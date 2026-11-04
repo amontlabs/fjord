@@ -381,6 +381,48 @@ Fjord's hidden tab: one on the overview and one on each thread's view.
   read. A typed answer works without that.
 - Caveats: one account; two threads; no permission prompt seen; no focus or tab-activation event in the whole run.
 
+## Seeing what a thread waits on (2026-11-04)
+
+**Detecting a waiting multiple-choice card.** A frame on fjord-test-a's overview, in Fjord's hidden tab, logged each thread row's
+whole structure: elements, class tokens, `data-*`, `time[datetime]` and its place. The thread asked two questions, then replied
+and stopped.
+- **Waiting is identical to idle.** On a card, the row goes from `running` (`span.animate-spin[data-cds=Icon]`) to `active` with
+  `svg` > `circle` and mark `dashed`, with no `[data-home-status-line]`. Its structure then matches an idle thread's (a turn ended,
+  not finished) except for the id: same `data-home-*` set, same children, `time[datetime]` unchanged. Nothing in the row says a
+  card waits.
+- **The row lags the card.** A thread-view frame left open saw the second card pending 1.6 s after the first was answered. The
+  overview row went `active` only 12.5 s after that, at 15.4 s. `time[datetime]` changed only when the thread replied, not when
+  a card came.
+- **Position:** a new thread takes `#0`; an answered or finished one doesn't move.
+- **Event-driven check:** on a row's `running` to `active`, the top frame opened one frame on that thread's view, counted pending
+  `[data-testid=decision-card]:not([data-state])` and its option buttons, and removed the frame.
+
+| Case | Frame opened after the transition | Frame loaded | Read | Result |
+|---|---|---|---|---|
+| First card | 3 ms | 179 ms | 1.86 s | 1 pending, 2 options |
+| Second card | 0 ms | 252 ms | 2.09 s | 1 pending, 2 options |
+| Idle (reply, stop) | 1 ms | 244 ms | 3.36 s | 0 pending (waited for both composers and rows, plus 3 s) |
+
+- **No ping-pong.** The overview frame moved back once, at its own load (it landed on Fjord's last thread). It didn't move again
+  through 3 check frames and one thread frame kept open.
+- **After an answer**, by a click on an option in a thread-view frame: `data-state=answered` at 1.1 to 1.3 s, the row `running`
+  at 1.2 to 1.5 s.
+
+**A tool permission prompt: not produced.**
+- fjord-e2e was granted to fjord-test-a with `preapprove_folder` (awaiting, then confirmed) and removed afterwards with
+  `remove_folder` (saved, status 200).
+- A thread started on that folder (the row gained `[data-testid=thread-machine-mark]`) ran `touch` and `rm` without any prompt.
+  The approval slots (`data-approval-cluster-host`, `data-approval-dock`) stayed empty and the row went from `running` straight to
+  finished. The folder has no file left.
+- The cause: the Remote Control serving the folder runs with `--permission-mode auto`, so the prompt needs a mode that asks, or an
+  action that mode doesn't allow.
+- No Claude-app `local_*.json` exists for a Remote Control thread. That app's files hold, among others, `permissionMode`,
+  `sessionPermissionUpdates`, `alwaysAllowedReasons`, `interruptedAwaitingPerson`, `lastTurnEdgeAt` and `turnBoxDeclared`.
+
+**Read:** a waiting card can be told only by looking at the thread itself. Checking on the row's `running` to `active` transition
+answers in about 2 s with one short-lived frame, and leaves the overview frame stable. The transition can come about 12 s after
+the card, so the check is late by that much.
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
