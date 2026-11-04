@@ -33,6 +33,9 @@ struct BriefBoard: Sendable {
     var watch: String?
     /// The project's coordinator is mid-turn (false for a stale project).
     var coordinatorTurning = false
+    /// The threads that wait on you, as the Board knows them: a card's key and options as data, a permission, a stranded
+    /// session, or a plain-words request whose question the model writes.
+    var entries: [BriefEntry] = []
 }
 
 /// The log API the wiring step adapts to the real host.
@@ -239,6 +242,9 @@ struct GeneralBrief: Equatable, Sendable {
         }
     }
 
+    /// A project's stored versions, oldest first (the drawer's prose history).
+    func versions(_ project: String) -> [BriefVersion] { store.versions(project) }
+
     /// Waits for every spawned piece of work (tests, and a quit that drains).
     func idle() async {
         while let (id, t) = tasks.first { await t.value; tasks[id] = nil }
@@ -266,15 +272,7 @@ struct GeneralBrief: Equatable, Sendable {
         let board = await source.board(project: project)
         load(project)
         var doc = docs[project] ?? BriefDoc(project: project)
-        doc.threads = board.threads
-        doc.sent = board.sent
-        doc.watch = board.watch
-        // An entry follows its thread's status and staleness.
-        doc.needsYou = doc.needsYou.map { e in
-            var e = e
-            if let t = board.threads.first(where: { $0.id == e.thread }) { e.state = t.status; e.asOf = t.asOf }
-            return e
-        }
+        Self.apply(board, to: &doc)
         if docs[project] != doc { docs[project] = doc }
     }
 
@@ -311,7 +309,7 @@ struct GeneralBrief: Equatable, Sendable {
     private func runCall(_ project: String, items: [BriefItem], board: BriefBoard) async {
         load(project)
         var doc = docs[project] ?? BriefDoc(project: project)
-        doc.threads = board.threads; doc.sent = board.sent; doc.watch = board.watch
+        Self.apply(board, to: &doc)
         let before = leadSignature()
         calls[project, default: 0] += 1
         let cursor = items.last?.seq ?? store.cursor(project)
@@ -356,8 +354,41 @@ struct GeneralBrief: Equatable, Sendable {
         // The cursor advances only on a landed answer.
         store.setCursor(project, max(cursor, store.cursor(project)))
         let board = await source.board(project: project)
-        doc.threads = board.threads; doc.sent = board.sent; doc.watch = board.watch
+        Self.apply(board, to: &doc)
         docs[project] = doc
+    }
+
+    /// The deterministic part onto a document: threads, sends, watch, and the entries merged with the model's.
+    static func apply(_ board: BriefBoard, to doc: inout BriefDoc) {
+        doc.threads = board.threads
+        doc.sent = board.sent
+        doc.watch = board.watch
+        doc.needsYou = entries(model: doc.needsYou, board: board)
+    }
+
+    /// The entries that wait on you: the Board's, each with the model's plain-words question when the page gave none (a
+    /// card's options always the card's, in the page's order and words); then the model's own entries for threads the Board
+    /// still says need you or that it wrote as stranded. An entry leaves once its thread's status leaves `needs you`.
+    static func entries(model: [BriefEntry], board: BriefBoard) -> [BriefEntry] {
+        var out: [BriefEntry] = []
+        for b in board.entries {
+            var e = b
+            if let m = model.first(where: { $0.thread == b.thread }) {
+                if e.kind == .request || e.question == nil, let q = m.question, !q.isEmpty { e.question = q }
+                e.since = min(e.since, m.since)
+                if e.sent.isEmpty { e.sent = m.sent }
+            }
+            out.append(e)
+        }
+        let listed = Set(out.map(\.thread))
+        for m in model where !listed.contains(m.thread) {
+            let t = board.threads.first { $0.id == m.thread }
+            guard m.kind == .stranded || t?.status == .needsYou else { continue }
+            var e = m
+            if let t { e.state = t.status; e.asOf = t.asOf }
+            out.append(e)
+        }
+        return out.sorted { ($0.since, $0.thread) < ($1.since, $1.thread) }
     }
 
     private func purposeCall(_ project: String, goal: String) async throws -> String? {

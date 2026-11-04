@@ -244,6 +244,13 @@ enum AppWindowShots {
             }
         }),
         Shot(name: "router") { _ in .router },
+        // The brief (RouterBriefView.swift): every section, an entry focused with option 2 picked (a question, a plan and a
+        // local form), a stale project, all quiet, and the history's drawer open under the composer.
+        briefShot("brief-home", .aqua), briefShot("brief-home-dark", .darkAqua),
+        briefShot("brief-needs-you", .aqua, height: 1500, focus: true), briefShot("brief-needs-you-dark", .darkAqua, height: 1500, focus: true),
+        briefShot("brief-stale", .aqua, variant: .stale), briefShot("brief-stale-dark", .darkAqua, variant: .stale),
+        briefShot("brief-quiet", .aqua, height: 800, variant: .quiet), briefShot("brief-quiet-dark", .darkAqua, height: 800, variant: .quiet),
+        briefShot("brief-drawer", .aqua, drawer: true), briefShot("brief-drawer-dark", .darkAqua, drawer: true),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
         Shot(name: "palette-search", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot(query: "fix")),
         Shot(name: "palette-actions", destination: { $0.shownCategories[0].id.asCategory },
@@ -1034,6 +1041,26 @@ enum AppWindowShots {
         // The list layout draws no page body in shots; the canvas layout's history panel shows the same history.
         model.layout = .canvas
         model.pane = .history
+    }
+
+    private static func briefShot(_ name: String, _ look: NSAppearance.Name, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
+                                  focus: Bool = false, drawer: Bool = false) -> Shot {
+        Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 1280, height: height),
+             compose: { _, store in
+                 let briefs = store.routerBriefs
+                 if focus {
+                     let t = BriefTarget(project: "chan_demo_fjord", thread: "th_settings")
+                     briefs.focus(t)
+                     briefs.pick(t, 2, store: store)
+                 }
+                 if drawer {
+                     briefs.drawerOpen = true
+                     briefs.record(BriefTarget(project: "chan_demo_docs", thread: "th_guide"), .read)
+                     briefs.record(BriefTarget(project: "chan_demo_fjord", thread: "th_bar"), .answered("Count only what's unread"))
+                 }
+             },
+             prepare: { store in if variant != .home { Demo.briefs(store, now: Date(), variant) } },
+             appearance: look)
     }
 
     private static func manyNeeds(_ store: Store) {

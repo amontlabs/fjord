@@ -96,6 +96,9 @@ enum RouterCourier {
     /// The app's reading of the local sessions (a test gives its own).
     var readLocal: @Sendable () -> JSON = { CourierLocal.read() }
     private var watchers: [UUID: AsyncStream<CourierSetupHealth>.Continuation] = [:]
+    /// Each local session's Claude Code session id, by its key on the Board (the last reading's): what ties a local thread to
+    /// the form Fjord's hook holds for it.
+    private(set) var localCLI: [String: String] = [:]
 
     lazy var setup = RouterCourierSetup(host: self)
 
@@ -148,11 +151,19 @@ enum RouterCourier {
                 self.readAgain = false
                 let read = self.readLocal
                 let json = await Task.detached { read() }.value
+                self.localCLI = Self.clis(json)
                 await self.host?.local(json)
                 if !self.readAgain { break }
             }
             self?.readingLocal = false
         }
+    }
+
+    /// `{"sessions": {key: {cli}}}` → key: cli.
+    static func clis(_ json: JSON) -> [String: String] {
+        var out: [String: String] = [:]
+        for (key, info) in json["sessions"]?.asObject ?? JSONObject() { if let cli = info.get("cli")?.asString { out[key] = cli } }
+        return out
     }
 
     /// Stops the host: the socket file goes, the database is closed.
@@ -356,6 +367,13 @@ struct RouterCourierSource {
     func send(_ words: String, display: String? = nil, to target: RouterCourier.Target, shown: String? = nil, key: String? = nil) async -> Int {
         await submit(.send(words: words, project: target.project, thread: target.thread, key: key),
                      work: .send(words: display ?? words, project: shown ?? target.project, thread: threadTitle(target) ?? target.thread))
+    }
+
+    /// Clicks option `option` (1-based, the page's order) of a thread's pending card: its pill shows the option's words going.
+    @discardableResult
+    func answer(project: String, thread: String, card: String, option: Int, label: String, shown: String? = nil) async -> Int {
+        await submit(.answer(project: project, thread: thread, card: card, option: option),
+                     work: .send(words: label, project: shown ?? project, thread: threadTitle(.thread(project: project, thread: thread)) ?? thread))
     }
 
     /// A delivery corrected (Send elsewhere): the engine keeps where it should have gone on its intent, for the measurement.

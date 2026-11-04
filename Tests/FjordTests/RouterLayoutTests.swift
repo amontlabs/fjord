@@ -35,7 +35,7 @@ import Testing
 
     /// A wide page: Now and History side by side, each one scroll down the page with nothing scrolling inside it, whatever
     /// Now holds; a narrow one: one of them at a time, the switch going between them.
-    @Test func nowAndHistoryAreEachOneScrollSideBySideOrOneAtATime() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func nowAndHistoryAreEachOneScrollSideBySideOrOneAtATime() async {
         for width in [1100, 900] as [CGFloat] {
             let model = RouterModel()
             model.layout = .list
@@ -73,7 +73,7 @@ import Testing
 
     /// On macOS 26 Now and History run under the Router's top bar and under the floating composer: their scrolls reach the
     /// page's top and bottom, so what scrolls shows through the bars' glass and the composer's (glass-plan §5.3, §5.4).
-    @Test func nowAndHistoryRunUnderTheTopBarAndTheComposer() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func nowAndHistoryRunUnderTheTopBarAndTheComposer() async {
         guard #available(macOS 26, *) else { return }
         let model = RouterModel()
         model.layout = .list

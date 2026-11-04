@@ -637,6 +637,8 @@ final class Store {
     func routerProposalsChanged() { persistedRevision &+= 1 }
     /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
+    /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
+    @ObservationIgnored lazy var routerBriefs = RouterBriefs()
     /// The entries of the ask-back cards still up: kept when the history is pruned.
     @ObservationIgnored var decisionsInUse: () -> Set<UUID> = { [] }
     /// A Router run's change was taken back with Revert (the run's entry): the dispatcher traces it as the outcome of the action.

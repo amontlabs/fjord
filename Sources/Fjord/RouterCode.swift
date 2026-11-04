@@ -67,7 +67,8 @@ struct RouterMain: View {
             // under it, fading out under a soft edge down to the window's bottom, as under Claude's composer.
             VStack(spacing: 0) {
                 RouterSetupNotice(store: store, model: model)
-                RouterPageView(store: store, model: model)
+                // The brief (RouterBriefView.swift); the Now and canvas pages stay compiled, unused.
+                RouterBriefView(store: store, model: model)
                     .frame(maxHeight: .infinity)
             }
             .safeAreaBar(edge: .bottom, spacing: 0) {
@@ -76,10 +77,8 @@ struct RouterMain: View {
                     // The page's ground from the composer's middle down, so no line shows below it or through its glass. On
                     // the canvas, nothing: the composer and your messages float over its ground, which goes on round them.
                     .background {
-                        if model.layout != .canvas {
-                            LinearGradient(colors: [CDS.Surface.s1.opacity(0), CDS.Surface.s1], startPoint: .top, endPoint: .center)
-                                .allowsHitTesting(false)
-                        }
+                        LinearGradient(colors: [CDS.Surface.s1.opacity(0), CDS.Surface.s1], startPoint: .top, endPoint: .center)
+                            .allowsHitTesting(false)
                     }
             }
             .scrollEdgeEffectStyle(.soft, for: .bottom)
@@ -89,18 +88,22 @@ struct RouterMain: View {
             VStack(spacing: 0) {
                 topBar
                 RouterSetupNotice(store: store, model: model)
-                RouterPageView(store: store, model: model)
+                RouterBriefView(store: store, model: model)
                     .frame(maxHeight: .infinity)
                 composer
             }
         }
     }
 
+    /// The composer, and under it the history's drawer (RouterDrawer.swift).
     private var composer: some View {
-        RouterComposer(store: store, model: model)
-            .frame(maxWidth: RouterCodeView.column)
-            .padding(.horizontal, 32)
-            .padding(.bottom, 16)
+        VStack(spacing: 6) {
+            RouterComposer(store: store, model: model)
+            RouterDrawer(store: store)
+        }
+        .frame(maxWidth: RouterCodeView.column)
+        .padding(.horizontal, 32)
+        .padding(.bottom, 10)
     }
 
     /// §3: a 48pt header holding the 32pt session bar: the title (13pt, wght 460, primary), and on the Brief when it was
@@ -114,12 +117,7 @@ struct RouterMain: View {
                     .foregroundStyle(CDS.Text.primary)
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                if model.layout == .brief { BriefUpdated(store: store) }
                 Spacer(minLength: 24)
-                // What shows only on some layouts goes first, so the switch and the trigger after it never move.
-                if model.layout == .brief { BriefHistoryToggle(store: store, model: model) }
-                // Brief, Canvas or List (RouterCanvasBeta.swift).
-                RouterLayoutSwitch(model: model).padding(.trailing, 4)
                 // The palette's trigger, where the Router's own search field was.
                 PaletteTrigger()
             }

@@ -100,7 +100,7 @@ import Testing
     /// Beside a rail, a click on the page is the page's: the sidebar is laid out at its full width under the rail's clip,
     /// and its scroll view (an AppKit view) took the clicks on the page's first 180 points, the Router's Now/History switch
     /// among them, so a narrow Router could neither go to History nor come back to Now.
-    @Test func theRouterSwitchBesideARailTakesItsClicks() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func theRouterSwitchBesideARailTakesItsClicks() async {
         guard #available(macOS 26, *) else { return }
         let store = Store()
         store.persists = false

@@ -45,6 +45,19 @@ final class RouterKeys {
             store.routerDispatcher.pick(ask.id, target: options[index].target)
             return true
         }
+        // The brief (RouterBriefs.swift): with an entry focused and the composer empty, Return, 1–9 (by key position), O, A, R
+        // and Esc are its own; ↑↓ walk its entries. A field other than the composer keeps its keys.
+        let briefs = store.routerBriefs
+        let fieldOtherThanComposer = responder is NSText && !model.composerFocused
+        if !fieldOtherThanComposer, !(responder is NSControl), model.draft.isEmpty, store.routerProposal == nil || code != kVK_Escape {
+            if let action = BriefKeys.action(code: code, characters: event.charactersIgnoringModifiers, flags: flags,
+                                             focused: briefs.focused != nil, composerEmpty: true),
+               briefs.key(action, model: model, store: store) { return true }
+            if briefs.focused == nil, flags.isEmpty, code == kVK_UpArrow || code == kVK_DownArrow, !briefs.page().entries.isEmpty {
+                briefs.move(down: code == kVK_DownArrow)
+                return true
+            }
+        }
         // ⌘F: the palette opens (by key position, as the inbox's).
         if flags == .command, code == kVK_ANSI_F {
             openPalette()

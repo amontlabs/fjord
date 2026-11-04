@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 @Suite(.hostsWindows) struct RouterCanvasFlightViewTests {
-    @Test func theCanvasRegistersCameraTransformedTargetsAndOnePillAboveTheComposer() async throws {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func theCanvasRegistersCameraTransformedTargetsAndOnePillAboveTheComposer() async throws {
         _ = NSApplication.shared
         let store = Store()
         Demo.populate(store, .router)

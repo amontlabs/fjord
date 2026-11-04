@@ -162,6 +162,7 @@ enum Demo {
         case .router, .routerCanvas:
             agents(store, now)
             router(store, now)
+            briefs(store, now: now)
         case .routerOff:
             agents(store, now)
         }

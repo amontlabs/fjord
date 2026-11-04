@@ -831,7 +831,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if action == .openSetup { self?.showWindow(.settings) } else { RouterCourierPills.openOutside(action) }
         }
         let link = store.routerCourierLink
-        Task { await link.start(pills: pills) }
+        Task { [weak store] in
+            await link.start(pills: pills)
+            guard let store else { return }
+            store.routerBriefs.start(store: store)
+        }
     }
 
     /// The engine's socket goes with the app: waited for briefly, since nothing runs after this returns.

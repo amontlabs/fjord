@@ -60,7 +60,7 @@ struct RouterComposer: View {
             FlightStack(store: store, flights: model.flights, showsOtherAsks: model.layout == .canvas)
                 .padding(.bottom, model.flights.pills.isEmpty && (model.layout != .canvas || store.routerDispatcher.askBacks.isEmpty) ? 0 : C.dockGap)
             // Who your words go to, as the Code tab's strip over its composer: the card you reply to.
-            if model.replyTo != nil {
+            if model.replyTo != nil || store.routerBriefs.focused != nil {
                 strip.padding(.bottom, C.dockGap)
             }
             card(on: on, working: working)
@@ -129,6 +129,12 @@ struct RouterComposer: View {
     /// The card the message replies to, removable.
     private var strip: some View {
         FlowLayout(spacing: C.stripGap) {
+            // The brief entry focused: your words go to its thread.
+            if let target = store.routerBriefs.focused {
+                let title = store.routerBriefs.title(target)
+                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.warning,
+                             removeLabel: "Stop replying to \(title)") { store.routerBriefs.focus(nil) }
+            }
             if let id = model.replyTo, let card = store.router.cards.first(where: { $0.id == id }) {
                 ComposerChip(symbol: "arrow.right", text: card.title, tint: card.kind.color,
                              removeLabel: "Stop replying to \(card.title)") { model.replyTo = nil }
@@ -175,7 +181,8 @@ struct RouterComposer: View {
         // `min(24rem, 40svh)` less the card's padding, in 20 pt lines.
         let limit = min(C.maxHeight, windowHeight > 0 ? windowHeight * C.maxHeightShare : C.maxHeight)
         let lines = max(1, Int((limit - 2 * C.pad - (C.row - 20)) / 20))
-        let placeholder = model.replyTo == nil ? "Tell the Router what to pass on, or ask" : "Reply, or tell the Router"
+        let placeholder = store.routerBriefs.focused != nil ? "Reply to this thread"
+            : model.replyTo == nil ? "Tell the Router what to pass on, or ask" : "Reply, or tell the Router"
         // Told on every change of the text view's first responder, not on a change of `focused`: the kept composer given the
         // keyboard again after a close may still read focused, and the model must hear it has the keyboard again.
         return MentionField(store: store, model: model, maxHeight: CGFloat(lines) * 20, editable: on, focusTick: focusTick) { now in

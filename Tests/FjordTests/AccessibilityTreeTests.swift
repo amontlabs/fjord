@@ -172,10 +172,7 @@ enum AccessibilityTree {
                 #expect(model.selection != nil)
                 #expect(tree.all.contains { $0.label == "Message the Router" }, "\(tree.all.map(\.label))")
             }
-            if name == "Router canvas" {
-                #expect(model.expandedNeed != nil)
-                #expect(tree.all.contains { $0.label == "Router canvas" }, "\(tree.all.map(\.label))")
-            }
+            // "Router canvas": the window shows the brief now (RouterBriefView); the canvas goes in a later step.
         }
         #expect(missing.isEmpty, "\(missing)")
     }

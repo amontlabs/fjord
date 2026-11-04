@@ -35,7 +35,7 @@ import UserNotifications
 
     // MARK: Window keys
 
-    @Test func arrowsWalkTheCardsAndSpaceArchivesNothing() throws {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func arrowsWalkTheCardsAndSpaceArchivesNothing() throws {
         let store = demo()
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)
@@ -71,7 +71,7 @@ import UserNotifications
         #expect(!keys.key(key(kVK_Escape), responder: nil))
     }
 
-    @Test func theArrowsWalkTheCardsInTheOrderThePageShowsThem() {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func theArrowsWalkTheCardsInTheOrderThePageShowsThem() {
         let store = demo()
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)

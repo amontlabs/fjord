@@ -144,7 +144,7 @@ import Testing
         return Int((shown.content - shown.visibleBottom).rounded())
     }
 
-    @Test func itOpensAtTheBottomFollowsWhileThereAndHoldsWhileScrolledUp() async throws {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func itOpensAtTheBottomFollowsWhileThereAndHoldsWhileScrolledUp() async throws {
         let store = store()
         let model = RouterModel()
         model.layout = .list
@@ -211,7 +211,7 @@ import Testing
     /// A scroll asked for while you scroll (here the Router picking, which goes to the bottom) leaves SwiftUI's scroll phase
     /// idle for the rest of your gesture: each step of it was read as layout leaving the pinned history short of its bottom,
     /// and stuck back there, so the lines stayed put while only the hover moved from line to line under the pointer.
-    @Test func yourScrollGoesOnAfterAScrollAskedForDuringIt() async throws {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func yourScrollGoesOnAfterAScrollAskedForDuringIt() async throws {
         let store = store()
         let model = RouterModel()
         model.layout = .list
@@ -266,7 +266,7 @@ import Testing
         #expect(fromBottom() > bottom + 150, "your scroll went up and stayed: \(seen) → \(fromBottom())")
     }
 
-    @Test func aMessageAskedForBeforeThePageShowsIsWhereItOpensAndOnlyThatOnce() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func aMessageAskedForBeforeThePageShowsIsWhereItOpensAndOnlyThatOnce() async {
         let store = store()
         let model = RouterModel()
         model.layout = .list
@@ -299,7 +299,7 @@ import Testing
         #expect(Self.fromBottom(hosting).map { abs($0) <= 1 } == true, "opens at the bottom: \(String(describing: Self.fromBottom(hosting)))")
     }
 
-    @Test func aLineAskedForBeforeThePageShowsIsWhereItOpensAndOnlyThatOnce() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func aLineAskedForBeforeThePageShowsIsWhereItOpensAndOnlyThatOnce() async {
         let store = store()
         let model = RouterModel()
         model.layout = .list
@@ -331,7 +331,7 @@ import Testing
         #expect(Self.fromBottom(hosting).map { abs($0) <= 1 } == true, "opens at the bottom: \(String(describing: Self.fromBottom(hosting)))")
     }
 
-    @Test func aCardAskedForBeforeThePageShowsIsScrolledToInNeedsYou() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func aCardAskedForBeforeThePageShowsIsScrolledToInNeedsYou() async {
         let store = Store()
         Demo.populate(store, .router)
         store.interceptOpen = { _ in }
@@ -366,7 +366,7 @@ import Testing
         #expect((needsOffset() ?? 0) > 100, "Needs you scrolled down to the card")
     }
 
-    @Test func aLongNeedsYouLeavesTheHistoryItsFloor() async {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func aLongNeedsYouLeavesTheHistoryItsFloor() async {
         let store = Store()
         Demo.populate(store, .router)
         store.interceptOpen = { _ in }

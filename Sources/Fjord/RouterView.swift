@@ -798,6 +798,14 @@ final class RouterModel {
     func send(store: Store) {
         // A proposed project takes the words (and an empty composer creates it).
         if answerProposal(store: store) { return }
+        // A brief entry focused: your words go to its thread, no model.
+        if let target = store.routerBriefs.focused, pointers.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if store.routerBriefs.send(draft, to: target, store: store) {
+                caret = nil
+                draft = ""
+            }
+            return
+        }
         let (text, _) = sentDraft(store)
         guard !text.isEmpty, canSend(store) else { return }
         // A pill over the composer from here until it lands where it went (`RouterFlights`): the page stays where it is.

@@ -99,14 +99,28 @@ final class CourierLog {
     private var last: [String: String]
     private(set) var status: [String: String] = [:]  // thread -> the latest recorded status
     private(set) var statusProject: [String: String] = [:]
+    private(set) var statusAt: [String: Double] = [:]  // thread -> when its latest status was recorded
+    private(set) var statusNeeds: [String: String] = [:]  // thread -> its latest status's `needs` (permission)
+    /// The newest log position: the briefs hear of new items by it moving.
+    private(set) var lastSeq = 0
 
     init(_ db: CourierStore) {
         self.db = db
         last = (try? db.latestItems()) ?? [:]
-        for i in (try? db.items(project: nil, after: 0, kind: "status")) ?? [] {
-            status[i.id] = i.content["status"]?.asString
-            if let p = i.project { statusProject[i.id] = p }
-        }
+        lastSeq = ((try? db.query("select max(seq) as seq from items")) ?? []).first?["seq"]?.asInt ?? 0
+        for i in (try? db.items(project: nil, after: 0, kind: "status")) ?? [] { noteStatus(i.id, project: i.project, at: i.at, i.content) }
+    }
+
+    private func noteStatus(_ thread: String, project: String?, at: Double, _ content: JSON) {
+        status[thread] = content["status"]?.asString
+        statusAt[thread] = at
+        statusNeeds[thread] = content.get("needs")?.asString
+        if let project { statusProject[thread] = project }
+    }
+
+    /// The newest content stored for (kind, id), if any.
+    func latest(kind: String, id: String) -> JSON? {
+        last[kind + "\u{1}" + id].flatMap { try? JSON.parse($0) }
     }
 
     /// Stores the item unless its content is the last stored for (kind, id). Returns whether it was new.
@@ -114,12 +128,9 @@ final class CourierLog {
     func record(_ now: Double, project: String?, thread: String?, kind: String, id: String, content: JSON) throws -> Bool {
         let key = kind + "\u{1}" + id, text = content.encoded()
         if last[key] == text { return false }
-        _ = try db.addItem(now, project: project, thread: thread, kind: kind, id: id, content: content)
+        lastSeq = max(lastSeq, try db.addItem(now, project: project, thread: thread, kind: kind, id: id, content: content))
         last[key] = text
-        if kind == "status" {
-            status[id] = content["status"]?.asString
-            if let project { statusProject[id] = project }
-        }
+        if kind == "status" { noteStatus(id, project: project, at: now, content) }
         return true
     }
 

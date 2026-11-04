@@ -1063,8 +1063,8 @@ struct CountedRouterCell: View {
     let action: () -> Void
 
     var body: some View {
-        let counts = store.routerCounts
-        RouterCell(needsYou: counts.needsYou, notes: counts.notes, action: action)
+        // The brief's needs-you entries not yet read.
+        RouterCell(needsYou: store.routerBriefs.untoldNeedsYou, notes: 0, action: action)
     }
 }
 

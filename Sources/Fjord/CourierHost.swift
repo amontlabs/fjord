@@ -157,7 +157,14 @@ actor CourierHost {
     nonisolated let snapshots: AsyncStream<CourierSnapshot>
     private let snapshotSink: AsyncStream<CourierSnapshot>.Continuation
     private var lastSnapshot: CourierSnapshot?
-    private var core: CourierCore?
+    /// What the briefs hear (RouterBriefSource.swift): the projects with new items, a changed Board, or a coordinator turn
+    /// that ended, after each input.
+    nonisolated let briefChanges: AsyncStream<CourierBriefChange>
+    let briefSink: AsyncStream<CourierBriefChange>.Continuation
+    var briefSeq: Int?
+    var briefSigs: [String: String] = [:]
+    var briefTurning: [String: Bool] = [:]
+    private(set) var core: CourierCore?
     private var hosts: [Connection] = []
     private var connections: [ObjectIdentifier: Connection] = [:]
     private var listener: Int32 = -1
@@ -186,6 +193,9 @@ actor CourierHost {
         var shots: AsyncStream<CourierSnapshot>.Continuation!
         snapshots = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { shots = $0 }
         snapshotSink = shots
+        var briefs: AsyncStream<CourierBriefChange>.Continuation!
+        briefChanges = AsyncStream(bufferingPolicy: .unbounded) { briefs = $0 }
+        briefSink = briefs
     }
 
     // MARK: Start and stop
@@ -351,6 +361,7 @@ actor CourierHost {
     private func finishInput() {
         publish()
         share()
+        shareBrief()
         arm()
     }
 

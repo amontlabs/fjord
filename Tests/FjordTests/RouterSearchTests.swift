@@ -82,7 +82,7 @@ import Testing
         #expect(model.history(store).contains(addressed))
     }
 
-    @Test func theKeysWalkOnlyWhatTheSearchListsAndAPickItHidesIsDropped() throws {
+    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func theKeysWalkOnlyWhatTheSearchListsAndAPickItHidesIsDropped() throws {
         let store = demo()
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)
