@@ -475,6 +475,28 @@ Left in the account: the test project `chan_01HwRR6j4vFs3JsEyrPKAXuu` (fjord-mea
 extension reload at the end, the page read as unreadable (`page_ok: false`) until a `reload_tab`. The send queued meanwhile then
 went through (confirmed).
 
+## Two structure checks (2026-11-04)
+
+1. **Finished threads stay in the list, in a collapsed group.** Their rows render inside `[data-home-section=done]` within
+   `section[data-home-group=done]`. That group is collapsed by default: its one `button[aria-expanded=false]` hides the rows, so a
+   finished row seems to leave.
+   - Expanded (the button clicked by structure in a frame, then clicked again to collapse), the group showed 20 rows. Each row
+     looked like an active one (`data-testid`, `data-home-card`, `data-home-simple`) but with `data-home-status-mark=icon`.
+   - Live, a test-a thread went `section=active`/`group=default` (new, 6.1 s), then `section=running`/`group=running` (a group
+     that exists only while a thread runs, 7.0 s), then `section=done`/`group=done` at the top (16.8 s).
+   - The done list holds 20 rows: the oldest one left as the new one came in.
+2. **No id ties the coordinator's rows to a thread.**
+   - The opening row (`data-perf-row=human`) has `data-entry-key`, `data-epitaxy-entry` and `data-take-back-entry`, all equal to
+     the thread's `data-home-card`, plus `data-thread-rename-anchor`. It has no `data-turn-key`.
+   - The coordinator's thread-start row is the next transcript entry: `data-epitaxy-entry-index` one more than the opening row's.
+     Its `data-entry-key`, `data-epitaxy-entry`, `data-turn-key` and `data-item-key` (`<own id>:t1`) are all its own id. Its
+     `channel-created-thread` card has `channel-created-thread-box[data-display=single]` and
+     `channel-created-thread-glyph[data-glyph]`, which goes `working` to `CheckCircle` when the thread finishes (17.0 s, 0.2 s
+     after the row moved to done).
+   - The finish-report row has only its own keys and no card.
+   - Nothing in either row or the card equals the thread id or the opening row's keys. The only tie is the start row's position
+     right after the opening row, and the card's glyph changing on that start row.
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
