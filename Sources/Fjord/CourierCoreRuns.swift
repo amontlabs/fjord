@@ -21,9 +21,14 @@ extension CourierCore {
         }
     }
 
-    /// One run's step. (Python ends a run whose step raises, so its waiter gets an outcome; a Swift step has no exceptions to catch.)
+    /// One run's step. One that raises ends that run, so its waiter gets an outcome, and the other runs go on.
     func safely(_ run: Run, late: Bool = false) {
-        advance(run, late: late)
+        do {
+            try advance(run, late: late)
+        } catch {
+            FileHandle.standardError.write(Data("\(clock()) routerd error: \(error)\n".utf8))
+            if runs.has(run.id) { try? finish(run, "failed", "routerd error: \(error)") }
+        }
     }
 
     /// One tab, one composer: only the oldest run that hasn't yielded acts. A yielded run waits for its proof and blocks nobody. A run
@@ -32,7 +37,7 @@ extension CourierCore {
     /// is visited again once a run finished or yielded in the pass (a newer one that held the tab may have let it go), until none does.
     /// So is every taken send once one that went back finished, or a run that had the tab let it go (`back_due`): it may go back now.
     /// Last, a watched send may go back (`back_to_watched`).
-    func advanceAll() {
+    func advanceAll() throws {
         var acting = false
         var passed = Set<Int>(), held = Set<Int>(), freed = false
         func unpassed() -> Set<Int> { Set(runs.keys).subtracting(passed) }
@@ -64,7 +69,7 @@ extension CourierCore {
                 acting = acting || (runs.has(runID) && !yielded(run) && !run.flag("paused") && !run.flag("lost") && !run.flag("open_wait"))
             }
         }
-        backToWatched()
+        try backToWatched()
     }
 
     func deadline(_ run: Run) {
@@ -86,13 +91,13 @@ extension CourierCore {
     }
 
     /// A taken send's end with no row from you: the cause says what is known of it. It is watched (`finish`).
-    func takenFailed(_ run: Run) {
+    func takenFailed(_ run: Run) throws {
         if run.flag("stuck") {  // the draft emptied after a click that had left the words there: a navigation may have dropped them
-            return finish(run, "failed", "the words stayed in the draft after a click, then the draft emptied with no row from you: the page may not have sent them, and they were never confirmed")
+            return try finish(run, "failed", "the words stayed in the draft after a click, then the draft emptied with no row from you: the page may not have sent them, and they were never confirmed")
         }
-        if run.flag("went") { return finish(run, "failed", Self.went) }  // dropped with a page that went: no page said it took them
-        if run.get("vanished_at") != nil { return finish(run, "failed", Self.vanished) }
-        return finish(run, "failed", "the page took the words but never confirmed them")
+        if run.flag("went") { return try finish(run, "failed", Self.went) }  // dropped with a page that went: no page said it took them
+        if run.get("vanished_at") != nil { return try finish(run, "failed", Self.vanished) }
+        return try finish(run, "failed", "the page took the words but never confirmed them")
     }
 
     /// The page took the words, or shows a row from you: never send again. Wait for the row; at ACCEPTED_WAIT open the place once, so a
@@ -101,7 +106,7 @@ extension CourierCore {
     /// than at ACCEPTED_WAIT: it fails then with no look while the tab shows the place (the reloaded page's rows were fetched afresh,
     /// and its stream delivers a later row of yours), and takes the look's open only when another run moved the tab away. A later row
     /// of yours still confirms it late (`reconcile_sends`).
-    func awaitProof(_ run: Run, _ intent: JSON) {
+    func awaitProof(_ run: Run, _ intent: JSON) throws {
         let now = clock()
         if !run.flag("accepted") { run.set("accepted", now) }
         var end = run.num("accepted")! + Self.acceptedWait
@@ -144,7 +149,7 @@ extension CourierCore {
         }
         let board = self.board()
         let lost = run.flag("went") ? Self.went : Self.vanished
-        if early && shows(board, place) && CourierDo.anchored(board, intent["proof"] ?? .null) { return finish(run, "failed", lost) }  // rows read afresh: no look
+        if early && shows(board, place) && CourierDo.anchored(board, intent["proof"] ?? .null) { return try finish(run, "failed", lost) }  // rows read afresh: no look
         if run.get("looking") == nil {
             // With the page away (Chrome closed, signed out, no host) no look can be taken: it fails at its bound, watched as any
             // taken send that failed, so a later row of yours still confirms it (`reconcile_sends`), and nobody waits past the bound.
@@ -153,7 +158,7 @@ extension CourierCore {
                     run["deadline"] = run["relook_by"]
                     return wake()
                 }
-                return takenFailed(run)
+                return try takenFailed(run)
             }
             if !tabIdle(run) { return deadline(run) }  // another run is using the tab, or a tool may read
             if let w = watchOpen {  // a watched send's going back is in flight: the look goes once it is over (its read, or its hold)
@@ -169,7 +174,7 @@ extension CourierCore {
         }
         // The look ends at its end, or once its open is done and a settled whole read of the place came after it with no row from you
         // (`look_read`, set in `handle`; the proof was checked against it before this): the outcome is known, and the tab is let go.
-        if now >= (run.num("looking") ?? 0) || (run.flag("look_read") && !run.flag("open")) { return takenFailed(run) }
+        if now >= (run.num("looking") ?? 0) || (run.flag("look_read") && !run.flag("open")) { return try takenFailed(run) }
     }
 
     /// Another run, not paused and not yielded, will take the tab: it acts now or once the ones ahead of it let go.
@@ -202,14 +207,14 @@ extension CourierCore {
     }
 
     /// The next small step for one run, from the Board and the events so far. `late`: its deadline passed.
-    func advance(_ run: Run, late lateIn: Bool = false) {
+    func advance(_ run: Run, late lateIn: Bool = false) throws {
         var late = lateIn
-        var intent = sql.intent(run.id)
+        var intent = try sql.intent(run.id)
         if CourierDo.done.contains(intent.str("status") ?? "") {
             runs.pop(run.id)
             return
         }
-        if run.flag("tool") { return advanceTool(run, intent, late) }
+        if run.flag("tool") { return try advanceTool(run, intent, late) }
         if run.flag("went_due") { return }  // its dropped send is decided at the next `page` (`settle_unwent`)
         let board = self.board()
         // Nothing reached the thread while no click was reported and nothing was taken: a reply may still go to the coordinator instead.
@@ -227,32 +232,32 @@ extension CourierCore {
             // The sends so far went to the dead thread: a click of one reported after this doesn't make the coordinator's send click-only.
             run["app"] = .null; run["grace"] = .null; run["sends"] = []
             run["stage"] = "start"  // an open of the thread may be under way: the project is the place now
-            intent = handOff(intent, gone)
+            intent = try handOff(intent, gone)
         }
         if let refused = CourierDo.refusal(board, intent) {
             // One the page may have sent (a click reported, taken, or a send not heard from) failed: a later row of yours may still
             // confirm it (`watched`). Only one that surely never reached the server is refused.
             let mayHave = run.flag("clicked") || run.flag("taken") || !unheardSends(run).isEmpty
-            return finish(run, mayHave ? "failed" : "refused", refused)
+            return try finish(run, mayHave ? "failed" : "refused", refused)
         }
         let place = Place(intent.str("project"), intent.str("thread"))
         var holds = false
         if intent.obj("proof").has("baseline") {
-            let proved = provedAt(place, intent)[.int(run.id)] ?? CourierDo.Proved(done: false, cause: nil, key: nil)
+            let proved = try provedAt(place, intent)[.int(run.id)] ?? CourierDo.Proved(done: false, cause: nil, key: nil)
             holds = proved.done
             let cause = proved.cause
-            if holds && cause == nil { return finish(run, "confirmed", row: proved.key) }
+            if holds && cause == nil { return try finish(run, "confirmed", row: proved.key) }
             // A row from you with other words after the baseline (you typed in the chat meanwhile): a run that never clicked and isn't
             // taken has nothing of its own to wait for, so it fails now. One that may have sent keeps the cause and waits for its row: so
             // does one with a cut-off send not heard from, which may have clicked before the cancel reached it. A send still waiting in
             // the page is cancelled by the failure instead (and watched, `finish`).
             let cutOff = unheardSends(run).filter { !($0 == run.str("command") && inPage(run)) }
-            if holds && !run.flag("clicked") && !run.flag("taken") && cutOff.isEmpty { return finish(run, "failed", cause) }
-            if holds && intent.get("cause") != cause.map(JSON.string) { intent = sql.update(clock(), run.id, [("cause", JSON(cause))]) }
+            if holds && !run.flag("clicked") && !run.flag("taken") && cutOff.isEmpty { return try finish(run, "failed", cause) }
+            if holds && intent.get("cause") != cause.map(JSON.string) { intent = try sql.update(clock(), run.id, [("cause", JSON(cause))]) }
             // Each read placed against the baseline anchors Claude's rows after it: a busy chat's window can scroll past
             // the baseline (a coordinator's long turn while your message is queued), and a later read is placed by them.
             let anchored = !holds ? CourierDo.anchor(board, intent["proof"] ?? .null) : (intent["proof"] ?? .null)
-            if anchored != (intent["proof"] ?? .null) { intent = sql.update(clock(), run.id, [("proof", anchored)]) }
+            if anchored != (intent["proof"] ?? .null) { intent = try sql.update(clock(), run.id, [("proof", anchored)]) }
         }
         if taken(run, board, place) { run["taken"] = true }
         // The tab reloaded right after a reported click: whatever the new page shows, the old one may have given the server the words, so
@@ -268,7 +273,7 @@ extension CourierCore {
                     && returned(board, place, intent) {
             run["taken"] = false; run["clicked"] = false; run["ignored"] = false; run["accepted"] = .null; run["stuck"] = false; late = true
             let said = !notice.text.isEmpty && clock() - notice.at < Self.noticeFresh ? ": \(notice.text)" : ""
-            intent = sql.update(clock(), run.id, [("cause", .string("the page couldn't send it\(said)"))])
+            intent = try sql.update(clock(), run.id, [("cause", .string("the page couldn't send it\(said)"))])
         }
         // The tab reloaded after the click, and the new page's rows of the place, read from the server and placed against the baseline,
         // hold no row from you after it: the old page went before the server had the words. Never sent again (the server may yet have
@@ -278,7 +283,7 @@ extension CourierCore {
             && !unsettled.contains(intent.flag("thread") ? intent.str("thread") ?? "" : intent.str("project") ?? "") && CourierDo.anchored(board, intent["proof"] ?? .null) {
             run.set("vanished_at", clock())
         }
-        if run.flag("taken") || holds { return awaitProof(run, intent) }  // the page took the words, or shows a row from you. It queues them while the coordinator replies.
+        if run.flag("taken") || holds { return try awaitProof(run, intent) }  // the page took the words, or shows a row from you. It queues them while the coordinator replies.
         let why = (intent.flag("thread") ? CourierDo.appWait(board, intent) : nil) ?? CourierDo.blocked(board["health"] ?? .null)
         if why == CourierDo.appClosed {  // the page is up and would click: a send still waiting in it is cut off
             run["app"] = true; run["grace"] = .null
@@ -289,24 +294,24 @@ extension CourierCore {
         }
         if let why {
             run["paused"] = true; run["deadline"] = .null
-            return mark(intent, "paused", why)
+            return try mark(intent, "paused", why)
         }
         if run.flag("paused") {  // a lost open is behind it too: its deadline was dropped with the pause
             run["paused"] = false; run["lost"] = false; late = false
             run["stage"] = run.str("stage") == "opening" ? "start" : (run["stage"] ?? .null)
-            mark(intent, "pending", nil)
+            try mark(intent, "pending", nil)
             if run.str("stage") == "waiting" && run.get("dropped") == run.get("command") {  // its send went with a page that is gone (`replay`)
                 let command = run.str("command") ?? ""
                 if run.strings("unran").contains(command) {  // unless that page says it never ran: it is made again, in the same attempt
-                    neverRan(run)
+                    try neverRan(run)
                     late = true
                 } else if relinked && unran.contains(where: { $0.0 == run.id && $0.1 == command }) {  // the next `page` says if it was that page
                     run["went_due"] = true
                     unwent.append(run.id)
                     return
                 } else {  // taken now: the run's checks are made again, out of the pause (a row may prove it), and the taken one waits for its proof
-                    went(run)
-                    return advance(run)
+                    try went(run)
+                    return try advance(run)
                 }
             }
             if run.str("stage") == "waiting" { deadline(run) }
@@ -338,7 +343,7 @@ extension CourierCore {
         }
         if run.str("stage") == "opening" && late {  // the tab showing the place with its whole read never settled is another failure
             let unsettledHere = shows(board, place) && unsettled.contains(intent.flag("thread") ? intent.str("thread") ?? "" : intent.str("project") ?? "")
-            return finish(run, "failed", intent.str("cause") ?? (unsettledHere ? "the page never settled on that place" : "the page never showed that place"))
+            return try finish(run, "failed", intent.str("cause") ?? (unsettledHere ? "the page never settled on that place" : "the page never showed that place"))
         }
         // A taken send's open will move the tab (`going_back`): the place the Board shows is about to change. Its `done` advances this run.
         // So does another taken send's look under way: it holds the tab until its end (`looking_now`), which advances this run.
@@ -374,7 +379,7 @@ extension CourierCore {
         let key = intent.flag("thread") ? intent.str("thread") ?? "" : intent.str("project") ?? ""
         let proof = CourierDo.baselined(board, intent["proof"] ?? .null, known: known[key]?.keys ?? [])
         if proof != (intent["proof"] ?? .null) {
-            intent = sql.update(clock(), run.id, [("proof", proof)])
+            intent = try sql.update(clock(), run.id, [("proof", proof)])
             if !intent.flag("thread") { chatted.insert(intent.str("project") ?? "") }  // Fjord has seen this chat: what comes after its send is news, even if it was empty
         }
         if run.flag("clicked") && returned(board, place, intent) { run["stuck"] = true }  // a reported click left the words in the draft
@@ -383,9 +388,9 @@ extension CourierCore {
         let again = run.flag("ignored") && clock() < (run.num("limit") ?? 0)
         if !again {
             if (intent["attempts"]?.asInt ?? 0) > CourierDo.retries {
-                return finish(run, "failed", intent.str("cause") ?? "the words never showed up")
+                return try finish(run, "failed", intent.str("cause") ?? "the words never showed up")
             }
-            intent = sql.update(clock(), run.id, [("status", "pending"), ("attempts", .int((intent["attempts"]?.asInt ?? 0) + 1)), ("cause", .null)])
+            intent = try sql.update(clock(), run.id, [("status", "pending"), ("attempts", .int((intent["attempts"]?.asInt ?? 0) + 1)), ("cause", .null)])
             run.set("limit", clock() + CourierDo.timeout)
         }
         let side = intent.flag("thread") ? "thread" : "project"
@@ -408,7 +413,7 @@ extension CourierCore {
     }
 
     /// The run is over. `row`: the key of the row that proved a send. It is kept in the intent's result and claimed for its place: it proves no other.
-    func finish(_ run: Run, _ status: String, _ cause: String? = nil, row: String? = nil, changes extra: [(String, JSON)] = []) {
+    func finish(_ run: Run, _ status: String, _ cause: String? = nil, row: String? = nil, changes extra: [(String, JSON)] = []) throws {
         var changes = extra
         runs.pop(run.id)
         // A send still waiting in the page must not click later, whatever the outcome (a confirmed run's retry may wait too). A tool's
@@ -417,7 +422,7 @@ extension CourierCore {
         // A read whose settings already arrived is only closing its dialog: it is left to close, since a cancel now would stop that close
         // (the page would report the cut-off as the read's first and only `done`, leaving the dialog open). Sends wait for it until its
         // `done`, a `commands` that no longer lists it, or its deadline, when it is cancelled after all (`tick`).
-        let reading = run.flag("tool") && run.get("mark") != nil && run.flag("command") && reads[sql.intent(run.id).str("project") ?? "", default: 0] > (run["mark"]?.asInt ?? 0)
+        let reading = try run.flag("tool") && run.get("mark") != nil && run.flag("command") && reads[try sql.intent(run.id).str("project") ?? "", default: 0] > (run["mark"]?.asInt ?? 0)
         if reading {
             closing[run.str("command")!] = clock() + CourierDo.timeout
             wake()
@@ -426,7 +431,7 @@ extension CourierCore {
         }
         if !run.flag("tool"), let o = run.str("open") { command("cancel", [("target", .string(o))]) }  // its open (a look, say) still waits in the page: it must not move the tab later
         if status == "confirmed" { run.put("ms", "proved", .int(ms(run))) }
-        let intent = sql.intent(run.id)
+        let intent = try sql.intent(run.id)
         var result = intent.obj("result").asObject ?? JSONObject()
         result["ms"] = run["ms"] ?? .null
         if let row, !row.isEmpty { result["row"] = .string(row) }
@@ -444,7 +449,7 @@ extension CourierCore {
             changes.append(("proof", CourierDo.tail(proof)))
         }
         if watch { result["watch"] = .double(clock() + Self.acceptedWait) }  // its end on the wall clock, for a restart (`__init__`)
-        let updated = sql.update(clock(), run.id, [("status", .string(status)), ("cause", JSON(cause)), ("result", .object(result))] + changes)
+        let updated = try sql.update(clock(), run.id, [("status", .string(status)), ("cause", JSON(cause)), ("result", .object(result))] + changes)
         if status == "failed" && result["acted"]?.isTruthy == true && Self.provable(.object(result)) { unproved.insert(updated["id"]?.asInt ?? 0) }
         if watch {  // a later row of yours still confirms it (`reconcile_sends`)
             watched[updated["id"]?.asInt ?? 0] = uptime() + Self.acceptedWait
@@ -454,28 +459,28 @@ extension CourierCore {
             moves += 1
             backDue = true
         }
-        follow(updated)
+        try follow(updated)
         settle(updated)
     }
 
     /// The tool steps queued after one that is over. When it is confirmed the next is checked and started, and whoever waits on this
     /// step waits on the next; otherwise every later step is refused, naming it.
-    func follow(_ intent: JSON) {
+    func follow(_ intent: JSON) throws {
         let id = intent["id"]?.asInt ?? 0
         guard let queued = chains.removeValue(forKey: id), !queued.isEmpty else { return }
         if intent.str("status") != "confirmed" {
-            for i in queued { sql.update(clock(), i, [("status", "refused"), ("cause", .string(after(intent)))]) }
+            for i in queued { try sql.update(clock(), i, [("status", "refused"), ("cause", .string(after(intent)))]) }
             var r = intent.obj("result").asObject ?? JSONObject()
             r["stopped"] = .array(queued.map(JSON.int))
-            sql.update(clock(), id, [("result", .object(r))])  // a late confirmation says so on them
+            try sql.update(clock(), id, [("result", .object(r))])  // a late confirmation says so on them
             return
         }
-        let step = startStep(sql.intent(queued[0]))
+        let step = try startStep(try sql.intent(queued[0]))
         let stepID = step["id"]?.asInt ?? 0
         waiters[stepID] = waiters.removeValue(forKey: id) ?? []
         if queued.count > 1 { chains[stepID] = Array(queued.dropFirst()) }
         if step.str("status") == "pending" { return addRun(step, clock()) }  // the pass that finished this step advances it
-        if step.str("status") == "refused" { follow(step) }  // so are the rest. A grant (`awaiting`) keeps them queued until `confirm` runs it.
+        if step.str("status") == "refused" { try follow(step) }  // so are the rest. A grant (`awaiting`) keeps them queued until `confirm` runs it.
         settle(step)
     }
 }

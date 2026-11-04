@@ -272,12 +272,12 @@ final class CourierCore {
 
     /// `out(command)` sends one command down the socket. `wake()` says a deadline was added. `gone()` (set by the watcher) says the page
     /// went away: the watcher looks at Chrome again. `uptime()` is a clock that stands still while the Mac sleeps.
-    init(db: CourierStore, out: @escaping (JSON) -> Void, clock: CourierClock = .system, wake: @escaping () -> Void = {}) {
+    init(db: CourierStore, out: @escaping (JSON) -> Void, clock: CourierClock = .system, wake: @escaping () -> Void = {}) throws {
         self.db = db; self.out = out; self.clock = clock.now; self.wake = wake; self.uptime = clock.uptime
         startID = String((0..<6).map { _ in "0123456789abcdef".randomElement()! })
         let sql = CourierSQL(db)
-        sql.compact(clock.now() - Self.keepDays * 86400)
-        let rows = sql.seen(last: Self.replayRows), mark = sql.mark()
+        try sql.compact(clock.now() - Self.keepDays * 86400)
+        let rows = try sql.seen(last: Self.replayRows), mark = try sql.mark()
         acc = CourierBoard.start(told: mark)
         CourierBoard.foldInto(acc, rows.filter { ($0["id"]?.asInt ?? 0) <= mark })
         let before = CourierBoard.finish(acc)
@@ -287,14 +287,14 @@ final class CourierCore {
         for k in acc.threads.keys {  // rows from a past run can't be a baseline: the page sends what it shows on load
             Self.reset(&acc.threads, k, ["messages", "draft", "disabled", "turning", "turn_state"])
         }
-        chatted = sql.chatProjects()
+        chatted = try sql.chatProjects()
         lastLocal = nil
         _board = nil
         for r in rows where ["chat", "messages"].contains(r["kind"]?.asString ?? "") && (r["fields"]?.get("messages")?.isTruthy ?? false) {
             remember(r["subject"]?.asString ?? "", r["fields"]!["messages"]!.asArray ?? [])
         }
         arrived = (nil, 0.0)
-        for i in sql.intents(-1, status: "confirmed", columns: CourierStore.lean) {
+        for i in try sql.intents(-1, status: "confirmed", columns: CourierStore.lean) {
             if Self.sends.contains(i.str("tool") ?? ""), let row = i.obj("result").str("row") {
                 claimed[Place(i.str("project"), i.str("thread")), default: []].insert(row)
             }
@@ -302,7 +302,7 @@ final class CourierCore {
         facts = OrderedMap()
         for f in CourierTell.facts(before, board()) { facts[f["key"]?.asString ?? ""] = f }
         trim()
-        let pending = ["pending", "paused", "queued"].flatMap { sql.intents(-1, status: $0) }.sorted { ($0["id"]?.asInt ?? 0) < ($1["id"]?.asInt ?? 0) }
+        let pending = try ["pending", "paused", "queued"].flatMap { try sql.intents(-1, status: $0) }.sorted { ($0["id"]?.asInt ?? 0) < ($1["id"]?.asInt ?? 0) }
         for i in pending {
             let status = i.str("status") ?? "", tool = i.str("tool") ?? "", id = i["id"]?.asInt ?? 0
             if ["pending", "paused"].contains(status) && Self.sends.contains(tool) {
@@ -317,34 +317,34 @@ final class CourierCore {
                         result["watch"] = .double(self.clock() + Self.acceptedWait)
                         changes.append(("result", .object(result)))
                     }
-                    sql.update(self.clock(), id, changes)
+                    try sql.update(self.clock(), id, changes)
                 } else {
-                    sql.update(self.clock(), id, [("status", "paused"), ("cause", "routerd restarted")])
+                    try sql.update(self.clock(), id, [("status", "paused"), ("cause", "routerd restarted")])
                     runs[id] = Run(JSONObject([("id", .int(id)), ("stage", "start"), ("t0", i["at"] ?? .null), ("paused", true), ("deadline", .null),
                                                ("ms", [:]), ("tool", false)]))
                 }
             } else if ["pending", "paused"].contains(status) && CourierDo.tools.contains(tool) {  // a tool is never acted on twice: what was done is read, not done again
-                sql.update(self.clock(), id, [("status", "failed"), ("cause", "routerd restarted before the change was proved")])
+                try sql.update(self.clock(), id, [("status", "failed"), ("cause", "routerd restarted before the change was proved")])
             } else if status == "queued" {  // its earlier step's run is gone
-                sql.update(self.clock(), id, [("status", "refused"), ("cause", "routerd restarted before the step before it was confirmed")])
+                try sql.update(self.clock(), id, [("status", "refused"), ("cause", "routerd restarted before the step before it was confirmed")])
             }
         }
         // A send failed after a click is watched again for the rest of its watch (on uptime from now), those the start failed too. Every
         // other failed one keeps only its proof's tail, as a finished send's does. The time it was updated stays: cutting it changes no outcome.
-        for i in sql.intents(-1, status: "failed", columns: CourierStore.lean) {
+        for i in try sql.intents(-1, status: "failed", columns: CourierStore.lean) {
             if Self.sends.contains(i.str("tool") ?? ""), let until = i.obj("result").get("watch")?.asDouble, until > self.clock() {
                 watched[i["id"]?.asInt ?? 0] = self.uptime() + until - self.clock()
             }
         }
-        for i in sql.longProofs(CourierDo.kept) {
+        for i in try sql.longProofs(CourierDo.kept) {
             let id = i["id"]?.asInt ?? 0
-            if !watched.has(id) { sql.update(i.num("updated") ?? 0, id, [("proof", CourierDo.tail(i["proof"] ?? .null))]) }
+            if !watched.has(id) { try sql.update(i.num("updated") ?? 0, id, [("proof", CourierDo.tail(i["proof"] ?? .null))]) }
         }
         // acted, never proved: a later read can confirm
-        unproved = Set(sql.intents(-1, status: "failed", columns: CourierStore.lean).filter { i in
+        unproved = Set(try sql.intents(-1, status: "failed", columns: CourierStore.lean).filter { i in
             CourierDo.tools.contains(i.str("tool") ?? "") && i.obj("result").flag("acted") && Self.provable(i.obj("result"))
         }.map { $0["id"]?.asInt ?? 0 })
-        markGoals()
+        try markGoals()
     }
 
     /// `result.get("provable", True)` as a truth value.
@@ -357,14 +357,13 @@ final class CourierCore {
         places[key] = .object(p)
     }
 
-    /// The store, without Swift's `throws`: Python lets a SQL error propagate to `safely`/`carry_on`; here it stops the process, which a
-    /// database that can't be written leaves no better option for.
+    /// The store. A SQL error propagates as Python's does: out of `safely` as that run's failure, else out of the call, to the host (`carry_on`).
     var sql: CourierSQL { CourierSQL(db) }
 
     /// Each project's latest goal that was typed and not proved is marked: the tab, which a restart doesn't reload, may still show it.
-    func markGoals(_ project: String? = nil) {
+    func markGoals(_ project: String? = nil) throws {
         if let project { staleGoal.pop(project) }
-        for i in sql.intents(-1, tool: "set_goal") {
+        for i in try sql.intents(-1, tool: "set_goal") {
             let result = i.obj("result")
             if result.has("acted") && (project == nil || project == i.str("project")) {
                 let key = i.str("project") ?? ""
@@ -386,9 +385,9 @@ final class CourierCore {
     }
 
     /// Appends Seen rows, steps the Board, and keeps the facts and claims the rows make for the next tell.
-    func ingest(_ rows: [JSON]) {
+    func ingest(_ rows: [JSON]) throws {
         if rows.isEmpty { return }
-        let rows = sql.addSeen(clock(), rows)
+        let rows = try sql.addSeen(clock(), rows)
         let threads = rows.contains { ["thread", "app"].contains($0["kind"]?.asString ?? "") }
         let before = threads ? board() : nil
         for r in rows { CourierBoard.step(acc, r) }
@@ -418,20 +417,20 @@ final class CourierCore {
     // ---- events
 
     /// One event from the page.
-    func handle(_ event: JSON) {
+    func handle(_ event: JSON) throws {
         jump(clock())
         let type = event.get("type")?.asString
         let quiet = ["done", "notice", "wake_me"].contains(type ?? "\u{0}")
         if nopage && !(type == "page" || quiet) {
-            ingest([CourierPage.row("health", "page", [("page_ok", true)])])  // an event from the content script: there is a page after all
+            try ingest([CourierPage.row("health", "page", [("page_ok", true)])])  // an event from the content script: there is a page after all
         }
         if !quiet { nopage = false }
-        if type == "done" { return done(event) }
+        if type == "done" { return try done(event) }
         if type == "notice" {  // the page's own message, kept to say why a send it gave up on failed
             notice = ((event.get("text").map { $0.isTruthy ? $0.pyStr : "" }) ?? "", clock())
             return
         }
-        if type == "commands" { return replay(event) }
+        if type == "commands" { return try replay(event) }
         if type == "wake_me" { return wakeMe(event.get("after")) }
         if type == "page" && event.get("gone") == .bool(true) {
             // The worker says the adopted page's port dropped (a reload, say): what was sent so far went to that page, so the next
@@ -461,7 +460,7 @@ final class CourierCore {
             let subject = rows[0]["subject"]?.asString ?? "", messages = rows[0]["fields"]?["messages"]?.asArray ?? []
             if event.get("full") == .bool(true) && event.get("settled") == .bool(true) {  // the page's whole render of the place
                 unsettled.remove(subject)
-                readWhole(Place(project, event.get("side") == "thread" ? thread : nil), event)
+                try readWhole(Place(project, event.get("side") == "thread" ? thread : nil), event)
             }
             // Its first rows, maybe not all of them yet, also for a place Fjord has seen (rows may have come while it was away). A
             // delta with rows comes only after a whole read (an empty chat's is settled), so it adds rows to a render already known;
@@ -471,10 +470,10 @@ final class CourierCore {
         }
         if type == "rows" && event.get("side") == "project", let project {
             let claims = rows.isEmpty ? [] : claimRows(project, rows[0]["fields"]?["messages"]?.asArray ?? [])
-            ingest(rows + claims)
+            try ingest(rows + claims)
             if !rows.isEmpty && !(rows[0]["fields"]?["messages"]?.asArray ?? []).isEmpty { chatted.insert(project) }  // a page shows no rows before its transcript mounts: that isn't having seen the chat
         } else {
-            ingest(rows)
+            try ingest(rows)
         }
         let loaded: JSON? = type == "page" ? event.get("loaded") : nil
         let instance: JSON? = type == "page" ? event.get("instance") : nil
@@ -487,8 +486,8 @@ final class CourierCore {
             let unran = self.unran
             relinked = false
             self.unran = []
-            if same { markUnran(unran) }  // the snapshot came from the document its sends were handed to
-            settleUnwent()
+            if same { try markUnran(unran) }  // the snapshot came from the document its sends were handed to
+            try settleUnwent()
         }
         if type == "page" && event.get("gone") != .bool(true) && regone {  // the first page after a `gone`
             regone = false
@@ -506,11 +505,11 @@ final class CourierCore {
         if type == "settings", let project { dropStaleGoal(project) }  // the tab shows another goal now: the refused one is gone from it
         // The live runs first; the place's sends are judged together (`proved_at`), so a row of a watched send's words is its, not a
         // live run's, and reconcile_sends then confirms it.
-        advanceAll()
+        try advanceAll()
         if !unproved.isEmpty && (type == "settings" || type == "projects") {
-            reconcile(type!, project, complete: event.get("complete") == .bool(true))
+            try reconcile(type!, project, complete: event.get("complete") == .bool(true))
         }
-        if !watched.isEmpty && type == "rows", let project { reconcileSends(Place(project, event.get("side") == "thread" ? thread : nil)) }
+        if !watched.isEmpty && type == "rows", let project { try reconcileSends(Place(project, event.get("side") == "thread" ? thread : nil)) }
     }
 
     /// A settled whole read of a place came: a watched send's going back there is over, used (`release_watch`), and a look there
@@ -518,7 +517,7 @@ final class CourierCore {
     /// look's open (the tab arrived since it went out, or its `done` came first): one from before is the render the look is there to
     /// refresh. Not one that shows a row of yours still pending, or the coordinator mid-turn: the server may hold your message
     /// queued, and the row may key moments later, so the look waits on to its end.
-    func readWhole(_ place: Place, _ event: JSON) {
+    func readWhole(_ place: Place, _ event: JSON) throws {
         if let w = watchOpen, w.to == place, arrivals > w.openFrom || w.open == nil || w.shown {
             // An open for a place the tab already shows moves no tab: the page's own read after the send is the one it answers with.
             releaseWatch(used: true)
@@ -529,7 +528,7 @@ final class CourierCore {
         }) { return }
         for run in runs.values {
             if !run.flag("tool") && lookLive(run) && (arrivals > (run["open_from"]?.asInt ?? arrivals) || run.flag("look_done") || (run.flag("open") && run.flag("open_shown"))) {
-                let intent = sql.intent(run.id)
+                let intent = try sql.intent(run.id)
                 if Place(intent.str("project"), intent.str("thread")) == place { run["look_read"] = true }
             }
         }
@@ -655,9 +654,9 @@ final class CourierCore {
 
     /// A native host connected or went away. `current`: the one leaving is the one commands go to (the latest linked). An older
     /// host whose socket closes after a newer one linked takes nothing with it: the commands since went to the newer one.
-    func connection(_ up: Bool, current: Bool = true) {
+    func connection(_ up: Bool, current: Bool = true) throws {
         hosts = max(0, hosts + (up ? 1 : -1))
-        if up || current || hosts == 0 { settleUnwent() }  // no `page` decided them: taken as gone with the page
+        if up || current || hosts == 0 { try settleUnwent() }  // no `page` decided them: taken as gone with the page
         if up {
             linked = commands
             relinked = true
@@ -685,27 +684,27 @@ final class CourierCore {
         // At a link the health kept from before is stale (the page may be gone, and an open sent on it fails if the worker finds no
         // tab): the page can't be read until the worker's first event says whether there is one (`connectHost`), so a tick between
         // the two moves no run on a `page_ok: true` from the host before.
-        ingest([CourierPage.row("health", "page", [("connected", .bool(hosts > 0))] + (up ? [("page_ok", false)] : []))])
+        try ingest([CourierPage.row("health", "page", [("connected", .bool(hosts > 0))] + (up ? [("page_ok", false)] : []))])
         nopage = up || (nopage && hosts > 0)
-        if !up { advanceAll() }
+        if !up { try advanceAll() }
     }
 
     func connected() -> Bool { hosts > 0 }
 
     /// Why a paused run waits, said again: Chrome may have started (its profile picker showing) since the reason was set.
-    func recheckPauses() {
+    func recheckPauses() throws {
         let why = CourierDo.blocked(board()["health"] ?? .null)
         for run in runs.values {
             if run.flag("paused"), let why {
-                let intent = sql.intent(run.id)
+                let intent = try sql.intent(run.id)
                 if intent.str("status") == "paused" && intent.str("cause") != why && !pyStartsWith(intent.str("cause") ?? "", "waiting for the Claude app") {
-                    sql.update(clock(), run.id, [("cause", .string(why))])
+                    try sql.update(clock(), run.id, [("cause", .string(why))])
                 }
             }
         }
     }
 
-    func local(_ local: JSON?) {
+    func local(_ local: JSON?) throws {
         guard let local, local.isTruthy else { return }
         let now = clock()
         let known = (board()["projects"]?.asObject?.values ?? []).filter { $0.get("where") == "cloud" }.map { (p: JSON) -> JSON in ["id": p["id"] ?? .null, "name": p["name"] ?? .null] }
@@ -713,8 +712,8 @@ final class CourierCore {
         let key: JSON = .array(rows.map { [$0["kind"] ?? .null, $0["subject"] ?? .null, $0["fields"] ?? .null] })
         if lastLocal != key {
             lastLocal = key
-            ingest(rows)
-            advanceAll()
+            try ingest(rows)
+            try advanceAll()
         }
     }
 
@@ -749,10 +748,10 @@ final class CourierCore {
 
     /// Gives up on a dev command still waiting: the page is told to drop it, and its `done` is no longer waited for. Returns whether it
     /// was still waiting: false when its `done` already came.
-    func devCancel(_ id: String) -> Bool {
+    func devCancel(_ id: String) throws -> Bool {
         if dev.pop(id) != nil {
             command("cancel", [("target", .string(id))])
-            advanceAll()  // the sends that waited for it go on
+            try advanceAll()  // the sends that waited for it go on
             return true
         }
         return false
@@ -761,10 +760,10 @@ final class CourierCore {
     func ms(_ run: Run) -> Int { Int(((clock() - (run.num("t0") ?? 0)) * 1000).rounded(.toNearestOrEven)) }
 
     /// Begins delivering a pending send or tool. Anything else is already done.
-    func start(_ intent: JSON, _ t0: Double) {
+    func start(_ intent: JSON, _ t0: Double) throws {
         if intent.str("status") != "pending" || !Self.runs_.contains(intent.str("tool") ?? "") { return settle(intent) }
         addRun(intent, t0)
-        advanceAll()
+        try advanceAll()
     }
 
     func addRun(_ intent: JSON, _ t0: Double) {
@@ -801,7 +800,7 @@ final class CourierCore {
     /// the words, so it is never sent again, not even click-only (the next page may show them in its draft, its saved draft). It is taken:
     /// its row proves it, or it fails as taken and is watched (`finish`). No page took this click: words back in a draft aren't one
     /// giving up.
-    func went(_ run: Run) {
+    func went(_ run: Run) throws {
         clicked(run)
         run["taken"] = true
         run["click_page"] = .null
@@ -812,7 +811,7 @@ final class CourierCore {
         if (g?.isTruthy ?? false), let a = g?.asArray, a.count == 2, a[1] == (run["command"] ?? .null), (run.get("reloaded") == nil) {
             run["reloaded"] = a[0]
         }
-        sql.update(clock(), run.id, [("cause", "the page it was handed to went before it said what it did")])
+        try sql.update(clock(), run.id, [("cause", "the page it was handed to went before it said what it did")])
     }
 
     /// The run may have sent the words. A restart watches any send that issued one (its baseline), so this isn't kept.
@@ -856,38 +855,35 @@ final class CourierCore {
     }
 }
 
-/// The store as the Core uses it: Python lets a SQL error propagate to `safely`; a failure here is fatal.
+/// The store as the Core uses it: every call can throw, as Python's can; `safely` turns a throw in one run's step into that run's failure.
 struct CourierSQL {
     let db: CourierStore
     init(_ db: CourierStore) { self.db = db }
-    private func ok<T>(_ f: () throws -> T) -> T {
-        do { return try f() } catch { fatalError("Courier store: \(error)") }
+    func compact(_ before: Double) throws { try db.compact(before: before) }
+    func seen(last: Int?) throws -> [JSON] { try db.seen(last: last) }
+    func mark() throws -> Int { try db.mark() }
+    func setMark(_ v: Int) throws { try db.setMark(v) }
+    func lastSeenId() throws -> Int { try db.lastSeenId() }
+    func chatProjects() throws -> Set<String> { try db.chatProjects() }
+    func addSeen(_ now: Double, _ rows: [JSON]) throws -> [JSON] { try db.addSeen(now, rows) }
+    func intents(_ limit: Int = 50, status: String? = nil, tool: String? = nil, columns: String = "*") throws -> [JSON] {
+        try db.intents(limit: limit, status: status, tool: tool, columns: columns)
     }
-    func compact(_ before: Double) { ok { try db.compact(before: before) } }
-    func seen(last: Int?) -> [JSON] { ok { try db.seen(last: last) } }
-    func mark() -> Int { ok { try db.mark() } }
-    func setMark(_ v: Int) { ok { try db.setMark(v) } }
-    func lastSeenId() -> Int { ok { try db.lastSeenId() } }
-    func chatProjects() -> Set<String> { ok { try db.chatProjects() } }
-    func addSeen(_ now: Double, _ rows: [JSON]) -> [JSON] { ok { try db.addSeen(now, rows) } }
-    func intents(_ limit: Int = 50, status: String? = nil, tool: String? = nil, columns: String = "*") -> [JSON] {
-        ok { try db.intents(limit: limit, status: status, tool: tool, columns: columns) }
-    }
-    func longProofs(_ kept: Int) -> [JSON] { ok { try db.longProofs(kept: kept) } }
+    func longProofs(_ kept: Int) throws -> [JSON] { try db.longProofs(kept: kept) }
     /// `store.intent`: nil when there is none.
-    func intentOrNil(_ id: Int) -> JSON? { ok { try db.intent(id) } }
+    func intentOrNil(_ id: Int) throws -> JSON? { try db.intent(id) }
     /// `store.intent` for an intent that exists.
-    func intent(_ id: Int) -> JSON { intentOrNil(id) ?? .null }
+    func intent(_ id: Int) throws -> JSON { try intentOrNil(id) ?? .null }
     @discardableResult
-    func update(_ now: Double, _ id: Int, _ changes: [(String, JSON)]) -> JSON { ok { try db.updateIntent(now, id, changes) } ?? .null }
+    func update(_ now: Double, _ id: Int, _ changes: [(String, JSON)]) throws -> JSON { try db.updateIntent(now, id, changes) ?? .null }
     func addIntent(_ now: Double, _ tool: String, words: String? = "", project: String? = nil, thread: String? = nil, args: JSON? = nil, proof: JSON? = nil,
-                   status: String = "pending", dup: Bool = true, more: [(String, JSON)] = []) -> (intent: JSON, created: Bool) {
-        ok { try db.addIntent(now, tool, words: words, project: project, thread: thread, args: args, proof: proof, status: status, dup: dup, more: more) }
+                   status: String = "pending", dup: Bool = true, more: [(String, JSON)] = []) throws -> (intent: JSON, created: Bool) {
+        try db.addIntent(now, tool, words: words, project: project, thread: thread, args: args, proof: proof, status: status, dup: dup, more: more)
     }
-    func told() -> JSONObject { ok { try db.told() } }
-    func setTold(_ now: Double, _ key: String, _ project: String?, _ kind: String?, _ detail: String?, _ text: String?) { ok { try db.setTold(now, key, project, kind, detail, text) } }
-    func notes() -> JSONObject { ok { try db.notes() } }
-    func setNote(_ now: Double, _ topic: String, _ text: String) { ok { try db.setNote(now, topic, text) } }
+    func told() throws -> JSONObject { try db.told() }
+    func setTold(_ now: Double, _ key: String, _ project: String?, _ kind: String?, _ detail: String?, _ text: String?) throws { try db.setTold(now, key, project, kind, detail, text) }
+    func notes() throws -> JSONObject { try db.notes() }
+    func setNote(_ now: Double, _ topic: String, _ text: String) throws { try db.setNote(now, topic, text) }
 }
 
 /// Whether the tab shows the place. A project shows with or without a thread open beside it: arriving on a project, the page
@@ -916,18 +912,18 @@ extension CourierCore {
     /// taken (`went`) and never sent again, at once (a paused one when it comes out of the pause), unless the document it was handed
     /// to says it never ran: then it is sent again (`went_or_retry`; after a new link, decided at the next `page`). A command an earlier routerd start sent that still waits has no run to answer for it: it is
     /// cancelled, so an old send can't click.
-    func replay(_ event: JSON) {
+    func replay(_ event: JSON) throws {
         let done = event.get("done")?.asArray ?? []
         for d in done {
             guard case .object = d else { continue }
-            if let s = d["settings"], case .object = s { replayedSettings(d) }
+            if let s = d["settings"], case .object = s { try replayedSettings(d) }
             let watchedOpen = watchOpen?.open
             if let id = d.get("id")?.asString, !id.isEmpty, dev.has(id) || id == watchedOpen || runs.values.contains(where: { unheard($0, id) }) {
-                self.done(d, replayed: true)
+                try self.done(d, replayed: true)
             }
             if let id = d.get("id")?.asString { closing.pop(id) }
-            typedNothing(d)
-            lateDone(d)
+            try typedNothing(d)
+            try lateDone(d)
         }
         if let waitingJSON = event.get("waiting")?.asArray {
             let waiting = waitingJSON.compactMap(\.asString)
@@ -967,7 +963,7 @@ extension CourierCore {
                         unran.append((run.id, c))
                     }
                 }
-                if relinked { self.unran = unran } else { markUnran(unran) }
+                if relinked { self.unran = unran } else { try markUnran(unran) }
             }
             // A taken send's open (its going back, or its look) sent before the page went that it neither lists nor reported done never
             // ran: the tab won't move for it, so it holds nobody (`going_back`). A look's own deadline still ends it.
@@ -997,11 +993,11 @@ extension CourierCore {
                     run["went_due"] = true
                     unwent.append(run.id)
                 } else {  // it reached a page (a send is made only while a host is linked), which may have clicked it, unless it never ran
-                    wentOrRetry(run)
+                    try wentOrRetry(run)
                 }
             }
         }
-        advanceAll()
+        try advanceAll()
     }
 
     /// A taken send's open (its going back, or its look) that never reached a page: the tab won't move for it, so it holds nobody
@@ -1019,34 +1015,34 @@ extension CourierCore {
 
     /// A send dropped from the page it was handed to: one that document says never ran (`mark_unran`) is made again, typed again if
     /// no click was reported; any other went with it (`went`).
-    func wentOrRetry(_ run: Run) {
+    func wentOrRetry(_ run: Run) throws {
         run.pop("went_due")
-        if run.strings("unran").contains(run.str("command") ?? "\u{0}") { neverRan(run) } else { went(run) }
+        if run.strings("unran").contains(run.str("command") ?? "\u{0}") { try neverRan(run) } else { try went(run) }
         safely(run)
     }
 
     /// A send its document says never ran (`mark_unran`): no attempt used. The same attempt goes on (`ignored`), made again with a
     /// fresh wait of its own.
-    func neverRan(_ run: Run) {
+    func neverRan(_ run: Run) throws {
         run.pop("gone_at")
         run["stage"] = "start"; run["deadline"] = .null; run["ignored"] = true; run.set("limit", clock() + CourierDo.timeout)
-        sql.update(clock(), run.id, [("cause", .null)])
+        try sql.update(clock(), run.id, [("cause", .null)])
     }
 
     /// The sends `replay` dropped while relinked, decided now that the next `page` came (its never-ran marks made or not).
-    func settleUnwent() {
+    func settleUnwent() throws {
         let list = unwent
         unwent = []
         for id in list {
-            if let run = runs[id], run.flag("went_due") { wentOrRetry(run) }
+            if let run = runs[id], run.flag("went_due") { try wentOrRetry(run) }
         }
     }
 
     /// [(run id, send id)]: sends the document they were handed to says never ran (`replay`).
-    func markUnran(_ unran: [(Int, String)]) {
+    func markUnran(_ unran: [(Int, String)]) throws {
         for (runID, id) in unran {
             if let run = runs[runID], run.flag("tool") {
-                if run.str("stage") == "act" && run.str("command") == id { toolUnran(run) }
+                if run.str("stage") == "act" && run.str("command") == id { try toolUnran(run) }
                 continue
             }
             if let run = runs[runID] {
@@ -1058,27 +1054,27 @@ extension CourierCore {
 
     /// A tool's act the document it was handed to says never ran (`replay`: the worker failed it, its `done` lost): as an act that
     /// erred before its one change (`ok: false`, not `committed`), nothing was done, and a goal typed nowhere marks no stale goal.
-    func toolUnran(_ run: Run) {
-        let intent = sql.intent(run.id)
+    func toolUnran(_ run: Run) throws {
+        let intent = try sql.intent(run.id)
         run["command"] = .null
-        keep(run, [("acted", false)] + (intent.str("tool") == "set_goal" ? [("provable", true)] : []))
-        finish(run, "failed", "the page never ran the step: it went before it said what it did")
+        try keep(run, [("acted", false)] + (intent.str("tool") == "set_goal" ? [("provable", true)] : []))
+        try finish(run, "failed", "the page never ran the step: it went before it said what it did")
     }
 
     /// A replayed read's settings, handled only for a read still unheard (a tool's command or a dev command no `done` answered yet)
     /// and only once: an old read's settings repeated by each snapshot would bump the reads (a tool's proving read would be this old
     /// one) and drop a goal's mark. Only what a settings read does is done: no arrival (the event's place is the read's, not the tab's
     /// now), and the runs advance after the snapshot as a whole.
-    func replayedSettings(_ d: JSON) {
+    func replayedSettings(_ d: JSON) throws {
         guard let id = d.get("id")?.asString, !readsDone.has(id), dev.has(id) || runs.values.contains(where: { $0.flag("tool") && unheard($0, id) }) else { return }
         readHeard(id)
         var event = d["settings"] ?? .null
         event["type"] = "settings"
         guard let project = CourierPage.place(event).project else { return }
         reads[project, default: 0] += 1
-        ingest(CourierPage.seenRows(event))
+        try ingest(CourierPage.seenRows(event))
         dropStaleGoal(project)
-        if !unproved.isEmpty { reconcile("settings", project) }
+        if !unproved.isEmpty { try reconcile("settings", project) }
     }
 
     /// A read's `done` heard, its settings handled: kept for the newest CAP.
@@ -1096,82 +1092,82 @@ extension CourierCore {
     /// `done` for it says what it did. A 2xx `saved` is the server's answer, so the act is confirmed (a goal's too: provable). A refusal
     /// before the change (`ok: false`, not `committed`) means nothing was done. `already` is `typed_nothing`'s. Its run is over: this
     /// changes the intent, never a run.
-    func lateDone(_ d: JSON) {
+    func lateDone(_ d: JSON) throws {
         guard case .object = d, let did = d.get("id")?.asString else { return }
         var candidates = unproved
         for m in staleGoal.values { if let i = m["id"]?.asInt { candidates.insert(i) } }
         for intentID in candidates.sorted() {
-            let intent = sql.intent(intentID)
+            let intent = try sql.intent(intentID)
             let result = intent.obj("result")
             if runs.has(intentID) || result.get("act") != .string(did) || !result.flag("acted") || d.get("already") == .bool(true) { continue }
             let goal = intent.str("tool") == "set_goal"
             if d.flag("ok"), let saved = d.get("saved"), saved.isPyInt, let s = saved.numeric, s >= 200 && s < 300 {
                 unproved.remove(intentID)
-                confirmLate(intent, "confirmed by the page's late report of its save", goal ? ["provable": true] : nil)
-                if goal { markGoals(intent.str("project")) }
+                try confirmLate(intent, "confirmed by the page's late report of its save", goal ? ["provable": true] : nil)
+                if goal { try markGoals(intent.str("project")) }
             } else if d.get("ok") == .bool(false) && !d.flag("committed") {
                 unproved.remove(intentID)
                 var r = result.asObject ?? JSONObject()
                 r["acted"] = false
                 if goal { r["provable"] = true }
-                sql.update(clock(), intentID, [("result", .object(r))])
-                if goal { markGoals(intent.str("project")) }
+                try sql.update(clock(), intentID, [("result", .object(r))])
+                if goal { try markGoals(intent.str("project")) }
             }
         }
     }
 
     /// A tool that was done but not confirmed is confirmed after all. The steps it stopped are not run now: nobody waits on them any
     /// more, and they were checked against a board that has moved on. Their cause stops naming a failure that turned out not to be one.
-    func confirmLate(_ intent: JSON, _ cause: String, _ result: JSON? = nil, columns: [(String, JSON)] = []) {
+    func confirmLate(_ intent: JSON, _ cause: String, _ result: JSON? = nil, columns: [(String, JSON)] = []) throws {
         var merged = intent.obj("result").asObject ?? JSONObject()
         merged.update(result?.asObject ?? JSONObject())
-        sql.update(clock(), intent["id"]?.asInt ?? 0, [("status", "confirmed"), ("cause", .string(cause)), ("result", .object(merged))] + columns)
+        try sql.update(clock(), intent["id"]?.asInt ?? 0, [("status", "confirmed"), ("cause", .string(cause)), ("result", .object(merged))] + columns)
         let n = intent.obj("result").get("step") ?? .int(1)
         for i in intent.obj("result").get("stopped")?.asArray ?? [] {
-            if sql.intent(i.asInt ?? 0).str("status") == "refused" {
-                sql.update(clock(), i.asInt ?? 0, [("cause", .string("step \(n.pyStr) (\(intent.str("tool") ?? "")) was confirmed later, by a read; this step wasn't run"))])
+            if try sql.intent(i.asInt ?? 0).str("status") == "refused" {
+                try sql.update(clock(), i.asInt ?? 0, [("cause", .string("step \(n.pyStr) (\(intent.str("tool") ?? "")) was confirmed later, by a read; this step wasn't run"))])
             }
         }
     }
 
     /// A goal's act an earlier routerd start sent, which the page reports found it already so: nothing was typed, so its goal is no
     /// longer marked as one the tab may show unsaved (an older mark of that project's still holds).
-    func typedNothing(_ d: JSON) {
+    func typedNothing(_ d: JSON) throws {
         guard case .object = d, d.get("already") == .bool(true), let did = d.get("id")?.asString else { return }
         for (p, marked) in staleGoal.pairs {
             if marked.obj("result").get("act") == .string(did) {
                 var result = JSONObject()
                 for (k, v) in marked.obj("result").asObject ?? JSONObject() where k != "acted" && k != "provable" { result[k] = v }
-                sql.update(clock(), marked["id"]?.asInt ?? 0, [("result", .object(result))])
-                markGoals(p)
+                try sql.update(clock(), marked["id"]?.asInt ?? 0, [("result", .object(result))])
+                try markGoals(p)
             }
         }
     }
 
     /// A reply to a stranded thread goes to its project's coordinator instead: one ordinary project send, with the same proof, that asks
     /// for a new thread continuing it. `continues` ties the new thread to the old one. Nothing is sent into the dead thread.
-    func handOff(_ intent: JSON, _ t: JSON) -> JSON {
+    func handOff(_ intent: JSON, _ t: JSON) throws -> JSON {
         let (words, args) = CourierDo.handoff(t, intent.str("words") ?? "")
         let proof: JSON = ["kind": "latest_you", "project": t["project"] ?? .null, "thread": .null, "words": .string(words)]
         var changed = intent
         changed["args"] = args
         var result = intent.obj("result").asObject ?? JSONObject()
         result["warning"] = JSON(CourierDo.warning(board(), changed))
-        return sql.update(clock(), intent["id"]?.asInt ?? 0, [("tool", "send_to_project"), ("words", .string(words)), ("project", t["project"] ?? .null), ("thread", .null),
+        return try sql.update(clock(), intent["id"]?.asInt ?? 0, [("tool", "send_to_project"), ("words", .string(words)), ("project", t["project"] ?? .null), ("thread", .null),
                                                              ("args", args), ("proof", proof), ("result", .object(result))])
     }
 
     /// Status and cause change only when they differ. A paused intent answers whoever waits: it goes on by itself when the page is back.
-    func mark(_ intent: JSON, _ status: String, _ cause: String?) {
+    func mark(_ intent: JSON, _ status: String, _ cause: String?) throws {
         if intent.get("status") != .string(status) || intent.get("cause") != cause.map(JSON.string) {
-            let updated = sql.update(clock(), intent["id"]?.asInt ?? 0, [("status", .string(status)), ("cause", JSON(cause))])
+            let updated = try sql.update(clock(), intent["id"]?.asInt ?? 0, [("status", .string(status)), ("cause", JSON(cause))])
             if status == "paused" { settle(updated) }
         }
     }
 
     /// The page's report of a command: what it did, not whether it worked. A failed step is tried again at once. `replayed`: from a
     /// `commands` snapshot, for a click made some time before (when isn't known): it is a click, but not a fresh one.
-    func done(_ event: JSON, replayed: Bool = false) {
+    func done(_ event: JSON, replayed: Bool = false) throws {
         let error = (event.get("error").map { $0.isTruthy ? $0.pyStr : "" }).flatMap { $0.isEmpty ? nil : $0 } ?? "the page reported a failure"
         let id = event.get("id")
         let ids = id?.asString
@@ -1183,7 +1179,7 @@ extension CourierCore {
         if let ids, let reply = dev[ids] {
             dev.pop(ids)
             reply(event)  // a dev command belongs to no run
-            return advanceAll()  // the sends that waited for it go on
+            return try advanceAll()  // the sends that waited for it go on
         }
         if let w = watchOpen, let wo = w.open, id == .string(wo) {  // a watched send's going back (`back_to_watched`)
             if event.flag("ok") {  // it holds on until a settled whole read of the place (`handle`), at most do.TIMEOUT more
@@ -1199,7 +1195,7 @@ extension CourierCore {
         }
         for run in runs.values {
             if run.flag("tool") {
-                if id == run.get("command") { toolDone(run, event) }
+                if id == run.get("command") { try toolDone(run, event) }
                 continue
             }
             if id == run.get("open") && (event.flag("ok") || (run.flag("accepted") && !run.flag("looking"))) {
@@ -1225,7 +1221,7 @@ extension CourierCore {
                 // again at its deadline, as background.js says routerd does. A second error in a row fails it with that error.
                 if error != "superseded" && run.flag("open_error") {
                     run["open"] = .null
-                    finish(run, "failed", error)
+                    try finish(run, "failed", error)
                     continue
                 }
                 run["open"] = .null; run["open_error"] = .bool(error != "superseded"); run["moving_to"] = .null
@@ -1269,10 +1265,10 @@ extension CourierCore {
                 } else if current && error == Self.dialogOpen {  // (an older or cut-off send's error says nothing of the run)
                     // A dialog the page holds open (a tool's, or one routerd doesn't know of): the same attempt goes on, and the send is made
                     // again when the tools end, else at its deadline. It never burns an attempt, nor is retried at once against the dialog.
-                    sql.update(clock(), run.id, [("cause", .string(error))])
+                    try sql.update(clock(), run.id, [("cause", .string(error))])
                     run["ignored"] = true; run["held"] = .bool(toolBusy())
                 } else if current {
-                    sql.update(clock(), run.id, [("cause", .string(error))])
+                    try sql.update(clock(), run.id, [("cause", .string(error))])
                     if error != "superseded" && tabHeld(run) {  // another run has the tab: the retry waits for it, at most the deadline
                         run["retry"] = true  // the pass that frees the tab makes it (`advance`, `advance_all`)
                         deadline(run)
@@ -1283,7 +1279,7 @@ extension CourierCore {
                 }
             }
         }
-        advanceAll()
+        try advanceAll()
     }
 
     /// The page asks to be woken after `after` ms: a hidden tab's own timers are throttled, a message is not. Each time asked is kept,
@@ -1299,7 +1295,7 @@ extension CourierCore {
     }
 
     /// Called when a deadline passes. A run that got no row from you in time takes its next attempt.
-    func tick(_ at: Double? = nil) {
+    func tick(_ at: Double? = nil) throws {
         let now = at ?? clock()
         jump(now)
         if wakes.contains(where: { $0 <= now }) {
@@ -1312,7 +1308,7 @@ extension CourierCore {
             closing.pop(id)
             command("cancel", [("target", .string(id))])
         }
-        unwatch()
+        try unwatch()
         if let w = watchOpen, w.holdUntil <= now {  // an open the page dropped, a tab that never arrived or settled
             releaseWatch(used: true)  // used: a place that never settles isn't opened again and again in one move
         }
@@ -1327,7 +1323,7 @@ extension CourierCore {
                 safely(run, late: true)
             }
         }
-        advanceAll()
+        try advanceAll()
     }
 
     func sendWake() {
@@ -1352,96 +1348,96 @@ extension CourierCore {
     // ---- say
 
     /// `decide.send_intent`.
-    func sendIntent(_ words: String, _ project: String?, _ thread: String?, _ more: [(String, JSON)] = []) -> JSON {
+    func sendIntent(_ words: String, _ project: String?, _ thread: String?, _ more: [(String, JSON)] = []) throws -> JSON {
         let proof: JSON = ["kind": "latest_you", "project": JSON(project), "thread": JSON(thread), "words": .string(words)]
         let tool = thread != nil && !thread!.isEmpty ? "reply_in_thread" : "send_to_project"
-        return sql.addIntent(clock(), tool, words: words, project: project, thread: thread, proof: proof, status: more.first { $0.0 == "status" }?.1.asString ?? "pending",
+        return try sql.addIntent(clock(), tool, words: words, project: project, thread: thread, proof: proof, status: more.first { $0.0 == "status" }?.1.asString ?? "pending",
                              more: more.filter { $0.0 != "status" }).intent
     }
 
     /// `decide.explicit`.
-    func explicit(_ board: JSON, _ words: String, _ project: String?, _ thread: String?) -> JSON {
+    func explicit(_ board: JSON, _ words: String, _ project: String?, _ thread: String?) throws -> JSON {
         if let thread, !thread.isEmpty {
             let t = board["threads"]?.get(thread)
-            return sendIntent(words, t?.str("project"), thread, [("cause", t != nil ? .null : "that thread isn't on the board"), ("status", t != nil ? "pending" : "refused")])
+            return try sendIntent(words, t?.str("project"), thread, [("cause", t != nil ? .null : "that thread isn't on the board"), ("status", t != nil ? "pending" : "refused")])
         }
         let p = project.flatMap { CourierBoard.projectNamed(board, $0) }
-        return sendIntent(words, p?.str("id"), nil, [("cause", p != nil ? .null : .string("no project named \(project ?? "None")")), ("status", p != nil ? "pending" : "refused")])
+        return try sendIntent(words, p?.str("id"), nil, [("cause", p != nil ? .null : .string("no project named \(project ?? "None")")), ("status", p != nil ? "pending" : "refused")])
     }
 
     /// Decide and start doing. `reply` gets the decision as soon as there is one; `finished` the intent once it is done. Only an explicit
     /// target (a project or a thread) is decided here: choosing one is the app's (`RouterJev`), the engine never calls a model.
-    func say(_ message: String, project: String? = nil, thread: String? = nil, reply: @escaping (JSON) -> Void = { _ in }, finished: @escaping (JSON) -> Void = { _ in }) {
+    func say(_ message: String, project: String? = nil, thread: String? = nil, reply: @escaping (JSON) -> Void = { _ in }, finished: @escaping (JSON) -> Void = { _ in }) throws {
         let t0 = clock()
         let board = self.board()
         if (project != nil && !project!.isEmpty) || (thread != nil && !thread!.isEmpty) {
-            return begin(explicit(board, message, project, thread), t0, reply, finished, ["by": "explicit"])
+            return try begin(try explicit(board, message, project, thread), t0, reply, finished, ["by": "explicit"])
         }
-        reply(["event": "error", "error": "no target: the app decides where a message goes"])
+        try reply(["event": "error", "error": "no target: the app decides where a message goes"])
     }
 
     /// Replies with the decision and starts it. `later`: the tool steps after this one, shown in the decision as `steps` so the owner
     /// sees them all at once; each starts when the one before it is confirmed.
-    func begin(_ intent: JSON, _ t0: Double, _ reply: @escaping (JSON) -> Void, _ finished: @escaping (JSON) -> Void, _ log: JSON? = nil, later: [JSON] = []) {
+    func begin(_ intent: JSON, _ t0: Double, _ reply: @escaping (JSON) -> Void, _ finished: @escaping (JSON) -> Void, _ log: JSON? = nil, later: [JSON] = []) throws {
         var intent = intent
-        if let log, !(intent.get("output")?.isTruthy ?? false) { intent = sql.update(clock(), intent["id"]?.asInt ?? 0, [("output", log)]) }
+        if let log, !(intent.get("output")?.isTruthy ?? false) { intent = try sql.update(clock(), intent["id"]?.asInt ?? 0, [("output", log)]) }
         let gone = intent.flag("thread") && intent.str("status") == "pending" ? CourierDo.stranded(board(), intent) : nil
-        if let gone { intent = handOff(intent, gone) }
+        if let gone { intent = try handOff(intent, gone) }
         let warning = CourierDo.warning(board(), intent)
         if let warning {
             var r = intent.obj("result").asObject ?? JSONObject()
             r["warning"] = .string(warning)
-            intent = sql.update(clock(), intent["id"]?.asInt ?? 0, [("result", .object(r))])
+            intent = try sql.update(clock(), intent["id"]?.asInt ?? 0, [("result", .object(r))])
         }
         var decision: JSON = ["event": "decision", "intent": intent, "warning": JSON(warning)]
         if !later.isEmpty { decision["steps"] = .array([intent] + later) }
-        reply(decision)
+        try reply(decision)
         let queued = later.filter { $0.str("status") == "queued" }.compactMap { $0["id"]?.asInt }
         let id = intent["id"]?.asInt ?? 0
         if !queued.isEmpty { chains[id] = queued }
         if CourierDo.done.contains(intent.str("status") ?? "") || intent.str("status") == "awaiting" { return finished(intent) }  // a permission grant waits for `confirm`
         waiters[id, default: []].append(finished)
-        if !runs.has(id) { start(intent, t0) }
+        if !runs.has(id) { try start(intent, t0) }
     }
 
     /// The owner confirms a permission grant. Until then nothing was done.
     @discardableResult
-    func confirm(_ intentID: Int, finished: @escaping (JSON) -> Void = { _ in }) -> JSON? {
-        let intent = sql.intentOrNil(intentID)
+    func confirm(_ intentID: Int, finished: @escaping (JSON) -> Void = { _ in }) throws -> JSON? {
+        let intent = try sql.intentOrNil(intentID)
         guard let intent, intent.str("status") == "awaiting" else {  // whoever asked still gets an outcome: the run's, or the intent as it is
             if let intent, runs.has(intent["id"]?.asInt ?? -1) {
                 waiters[intentID, default: []].append(finished)
             } else {
-                finished(intent ?? ["id": .int(intentID), "error": .string("no intent \(intentID)")])
+                try finished(intent ?? ["id": .int(intentID), "error": .string("no intent \(intentID)")])
             }
             return intent
         }
         var r = intent.obj("result").asObject ?? JSONObject()
         r["confirmed"] = .double(clock())
-        let updated = sql.update(clock(), intentID, [("status", "pending"), ("result", .object(r))])
+        let updated = try sql.update(clock(), intentID, [("status", "pending"), ("result", .object(r))])
         waiters[intentID, default: []].append(finished)
-        start(updated, clock())
-        return sql.intentOrNil(intentID)
+        try start(updated, clock())
+        return try sql.intentOrNil(intentID)
     }
 
     /// The owner says a message belonged to another project. Kept on the intent.
     @discardableResult
-    func correct(_ intentID: Int, _ project: String) -> JSON {
-        sql.update(clock(), intentID, [("correction", ["project": .string(project), "at": .double(clock())])])
+    func correct(_ intentID: Int, _ project: String) throws -> JSON {
+        try sql.update(clock(), intentID, [("correction", ["project": .string(project), "at": .double(clock())])])
     }
 
     @discardableResult
-    func note(_ topic: String, _ text: String) -> JSON {
-        sql.setNote(clock(), topic, text)
-        return sql.addIntent(clock(), "update_notes", words: text, args: ["topic": .string(topic), "text": .string(text)], status: "confirmed", dup: false).intent
+    func note(_ topic: String, _ text: String) throws -> JSON {
+        try sql.setNote(clock(), topic, text)
+        return try sql.addIntent(clock(), "update_notes", words: text, args: ["topic": .string(topic), "text": .string(text)], status: "confirmed", dup: false).intent
     }
 
     // ---- tell
 
     /// The brief: facts since the last tell that you weren't told. Records what was told.
-    func tell() -> [String] {
+    func tell() throws -> [String] {
         let now = clock()
-        let known = sql.told(), board = self.board()
+        let known = try sql.told(), board = self.board()
         var found = facts.values
         found += CourierTell.standing(board).filter { known.has($0["key"]?.asString ?? "") && !facts.has($0["key"]?.asString ?? "") }
         // Whether a thread's state is live is as of now, not as of when the fact was found: the tab may have moved since.
@@ -1456,9 +1452,9 @@ extension CourierCore {
         found = found.filter { CourierTell.holds($0, board) }  // a thread stranded and back, or an app closed and open again, before the tell
         let (say, quiet) = CourierTell.plan(found, known, acc.claims, now)
         for f in say + quiet {
-            sql.setTold(now, f["key"]?.asString ?? "", f.get("project")?.asString, f.get("kind")?.asString, f.get("detail")?.asString, f.get("text")?.asString)
+            try sql.setTold(now, f["key"]?.asString ?? "", f.get("project")?.asString, f.get("kind")?.asString, f.get("detail")?.asString, f.get("text")?.asString)
         }
-        sql.setMark(sql.lastSeenId())
+        try sql.setMark(try sql.lastSeenId())
         facts = OrderedMap()
         acc.claims = []
         _board = nil

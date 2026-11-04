@@ -30,6 +30,8 @@ final class CourierStore {
     }
 
     private var db: OpaquePointer?
+    /// Test hook: called with each statement before it runs; a returned error is thrown instead of running it.
+    var beforeStatement: ((String) -> Error?)?
 
     /// `connect(path)`: opens the file (WAL, so a second process can read and write it), and creates what is missing.
     init(path: String) throws {
@@ -51,6 +53,7 @@ final class CourierStore {
 
     /// `executescript`: runs every statement, no parameters.
     func script(_ sql: String) throws {
+        if let e = beforeStatement?(sql) { throw e }
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(db, sql, nil, nil, &error) == SQLITE_OK else {
             let why = error.map { String(cString: $0) } ?? "error"
@@ -62,6 +65,7 @@ final class CourierStore {
     /// One statement with its parameters: the rows it returns, as objects (`dict(row)`).
     @discardableResult
     func query(_ sql: String, _ params: [JSON] = []) throws -> [JSONObject] {
+        if let e = beforeStatement?(sql) { throw e }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw Failure(message: String(cString: sqlite3_errmsg(db))) }
         defer { sqlite3_finalize(stmt) }
