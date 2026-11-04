@@ -250,6 +250,22 @@ moments, confirmed once on the 62 realB; sealed groups untouched.
 - Sonnet is the same with the recipe as with its rich board (realB: project +0, session +0), with a shorter input.
 - Choice: Sonnet decides, with either board. Jev's only edge is latency (0.16 s against ~6 s).
 
+**F: Jev first, then Sonnet or Haiku (same day).** Jev with C's rich context answers when its top choice is at 0.7 or more;
+otherwise the fallback decides with the recipe's board. The bar was the lowest with no wrong Jev answer on the 120 dev moments,
+then checked once on realB.
+
+| 62 realB | Project top-1 | Session top-1 | Sent | Wrong project of sent | Jev answered | Mean time | Cost per fallback |
+|---|---|---|---|---|---|---|---|
+| Sonnet alone (C) | 95% | 79% | 55% | 0 of 34 | | 5.6 s | $0.016 |
+| Jev 0.7, then Sonnet | 95% | 79% | 56% | 0 of 35 | 23% (32% on dev) | 4.4 s | $0.016 |
+| Haiku alone (recipe board) | 85% | 66% | 44% | 0 of 27 | | 5.0 s | $0.0011 |
+| Jev 0.7, then Haiku | 85% | 66% | 47% | 0 of 29 | 23% | | $0.0011 |
+
+- The cascade keeps Sonnet's accuracy and answers a quarter to a third of messages at once. Under 0.6, Jev's wrong answers appear.
+- Haiku is 10 points under Sonnet on project (CI −19 to 0) and 13 on session (−23 to −3), at a fifteenth of the cost. With
+  the best board its wrong sends are rare (0 of 27), unlike last week's thin-board run. Its time is the same: most of the
+  ~5 s is `claude -p` starting, so a direct API call in the app would be faster for both.
+
 
 ### The coordinator on new vs existing
 
