@@ -252,6 +252,56 @@ import Testing
         await w.host.stop()
     }
 
+    /// Round 3 A/C: after a relaunch the engine's own record says where a proposal's delivery is, and it isn't sent again.
+    @MainActor @Test func aProposalsDeliveryIsReadFromTheEngineAfterARelaunchAndNotResent() async throws {
+        let w = try await started(World())
+        let client = try Client(w.socket)
+        w.pageUp(client, signedIn: false)
+        #expect(await Self.eventually { await w.host.board()["projects"]?["chan_a"] != nil })
+        let id = await w.host.submit(.send(words: "ship it", project: "chan_a", thread: nil))
+        #expect(id > 0)
+        try await w.restart()
+        let since = Date(timeIntervalSince1970: w.box.t - 60)
+        #expect(await w.host.status(of: id)?.state == .paused)
+        #expect(await w.host.intent(matching: "ship it", project: "chan_a", since: since) == .found(id))
+        #expect(await w.host.intent(matching: "ship it", project: nil, since: since) == .found(id))
+        #expect(await w.host.intent(matching: "something else", project: "chan_a", since: since) == CourierLookup.none)
+        let pills = RouterCourierPills()
+        pills.attach(.host(w.host))
+        let engine = RouterProjectPillsEngine(pills: pills)
+        let store = Store()
+        store.persists = false
+        store.restoreProposals([.init(message: "ship it", fields: .init(name: "alpha"), made: [.create], project: "chan_a",
+                                      stopped: "Fjord quit as your message went", sent: id),
+                                .init(message: "ship it", fields: .init(name: "alpha"), made: [.create], project: "chan_a",
+                                      stopped: "Fjord quit as your message went",
+                                      sending: .init(words: "ship it", project: "chan_a", at: since))],
+                               reviser: RouterProjectFakeReviser(), engine: engine)
+        let p = try #require(store.routerProposal)
+        p.settleAfter = nil
+        let q = try #require(store.routerProposalQueue.first)
+        await store.reconciling?.value
+        #expect(p.phase == .created)
+        #expect(q.phase == .created && q.sentIntent == id)
+        // Nothing new reached the engine.
+        #expect(await w.host.status(of: id + 1) == nil)
+        await w.host.stop()
+    }
+
+    /// Round 3 A: a confirmed create's status carries the project its proof found.
+    @Test func aConfirmedCreatesStatusCarriesItsProject() async throws {
+        let w = try await started(World())
+        let client = try Client(w.socket)
+        w.pageUp(client)
+        #expect(await Self.eventually { await w.host.board()["projects"]?["chan_a"] != nil })
+        let id = await w.host.submit(.tool(name: .createProject, args: ["name": "beta"]))
+        #expect(id > 0)
+        try CourierStore(path: w.dir + "/router.db").updateIntent(w.box.t, id, [("status", "confirmed"), ("project", "chan_b")])
+        let status = await w.host.status(of: id)
+        #expect(status?.state == .toolDone && status?.project == "chan_b")
+        await w.host.stop()
+    }
+
     // MARK: Debug ops
 
     @Test func debugOpsAreAnswered() async throws {

@@ -625,10 +625,12 @@ struct RouterAskBack: Identifiable, Equatable {
         let first = proposal.first
         proposing.insert(id)
         var made = false
-        proposal.onCreated = { [weak store, weak proposal] fields in
+        proposal.onCreated = { [weak store, weak proposal] fields, intent in
             made = true
             guard let proposal else { return }
             store?.updateDecision(id) {
+                // Its delivery, judged by the engine's record as any other send is (`RouterProjectContext.routings`).
+                $0.decision.courierIntent = intent
                 let target = RouterCourier.Target.project(fields.name).targetID
                 $0.decision.target = "new claude.ai project “\(fields.name)”"
                 $0.decision.targetID = target
@@ -1071,7 +1073,9 @@ extension RouterDispatcher.Effects {
                 let board = await link.board()
                 let read = link.readLocal
                 let local = await Task.detached { read() }.value
-                let context = RouterProjectContext.gather(board: board, local: local, store: store, excluding: tools.decision)
+                let statuses = await RouterProjectContext.deliveries(store)
+                let context = RouterProjectContext.gather(board: board, local: local, store: store, excluding: tools.decision,
+                                                          statuses: statuses)
                 var decider = RouterProjectDecider.app(store)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
                 decider.jev = unattended ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)

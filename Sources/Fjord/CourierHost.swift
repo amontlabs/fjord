@@ -24,6 +24,17 @@ enum CourierState: Equatable {
     case sending, taken, delivered, deliveredLate, failed, refused, paused, awaiting, toolDone, toolUnconfirmed
 }
 
+/// An intent as the engine's database has it now (`CourierHost.status`).
+struct CourierIntentStatus: Equatable, Sendable {
+    var state: CourierState
+    var cause: String?
+    /// A confirmed create's project id (`chan_`).
+    var project: String?
+}
+
+/// A delivery looked up by its words (`CourierHost.intent(matching:)`): found, surely none, or the engine can't say now.
+enum CourierLookup: Equatable, Sendable { case found(Int), none, unknown }
+
 /// Why a paused intent waits, as a code: the same conditions `CourierDo.blocked` words in its cause (`CourierDo.pause`), and the
 /// Claude app's wait (`CourierDo.appWait`).
 enum CourierPause: String, CaseIterable, Sendable {
@@ -498,6 +509,27 @@ actor CourierHost {
         if let failure { log("routerd submit: \(failure)") }
         finishInput()
         return id
+    }
+
+    /// Where intent `id` is now, read from the engine's own database (it survives a relaunch); nil when the host isn't
+    /// started or has no such intent. For a confirmed create_project, `project` is the claude.ai id its proof found (the
+    /// project that wasn't on the Board before that create).
+    func status(of id: Int) -> CourierIntentStatus? {
+        guard let core, let intent = (try? core.db.intent(id)) ?? nil else { return nil }
+        let state = Self.state(intent, taken: core.runs[id]?.flag("taken") ?? false)
+        let made = intent.str("tool") == "create_project" && state == .toolDone ? intent.str("project").flatMap { $0.isEmpty ? nil : $0 } : nil
+        return CourierIntentStatus(state: state, cause: intent.get("cause")?.asString, project: made)
+    }
+
+    /// The newest delivery of exactly `words` to `project` (its id; nil: any) made at `since` or later: a send whose intent id never
+    /// reached the app (it quit while submitting). `.unknown` when the host isn't started.
+    func intent(matching words: String, project: String?, since: Date) -> CourierLookup {
+        guard let core else { return .unknown }
+        // No project given (it went by its name): any project; the words and the time tell it.
+        let rows = (try? core.db.query("select id from intents where tool in ('send_to_project', 'reply_in_thread') and words = ? "
+                                       + (project == nil ? "" : "and project = ? ") + "and at >= ? order by id desc limit 1",
+                                       [.string(words)] + (project.map { [JSON.string($0)] } ?? []) + [.double(since.timeIntervalSince1970)])) ?? []
+        return rows.first?["id"]?.asInt.map(CourierLookup.found) ?? .none
     }
 
     /// How many native hosts are linked.

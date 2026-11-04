@@ -37,21 +37,28 @@ struct RouterProjectFields: Equatable, Sendable, Codable {
     }
 }
 
+/// A revision's result: the proposal as revised, and the fields it couldn't be applied to (they stay as they were).
+struct RouterProjectRevision: Equatable, Sendable {
+    var fields: RouterProjectFields
+    /// Fields whose answer held a redaction placeholder that stands for nothing the model was given.
+    var unapplied: [String] = []
+}
+
 /// Revises a proposal from your words. The model-backed one is the decider's; `RouterProjectFakeReviser` is the deterministic one.
 @MainActor protocol RouterProjectReviser {
     /// The proposal as `text` asks it changed. Throws a plain sentence when it can't (the pill shows it, the proposal stays).
-    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectFields
+    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectRevision
 }
 
-/// What a tool did. `project`: the id the engine's Board gave the project a create made (what the later steps name it by:
-/// a local folder of the same name is a project of the Board's too, so a name alone can be ambiguous); on a create that
-/// failed, the id of the claude.ai project the Board has under that name, if any (an earlier create of the proposal's that
-/// took). `refused`: the engine didn't try it (nothing it did can have taken).
+/// What a tool did, as the engine says: `intent` is its intent (0: the engine didn't take it); `project`, for a confirmed
+/// create, the claude.ai id the engine's proof found (the project that wasn't on the Board before that create: what the later
+/// steps name it by). `unsure`: it may have taken though it didn't confirm (asked again by its intent later).
 struct RouterProjectOutcome: Equatable, Sendable {
     var ok: Bool
     var cause: String?
+    var intent = 0
     var project: String? = nil
-    var refused = false
+    var unsure = false
     static let done = RouterProjectOutcome(ok: true)
     static func failed(_ cause: String) -> RouterProjectOutcome { .init(ok: false, cause: cause) }
 }
@@ -59,24 +66,25 @@ struct RouterProjectOutcome: Equatable, Sendable {
 /// Where the proposal's tools run and its message goes: the pills' engine in the app.
 @MainActor protocol RouterProjectEngine {
     /// Runs one tool and says how it ended (a grant is confirmed on the way: its Return was the owner's). While the engine
-    /// waits (Chrome disconnected, signed out), `waiting` is told why, and nil once it goes on: a wait isn't an end.
+    /// waits (Chrome disconnected, signed out), `waiting` is told why, and nil once it goes on: a wait isn't an end. A cancelled
+    /// task stops waiting (the intent goes on in the engine).
     func run(_ tool: CourierTool, _ args: [String: JSON], waiting: @escaping @MainActor (String?) -> Void) async -> RouterProjectOutcome
-    /// Hands the original message to the project once it exists: `project` is its id when the create gave one, else its name.
-    /// The delivery's intent id; 0 when the engine didn't take it (it isn't running): nothing was sent.
-    /// `tagged`: what the message tags (`RouterTools.tagged`), delivered after your words (`RouterPointers.attach`); the pill
-    /// shows your words alone.
-    func send(_ words: String, tagged: String?, to project: String, named name: String) async -> Int
-    /// Where intent `id` (a delivery this proposal handed over) is now, as the engine knows it; nil when it can't tell yet.
-    func state(of id: Int) -> CourierState?
-    /// The claude.ai projects (`chan_` ids) the Board lists under `name` now.
-    func projects(named name: String) async -> [String]
+    /// Hands `words` (the message, then what it tags) to the project; its pill shows `display`. The delivery's intent id; 0
+    /// when the engine didn't take it: nothing was sent.
+    func send(_ words: String, display: String, to project: String, named name: String) async -> Int
+    /// Where intent `id` is now, from the engine's own record (it survives a relaunch); nil when it can't say yet.
+    func status(of id: Int) async -> CourierIntentStatus?
+    /// The delivery of exactly `words` to `project` made since `since` (a send whose id never came back).
+    func intent(matching words: String, project: String?, since: Date) async -> CourierLookup
 }
 
 /// One proposal to start a project for `message`. Observable: the pill follows `fields` and `phase`.
 ///
-/// Once a create was issued (made, or possibly made: unconfirmed), the project's identity is fixed: its name no longer
-/// changes, and neither does a piece already made; your words change only what isn't made yet. Escape ends it for good:
-/// nothing queued (a Return while revising) runs after.
+/// Once the engine took a create (made, or possibly made: unconfirmed), the project's identity is fixed: its name no longer
+/// changes, and neither does a piece already made; your words change only what isn't made yet. A project is this proposal's
+/// only by the id the engine's proof gave its own create, never by its name. The message is handed over once: its intent (or,
+/// while it is being handed, its words and time) is saved, and a relaunch asks the engine before anything is sent again.
+/// Escape ends it for good: nothing queued (a Return while revising) runs after.
 @Observable @MainActor final class RouterProjectProposal {
     enum Phase: Equatable {
         /// Shown, waiting for Return (create) or your words (revise).
@@ -96,19 +104,28 @@ struct RouterProjectOutcome: Equatable, Sendable {
     /// The step that makes each piece, in the order they run.
     enum Step: String, CaseIterable, Codable { case create, repo, instructions, folder }
 
-    /// What survives a quit (Store's saved state): enough to show it again and go on from the made steps, never re-creating.
+    /// The message being handed to the engine, before its intent id came back: what a relaunch looks it up by.
+    struct Sending: Codable, Equatable {
+        var words: String
+        var project: String?
+        var at: Date
+    }
+
+    /// What survives a quit (Store's saved state): enough to show it again and go on from the made steps, never re-creating
+    /// or re-sending.
     struct Saved: Codable, Equatable {
         var message: String
         var fields: RouterProjectFields
         var made: [Step]
         var project: String?
-        var createIssued: Bool
+        /// The engine's intents of the creates it took and didn't surely fail: asked how they ended before another is made.
+        var creates: [Int]? = nil
         /// Why it stopped, when Return had been pressed (it failed, or the app quit while making it): it shows stopped.
         var stopped: String?
-        /// The claude.ai projects of that name before the first create: none of them is this proposal's.
-        var before: [String]? = nil
-        /// The delivery of the message the engine took: it is never sent again unless the engine says it failed.
+        /// The delivery of the message the engine took.
         var sent: Int? = nil
+        /// The message being handed over when the app quit (no id yet).
+        var sending: Sending? = nil
         /// Your words not yet taken in by a revision: back in the composer on relaunch.
         var words: [String]? = nil
         /// The history's entry for the message (the dispatcher's), to reattach on relaunch.
@@ -129,10 +146,12 @@ struct RouterProjectOutcome: Equatable, Sendable {
     internal(set) var phase: Phase = .proposed { didSet { onSave() } }
     /// What the last revision changed ("name, repo"); empty before one.
     private(set) var changed: [String] = []
-    /// Why the last revision didn't happen (or didn't wholly: a made piece stays).
+    /// Why the last revision didn't happen (or didn't wholly: a made piece stays, a part couldn't be applied).
     private(set) var reviseNote: String?
-    /// The pieces made already: fixed, as is the name once a create was issued.
+    /// The pieces made already: fixed, as is the name once the engine took a create.
     private(set) var made: Set<Step> = [] { didSet { onSave() } }
+    /// The engine's intents of creates it took whose end isn't a sure failure.
+    private(set) var creates: [Int] = [] { didSet { onSave() } }
 
     @ObservationIgnored private let reviser: RouterProjectReviser
     @ObservationIgnored private let engine: RouterProjectEngine
@@ -141,15 +160,13 @@ struct RouterProjectOutcome: Equatable, Sendable {
     @ObservationIgnored private var confirmAfter = false
     /// Escape was pressed (or it ended): nothing more runs, whatever was queued.
     @ObservationIgnored private(set) var ended = false
-    /// A create was issued that may have taken (it wasn't refused): a later "name taken" for this name is this proposal's own.
-    @ObservationIgnored private var createIssued = false { didSet { onSave() } }
-    /// The made project's id on the Board, once the create gave it: the later steps and the message name it by it.
+    /// The made project's id on the Board, once the engine's proof gave it: the later steps and the message name it by it.
     @ObservationIgnored private var madeID: String? { didSet { onSave() } }
     @ObservationIgnored private var making: Task<Void, Never>?
-    /// The claude.ai projects of the name before the first create (ownership: a "name taken" is ours only for one that wasn't).
-    @ObservationIgnored private var before: [String]? { didSet { onSave() } }
     /// The delivery's intent once the engine took the message.
-    @ObservationIgnored private var sentIntent: Int? { didSet { onSave() } }
+    @ObservationIgnored private(set) var sentIntent: Int? { didSet { onSave() } }
+    /// The message while it is being handed over (no id yet).
+    @ObservationIgnored private(set) var sending: Sending? { didSet { onSave() } }
     /// The words a revision is on now (with `queue`, what is saved as not yet taken in).
     @ObservationIgnored private var revisingWords: String?
     /// Words saved before a quit and not taken in: the composer takes them back (`takeRestoredWords`).
@@ -158,14 +175,14 @@ struct RouterProjectOutcome: Equatable, Sendable {
     @ObservationIgnored var decision: UUID? { didSet { onSave() } }
     /// Restored at launch and not yet reattached by the dispatcher (`Store.reattachProposals`).
     @ObservationIgnored var restored = false
-    /// How it ended, when that needs saying in the history (dropped while the engine still had a create in hand).
+    /// How it ended, when that needs saying in the history (dropped while the engine still had something in hand).
     @ObservationIgnored private(set) var endNote: String?
     /// How long the made pill stays; nil keeps it (a shot, a test).
     @ObservationIgnored var settleAfter: Duration? = .seconds(2)
     /// The proposal is over (made and settled, or dropped): whoever holds it lets go. Called once.
     @ObservationIgnored var onEnd: () -> Void = {}
-    /// The project exists and the message is on its way (`fields`, as made): the history's entry.
-    @ObservationIgnored var onCreated: (RouterProjectFields) -> Void = { _ in }
+    /// The project exists and the message went (`fields`, as made; the delivery's intent): the history's entry.
+    @ObservationIgnored var onCreated: (RouterProjectFields, Int?) -> Void = { _, _ in }
     /// What `saved` holds changed (Store writes it).
     @ObservationIgnored var onSave: () -> Void = {}
 
@@ -185,13 +202,25 @@ struct RouterProjectOutcome: Equatable, Sendable {
         fields = saved.fields
         made = Set(saved.made)
         madeID = saved.project
-        createIssued = saved.createIssued
-        before = saved.before
+        creates = saved.creates ?? []
         sentIntent = saved.sent
+        sending = saved.sending
         restoredWords = saved.words ?? []
         decision = saved.decision
         restored = true
         if let stopped = saved.stopped { phase = .failed(stopped) }
+    }
+
+    /// A relaunch's look at the delivery handed over before the quit: delivered or under way, the proposal is made (nothing
+    /// is sent again); failed, Return sends it; the engine can't say, it stays stopped. Nothing to look at: nothing happens.
+    func reconcile() async {
+        guard !ended, sentIntent != nil || sending != nil, made.contains(.create) || madeID != nil || sentIntent != nil else { return }
+        let went = await delivery()
+        known = went
+        guard !ended, went == .went else { return }
+        phase = .created
+        onCreated(fields, sentIntent)
+        settle()
     }
 
     /// The words saved before a quit that no revision took in, for the composer (once).
@@ -209,17 +238,17 @@ struct RouterProjectOutcome: Equatable, Sendable {
         case .created: return nil
         case .failed(let cause): stopped = cause
         case .creating, .waiting:
-            stopped = sentIntent != nil ? "Fjord quit as your message went. Return checks it arrived (it isn't sent twice)"
+            stopped = sentIntent != nil || sending != nil ? "Fjord quit as your message went. Return checks it arrived (it isn't sent twice)"
                 : "Fjord quit while making it. Return goes on from where it stopped"
         }
         let words = restoredWords + [revisingWords].compactMap { $0 } + queue
         return Saved(message: message, fields: fields, made: Step.allCases.filter(made.contains), project: madeID,
-                     createIssued: createIssued, stopped: stopped, before: before, sent: sentIntent,
+                     creates: creates.isEmpty ? nil : creates, stopped: stopped, sent: sentIntent, sending: sending,
                      words: words.isEmpty ? nil : words, decision: decision, tagged: tagged, first: first)
     }
 
     /// The name is the made project's (or may be): it no longer changes.
-    var nameFixed: Bool { createIssued || made.contains(.create) }
+    var nameFixed: Bool { made.contains(.create) || !creates.isEmpty }
 
     // MARK: Revising
 
@@ -254,18 +283,33 @@ struct RouterProjectOutcome: Equatable, Sendable {
         }
     }
 
-    /// A revision, with what is made kept as made (and the note says so when it asked otherwise).
-    private func apply(_ revised: RouterProjectFields) {
-        var f = Self.cleaned(revised)
+    /// A revision, with what is made kept as made, and what couldn't be applied as it was (the note says so).
+    private func apply(_ revision: RouterProjectRevision) {
+        var f = Self.cleaned(revision.fields)
         var kept: [String] = []
         if nameFixed, f.name != fields.name { f.name = fields.name; kept.append("name") }
         if made.contains(.repo), f.repo != fields.repo { f.repo = fields.repo; kept.append("repo") }
         if made.contains(.instructions), f.instructions != fields.instructions { f.instructions = fields.instructions; kept.append("instructions") }
         if made.contains(.folder), f.folder != fields.folder { f.folder = fields.folder; kept.append("folder") }
+        for field in revision.unapplied {
+            switch field {
+            case "name": f.name = fields.name
+            case "folder": f.folder = fields.folder
+            case "repo": f.repo = fields.repo
+            case "instructions": f.instructions = fields.instructions
+            default: break
+            }
+        }
         changed = f.changes(from: fields)
         fields = f
-        reviseNote = kept.isEmpty ? nil
-            : "“\(fields.name)” is made already: its \(kept.joined(separator: ", ")) \(kept.count == 1 ? "stays" : "stay") as made."
+        var notes: [String] = []
+        if !kept.isEmpty {
+            notes.append("“\(fields.name)” is made already: its \(kept.joined(separator: ", ")) \(kept.count == 1 ? "stays" : "stay") as made.")
+        }
+        if !revision.unapplied.isEmpty {
+            notes.append("Couldn't apply that part to the \(revision.unapplied.joined(separator: ", ")): it named something redacted.")
+        }
+        reviseNote = notes.isEmpty ? nil : notes.joined(separator: " ")
     }
 
     /// Whether your words can still change it.
@@ -310,6 +354,54 @@ struct RouterProjectOutcome: Equatable, Sendable {
         }
     }
 
+    /// How this proposal's earlier creates ended, by the engine's record of each.
+    private enum EarlierCreate { case made(String?), underWay, unknown, none }
+
+    private func earlierCreate() async -> EarlierCreate {
+        var underWay = false, unknown = false
+        for id in creates.reversed() {
+            guard let status = await engine.status(of: id) else { unknown = true; continue }
+            switch status.state {
+            case .toolDone: return .made(status.project)
+            case .failed, .refused: creates.removeAll { $0 == id }
+            case .toolUnconfirmed: break
+            default: underWay = true
+            }
+        }
+        return underWay ? .underWay : unknown ? .unknown : .none
+    }
+
+    /// Whether the message went already, by the engine's record of its delivery (or of the words being handed over).
+    enum Delivery { case went, notSent, unknown }
+
+    /// What the engine last said of the delivery handed over before a quit (`reconcile`); nil: not asked yet.
+    @ObservationIgnored private(set) var known: Delivery?
+
+    private func delivery() async -> Delivery {
+        if let id = sentIntent {
+            guard let status = await engine.status(of: id) else { return .unknown }
+            switch status.state {
+            case .failed, .refused:
+                sentIntent = nil
+                return .notSent
+            default: return .went
+            }
+        }
+        if let mark = sending {
+            switch await engine.intent(matching: mark.words, project: mark.project, since: mark.at.addingTimeInterval(-5)) {
+            case .found(let id):
+                sentIntent = id
+                sending = nil
+                return await delivery()
+            case .none:
+                sending = nil
+                return .notSent
+            case .unknown: return .unknown
+            }
+        }
+        return .notSent
+    }
+
     /// The tools, in order, each only if it isn't made (a retry goes on from where it stopped), then the message. A piece the
     /// proposal has nothing for is skipped, not counted made: a revision after a failure can still add it.
     private func make() {
@@ -321,31 +413,29 @@ struct RouterProjectOutcome: Equatable, Sendable {
                 guard !self.ended else { return }
                 guard let (tool, args, doing) = Self.call(step, fields, project: self.madeID) else { continue }
                 self.phase = .creating(doing)
-                let ours = self.createIssued
                 if step == .create {
-                    // What has the name before this proposal ever created: never its own.
-                    if self.before == nil { self.before = await self.engine.projects(named: fields.name) }
-                    self.createIssued = true
+                    switch await self.earlierCreate() {
+                    case .made(let id):
+                        // The engine's proof says an earlier create of this proposal's made it: that project is this one.
+                        self.madeID = id
+                        self.made.insert(step)
+                        continue
+                    case .underWay:
+                        self.phase = .failed("An earlier create of “\(fields.name)” is still with the engine. Return checks it again")
+                        return
+                    case .unknown:
+                        self.phase = .failed("Fjord's engine can't say yet how the earlier create of “\(fields.name)” ended. Return checks again")
+                        return
+                    case .none: break
+                    }
                 }
                 let outcome = await self.engine.run(tool, args) { [weak self] why in
                     guard let self, !self.ended else { return }
                     self.phase = why.map { .waiting($0) } ?? .creating(doing)
                 }
+                if step == .create, outcome.intent > 0, outcome.ok || outcome.unsure { self.creates.append(outcome.intent) }
                 guard !self.ended else { return }
-                if step == .create, !outcome.ok, ours {
-                    // "Name taken": ours only if an earlier create of ours was taken by the engine and the one project
-                    // of that name is one that wasn't there before it.
-                    let new = await self.engine.projects(named: fields.name).filter { !(self.before ?? []).contains($0) }
-                    guard !self.ended else { return }
-                    if new.count == 1 {
-                        self.madeID = new[0]
-                        self.made.insert(step)
-                        continue
-                    }
-                }
                 guard outcome.ok else {
-                    // Refused (not taken by the engine, or not tried): nothing of it can have taken.
-                    if step == .create, outcome.refused { self.createIssued = ours }
                     self.phase = .failed("\(Self.failure(step)): \(outcome.cause ?? "the engine gave no reason")")
                     return
                 }
@@ -353,30 +443,33 @@ struct RouterProjectOutcome: Equatable, Sendable {
                 self.made.insert(step)
             }
             self.phase = .creating("Sending your message")
-            if let sent = self.sentIntent {
-                // Handed over before (a relaunch): sent again only if the engine says that delivery failed.
-                switch self.engine.state(of: sent) {
-                case .failed?, .refused?: self.sentIntent = nil
-                case nil:
-                    self.phase = .failed("Your message was handed to the engine before Fjord quit, and it can't tell yet "
-                                         + "whether it went. Return checks again (it isn't sent twice)")
-                    return
-                default: break
-                }
-            }
-            if self.sentIntent == nil {
-                let id = await self.engine.send(self.message, tagged: self.tagged, to: self.madeID ?? fields.name, named: fields.name)
+            let went = await self.delivery()
+            self.known = went
+            guard !self.ended else { return }
+            switch went {
+            case .went: break
+            case .unknown:
+                self.phase = .failed("Your message was handed to the engine before Fjord quit, and it can't tell yet "
+                                     + "whether it went. Return checks again (it isn't sent twice)")
+                return
+            case .notSent:
+                let words = RouterPointers.attach(self.tagged, to: self.message)
+                let project = self.madeID ?? fields.name
+                // Kept before it is handed over: a quit from here on looks it up, never sends it twice.
+                self.sending = Sending(words: words, project: self.madeID, at: Date())
+                let id = await self.engine.send(words, display: self.message, to: project, named: fields.name)
                 guard id > 0 else {
+                    self.sending = nil
                     guard !self.ended else { return }
                     self.phase = .failed("The project exists, but your message wasn't sent: Fjord's engine for claude.ai isn't running")
                     return
                 }
-                // Kept at once: a quit from here on never sends it twice.
                 self.sentIntent = id
+                self.sending = nil
             }
             guard !self.ended else { return }
             self.phase = .created
-            self.onCreated(fields)
+            self.onCreated(fields, self.sentIntent)
             self.making = nil
             self.settle()
         }
@@ -421,21 +514,35 @@ struct RouterProjectOutcome: Equatable, Sendable {
 
     // MARK: Dropping
 
-    /// Escape: nothing more is done (a Return queued behind a revision included), and the message is yours again. A project
-    /// already made stays made.
-    func drop() -> String {
+    /// Escape: nothing more is done (a Return queued behind a revision included), and the message is yours again; nil when it
+    /// went already (the engine says its delivery from before a quit is delivered or under way): then it isn't yours to send
+    /// again. A project already made stays made.
+    func drop() -> String? {
+        var back: String? = message
         if case .waiting = phase {
             // The engine keeps what it has in hand (a create, a setting) and may still do it once claude.ai is back.
             endNote = made.contains(.create)
                 ? "Dropped while waiting on claude.ai: “\(fields.name)” exists, and the step it waited on may still happen. Your message wasn't sent."
                 : "Dropped while waiting on claude.ai: the engine may still create “\(fields.name)”, without your message."
         }
+        if sentIntent != nil || sending != nil {
+            // What the engine said when it was last asked (`reconcile`, at relaunch): not asked, it can't be told.
+            switch known ?? .unknown {
+            case .went:
+                endNote = "Your message had already gone to “\(fields.name)”."
+                back = nil
+                onCreated(fields, sentIntent)
+            case .unknown:
+                endNote = "Fjord can't tell yet whether your message went to “\(fields.name)” before it quit: look there before sending it again."
+            case .notSent: break
+            }
+        }
         confirmAfter = false
         queue = []
         worker?.cancel(); worker = nil
         making?.cancel(); making = nil
         end()
-        return message
+        return back
     }
 
     /// A shot's or a test's way to a given state.
@@ -450,70 +557,71 @@ struct RouterProjectOutcome: Equatable, Sendable {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+    var nilIfEmptyValue: String? { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self }
 }
 
 // MARK: - The app's engine
 
 /// The pills' engine for the proposal: each tool is an intent whose pill the proposal's own replaces (it is dismissed once the
-/// tool ended); the message is an ordinary delivery with its own pill.
+/// tool ended); the message is an ordinary delivery with its own pill. What it says of an intent is the engine's own record.
 @MainActor struct RouterProjectPillsEngine: RouterProjectEngine {
     let pills: RouterCourierPills
-    /// The engine's Board now (`RouterCourierLink.board`): where a created project's id is read.
-    var board: () async -> JSON = { .null }
 
     func run(_ tool: CourierTool, _ args: [String: JSON], waiting: @escaping @MainActor (String?) -> Void) async -> RouterProjectOutcome {
         let id = await pills.tool(tool, args: args)
-        // Not taken: not tried, so nothing of it can have taken.
-        guard id > 0 else { return .init(ok: false, cause: "Fjord's engine for claude.ai isn't running", refused: true) }
-        var update = await pills.next(id) { $0 != .sending && $0 != .taken }
+        guard id > 0 else { return .failed("Fjord's engine for claude.ai isn't running") }
+        let stopped = RouterProjectOutcome(ok: false, cause: "stopped", intent: id, unsure: true)
+        guard var update = await pills.next(id, where: { $0 != .sending && $0 != .taken }) else { return stopped }
         // The grant: its Return was this one. A pause is a wait, not an end: the engine goes on by itself once claude.ai is
         // back, and the intent's own pill stays meanwhile (its button is what lets it go on).
         while update.state == .awaiting || update.state == .paused {
             let was = update.state
             if was == .awaiting { pills.perform(.allow, on: id) } else { waiting(update.cause ?? "the engine is waiting on claude.ai") }
-            update = await pills.next(id) { $0 != .sending && $0 != .taken && $0 != was }
+            guard let next = await pills.next(id, where: { $0 != .sending && $0 != .taken && $0 != was }) else { return stopped }
+            update = next
             if was == .paused { waiting(nil) }
         }
         pills.dismiss(id)
-        let name = tool == .createProject ? args["name"]?.asString : nil
         switch update.state {
         case .toolDone, .delivered, .deliveredLate:
-            guard let name else { return .done }
-            return RouterProjectOutcome(ok: true, project: Self.created(name, on: await board()))
+            let project = tool == .createProject ? await pills.status(of: id)?.project : nil
+            return RouterProjectOutcome(ok: true, intent: id, project: project)
         default:
-            return RouterProjectOutcome(ok: false, cause: update.cause ?? "the engine couldn't do it", refused: update.state == .refused)
+            return RouterProjectOutcome(ok: false, cause: update.cause ?? "the engine couldn't do it", intent: id,
+                                        unsure: update.state == .toolUnconfirmed)
         }
     }
 
-    func send(_ words: String, tagged: String?, to project: String, named name: String) async -> Int {
-        await pills.send(RouterPointers.attach(tagged, to: words), display: words, to: .project(project), shown: name)
+    func send(_ words: String, display: String, to project: String, named name: String) async -> Int {
+        await pills.send(words, display: display, to: .project(project), shown: name)
     }
 
-    func state(of id: Int) -> CourierState? { pills.lastUpdates[id]?.state }
+    func status(of id: Int) async -> CourierIntentStatus? { await pills.status(of: id) }
 
-    func projects(named name: String) async -> [String] { Self.projects(name, on: await board()) }
-
-    /// The claude.ai projects (`chan_` ids) the Board lists under `name`; a local folder's project (`local:`) isn't one.
-    static func projects(_ name: String, on board: JSON) -> [String] {
-        (board["projects"]?.asObject?.values ?? []).filter { $0["name"]?.asString == name }
-            .compactMap { $0["id"]?.asString }.filter { $0.hasPrefix("chan_") }.sorted()
-    }
-
-    /// The claude.ai project (a `chan_` id) the Board lists under `name`: the one a create just made, since a name is taken by
-    /// one claude.ai project at most (`CourierDo.nameTaken`); a local folder's project of that name (`local:`) isn't it.
-    static func created(_ name: String, on board: JSON) -> String? {
-        let ids = projects(name, on: board)
-        return ids.count == 1 ? ids[0] : nil
+    func intent(matching words: String, project: String?, since: Date) async -> CourierLookup {
+        await pills.intent(matching: words, project: project, since: since)
     }
 }
 
 extension RouterCourierPills {
-    /// The first update of intent `id` (as it is now, or the next) whose state `matches`.
-    func next(_ id: Int, where matches: @escaping (CourierState) -> Bool) async -> CourierUpdate {
+    /// The first update of intent `id` (as it is now, or the next) whose state `matches`; nil once the waiting task is
+    /// cancelled (a dropped proposal's: its wait ends, the intent goes on in the engine).
+    func next(_ id: Int, where matches: @escaping (CourierState) -> Bool) async -> CourierUpdate? {
         if let last = lastUpdates[id], matches(last.state) { return last }
-        return await withCheckedContinuation { continuation in
-            waiters[id, default: []].append((matches, continuation))
+        let key = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else { return continuation.resume(returning: nil) }
+                waiters[id, default: []].append((key, matches, continuation))
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.stopWaiting(id, key) }
         }
+    }
+
+    private func stopWaiting(_ id: Int, _ key: UUID) {
+        guard let i = waiters[id]?.firstIndex(where: { $0.key == key }) else { return }
+        waiters[id]?.remove(at: i).continuation.resume(returning: nil)
     }
 }
 
@@ -525,7 +633,7 @@ extension RouterCourierPills {
     var delay: Duration?
     var failure: String?
 
-    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectFields {
+    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectRevision {
         if let delay { try await Task.sleep(for: delay) }
         if let failure { throw FakeFailure(errorDescription: failure) }
         var f = current
@@ -541,60 +649,72 @@ extension RouterCourierPills {
         if lower.contains("no repo") { f.repo = nil } else if let repo = words.first(where: { $0.contains("/") && !$0.hasPrefix("/") && !$0.hasPrefix("~") }) { f.repo = repo }
         if lower.contains("no folder") { f.folder = nil } else if let path = words.first(where: { $0.hasPrefix("/") || $0.hasPrefix("~") }) { f.folder = path }
         if let range = lower.range(of: "instructions:") { f.instructions = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces) }
-        return f
+        return RouterProjectRevision(fields: f)
     }
 
     struct FakeFailure: LocalizedError { var errorDescription: String? }
 }
 
 /// A fake engine: every tool ends as `outcomes[tool]` (done by default), after `delay`; what ran and what was sent is kept.
+/// Each tool and send gets an intent id, and `statuses` is the engine's record of each (a test changes it, or sets `up` false
+/// for an engine that can't say).
 @MainActor final class RouterProjectFakeEngine: RouterProjectEngine {
     var outcomes: [CourierTool: RouterProjectOutcome] = [:]
     var delay: Duration?
-    private(set) var ran: [(tool: CourierTool, args: [String: JSON])] = []
+    private(set) var ran: [(tool: CourierTool, args: [String: JSON], intent: Int)] = []
+    /// Your words as each message's pill shows them, and where it went.
     private(set) var sent: [(words: String, project: String)] = []
     /// What reached the engine for each message (your words, then what they tag).
     private(set) var delivered: [String] = []
-    /// The id a create gives its project (nil: none, the later steps name it by its name).
+    /// The id a confirmed create's proof gives its project (nil: none, the later steps name it by its name).
     var createdID: String?
     /// A tool that waits (why) before it ends: `waiting` is told, then nil, around `pause`.
     var waits: [CourierTool: String] = [:]
     var pause: Duration = .milliseconds(20)
-    /// What the engine said while each tool waited, in order.
-    private(set) var waited: [String?] = []
     /// False: the engine doesn't take the message (it isn't running).
     var takes = true
-    /// The claude.ai projects the Board has under each name.
-    var board: [String: [String]] = [:]
-    /// What the engine says of each delivery (nil: it can't tell).
-    var states: [Int: CourierState] = [:]
-    private var nextIntent = 100
+    /// False: the engine can't say anything of its intents (not started yet).
+    var up = true
+    /// The engine's record of each intent.
+    var statuses: [Int: CourierIntentStatus] = [:]
+    /// The deliveries by their words (what `intent(matching:)` finds).
+    var byWords: [String: Int] = [:]
+    var nextIntent = 100
 
     func run(_ tool: CourierTool, _ args: [String: JSON], waiting: @escaping @MainActor (String?) -> Void) async -> RouterProjectOutcome {
-        ran.append((tool, args))
+        nextIntent += 1
+        let id = nextIntent
+        ran.append((tool, args, id))
         if let delay { try? await Task.sleep(for: delay) }
         if let why = waits[tool] {
-            waited.append(why); waiting(why)
+            waiting(why)
             try? await Task.sleep(for: pause)
-            waited.append(nil); waiting(nil)
+            waiting(nil)
         }
         var outcome = outcomes[tool] ?? .done
+        outcome.intent = id
         if tool == .createProject, outcome.ok { outcome.project = createdID }
+        statuses[id] = CourierIntentStatus(state: outcome.ok ? .toolDone : outcome.unsure ? .toolUnconfirmed : .failed,
+                                           cause: outcome.cause, project: outcome.project)
         return outcome
     }
 
-    func send(_ words: String, tagged: String?, to project: String, named name: String) async -> Int {
+    func send(_ words: String, display: String, to project: String, named name: String) async -> Int {
         guard takes else { return 0 }
-        sent.append((words, project))
-        delivered.append(RouterPointers.attach(tagged, to: words))
         nextIntent += 1
-        states[nextIntent] = .sending
+        sent.append((display, project))
+        delivered.append(words)
+        statuses[nextIntent] = CourierIntentStatus(state: .taken)
+        byWords[words] = nextIntent
         return nextIntent
     }
 
-    func state(of id: Int) -> CourierState? { states[id] }
+    func status(of id: Int) async -> CourierIntentStatus? { up ? statuses[id] : nil }
 
-    func projects(named name: String) async -> [String] { board[name] ?? [] }
+    func intent(matching words: String, project: String?, since: Date) async -> CourierLookup {
+        guard up else { return .unknown }
+        return byWords[words].map(CourierLookup.found) ?? .none
+    }
 }
 
 // MARK: - The seam for the dispatcher and the keys
@@ -633,11 +753,17 @@ extension Store {
     /// The proposals saved before a quit, shown again in their order (`RouterProjectProposal.Saved`).
     func restoreProposals(_ saved: [RouterProjectProposal.Saved], reviser: RouterProjectReviser? = nil,
                           engine: RouterProjectEngine? = nil) {
+        var back: [RouterProjectProposal] = []
         for s in saved {
-            hold(RouterProjectProposal(saved: s, reviser: reviser ?? RouterProjectAppReviser(store: self),
-                                       engine: engine ?? appProjectEngine))
+            let p = RouterProjectProposal(saved: s, reviser: reviser ?? RouterProjectAppReviser(store: self),
+                                          engine: engine ?? appProjectEngine)
+            hold(p)
+            back.append(p)
         }
-        if !saved.isEmpty { onProposalsRestored() }
+        guard !saved.isEmpty else { return }
+        onProposalsRestored()
+        // A message handed over before the quit: the engine's record says whether it went, before anything is sent again.
+        reconciling = Task { for p in back { await p.reconcile() } }
     }
 
     /// What to save of the proposals: the one up, then those waiting.
@@ -646,7 +772,7 @@ extension Store {
     }
 
     private var appProjectEngine: RouterProjectEngine {
-        RouterProjectPillsEngine(pills: routerCourier) { [weak self] in await self?.routerCourierLink.board() ?? .null }
+        RouterProjectPillsEngine(pills: routerCourier)
     }
 
     private func hold(_ proposal: RouterProjectProposal) {
@@ -671,7 +797,7 @@ extension Store {
 @MainActor struct RouterProjectAppReviser: RouterProjectReviser {
     weak var store: Store?
 
-    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectFields {
+    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectRevision {
         guard let store else { throw RouterTools.Failure("Fjord is closing") }
         return try await RouterProjectModelReviser.app(store).revise(current, with: text, message: message)
     }
@@ -717,9 +843,15 @@ extension RouterModel {
         // The next proposal waiting shows once its message, back in the composer, is sent or cleared: a Return now is
         // that message's, not a revision of the next.
         store.routerProposalHeld = true
-        draft = proposal.drop()
-        caret = nil
-        focusRequest &+= 1
+        // A message that went already (before a quit) isn't put back as unsent.
+        if let back = proposal.drop() {
+            draft = back
+            caret = nil
+            focusRequest &+= 1
+        } else {
+            store.routerProposalHeld = false
+            store.showNextProposal()
+        }
         return true
     }
 }
@@ -785,56 +917,87 @@ extension RouterModel {
 
     static let schema = #"{"type": "object", "properties": {"name": {"type": "string"}, "folder": {"type": "string"}, "repo": {"type": "string", "description": "owner/name, or empty"}, "instructions": {"type": "string"}}, "required": ["name", "folder", "repo", "instructions"]}"#
 
-    static func prompt(_ current: RouterProjectFields, with text: String, message: String) -> String {
-        // Every field redacted as the decider's input is: a pasted secret in one is never sent to the model.
-        let now: [String: String] = ["name": current.name, "folder": current.folder ?? "", "repo": current.repo ?? "",
-                                     "instructions": current.instructions].mapValues(RouterTools.redacted)
+    /// The model's input, every part redacted as the decider's input is (a pasted secret is never sent), each secret as a
+    /// numbered placeholder that `redactor` maps back.
+    static func prompt(_ current: RouterProjectFields, with text: String, message: String, redactor: inout Redactor) -> String {
+        let now: [String: String] = ["name": redactor.redact(current.name), "folder": redactor.redact(current.folder ?? ""),
+                                     "repo": redactor.redact(current.repo ?? ""), "instructions": redactor.redact(current.instructions)]
         let json = (try? JSONSerialization.data(withJSONObject: now, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-        return "Proposal:\n\(json)\n\nThe message it is for:\n<message>\(RouterTools.redacted(message))</message>\n\n"
-            + "The owner's words about the proposal:\n<words>\(RouterTools.redacted(text))</words>"
+        return "Proposal:\n\(json)\n\nThe message it is for:\n<message>\(redactor.redact(message))</message>\n\n"
+            + "The owner's words about the proposal:\n<words>\(redactor.redact(text))</words>"
     }
 
-    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectFields {
-        let o = try await ask(Self.role, Self.prompt(current, with: text, message: message), Self.schema)
+    func revise(_ current: RouterProjectFields, with text: String, message: String) async throws -> RouterProjectRevision {
+        var redactor = Redactor()
+        let o = try await ask(Self.role, Self.prompt(current, with: text, message: message, redactor: &redactor), Self.schema)
         guard let name = o["name"] as? String else { throw RouterTools.Failure("Sonnet's revision had no name") }
-        func field(_ key: String) -> String? {
-            let v = (o[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return v.isEmpty ? nil : v
+        var unapplied: [String] = []
+        // Only the model's copy was redacted: its placeholders stand for the originals again. One that stands for nothing it
+        // was given leaves that field as it was.
+        func value(_ key: String, _ raw: String, _ previous: String) -> String {
+            if let restored = redactor.restore(raw.trimmingCharacters(in: .whitespacesAndNewlines)) { return restored }
+            unapplied.append(key)
+            return previous
         }
-        // Only the model's copy was redacted: its placeholders stand for the originals again.
-        return RouterProjectFields(name: Self.unredacted(name, from: current.name),
-                                   folder: field("folder").map { Self.unredacted($0, from: current.folder ?? "") },
-                                   repo: field("repo").map { Self.unredacted($0, from: current.repo ?? "") },
-                                   instructions: Self.unredacted(field("instructions") ?? "", from: current.instructions))
+        let f = RouterProjectFields(name: value("name", name, current.name),
+                                    folder: value("folder", o["folder"] as? String ?? "", current.folder ?? "").nilIfEmptyValue,
+                                    repo: value("repo", o["repo"] as? String ?? "", current.repo ?? "").nilIfEmptyValue,
+                                    instructions: value("instructions", o["instructions"] as? String ?? "", current.instructions))
+        return RouterProjectRevision(fields: f, unapplied: unapplied)
     }
 
-    static let placeholder = "[redacted]"
+    /// The secrets of one call's inputs, each as `[redacted-N]` in the model's copy (the same secret, the same N), and back.
+    @MainActor struct Redactor {
+        static let bare = "[redacted]"
+        private(set) var secrets: [String] = []
 
-    /// `answer` with each placeholder the model kept put back as the part of `original` it stood for, in order. When they
-    /// can't be told apart (the model added or dropped some), an answer that is the redacted copy itself is the original;
-    /// anything else stays as the model gave it.
-    static func unredacted(_ answer: String, from original: String) -> String {
-        let red = RouterTools.redacted(original)
-        guard red != original, answer.contains(placeholder) else { return answer }
-        if answer == red { return original }
-        let parts = red.components(separatedBy: placeholder)
-        var rest = Substring(original)
-        guard rest.hasPrefix(parts[0]) else { return answer }
-        rest = rest.dropFirst(parts[0].count)
-        var secrets: [String] = []
-        for (i, literal) in parts.dropFirst().enumerated() {
-            if i == parts.count - 2 {
-                guard rest.hasSuffix(literal) else { return answer }
-                secrets.append(String(rest.dropLast(literal.count)))
-            } else {
-                guard !literal.isEmpty, let at = rest.range(of: literal) else { return answer }
-                secrets.append(String(rest[..<at.lowerBound]))
-                rest = rest[at.upperBound...]
+        /// `original` as the model sees it. A part redacted that can't be told apart from the rest stays a bare placeholder
+        /// (it maps back to nothing).
+        mutating func redact(_ original: String) -> String {
+            let red = RouterTools.redacted(original)
+            guard red != original, let found = Self.secrets(of: original, redacted: red) else { return red }
+            let parts = red.components(separatedBy: Self.bare)
+            var out = parts[0]
+            for (i, secret) in found.enumerated() {
+                let n = (secrets.firstIndex(of: secret) ?? { secrets.append(secret); return secrets.count - 1 }()) + 1
+                out += "[redacted-\(n)]" + parts[i + 1]
             }
+            return out
         }
-        let pieces = answer.components(separatedBy: placeholder)
-        guard pieces.count - 1 == secrets.count else { return answer }
-        return zip(pieces, secrets + [""]).map { $0 + $1 }.joined()
+
+        /// `answer` with each numbered placeholder put back; nil when it holds one that stands for nothing given.
+        func restore(_ answer: String) -> String? {
+            guard answer.contains("[redacted") else { return answer }
+            let pattern = try! NSRegularExpression(pattern: #"\[redacted(?:-(\d+))?\]"#)
+            var out = "", last = answer.startIndex
+            for m in pattern.matches(in: answer, range: NSRange(answer.startIndex..., in: answer)) {
+                guard let whole = Range(m.range, in: answer), let digits = Range(m.range(at: 1), in: answer),
+                      let n = Int(answer[digits]), n >= 1, n <= secrets.count else { return nil }
+                out += answer[last..<whole.lowerBound] + secrets[n - 1]
+                last = whole.upperBound
+            }
+            return out + answer[last...]
+        }
+
+        /// The parts of `original` that `redacted` replaced, in order; nil when they can't be told apart.
+        static func secrets(of original: String, redacted red: String) -> [String]? {
+            let parts = red.components(separatedBy: bare)
+            var rest = Substring(original)
+            guard rest.hasPrefix(parts[0]) else { return nil }
+            rest = rest.dropFirst(parts[0].count)
+            var found: [String] = []
+            for (i, literal) in parts.dropFirst().enumerated() {
+                if i == parts.count - 2 {
+                    guard rest.hasSuffix(literal) else { return nil }
+                    found.append(String(rest.dropLast(literal.count)))
+                } else {
+                    guard !literal.isEmpty, let at = rest.range(of: literal) else { return nil }
+                    found.append(String(rest[..<at.lowerBound]))
+                    rest = rest[at.upperBound...]
+                }
+            }
+            return found
+        }
     }
 
     /// The app's: Sonnet through the Claude Code the Router uses, in the Router's home.

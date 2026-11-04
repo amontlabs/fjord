@@ -212,9 +212,14 @@ enum RouterCourier {
 struct RouterCourierSource {
     var submit: @MainActor (CourierRequest) async -> Int
     var updates: AsyncStream<CourierUpdate>
+    /// Where an intent is now, from the engine's database (`CourierHost.status`); nil: it can't say.
+    var status: @MainActor (Int) async -> CourierIntentStatus? = { _ in nil }
+    /// A delivery by its words, project and time (`CourierHost.intent(matching:)`).
+    var matching: @MainActor (String, String?, Date) async -> CourierLookup = { _, _, _ in .unknown }
 
     static func host(_ host: CourierHost) -> RouterCourierSource {
-        RouterCourierSource(submit: { await host.submit($0) }, updates: host.updates)
+        RouterCourierSource(submit: { await host.submit($0) }, updates: host.updates, status: { await host.status(of: $0) },
+                            matching: { await host.intent(matching: $0, project: $1, since: $2) })
     }
 
     /// A fake engine: each request gets the next id and the updates `script` gives for it, `delay` apart (none: all at once).
@@ -305,13 +310,22 @@ struct RouterCourierSource {
     @ObservationIgnored private var early: [Int: CourierUpdate] = [:]
     /// The newest update of each intent, and who waits for one (`next`).
     @ObservationIgnored var lastUpdates: [Int: CourierUpdate] = [:]
-    @ObservationIgnored var waiters: [Int: [(matches: (CourierState) -> Bool, continuation: CheckedContinuation<CourierUpdate, Never>)]] = [:]
+    @ObservationIgnored var waiters: [Int: [(key: UUID, matches: (CourierState) -> Bool, continuation: CheckedContinuation<CourierUpdate?, Never>)]] = [:]
     @ObservationIgnored private var source: RouterCourierSource?
     @ObservationIgnored private var following: Task<Void, Never>?
     /// How long a settled pill stays; nil keeps it (a shot, a test).
     @ObservationIgnored var settleAfter: Duration? = RouterFlights.confirmation
     /// What the pause buttons open outside Fjord; a test records them.
     @ObservationIgnored var open: (Action) -> Void = RouterCourierPills.openOutside
+
+    /// Where intent `id` is now, as the engine's database has it (survives a relaunch); nil when the engine can't say.
+    func status(of id: Int) async -> CourierIntentStatus? { await source?.status(id) }
+
+    /// The delivery of `words` to `project` made since `since`, by the engine's database.
+    func intent(matching words: String, project: String?, since: Date) async -> CourierLookup {
+        guard let source else { return .unknown }
+        return await source.matching(words, project, since)
+    }
 
     /// Follows `source`'s updates from now on.
     func attach(_ source: RouterCourierSource) {

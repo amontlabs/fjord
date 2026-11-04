@@ -259,7 +259,8 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable {
         case "new_work" where sure:
             if let project { return decided(.newWork(project: project)) }
             let name = a.project.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty { return decided(.newProject(name: name)) }
+            // A redacted name that matched no one project isn't a new project's name: it asks.
+            if !name.isEmpty, !name.contains("[redacted") { return decided(.newProject(name: name)) }
         case "answer_here" where sure:
             return decided(.answer)
         default: break
@@ -278,8 +279,12 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable {
     }
 
     /// A project a model named: by its name or id, or by its name as the model read it (redacted), mapped back to the real one.
+    /// The project a name the model gave stands for: its own, or the one project whose redacted name it is (several: none,
+    /// and the decision asks).
     func resolve(_ name: String, in context: RouterProjectContext) -> RouterProjectContext.Project? {
-        context.project(named: name) ?? context.projects.first { RouterTools.redacted($0.name) == name }
+        if let p = context.project(named: name) { return p }
+        let matches = context.projects.filter { RouterTools.redacted($0.name) == name }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     static func ask(_ places: [RouterProjectDecision.Kind], confidence: Double, decider: RouterProjectDecision.Decider,

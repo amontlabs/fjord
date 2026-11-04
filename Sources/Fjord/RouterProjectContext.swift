@@ -200,13 +200,14 @@ extension RouterProjectContext {
     /// The app's context: the Board as the engine last folded it, the local sessions as the engine's `local` input
     /// (`CourierLocal.read()`, for bridge ids), the app's sessions, activity, cards and what you told them, and your last
     /// routings from the history.
-    @MainActor static func gather(board: JSON, local: JSON? = nil, store: Store, now: Date = Date(), excluding: UUID? = nil) -> RouterProjectContext {
+    @MainActor static func gather(board: JSON, local: JSON? = nil, store: Store, now: Date = Date(), excluding: UUID? = nil,
+                                  statuses: [Int: CourierIntentStatus] = [:]) -> RouterProjectContext {
         let told = store.lastTold()
         let cards = store.routerShownOpenCards
         let byCLI = Dictionary(store.claudeSessions.values.compactMap { s in s.cliID.map { ($0, s) } }, uniquingKeysWith: { a, b in
             a.lastActivity >= b.lastActivity ? a : b
         })
-        return from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store, excluding: excluding)) { cli in
+        return from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store, excluding: excluding, statuses: statuses)) { cli in
             guard let s = byCLI[cli] else { return nil }
             var f = LocalFacts(summary: s.summary?.detail ?? "")
             if s.running { f.doing = store.claudeActivity[s.id]?.text ?? "" }
@@ -218,14 +219,24 @@ extension RouterProjectContext {
         }
     }
 
+    /// The engine's record of each delivery the history names (`courierIntent`), for `routings`.
+    @MainActor static func deliveries(_ store: Store) async -> [Int: CourierIntentStatus] {
+        var out: [Int: CourierIntentStatus] = [:]
+        for intent in store.router.decisions.compactMap(\.decision.courierIntent).suffix(routingCount * 4) {
+            if let status = await store.routerCourier.status(of: intent) { out[intent] = status }
+        }
+        return out
+    }
+
     /// Your last messages and where each went, oldest first: the decision log's own messages that were delivered (`sent`: not a
     /// dropped proposal, a message still waiting for your pick, or the one being decided, `excluding`), a correction with where
     /// you sent it instead.
-    @MainActor static func routings(_ store: Store, excluding: UUID? = nil) -> [Routing] {
-        /// A send the engine took but then failed (or refused) wasn't delivered: no example. One it hasn't reported on (or has
-        /// forgotten, as after a restart) stands as it was recorded.
+    @MainActor static func routings(_ store: Store, excluding: UUID? = nil, statuses: [Int: CourierIntentStatus] = [:]) -> [Routing] {
+        /// A send the engine took but then failed (or refused) wasn't delivered: no example. Its state is the engine's record
+        /// (`statuses`, read by `deliveries`), which survives a restart; one the engine can't say of stands as it was recorded.
         func delivered(_ entry: RouterDecision) -> Bool {
-            guard let intent = entry.decision.courierIntent, let state = store.routerCourier.lastUpdates[intent]?.state else { return true }
+            guard let intent = entry.decision.courierIntent,
+                  let state = statuses[intent]?.state ?? store.routerCourier.lastUpdates[intent]?.state else { return true }
             return state == .delivered || state == .deliveredLate
         }
         var out: [Routing] = []

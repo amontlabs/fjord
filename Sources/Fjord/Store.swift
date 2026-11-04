@@ -629,6 +629,8 @@ final class Store {
     var routerProposalHeld = false
     /// Proposals were restored at launch (the dispatcher reattaches their history entries, `reattachProposals`).
     @ObservationIgnored var onProposalsRestored: () -> Void = {}
+    /// The restored proposals' look at their deliveries (a test waits for it).
+    @ObservationIgnored var reconciling: Task<Void, Never>?
     /// A proposal changed what is saved of it (`routerProposalsSaved`): written like any other persisted change.
     func routerProposalsChanged() { persistedRevision &+= 1 }
     /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.

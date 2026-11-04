@@ -174,6 +174,32 @@ import Testing
         #expect(RouterProjectContext.routings(s).count == 1)
     }
 
+    // Round 3 D: the engine's record (it survives a restart) judges a delivery before the pills' memory does.
+    @Test func theEnginesRecordJudgesARoutingExample() async {
+        let (s, d, f) = setup()
+        f.decisions = [decided(.project("lookout", thread: nil))]
+        let id = d.submit("bump the version")
+        await finish(f, id)
+        await waitUntil { decision(s, id)?.decision.courierIntent == 1 }
+        s.routerCourier.lastUpdates[1] = CourierUpdate(intentID: 1, state: .delivered, cause: nil, before: nil, at: Date())
+        #expect(RouterProjectContext.routings(s, statuses: [1: CourierIntentStatus(state: .failed)]).isEmpty)
+        s.routerCourier.attach(RouterCourierSource(submit: { _ in 0 }, updates: AsyncStream { _ in },
+                                                   status: { $0 == 1 ? CourierIntentStatus(state: .refused) : nil }))
+        let statuses = await RouterProjectContext.deliveries(s)
+        #expect(statuses[1]?.state == .refused)
+        #expect(RouterProjectContext.routings(s, statuses: statuses).isEmpty)
+    }
+
+    // Round 3 F: a wait on the pills ends when its task is cancelled.
+    @Test func aWaitOnAnIntentEndsWhenCancelled() async {
+        let (s, _, _) = setup()
+        let wait = Task { await s.routerCourier.next(42) { $0 == .toolDone } }
+        try? await Task.sleep(for: .milliseconds(20))
+        wait.cancel()
+        #expect(await wait.value == nil)
+        #expect(s.routerCourier.waiters[42]?.isEmpty ?? true)
+    }
+
     // MARK: What the message tags
 
     @Test func aTaggedCategoryReachesTheDeciderAndGoesAfterYourWords() async {
@@ -287,7 +313,7 @@ import Testing
         #expect(proposal?.message.contains("@CI: a category") == false)
         // The pills' engine: the tags after your words, the pill showing your words alone.
         let engine = RouterProjectPillsEngine(pills: s.routerCourier)
-        let intent = await engine.send("look at it", tagged: "@CI: a category", to: "chan_x", named: "x")
+        let intent = await engine.send("look at it\n\n@CI: a category", display: "look at it", to: "chan_x", named: "x")
         #expect(intent > 0)
         #expect(sentWords(f).last?.words == "look at it\n\n@CI: a category")
         #expect(s.routerCourier.items.last.map { if case .send(let w, _, _) = $0.work { w } else { "" } } == "look at it")
@@ -298,7 +324,7 @@ import Testing
         let entry = s.logDecision(RouterDecision(trigger: .you("start an iOS app"), outcome: .done))
         let engine = RouterProjectFakeEngine()
         s.restoreProposals([.init(message: "start an iOS app", fields: .init(name: "fjord-ios"), made: [.create], project: "chan_i",
-                                  createIssued: true, stopped: "Fjord quit while making it", decision: entry)],
+                                  stopped: "Fjord quit while making it", decision: entry)],
                            reviser: RouterProjectFakeReviser(), engine: engine)
         let p = try #require(s.routerProposal)
         p.settleAfter = nil
@@ -308,6 +334,7 @@ import Testing
         await p.settled()
         #expect(engine.sent.map(\.project) == ["chan_i"])
         #expect(decision(s, entry)?.decision.target == "new claude.ai project “fjord-ios”")
+        #expect(decision(s, entry)?.decision.courierIntent == 101)
         #expect(decision(s, entry)?.outcome == .done)
         _ = d
     }
