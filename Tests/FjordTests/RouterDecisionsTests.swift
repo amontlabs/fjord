@@ -164,7 +164,7 @@ import Testing
     /// Synthetic entries in the shapes older files kept: a divided message (`parts`, nothing of its own) and a removed done case.
     @Test func entriesInOlderShapesStillDecode() throws {
         let part = { (id: String, place: String, session: String) in
-            #"{"id":"\#(id)","place":"\#(place)","text":"words","decision":{"target":"\#(place)","intent":"i","confirmed":true},"done":[{"sent":{"to":"\#(place)","text":"words"}}],"outcome":{"done":{}},"links":{"changes":[],"cards":[],"sessions":["\#(session)"]}}"#
+            #"{"id":"\#(id)","place":"\#(place)","text":"words","decision":{"target":"\#(place)","intent":"i","confirmed":true},"done":[{"sent":{"to":"\#(place)","text":"words"}}],"outcome":{"done":{}},"links":{"changes":[],"cards":[],"sessions":["\#(session)"]},"reply":"\#(place == "Alpha" ? "the answer" : "another")"\#(place == "Beta" ? #","note":"a note""# : "")}"#
         }
         let split = #"{"id":"00000000-0000-0000-0000-000000000001","at":0,"trigger":{"you":{"_0":"words"}},"parts":["#
             + part("00000000-0000-0000-0000-000000000011", "Alpha", "s1") + "," + part("00000000-0000-0000-0000-000000000012", "Beta", "s2") + "]}"
@@ -178,6 +178,7 @@ import Testing
         let a = state.decisions[0]
         #expect(a.decision.target == "Alpha" && a.outcome == .done && a.done.count == 2 && a.links.sessions == ["s1", "s2"])
         #expect(a.note?.contains("Alpha, Beta") == true)
+        #expect(a.reply == "Alpha: the answer\nBeta: another" && a.note?.contains("Beta: a note") == true)
         let b = state.decisions[1]
         #expect(b.done.count == 2 && b.done.first?.sendsWords == true && b.note?.contains("vanished") == true)
     }

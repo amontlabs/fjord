@@ -1412,7 +1412,7 @@ struct RelayInbox: Sendable {
     static func header(of text: String) -> (target: String, nonce: String)? {
         guard let line = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first,
               line.hasSuffix("⟧") else { return nil }
-        for (prefix, count) in [("⟦fjord v1 ", 4), ("⟦fjord v2 ", 6), ("⟦fjord v3 ", 7), ("⟦fjord v4 ", 8), ("⟦fjord abort v1 ", 5), ("⟦fjord stop v1 ", 5), ("⟦fjord carry v1 ", 5)] where line.hasPrefix(prefix) {
+        for (prefix, count) in [("⟦fjord v1 ", 4), ("⟦fjord abort v1 ", 5), ("⟦fjord carry v1 ", 5)] where line.hasPrefix(prefix) {
             let fields = line.dropFirst(prefix.count).dropLast().split(separator: " ")
             guard fields.count == count else { return nil }
             return (String(fields[0]), String(fields[1]))

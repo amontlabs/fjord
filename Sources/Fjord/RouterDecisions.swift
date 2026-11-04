@@ -361,8 +361,15 @@ extension RouterDecision: Codable {
             merged.changes += part.links.changes.filter { !merged.changes.contains($0) }
         }
         links = merged
-        reply = try c.decodeIfPresent(String.self, forKey: .reply)
-        note = try c.decodeIfPresent(String.self, forKey: .note)
+        // What each part answered or noted stays, labelled by its place when there are several.
+        func joined(_ own: String?, _ per: [(place: String, text: String?)]) -> String? {
+            let kept = per.compactMap { item in item.text.flatMap { $0.isEmpty ? nil : $0 }.map { (item.place, $0) } }
+            let lines = kept.map { per.count > 1 ? "\($0.0): \($0.1)" : $0.1 }
+            let all = (own.flatMap { $0.isEmpty ? nil : $0 }.map { [$0] } ?? []) + lines
+            return all.isEmpty ? nil : all.joined(separator: "\n")
+        }
+        reply = joined(try c.decodeIfPresent(String.self, forKey: .reply), (parts ?? []).map { ($0.place, $0.reply) })
+        note = joined(try c.decodeIfPresent(String.self, forKey: .note), (parts ?? []).map { ($0.place, $0.note) })
         delivered = try c.decodeIfPresent(Delivered.self, forKey: .delivered) ?? parts?.lazy.compactMap(\.delivered).first
         var old = legacyNotes
         if let parts, parts.count > 1 { old.append("divided between: " + parts.map(\.place).joined(separator: ", ")) }
@@ -377,7 +384,9 @@ extension RouterDecision: Codable {
         var outcome: Outcome?
         var links = Links()
         var delivered: Delivered?
-        private enum Key: String, CodingKey { case place, decision, done, outcome, links, delivered }
+        var reply: String?
+        var note: String?
+        private enum Key: String, CodingKey { case place, decision, done, outcome, links, delivered, reply, note }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Key.self)
             place = (try? c.decodeIfPresent(String.self, forKey: .place)) ?? ""
@@ -386,6 +395,8 @@ extension RouterDecision: Codable {
             outcome = try? c.decodeIfPresent(Outcome.self, forKey: .outcome)
             links = (try? c.decodeIfPresent(Links.self, forKey: .links)) ?? Links()
             delivered = try? c.decodeIfPresent(Delivered.self, forKey: .delivered)
+            reply = (try? c.decodeIfPresent(String.self, forKey: .reply)) ?? nil
+            note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? nil
         }
     }
 
