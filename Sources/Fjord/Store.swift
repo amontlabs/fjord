@@ -623,6 +623,10 @@ final class Store {
     }()
     /// A proposal to start a project for a message that fit none (RouterProjectProposal.swift); its pill is over the composer.
     var routerProposal: RouterProjectProposal?
+    /// Proposals for later messages, waiting for the one up to end; the next shows then.
+    var routerProposalQueue: [RouterProjectProposal] = []
+    /// A proposal changed what is saved of it (`routerProposalsSaved`): written like any other persisted change.
+    func routerProposalsChanged() { persistedRevision &+= 1 }
     /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The entries of the ask-back cards still up: kept when the history is pruned.
@@ -1058,6 +1062,8 @@ final class Store {
         myTeams = state.myTeams ?? []
         reposResolvedAt = state.reposResolvedAt
         login = state.login ?? ""
+        // A proposal under way when the app quit shows again, stopped where it was (Return goes on, never re-creating).
+        restoreProposals(state.routerProposals ?? [])
         savedRevision = persistedRevision
         loadActions()
         // Once the login, marks and actions' records are in: carried during the load, a cached rating or Done was lost.
@@ -1269,7 +1275,8 @@ final class Store {
                                                        contributedRepos: contributedRepos, reposResolvedAt: reposResolvedAt,
                                                        myTeams: myTeams, login: login.isEmpty ? nil : login,
                                                        fetchedFor: fetchedFor, baselinePending: baselinePending ? true : nil,
-                                                       snippets: snippets))
+                                                       snippets: snippets,
+                                                       routerProposals: routerProposalsSaved.isEmpty ? nil : routerProposalsSaved))
         let write: @Sendable () -> String? = {
             let enc = JSONEncoder()
             enc.dateEncodingStrategy = .iso8601

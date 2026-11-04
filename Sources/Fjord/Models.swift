@@ -125,13 +125,16 @@ struct PersistedState: Codable {
     var baselinePending: Bool? = nil
     /// The snippets, in order; nil (a file from before them) is none.
     var snippets: [Snippet]? = nil
+    /// The project proposals up or waiting when the app quit (RouterProjectProposal.swift); nil: none.
+    var routerProposals: [RouterProjectProposal.Saved]? = nil
 
     init(settings: AppSettings, agents: AgentsState? = nil, router: RouterState? = nil, categories: [InboxCategory]? = nil,
          groups: [InboxGroup]? = nil, categorySections: [CategorySection]? = nil, things: [String: Thing]? = nil,
          marks: [String: EntryMarks]? = nil,
          categoryBaselines: [UUID: Set<UUID>]? = nil, ownedRepos: Set<String>? = nil, contributedRepos: Set<String>? = nil,
          reposResolvedAt: Date? = nil, myTeams: Set<String>? = nil, login: String? = nil,
-         fetchedFor: Store.FetchedScope? = nil, baselinePending: Bool? = nil, snippets: [Snippet]? = nil) {
+         fetchedFor: Store.FetchedScope? = nil, baselinePending: Bool? = nil, snippets: [Snippet]? = nil,
+         routerProposals: [RouterProjectProposal.Saved]? = nil) {
         self.settings = settings
         self.agents = agents
         self.router = router
@@ -149,6 +152,7 @@ struct PersistedState: Codable {
         self.fetchedFor = fetchedFor
         self.baselinePending = baselinePending
         self.snippets = snippets
+        self.routerProposals = routerProposals
     }
 
     /// The parts the file had that this build could not read (a damaged file, or one from a build whose parts this one
@@ -157,7 +161,7 @@ struct PersistedState: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case settings, agents, router, categories, groups, categorySections, things, marks, categoryBaselines, ownedRepos,
-             contributedRepos, reposResolvedAt, myTeams, login, fetchedFor, baselinePending, snippets
+             contributedRepos, reposResolvedAt, myTeams, login, fetchedFor, baselinePending, snippets, routerProposals
     }
 
     /// Tolerant: a file from before the categories (repos, items, ci) loses that data and loads the rest; a part that no
@@ -207,6 +211,7 @@ struct PersistedState: Codable {
         fetchedFor = part(.fetchedFor)
         baselinePending = part(.baselinePending)
         snippets = each(.snippets)
+        routerProposals = each(.routerProposals)
         self.dropped = dropped
     }
 }

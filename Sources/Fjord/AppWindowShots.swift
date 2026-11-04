@@ -756,6 +756,7 @@ enum AppWindowShots {
             ("revised", revised, .proposed, ["name", "repo"], nil),
             ("revise-failed", first, .proposed, [], "Couldn't revise that: the model didn't answer. The proposal stays as it was."),
             ("creating", revised, .creating("Adding the repo"), [], nil),
+            ("waiting", revised, .waiting("Chrome isn't connected: Fjord goes on once it is"), [], nil),
             ("created", revised, .created, [], nil),
             ("failed", revised, .failed("The project wasn't created: a project named fjord-ios already exists"), [], nil),
             ("none", RouterProjectFields(name: "scratch-notes"), .proposed, [], nil),

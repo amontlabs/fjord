@@ -48,7 +48,7 @@ struct RouterComposer: View {
         VStack(alignment: .leading, spacing: 0) {
             // A project proposed for the message that fit none.
             if let proposal = store.routerProposal {
-                RouterProjectProposalPill(proposal: proposal).padding(.bottom, C.dockGap)
+                RouterProjectProposalPill(proposal: proposal, queued: store.routerProposalQueue.count).padding(.bottom, C.dockGap)
                     .transition(.opacity)
             }
             // What the engine is doing for claude.ai, over your messages still finding where they go.
