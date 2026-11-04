@@ -617,7 +617,11 @@ final class Store {
         return dispatcher
     }()
     /// The claude.ai deliveries and tools the engine runs, as pills over the composer (`RouterCourier`).
-    @ObservationIgnored lazy var routerCourier = RouterCourierPills()
+    @ObservationIgnored lazy var routerCourier: RouterCourierPills = {
+        let pills = RouterCourierPills()
+        pills.threadTitle = { [weak self] in self?.routerCourierLink.title($0) }
+        return pills
+    }()
     /// The engine itself while it runs (`RouterCourier.on`, started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The entries of the ask-back cards still up: kept when the history is pruned.

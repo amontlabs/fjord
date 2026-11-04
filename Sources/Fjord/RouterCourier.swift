@@ -107,6 +107,12 @@ enum RouterCourier {
     /// The Board as last shared: what the dispatcher offers Jev and how the setup reads the page.
     private(set) var snapshot = CourierSnapshot()
     private var following: Task<Void, Never>?
+    private var localWatchers: [FolderWatcher] = []
+    private var localObservers: [NSObjectProtocol] = []
+    private var readingLocal = false
+    private var readAgain = false
+    /// The app's reading of the local sessions (a test gives its own).
+    var readLocal: @Sendable () -> JSON = { CourierLocal.read() }
     private var watchers: [UUID: AsyncStream<CourierSetupHealth>.Continuation] = [:]
     /// Called when the places change (the dispatcher's targets are read again).
     var placesChanged: () -> Void = {}
@@ -135,11 +141,46 @@ enum RouterCourier {
                 self.take(next)
             }
         }
+        watchLocal()
+    }
+
+    /// The engine hears of the local sessions when a session file or a registry file changes, and when the Claude app starts or
+    /// quits; no timer. Once now, for the state at start.
+    func watchLocal(_ folders: [URL] = [Claude.sessionsDir, CourierLocal.Places.app.registry], observing center: NotificationCenter = NSWorkspace.shared.notificationCenter) {
+        localWatchers = [FolderWatcher(folders) { [weak self] in MainActor.assumeIsolated { self?.localChanged() } }]
+        localObservers = [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification].map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                guard app?.bundleIdentifier == Claude.bundleID else { return }
+                MainActor.assumeIsolated { self?.localChanged() }
+            }
+        }
+        localChanged()
+    }
+
+    /// Reads the local sessions off the main thread and gives them to the engine; a change while one is being read asks for another.
+    func localChanged() {
+        guard host != nil else { return }
+        if readingLocal { readAgain = true; return }
+        readingLocal = true
+        Task { [weak self] in
+            while let self {
+                self.readAgain = false
+                let read = self.readLocal
+                let json = await Task.detached { read() }.value
+                await self.host?.local(json)
+                if !self.readAgain { break }
+            }
+            self?.readingLocal = false
+        }
     }
 
     /// Stops the host: the socket file goes, the database is closed.
     func stop() async {
         following?.cancel(); following = nil
+        localWatchers = []
+        localObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        localObservers = []
         let host = self.host
         self.host = nil
         await host?.stop()
@@ -156,6 +197,11 @@ enum RouterCourier {
     /// The project a target names, on the Board as last shared: by name, else by id.
     func place(_ target: RouterCourier.Target) -> CourierPlace? {
         places.first { $0.name == target.project } ?? places.first { $0.id == target.project }
+    }
+
+    /// A thread target's title on the Board, shortened as the buttons do; nil when the thread or its title is unknown.
+    func title(_ target: RouterCourier.Target) -> String? {
+        thread(target).flatMap { $0.title.isEmpty ? nil : RouterPointers.inert($0.title, 60) }
     }
 
     func thread(_ target: RouterCourier.Target) -> CourierPlace.Thread? {
@@ -296,11 +342,14 @@ struct RouterCourierSource {
 
     // MARK: Sending
 
+    /// The title a thread target shows by (the Board's); nil when unknown, and the pill shows the thread's id.
+    var threadTitle: (RouterCourier.Target) -> String? = { _ in nil }
+
     /// Hands your words for a claude.ai place to the engine; its pill shows at once.
     @discardableResult
     func send(_ words: String, to target: RouterCourier.Target) async -> Int {
         await submit(.send(words: words, project: target.project, thread: target.thread),
-                     work: .send(words: words, project: target.project, thread: target.thread))
+                     work: .send(words: words, project: target.project, thread: threadTitle(target) ?? target.thread))
     }
 
     /// One of the Router's tools for claude.ai.
@@ -513,7 +562,7 @@ extension RouterDispatcher {
         store.updateDecision(job.id) {
             // The target the flights read to leave the message's pill to the engine's (`RouterFlights.handedToCourier`).
             $0.decision.targetID = courier.targetID
-            $0.add(.sent(to: RouterCourierPills.place(courier.project, courier.thread), text: words, original: words == job.text ? nil : job.text))
+            $0.add(.sent(to: RouterCourierPills.place(courier.project, store.routerCourier.threadTitle(courier) ?? courier.thread), text: words, original: words == job.text ? nil : job.text))
             $0.outcome = .done
         }
         return courier
