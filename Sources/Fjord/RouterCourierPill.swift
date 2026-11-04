@@ -60,11 +60,12 @@ struct RouterCourierPill: View {
     private func line(_ face: RouterCourierPills.Face) -> some View {
         HStack(spacing: 8) {
             mark(face)
+            // Your words get the room first: the place after them truncates before they do.
             Text(face.words).cdsText((13, 18), .regular, face.mark == .working || face.mark == .asks ? CDS.Text.primary : CDS.Text.secondary)
                 .lineLimit(1).truncationMode(.tail)
+                .layoutPriority(1)
             if !face.status.isEmpty {
                 Text(face.status).cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).truncationMode(.tail)
-                    .layoutPriority(1)
                     .id(face.status)
                     .transition(.opacity)
             }

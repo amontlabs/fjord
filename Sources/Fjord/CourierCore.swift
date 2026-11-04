@@ -206,6 +206,9 @@ final class CourierCore {
     var gone: () -> Void = {}
 
     var runs = OrderedMap<Int, Run>()
+    /// Why each paused run waits, as a code (set beside the cause, from the same conditions): the app's pill picks its button by it.
+    /// None for a pause the app can't help (a restart's). Not in the reference: nothing the bridge replies holds it.
+    var pauses: [Int: CourierPause] = [:]
     var waiters: [Int: [(JSON) -> Void]] = [:]
     var hosts = 0
     var commands = 0
@@ -693,12 +696,14 @@ final class CourierCore {
 
     /// Why a paused run waits, said again: Chrome may have started (its profile picker showing) since the reason was set.
     func recheckPauses() throws {
-        let why = CourierDo.blocked(board()["health"] ?? .null)
+        let pause = CourierDo.pause(board()["health"] ?? .null)
+        let why = pause.map(CourierDo.sentence)
         for run in runs.values {
             if run.flag("paused"), let why {
                 let intent = try sql.intent(run.id)
                 if intent.str("status") == "paused" && intent.str("cause") != why && !pyStartsWith(intent.str("cause") ?? "", "waiting for the Claude app") {
                     try sql.update(clock(), run.id, [("cause", .string(why))])
+                    pauses[run.id] = pause
                 }
             }
         }

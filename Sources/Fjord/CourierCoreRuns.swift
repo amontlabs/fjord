@@ -284,8 +284,9 @@ extension CourierCore {
             run.set("vanished_at", clock())
         }
         if run.flag("taken") || holds { return try awaitProof(run, intent) }  // the page took the words, or shows a row from you. It queues them while the coordinator replies.
-        let why = (intent.flag("thread") ? CourierDo.appWait(board, intent) : nil) ?? CourierDo.blocked(board["health"] ?? .null)
-        if why == CourierDo.appClosed {  // the page is up and would click: a send still waiting in it is cut off
+        let pause: CourierPause? = intent.flag("thread") && CourierDo.appWait(board, intent) != nil ? .appClosed : CourierDo.pause(board["health"] ?? .null)
+        let why = pause.map(CourierDo.sentence)
+        if pause == .appClosed {  // the page is up and would click: a send still waiting in it is cut off
             run["app"] = true; run["grace"] = .null
             if inPage(run) && run.str("stage") == "waiting" {
                 cancelSend(run)
@@ -294,8 +295,10 @@ extension CourierCore {
         }
         if let why {
             run["paused"] = true; run["deadline"] = .null
+            pauses[run.id] = pause
             return try mark(intent, "paused", why)
         }
+        pauses[run.id] = nil
         if run.flag("paused") {  // a lost open is behind it too: its deadline was dropped with the pause
             run["paused"] = false; run["lost"] = false; late = false
             run["stage"] = run.str("stage") == "opening" ? "start" : (run["stage"] ?? .null)

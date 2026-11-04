@@ -28,6 +28,8 @@ struct SettingsView: View {
     static let claudeID = "claude"
     static let codeFoldersID = "code-folders"
     static let shortcutsID = "shortcuts"
+    /// The claude.ai delivery's setup, under Claude (only while `RouterCourier.on`).
+    static let courierID = "courier"
     /// Every section's anchor, in page order (the ⌘K palette scrolls to one for each of its rows).
     static let anchors = [toolsID, computerDefaultsID, connectedMacsID, githubID, notificationsID, claudeID, codeFoldersID,
                           shortcutsID, updatesID, generalID]
@@ -43,6 +45,7 @@ struct SettingsView: View {
                     // The Router's own sections read the Router's state in views of their own: what changes with every read of
                     // Claude's sessions redraws them, not the whole page.
                     if store.routerOn { RouterSettings(store: store, part: .claude).id(Self.claudeID) }
+                    if store.routerOn && RouterCourier.on { RouterCourierSetupView(setup: store.routerCourierLink.setup).id(Self.courierID) }
                     if store.triageOn || store.routerOn { CodeFoldersSettings(store: store).id(Self.codeFoldersID) }
                     shortcuts.id(Self.shortcutsID)
                     updates.id(Self.updatesID)

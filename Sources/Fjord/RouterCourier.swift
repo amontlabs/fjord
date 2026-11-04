@@ -9,7 +9,44 @@ import Observation
 
 enum RouterCourier {
     /// The dispatcher hands claude.ai targets to the engine. Off: no target is one, and local targets go as they always went.
+    /// Flipping this is the only change the code needs; a live run turns it on without it (`on`).
     static let enabled = false
+
+    /// The hidden switch: `--courier` at launch, or `defaults write <Fjord's bundle id> routerCourier -bool YES`. Never under
+    /// a test or in a demo, whatever the defaults say.
+    static let flag = "--courier"
+    static let defaultsKey = "routerCourier"
+
+    /// Whether the engine runs and claude.ai places are targets: `enabled`, or the hidden switch.
+    static var on: Bool { override ?? (enabled || (!UnderTest.isRunning && !Store.isDemo && hiddenSwitch)) }
+
+    /// A test turns it on for itself.
+    nonisolated(unsafe) static var override: Bool?
+
+    /// The claude.ai places the dispatcher offers: the engine's Board as last shared, while it is on.
+    @MainActor static func places(_ store: Store) -> [CourierPlace] {
+        on ? store.routerCourierLink.places : []
+    }
+
+    /// Whether a claude.ai target can be sent to now: the engine is on and the Board has its project (and thread).
+    @MainActor static func eligible(_ target: Target, store: Store) -> Bool {
+        guard on else { return false }
+        let link = store.routerCourierLink
+        return target.thread == nil ? link.place(target) != nil : link.thread(target) != nil
+    }
+
+    /// A claude.ai target as a button: the project's name, or the thread's title in its project.
+    @MainActor static func option(_ target: Target, store: Store) -> RouterAskBack.Option? {
+        guard eligible(target, store: store) else { return nil }
+        let link = store.routerCourierLink
+        if let thread = link.thread(target) {
+            return .init(target: target.targetID, title: thread.title.isEmpty ? "Untitled thread" : RouterPointers.inert(thread.title, 60),
+                         detail: "claude.ai · \(target.project)")
+        }
+        return .init(target: target.targetID, title: target.project, detail: "claude.ai project")
+    }
+
+    private static let hiddenSwitch = CommandLine.arguments.contains(flag) || UserDefaults.standard.bool(forKey: defaultsKey)
 
     /// A claude.ai place, as a target id: `claude-project:<project>` or `claude-thread:<project>/<thread>` (a thread id has no
     /// slash; a project's name may).
@@ -47,35 +84,98 @@ enum RouterCourier {
         var thread: String? { if case .thread(_, let t) = self { t } else { nil } }
     }
 
-    /// Why a paused intent waits, as the engine words it (`CourierDo.blocked`, `appClosed`), and the one thing that lets it go
-    /// on. Matched on the engine's own sentences, never on words in them: a cause it doesn't list gets no button.
-    enum Pause: Equatable {
-        case chromeNotRunning, chromeNotConnected, signedOut, tabAway, pageUnreadable, claudeApp
-
-        init?(_ cause: String?) {
-            guard let cause else { return nil }
-            switch cause {
-            case "Chrome isn't running": self = .chromeNotRunning
-            case CourierDo.chromeOpen: self = .chromeNotConnected
-            case "signed out of claude.ai": self = .signedOut
-            case "Fjord's tab has left the Claude Code page": self = .tabAway
-            case "the page can't be read": self = .pageUnreadable
-            default:
-                // The engine starts the app's wait with this and may say more after it (`CourierCore.recheckPauses`).
-                guard cause.hasPrefix(CourierDo.appClosed) else { return nil }
-                self = .claudeApp
-            }
+    /// The one thing that lets a paused intent go on, by the engine's code for why it waits (`CourierUpdate.pause`): never read
+    /// from its sentence. A pause with no code (a restart's) gets no button.
+    static func action(_ pause: CourierPause?) -> RouterCourierPills.Action? {
+        switch pause {
+        case .chromeClosed: .openChrome
+        // Chrome runs but the tab doesn't link (the extension off, the native host not registered, another profile): the
+        // setup's checks say which.
+        case .chromeNotConnected: .openSetup
+        case .signedOut: .signIn
+        case .away, .tabUnreadable: .openTab
+        case .appClosed: .showClaudeApp
+        case nil: nil
         }
+    }
+}
 
-        var action: RouterCourierPills.Action {
-            switch self {
-            case .chromeNotRunning, .chromeNotConnected: .openChrome
-            case .signedOut: .signIn
-            case .tabAway, .pageUnreadable: .openTab
-            case .claudeApp: .showClaudeApp
+/// The engine in the app: started at launch while `RouterCourier.on` (never in a demo or a test), its updates fed to the pills,
+/// its Board's health and places kept here on the main actor for the setup and the dispatcher, stopped on quit.
+@MainActor final class RouterCourierLink: RouterCourierSetupHost {
+    private(set) var host: CourierHost?
+    /// The Board as last shared: what the dispatcher offers Jev and how the setup reads the page.
+    private(set) var snapshot = CourierSnapshot()
+    private var following: Task<Void, Never>?
+    private var watchers: [UUID: AsyncStream<CourierSetupHealth>.Continuation] = [:]
+    /// Called when the places change (the dispatcher's targets are read again).
+    var placesChanged: () -> Void = {}
+
+    lazy var setup = RouterCourierSetup(host: self)
+
+    var places: [CourierPlace] { snapshot.places }
+    var running: Bool { host != nil }
+
+    /// Starts `host` (the app's socket and database by default) and feeds `pills` from it. A failure (another routerd on the
+    /// socket, say) is logged, and nothing routes to claude.ai.
+    func start(pills: RouterCourierPills, host: CourierHost = CourierHost()) async {
+        guard self.host == nil else { return }
+        do {
+            try await host.start()
+        } catch {
+            FileHandle.standardError.write(Data("routerd didn't start: \(error)\n".utf8))
+            return
+        }
+        self.host = host
+        pills.attach(.host(host))
+        let snapshots = host.snapshots
+        following = Task { [weak self] in
+            for await next in snapshots {
+                guard let self else { return }
+                self.take(next)
             }
         }
     }
+
+    /// Stops the host: the socket file goes, the database is closed.
+    func stop() async {
+        following?.cancel(); following = nil
+        let host = self.host
+        self.host = nil
+        await host?.stop()
+    }
+
+    /// A snapshot taken in (the host's, or a test's).
+    func take(_ next: CourierSnapshot) {
+        let moved = next.places != snapshot.places
+        snapshot = next
+        for w in watchers.values { w.yield(next.health) }
+        if moved { placesChanged() }
+    }
+
+    /// The project a target names, on the Board as last shared: by name, else by id.
+    func place(_ target: RouterCourier.Target) -> CourierPlace? {
+        places.first { $0.name == target.project } ?? places.first { $0.id == target.project }
+    }
+
+    func thread(_ target: RouterCourier.Target) -> CourierPlace.Thread? {
+        guard let id = target.thread else { return nil }
+        return place(target)?.threads.first { $0.id == id }
+    }
+
+    // MARK: The setup's hooks
+
+    var healthUpdates: AsyncStream<CourierSetupHealth> {
+        let id = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            continuation.yield(snapshot.health)
+            watchers[id] = continuation
+            continuation.onTermination = { [weak self] _ in Task { @MainActor in self?.watchers[id] = nil } }
+        }
+    }
+
+    func openTab() { RouterCourierPills.openOutside(.openTab) }
+    func openSignIn() { RouterCourierPills.openOutside(.signIn) }
 }
 
 /// The engine as the pills see it: what they submit and the updates they follow. The app's is the host's; shots and tests
@@ -132,12 +232,14 @@ struct RouterCourierSource {
         var cause: String?
         var before: JSON?
         var at: Date
+        /// Why it waits, while it is paused (the engine's code).
+        var pause: CourierPause? = nil
         /// You acted on it (Allow, Revert) and the engine hasn't said yet: it shows as under way at once.
         var acting = false
     }
 
     enum Action: Equatable {
-        case signIn, openChrome, showClaudeApp, openTab, allow, revert
+        case signIn, openChrome, showClaudeApp, openTab, openSetup, allow, revert
 
         var label: String {
             switch self {
@@ -145,6 +247,7 @@ struct RouterCourierSource {
             case .openChrome: "Open Chrome"
             case .showClaudeApp: "Show the Claude app"
             case .openTab: "Open Fjord's tab"
+            case .openSetup: "Check the setup"
             case .allow: "Allow"
             case .revert: "Revert"
             }
@@ -240,6 +343,7 @@ struct RouterCourierSource {
         guard shown || update.state == .deliveredLate else { return }
         item.state = update.state
         item.cause = update.cause
+        item.pause = update.state == .paused ? update.pause : nil
         item.before = update.before ?? item.before
         item.at = update.at
         item.acting = false
@@ -271,7 +375,7 @@ struct RouterCourierSource {
             guard let request = Self.revert(items[i]), case .tool(let name, let args) = request else { return }
             items[i].acting = true
             Task { await self.submit(request, work: .tool(name, args: args, reverts: true), replacing: id) }
-        case .signIn, .openChrome, .showClaudeApp, .openTab:
+        case .signIn, .openChrome, .showClaudeApp, .openTab, .openSetup:
             open(action)
         }
     }
@@ -303,8 +407,8 @@ struct RouterCourierSource {
         case .showClaudeApp:
             guard !UnderTest.refuses("the Claude app"), let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Claude.bundleID) else { return }
             NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
-        case .allow, .revert:
-            return
+        case .openSetup, .allow, .revert:
+            return  // the setup is in Fjord's Settings: the app's `open` shows it
         }
     }
 
@@ -334,7 +438,7 @@ struct RouterCourierSource {
             return Face(mark: .warning, words: words, status: "Not delivered to \(place)", note: item.cause, dismissible: true, settles: false)
         case .paused:
             return Face(mark: .paused, words: words, status: "Waiting to send to \(place)", note: item.cause,
-                        action: RouterCourier.Pause(item.cause)?.action, dismissible: false, settles: false)
+                        action: RouterCourier.action(item.pause), dismissible: false, settles: false)
         case .awaiting:
             return Face(mark: .asks, words: words, status: "Waiting for you", note: item.cause, dismissible: true, settles: false)
         }
@@ -359,7 +463,7 @@ struct RouterCourierSource {
             return Face(mark: .warning, words: words.asked, status: "Not done", note: item.cause, dismissible: true, settles: false)
         case .paused:
             return Face(mark: .paused, words: words.asked, status: "Waiting", note: item.cause,
-                        action: RouterCourier.Pause(item.cause)?.action, dismissible: false, settles: false)
+                        action: RouterCourier.action(item.pause), dismissible: false, settles: false)
         case .awaiting:
             return Face(mark: item.acting ? .working : .asks, words: words.asked, status: item.acting ? "Allowing…" : "",
                         note: item.cause, action: item.acting ? nil : .allow, dismissible: !item.acting, settles: false)
@@ -402,12 +506,22 @@ extension RouterDispatcher {
     /// A claude.ai target goes to the engine, its pill over the composer taking over from the message's own. Nil: the target is
     /// not one (or the handoff is off), and it goes as it always went.
     func courierHandoff(_ job: Job, to target: String) -> RouterCourier.Target? {
-        guard RouterCourier.enabled, let store, let courier = RouterCourier.Target(target) else { return nil }
-        Task { await store.routerCourier.send(job.text, to: courier) }
+        guard RouterCourier.on, let store, let courier = RouterCourier.Target(target) else { return nil }
+        // The pills that address it at the start of your words aren't part of them (the reply path drops them so too).
+        let words = Self.courierWords(job.text, pills: job.context.pills)
+        Task { await store.routerCourier.send(words, to: courier) }
         store.updateDecision(job.id) {
-            $0.add(.sent(to: RouterCourierPills.place(courier.project, courier.thread), text: job.text, original: nil))
+            // The target the flights read to leave the message's pill to the engine's (`RouterFlights.handedToCourier`).
+            $0.decision.targetID = courier.targetID
+            $0.add(.sent(to: RouterCourierPills.place(courier.project, courier.thread), text: words, original: words == job.text ? nil : job.text))
             $0.outcome = .done
         }
         return courier
+    }
+
+    /// Your words without the address pills they start with; as they are when nothing is left.
+    nonisolated static func courierWords(_ text: String, pills: [Range<Int>]) -> String {
+        let rest = (Addressing.withoutLeadingPills(text, pills) ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return rest.isEmpty ? text : rest
     }
 }

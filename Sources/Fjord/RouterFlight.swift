@@ -145,6 +145,11 @@ struct FlightFramesKey: PreferenceKey {
             let asking = dispatcher.askBacks.contains { $0.id == pill.id }
             // A part held for another place's answer is in the history, with Send now: its pill goes there, not on spinning.
             let holding = dispatcher.held[pill.id] != nil && Self.holds(entry)
+            // Handed to the delivery engine: its own pill over the composer says where it is from now on, so this one goes at once.
+            if Self.went(entry), Self.handedToCourier(entry) {
+                drop(pill.id, store: store)
+                continue
+            }
             if Self.went(entry) || holding || (!running && !asking && entry.outcome != .pending && entry.reply != nil && !Self.failed(entry)) {
                 let target = holding ? "history" : Self.landing(entry)
                 // An answer in the history stays where it was said, readable, rather than flying into a history out of sight.
@@ -354,6 +359,11 @@ struct FlightFramesKey: PreferenceKey {
     }
 
     static func failed(_ entry: RouterDecision) -> Bool { failure(entry) != nil }
+
+    /// It went to a claude.ai place: the engine took it (`RouterDispatcher.courierHandoff`), and its pill is the message's.
+    static func handedToCourier(_ entry: RouterDecision) -> Bool {
+        entry.decision.targetID.flatMap(RouterCourier.Target.init) != nil
+    }
 
     /// A part of a divided message that waits for another place's answer and hasn't gone: held for you to send.
     static func holds(_ entry: RouterDecision) -> Bool {

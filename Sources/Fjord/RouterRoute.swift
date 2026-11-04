@@ -147,10 +147,32 @@ extension RouterTools {
             out.append(Destination(target: "new:\(folder)", name: unique("new session in \(name)"),
                                    criteria: ["kind": "new session", "project": name]))
         }
+        // The claude.ai projects on the engine's Board (none unless it runs, nor when the message tags local projects).
+        if projects == nil {
+            for place in RouterCourier.places(store) {
+                out.append(Self.claudeDestination(place, name: unique("claude.ai project \(Self.hinted(place.name, 80))")))
+            }
+        }
         for intent in Self.intentCriteria {
             out.append(Destination(target: intent.name, name: intent.name, criteria: intent.criteria))
         }
         return out
+    }
+
+    /// How many of a claude.ai project's threads its option names, and how much of its purpose (poc/router/decide.py's
+    /// `OPTION_THREADS` and `JEV_PURPOSE`: more text made Jev less sure).
+    static let claudeThreads = 6
+    static let claudePurpose = 140
+
+    /// A claude.ai project as one option, as decide.py offers it: the project, never a thread (its coordinator picks the
+    /// thread), with its purpose and its latest threads' titles as what it is about. All of it is what sessions wrote: data.
+    static func claudeDestination(_ place: CourierPlace, name: String) -> Destination {
+        var criteria: [String: Any] = ["kind": "claude.ai project: its coordinator reads the message and picks or starts the thread",
+                                       "project": hinted(place.name, 80),
+                                       "about": place.purpose.isEmpty ? "no description" : hinted(place.purpose, claudePurpose)]
+        let titles = place.threads.map(\.title).filter { !$0.isEmpty }.prefix(claudeThreads).map { hinted($0, 80) }
+        if !titles.isEmpty { criteria["its threads"] = Array(titles) }
+        return Destination(target: RouterCourier.Target.project(place.name).targetID, name: name, criteria: criteria)
     }
 
     /// Where a new session is offered: every project Fjord knows, or only `projects` (all of them, a clone with no

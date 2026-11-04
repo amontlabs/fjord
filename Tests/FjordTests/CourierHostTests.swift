@@ -214,6 +214,25 @@ import Testing
         #expect(update?.intentID == id && update?.state == .refused && update?.cause == "no project named nope")
     }
 
+    @Test func aPausedSendsUpdateCarriesWhyAsACodeAgainAfterARestart() async throws {
+        let w = try await started(World())
+        let client = try Client(w.socket)
+        w.pageUp(client, signedIn: false)
+        #expect(await Self.eventually { await w.host.board()["projects"]?["chan_a"] != nil })
+        let reader = Task { () -> CourierUpdate? in for await u in w.host.updates where u.state == .paused { return u }; return nil }
+        let id = await w.host.submit(.send(words: "later", project: "alpha", thread: nil))
+        let paused = await reader.value
+        #expect(paused?.intentID == id && paused?.pause == .signedOut && paused?.cause == CourierDo.sentence(.signedOut))
+        try await w.restart()
+        let again = Task { () -> CourierUpdate? in for await u in w.host.updates where u.intentID == id { return u }; return nil }
+        // the restart's own pause ("routerd restarted") has no code; the page back, still signed out, gives it again
+        let back = try Client(w.socket)
+        back.send(["type": "page", "signed_in": false, "page_ok": true])
+        let update = await again.value
+        #expect(update?.state == .paused && update?.pause == .signedOut)
+        await w.host.stop()
+    }
+
     // MARK: Restart
 
     @Test func aRestartReplaysThePendingIntentsOfAnExistingDatabase() async throws {

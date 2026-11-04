@@ -24,13 +24,61 @@ enum CourierState: Equatable {
     case sending, taken, delivered, deliveredLate, failed, refused, paused, awaiting, toolDone, toolUnconfirmed
 }
 
-/// One per status or cause change of an intent, read from the rows of the `intents` table.
+/// Why a paused intent waits, as a code: the same conditions `CourierDo.blocked` words in its cause (`CourierDo.pause`), and the
+/// Claude app's wait (`CourierDo.appWait`).
+enum CourierPause: String, CaseIterable, Sendable {
+    case chromeClosed, chromeNotConnected, signedOut, away, tabUnreadable, appClosed
+}
+
+/// One per status or cause change of an intent, read from the rows of the `intents` table. `pause`: why a paused one waits, when
+/// the app can do something about it (nil for a restart's pause, and for every other state).
 struct CourierUpdate {
     let intentID: Int
     let state: CourierState
     let cause: String?
     let before: JSON?
     let at: Date
+    var pause: CourierPause? = nil
+}
+
+/// A claude.ai project on the Board, as the app routes to it: its threads, latest touched first.
+struct CourierPlace: Equatable, Sendable {
+    struct Thread: Equatable, Sendable {
+        var id: String
+        var title: String
+        var state: String
+        var touched: Double
+    }
+    var id: String
+    var name: String
+    var purpose: String
+    var threads: [Thread]
+}
+
+/// What the app keeps of the engine between its updates: the page's health (the setup's) and the claude.ai places (the
+/// dispatcher's candidates). Sent when it changes.
+struct CourierSnapshot: Equatable, Sendable {
+    var health = CourierSetupHealth()
+    var places: [CourierPlace] = []
+
+    /// From a Board: the tab is linked when the page's health says connected; signed in only as the page said. A project
+    /// of a local folder only (`local:`) has no claude.ai project to send to, and isn't one.
+    static func of(_ board: JSON) -> CourierSnapshot {
+        let health = board["health"] ?? .null
+        let connected = health.get("connected") == .bool(true)
+        var out = CourierSnapshot(health: CourierSetupHealth(tabConnected: connected, signedIn: connected ? health.get("signed_in")?.asBool : nil))
+        let threads = board["threads"]?.asObject?.values ?? []
+        for p in board["projects"]?.asObject?.values ?? [] {
+            guard let id = p["id"]?.asString, !id.hasPrefix("local:"), let name = p["name"]?.asString, !name.isEmpty else { continue }
+            let mine = threads.filter { $0["project"]?.asString == id }.compactMap { t -> CourierPlace.Thread? in
+                guard let tid = t["id"]?.asString else { return nil }
+                return .init(id: tid, title: t.get("title")?.asString ?? "", state: t.get("state")?.asString ?? "", touched: t.get("touched")?.asDouble ?? 0)
+            }.sorted { ($0.touched, $0.id) > ($1.touched, $1.id) }
+            out.places.append(CourierPlace(id: id, name: name, purpose: p.get("purpose")?.asString ?? "", threads: mine))
+        }
+        out.places.sort { ($0.name, $0.id) < ($1.name, $1.id) }
+        return out
+    }
 }
 
 actor CourierHost {
@@ -91,6 +139,10 @@ actor CourierHost {
 
     nonisolated let updates: AsyncStream<CourierUpdate>
     private let updateSink: AsyncStream<CourierUpdate>.Continuation
+    /// The Board's health and places, each time they change (the first once started).
+    nonisolated let snapshots: AsyncStream<CourierSnapshot>
+    private let snapshotSink: AsyncStream<CourierSnapshot>.Continuation
+    private var lastSnapshot: CourierSnapshot?
     private var core: CourierCore?
     private var hosts: [Connection] = []
     private var connections: [ObjectIdentifier: Connection] = [:]
@@ -101,7 +153,7 @@ actor CourierHost {
     private var timer: Task<Void, Never>?
     private var generation = 0
     private var lastFired: Double?
-    private var known: [Int: (state: CourierState, cause: String?)] = [:]
+    private var known: [Int: (state: CourierState, cause: String?, pause: CourierPause?)] = [:]
     private let queue = DispatchQueue(label: "fjord.courier.socket")
 
     /// `dbPath`: `router.db` next to the socket unless given. `sleeper`: how the timer waits (a test releases it by hand).
@@ -117,6 +169,9 @@ actor CourierHost {
         var sink: AsyncStream<CourierUpdate>.Continuation!
         updates = AsyncStream(bufferingPolicy: .unbounded) { sink = $0 }
         updateSink = sink
+        var shots: AsyncStream<CourierSnapshot>.Continuation!
+        snapshots = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { shots = $0 }
+        snapshotSink = shots
     }
 
     // MARK: Start and stop
@@ -131,6 +186,8 @@ actor CourierHost {
         core = created
         known = [:]
         snapshot()
+        lastSnapshot = nil
+        share()
         var sink: AsyncStream<Input>.Continuation!
         let stream = AsyncStream<Input>(bufferingPolicy: .unbounded) { sink = $0 }
         inputs = sink
@@ -230,6 +287,7 @@ actor CourierHost {
         pump?.cancel(); pump = nil
         core = nil
         updateSink.finish()
+        snapshotSink.finish()
     }
 
     // MARK: Socket input
@@ -278,7 +336,17 @@ actor CourierHost {
     /// After every input: the updates it caused, and the timer re-armed to the next deadline.
     private func finishInput() {
         publish()
+        share()
         arm()
+    }
+
+    /// The Board's health and places, sent when they changed.
+    private func share() {
+        guard let core else { return }
+        let now = CourierSnapshot.of(core.board())
+        guard now != lastSnapshot else { return }
+        lastSnapshot = now
+        snapshotSink.yield(now)
     }
 
     /// `send`: a command goes to the latest host. With none linked it is loud, so a command that goes nowhere isn't taken for one the page ignored.
@@ -479,28 +547,31 @@ actor CourierHost {
         }
     }
 
-    private func rows() -> [(id: Int, state: CourierState, cause: String?, before: JSON?)] {
+    private func rows() -> [(id: Int, state: CourierState, cause: String?, before: JSON?, pause: CourierPause?)] {
         guard let core else { return [] }
         let found = (try? core.db.intents(limit: 100, columns: "id, tool, status, cause, result")) ?? []
         return found.compactMap { i in
             guard let id = i["id"]?.asInt else { return nil }
             let taken = core.runs[id]?.flag("taken") ?? false
-            return (id, Self.state(i, taken: taken), i.get("cause")?.asString, i.get("result")?.get("before"))
+            let state = Self.state(i, taken: taken)
+            // The run's code, only while the row says it waits: a restart's pause has none.
+            let pause = state == .paused && core.runs.has(id) ? core.pauses[id] : nil
+            return (id, state, i.get("cause")?.asString, i.get("result")?.get("before"), pause)
         }
     }
 
     private func snapshot() {
-        for r in rows() { known[r.id] = (r.state, r.cause) }
+        for r in rows() { known[r.id] = (r.state, r.cause, r.pause) }
     }
 
-    /// One update per intent whose state or cause changed since the last look.
+    /// One update per intent whose state, cause or pause changed since the last look.
     private func publish() {
         guard core != nil else { return }
         let at = Date(timeIntervalSince1970: clock.now())
         for r in rows() {
-            if let old = known[r.id], old.state == r.state, old.cause == r.cause { continue }
-            known[r.id] = (r.state, r.cause)
-            updateSink.yield(CourierUpdate(intentID: r.id, state: r.state, cause: r.cause, before: r.before, at: at))
+            if let old = known[r.id], old.state == r.state, old.cause == r.cause, old.pause == r.pause { continue }
+            known[r.id] = (r.state, r.cause, r.pause)
+            updateSink.yield(CourierUpdate(intentID: r.id, state: r.state, cause: r.cause, before: r.before, at: at, pause: r.pause))
         }
     }
 }

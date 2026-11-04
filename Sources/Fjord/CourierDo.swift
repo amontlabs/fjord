@@ -53,12 +53,27 @@ enum CourierDo {
     }
 
     /// Why nothing can be done now, else nil. Null is unknown, not a reason to pause.
-    static func blocked(_ health: JSON) -> String? {
-        if health.get("connected") != .bool(true) { return chromeRunning() ? chromeOpen : "Chrome isn't running" }
-        if health.get("signed_in") == .bool(false) { return "signed out of claude.ai" }
-        if health.get("away") == .bool(true) { return "Fjord's tab has left the Claude Code page" }
-        if health.get("page_ok") == .bool(false) { return "the page can't be read" }
+    static func blocked(_ health: JSON) -> String? { pause(health).map(sentence) }
+
+    /// `blocked`'s reason as a code, from the same conditions: what the app picks a pill's button by.
+    static func pause(_ health: JSON) -> CourierPause? {
+        if health.get("connected") != .bool(true) { return chromeRunning() ? .chromeNotConnected : .chromeClosed }
+        if health.get("signed_in") == .bool(false) { return .signedOut }
+        if health.get("away") == .bool(true) { return .away }
+        if health.get("page_ok") == .bool(false) { return .tabUnreadable }
         return nil
+    }
+
+    /// How the engine words a pause in the intent's cause (the reference's own sentences).
+    static func sentence(_ pause: CourierPause) -> String {
+        switch pause {
+        case .chromeClosed: "Chrome isn't running"
+        case .chromeNotConnected: chromeOpen
+        case .signedOut: "signed out of claude.ai"
+        case .away: "Fjord's tab has left the Claude Code page"
+        case .tabUnreadable: "the page can't be read"
+        case .appClosed: appClosed
+        }
     }
 
     static func refusal(_ board: JSON, _ intent: JSON) -> String? {

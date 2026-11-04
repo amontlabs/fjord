@@ -12,6 +12,9 @@ enum RouterPointer: Hashable, Codable {
     case project(String)
     /// A Claude Code session, by the Claude app's id.
     case session(String)
+    /// A claude.ai project or thread the delivery engine sends to, by its target (`claude-project:<project>`,
+    /// `claude-thread:<project>/<thread>`, `RouterCourier.Target`). Offered only while the engine runs.
+    case claude(String)
     /// A thing of the Triage inbox, by its id (`pr:owner/repo#12`).
     case notification(String)
     /// A category of the Triage inbox.
@@ -24,12 +27,12 @@ enum RouterPointer: Hashable, Codable {
     /// start with it, as an address (`RouterContext.pills`). A notification or a category is what you talk about, and stays.
     var addresses: Bool {
         switch self {
-        case .project, .session: true
+        case .project, .session, .claude: true
         case .notification, .category, .thisItem: false
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case project, session, notification, category, thisItem }
+    private enum CodingKeys: String, CodingKey { case project, session, claude, notification, category, thisItem }
 
     /// `{"project": "/code/lookout"}` and so on; a bare string, a project's folder (as the pills were kept before there
     /// were other kinds), is a project.
@@ -41,6 +44,7 @@ enum RouterPointer: Hashable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try c.decodeIfPresent(String.self, forKey: .project) { self = .project(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .session) { self = .session(v) }
+        else if let v = try c.decodeIfPresent(String.self, forKey: .claude) { self = .claude(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .notification) { self = .notification(v) }
         else if let v = try c.decodeIfPresent(UUID.self, forKey: .category) { self = .category(v) }
         else if c.contains(.thisItem) { self = .thisItem }
@@ -52,6 +56,7 @@ enum RouterPointer: Hashable, Codable {
         switch self {
         case .project(let folder): try c.encode(folder, forKey: .project)
         case .session(let id): try c.encode(id, forKey: .session)
+        case .claude(let target): try c.encode(target, forKey: .claude)
         case .notification(let id): try c.encode(id, forKey: .notification)
         case .category(let id): try c.encode(id, forKey: .category)
         case .thisItem: try c.encode(true, forKey: .thisItem)
@@ -93,6 +98,8 @@ extension Store {
             return folderName(folder)
         case .session(let id):
             return claudeSessions[id].map { RouterPointers.inert($0.title, 40) } ?? "session"
+        case .claude(let target):
+            return RouterPointers.inert(RouterCourier.Target(target).flatMap { RouterCourier.option($0, store: self)?.title ?? $0.project } ?? "claude.ai", 40)
         case .notification(let id):
             return things[id].map(RouterPointers.reference) ?? "notification"
         case .category(let id):
@@ -113,6 +120,8 @@ extension Store {
             let session = claudeSessions[id]
             return MentionLook(label: session.map { RouterDecision.clip($0.title, 32) } ?? name ?? "session",
                                symbol: "text.bubble", tint: session.flatMap { projectColor($0.folderKey) } ?? CDS.Text.secondary)
+        case .claude:
+            return MentionLook(label: name ?? pointerName(pointer), symbol: "cloud", tint: CDS.Text.secondary)
         case .notification(let id):
             guard let thing = things[id] else { return MentionLook(label: name ?? "notification", symbol: "bell", tint: CDS.Text.muted) }
             let category = entries.first { $0.id == id }.flatMap { e in categories.first { $0.id == e.categoryID } }
@@ -177,6 +186,12 @@ extension RouterContext {
     var notifications: [String] {
         var seen = Set<String>()
         return mentions.compactMap { if case .notification(let id) = $0.pointer { id } else { nil } }.filter { seen.insert($0).inserted }
+    }
+
+    /// The claude.ai places tagged (their targets), in order.
+    var claudeTargets: [String] {
+        var seen = Set<String>()
+        return mentions.compactMap { if case .claude(let t) = $0.pointer { t } else { nil } }.filter { seen.insert($0).inserted }
     }
 
     /// The categories tagged, in order.
@@ -293,7 +308,7 @@ enum RouterPointers {
                 let open = store.entries(in: c.id)
                 blocks.append(category(name: m.name, rules: RuleWords(store: store).summary(c), open: open.count,
                                        unread: open.filter(\.isUnread).count))
-            case .project, .session, .thisItem:
+            case .project, .session, .claude, .thisItem:
                 continue
             }
         }
@@ -395,6 +410,7 @@ struct MentionSuggestion: Identifiable, Equatable {
         switch pick {
         case .pointer(.project(let v)): "project:" + v
         case .pointer(.session(let v)): "session:" + v
+        case .pointer(.claude(let v)): v
         case .pointer(.notification(let v)): "notification:" + v
         case .pointer(.category(let v)): "category:" + v.uuidString
         case .pointer(.thisItem): "this"
@@ -437,6 +453,13 @@ extension RouterMentions {
             out.append(MentionSuggestion(section: .projects, pick: .pointer(.project(folder)), name: name,
                                          detail: MentionList.shortPath(folder),
                                          look: MentionLook(label: name, symbol: "folder", tint: CDS.Text.secondary), keys: [name]))
+        }
+        // The claude.ai projects, while the delivery engine runs: in Projects, marked as claude.ai's.
+        for place in RouterCourier.places(store) {
+            let target = RouterCourier.Target.project(place.name).targetID
+            guard !except.contains(.claude(target)), found([place.name]) else { continue }
+            out.append(MentionSuggestion(section: .projects, pick: .pointer(.claude(target)), name: place.name, detail: "claude.ai",
+                                         look: MentionLook(label: place.name, symbol: "cloud", tint: CDS.Text.secondary), keys: [place.name]))
         }
         let sessions = MentionBase.sessions(store).lazy.filter { !except.contains(.session($0.id)) }.prefix(40)
         var made = 0

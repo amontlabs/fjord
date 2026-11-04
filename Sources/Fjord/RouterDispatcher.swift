@@ -830,6 +830,9 @@ struct RouterAskBack: Identifiable, Equatable {
                                           store: store) {
             return .fork(fork)
         }
+        // One claude.ai place tagged, and nothing else that says where (no other place, reply or pin): the whole message goes
+        // there, with no model, as decide.py's explicit target does.
+        if !unattended, !context.part, let only = claudeTag(context, store: store) { return .route(only) }
         // The tags decide where each part goes (the armed reply and the pinned target are fed into them); a message with none
         // is for the reply, the pin, or Jev. An action's message is never divided, and a part is not divided again.
         if !unattended, !context.part {
@@ -854,6 +857,16 @@ struct RouterAskBack: Identifiable, Equatable {
             if !other { return .start(folder: folder) }
         }
         return .classify
+    }
+
+    /// The one claude.ai place the message tags, when it tags no other place and no reply or pin fixes it: nil otherwise, or when
+    /// the engine is off or its Board hasn't that place.
+    static func claudeTag(_ context: RouterContext, store: Store) -> String? {
+        let tagged = context.claudeTargets
+        guard tagged.count == 1, context.replyTo == nil, context.target == nil, context.recipients.isEmpty,
+              !context.mentions.contains(where: { if case .claude = $0.pointer { false } else { $0.pointer.addresses } }),
+              let target = RouterCourier.Target(tagged[0]), RouterCourier.eligible(target, store: store) else { return nil }
+        return target.targetID
     }
 
     /// Everything in the message is for the Router (`@router`, its asides): nothing of it would go on to a session.
@@ -1638,6 +1651,8 @@ struct RouterAskBack: Identifiable, Equatable {
         if target.hasPrefix("session:") { return store.claudeSessions[String(target.dropFirst(8))].map { !$0.isArchived } ?? false }
         // A project Fjord knows: a session's folder, or a repo in your code folders (a clone with no session yet).
         if target.hasPrefix("new:") { return store.isProjectFolder(String(target.dropFirst(4))) }
+        // A claude.ai place the engine's Board has, while it runs.
+        if let courier = RouterCourier.Target(target) { return RouterCourier.eligible(courier, store: store) }
         return true
     }
 
@@ -1649,7 +1664,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// The label a target stands for: reply (a card or session), start (a project), change_fjord, question, compound.
     static func label(_ target: String) -> String {
-        if target.hasPrefix("answer:") || target.hasPrefix("session:") { return "reply" }
+        if target.hasPrefix("answer:") || target.hasPrefix("session:") || RouterCourier.Target(target) != nil { return "reply" }
         if target.hasPrefix("new:") { return "start" }
         return target
     }
@@ -1742,6 +1757,7 @@ struct RouterAskBack: Identifiable, Equatable {
             let folder = String(target.dropFirst(4))
             return .init(target: target, title: "New session", detail: store.folderName(folder))
         }
+        if let courier = RouterCourier.Target(target) { return RouterCourier.option(courier, store: store) }
         switch target {
         case RouterAskBack.chooseFolder: return .init(target: target, title: "Choose folder…", detail: "a new session there")
         case "change_fjord": return .init(target: target, title: "Change Fjord", detail: "Categories, groups, settings")
@@ -1803,6 +1819,9 @@ struct RouterAskBack: Identifiable, Equatable {
         if target.hasPrefix("answer:") { return "card “\(option.title)” (\(option.detail))" }
         if target.hasPrefix("session:") { return "session “\(option.title)” in \(option.detail)" }
         if target.hasPrefix("new:") { return "new session in \(option.detail)" }
+        if let courier = RouterCourier.Target(target) {
+            return courier.thread == nil ? "claude.ai project “\(option.title)”" : "thread “\(option.title)” in claude.ai project \(courier.project)"
+        }
         return option.title.lowercased()
     }
 
@@ -1810,8 +1829,10 @@ struct RouterAskBack: Identifiable, Equatable {
     func pickerOptions() -> (sessions: [RouterAskBack.Option], projects: [RouterAskBack.Option]) {
         guard let store else { return ([], []) }
         let sessions = store.claudeSessions.values.filter { !$0.isArchived }.sorted { $0.lastActivity > $1.lastActivity }.prefix(30)
+        // The claude.ai projects too, while the engine runs: picked, one goes there with no model (a pin).
+        let claude = RouterCourier.places(store).prefix(30).compactMap { option(RouterCourier.Target.project($0.name).targetID, store: store) }
         return (sessions.compactMap { option("session:\($0.id)", store: store) },
-                store.knownFolders.filter { !$0.isEmpty }.prefix(30).compactMap { option("new:\($0)", store: store) })
+                store.knownFolders.filter { !$0.isEmpty }.prefix(30).compactMap { option("new:\($0)", store: store) } + claude)
     }
 }
 
@@ -2092,6 +2113,7 @@ extension RouterDispatcher {
             switch m.pointer {
             case .project: true
             case .session(let id): store.claudeSessions[id].map { !$0.isArchived } == true
+            case .claude: true
             case .notification, .category, .thisItem: false
             }
         }

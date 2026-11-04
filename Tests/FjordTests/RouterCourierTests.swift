@@ -78,23 +78,19 @@ import Testing
     }
 
     @Test func eachPauseTheEngineGivesHasItsOneButton() {
-        // The engine's own sentences (`CourierDo.blocked`), so a change of its wording fails here, not silently in the pill.
-        let running = CourierDo.chromeRunning
-        defer { CourierDo.chromeRunning = running }
-        CourierDo.chromeRunning = { false }
-        #expect(RouterCourier.Pause(CourierDo.blocked(["connected": false]))?.action == .openChrome)
-        CourierDo.chromeRunning = { true }
-        #expect(RouterCourier.Pause(CourierDo.blocked(["connected": false]))?.action == .openChrome)
-        #expect(RouterCourier.Pause(CourierDo.blocked(["connected": true, "signed_in": false]))?.action == .signIn)
-        #expect(RouterCourier.Pause(CourierDo.blocked(["connected": true, "away": true]))?.action == .openTab)
-        #expect(RouterCourier.Pause(CourierDo.blocked(["connected": true, "page_ok": false]))?.action == .openTab)
-        #expect(RouterCourier.Pause(CourierDo.appClosed)?.action == .showClaudeApp)
-        #expect(RouterCourier.Pause("routerd restarted") == nil)
+        // By the engine's code (`CourierUpdate.pause`); the sentence is only shown.
+        #expect(RouterCourier.action(.chromeClosed) == .openChrome)
+        #expect(RouterCourier.action(.chromeNotConnected) == .openSetup)
+        #expect(RouterCourier.action(.signedOut) == .signIn)
+        #expect(RouterCourier.action(.away) == .openTab)
+        #expect(RouterCourier.action(.tabUnreadable) == .openTab)
+        #expect(RouterCourier.action(.appClosed) == .showClaudeApp)
+        #expect(RouterCourier.action(nil) == nil)
         let pills = pills()
         var opened: [RouterCourierPills.Action] = []
         pills.open = { opened.append($0) }
         pills.track(1, send)
-        pills.apply(update(1, .paused, "signed out of claude.ai"))
+        pills.apply(CourierUpdate(intentID: 1, state: .paused, cause: "signed out of claude.ai", before: nil, at: Date(), pause: .signedOut))
         #expect(face(pills, 1)?.note == "signed out of claude.ai")
         #expect(face(pills, 1)?.action == .signIn)
         pills.perform(.signIn, on: 1)

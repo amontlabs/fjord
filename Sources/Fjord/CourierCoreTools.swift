@@ -99,10 +99,12 @@ extension CourierCore {
                 return try finish(run, "failed", run.str("act_error"))
             }
         }
-        if let why = CourierDo.blocked(board["health"] ?? .null) {
+        if let pause = CourierDo.pause(board["health"] ?? .null) {
             run["paused"] = true; run["deadline"] = .null
-            return try mark(intent, "paused", why)
+            pauses[run.id] = pause
+            return try mark(intent, "paused", CourierDo.sentence(pause))
         }
+        pauses[run.id] = nil
         if run.flag("paused") {
             run["paused"] = false; late = false
             try mark(intent, "pending", nil)

@@ -28,9 +28,9 @@ enum NativeHostManifest {
         return data + Data("\n".utf8)
     }
 
-    /// Off until the Router's delivery engine listens on `NativeHost.socketPath()`: until then the Python POC owns the host name,
-    /// and an installed app taking it would leave the extension relaying to a socket nobody serves.
-    static let enabled = false
+    /// On with the Router's delivery engine (`RouterCourier.on`), which then listens on `NativeHost.socketPath()`: off, the Python
+    /// POC owns the host name, and an installed app taking it would leave the extension relaying to a socket nobody serves.
+    static var enabled: Bool { RouterCourier.on }
 
     /// Only from the app bundle: a debug binary or a test run must not point Chrome at itself.
     static func isBundle(_ bundlePath: String = Bundle.main.bundlePath) -> Bool { bundlePath.hasSuffix(".app") }
