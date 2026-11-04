@@ -155,6 +155,15 @@ enum CourierBoard {
             var t = acc.threads[subject]?.asObject ?? JSONObject([("id", .string(subject)), ("turn", .int(0)), ("touched", at), ("last", .null), ("view", .object(JSONObject()))])
             rowsEvent(&t, fields, key: "messages")
             acc.threads[subject] = .object(t)
+        } else if kind == "threadlist" {  // the project's page lists no thread: each one it showed is finished (idle), until a later row says otherwise
+            for (k, _) in acc.threads.pairs {
+                let place = CourierAcc.Place(kind: "thread", subject: k)
+                guard let pageView = acc.latest[place]?["page"], pageView.get("state")?.asString.map({ !finished.contains($0) }) ?? true,
+                      acc.threads[k]?["view"]?.get("project")?.asString == subject else { continue }
+                var f = pageView.asObject ?? JSONObject()
+                f["state"] = "idle"; f["needs"] = .null
+                threadStep(acc, ["source": "page", "kind": "thread", "subject": .string(k), "at": at, "fields": .object(f)])
+            }
         } else if kind == "listing" {
             acc.listed = Set((fields["ids"]?.asArray ?? []).compactMap(\.asString))
         } else if kind == "claim" {

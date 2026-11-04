@@ -71,6 +71,16 @@ class Events(unittest.TestCase):
         page.pump(core)
         self.assertGreater(store.last_seen_id(core.db), before)
 
+    def test_a_revisit_that_shows_an_empty_list_finishes_the_threads_the_board_had_running(self):
+        core, page = support.world()
+        page.set_thread("chan_a", "cmsg_1", state="working")
+        page.pump(core)
+        self.assertEqual(core.board()["threads"]["cmsg_1"]["state"], "working")
+        page.projects["chan_a"]["threads"].clear()  # it finished while the tab was elsewhere: no event said so
+        for event in page.load("chan_a"):  # the revisit: the page loads with an empty list
+            core.handle(event)
+        self.assertEqual(core.board()["threads"]["cmsg_1"]["state"], "idle")
+
     @support.python_only("tests routerd's lock, link, carry_on or trace: process glue (CourierHostTests)")
     def test_a_command_sent_while_a_host_links_is_not_one_its_replay_answers_for(self):
         core, _ = support.world()

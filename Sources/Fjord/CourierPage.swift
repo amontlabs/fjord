@@ -158,6 +158,9 @@ enum CourierPage {
                                               ("offered_folders", JSON(strings(event.get("offered_folders"))))])]
         }
         if kind == "threads", let project {
+            if let list = event.get("threads")?.asArray, list.isEmpty {  // the project's list rendered with no rows: its threads are all finished
+                return [row("threadlist", project, [("ids", .array([]))])]
+            }
             return items(event.get("threads")).filter { t in
                 guard let id = t.get("thread")?.asString, !id.isEmpty else { return false }
                 return belongs(id, project)

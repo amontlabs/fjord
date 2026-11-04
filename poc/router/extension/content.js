@@ -306,7 +306,7 @@ function pageState() {
 }
 
 // What the host has been told, so that only changes are sent.
-let told = { rows: { project: new Map(), thread: new Map() }, owed: { project: true, thread: true }, empty: { project: false, thread: false }, quiet: { project: null, thread: null }, settle: { project: null, thread: null }, unsettled: { project: null, thread: null }, turning: { project: null, thread: null }, threads: new Map(), projects: "", composer: { project: "", thread: "" }, page: "", where: "", path: "", arrived: 0, notice: new Set() };
+let told = { rows: { project: new Map(), thread: new Map() }, owed: { project: true, thread: true }, empty: { project: false, thread: false }, quiet: { project: null, thread: null }, settle: { project: null, thread: null }, unsettled: { project: null, thread: null }, turning: { project: null, thread: null }, threads: new Map(), emptied: false, projects: "", composer: { project: "", thread: "" }, page: "", where: "", path: "", arrived: 0, notice: new Set() };
 let port = null;
 
 // A port the worker drops right after it connected (within QUICK_DROP_MS: say its check of the tab failed) is connected again after a
@@ -372,7 +372,7 @@ function scan(full) {
     if (location.pathname !== told.path) {
       told.path = location.pathname; told.arrived = lastFlush.at;
       told.quiet.project = told.settle.project = null;
-      told.threads.clear();  // another project's Threads panel: this one's are sent whole anyway (`full`), and the map doesn't grow per visit
+      told.threads.clear(); told.emptied = false;  // another project's Threads panel: this one's are sent whole anyway (`full`), and the map doesn't grow per visit
     }
     told.owed = { project: true, thread: true }; told.empty = { project: false, thread: false }; told.quiet.thread = told.settle.thread = null; told.composer = { project: "", thread: "" };
     told.unsettled = { project: null, thread: null }; told.turning = { project: null, thread: null };
@@ -405,6 +405,10 @@ function scan(full) {
   const threads = listed.filter((row) => full || told.threads.get(row.thread) !== JSON.stringify(row));
   for (const row of threads) told.threads.set(row.thread, JSON.stringify(row));
   if (threads.length) emit({ type: "threads", threads });
+  // The list that had rows on this project's page and has none now, with the project side rendered (its composer mounted) and no thread
+  // open (a thread's view may hide the list): its rows left because those threads are finished. Sent empty, once. A list never seen with
+  // rows since the arrival (`told.threads` is cleared by a new path) says nothing: that is the page still loading.
+  else if (!listed.length && told.threads.size && threadParam() === null && box("project")) { told.threads.clear(); told.emptied = true; emit({ type: "threads", threads: [] }); }
 
   for (const side of ["project", "thread"]) {
     const seen = told.rows[side];
@@ -438,6 +442,10 @@ function scan(full) {
     const empty = settledEmpty(side, now, composer ? sizer : null, whole);
     // A whole read says whether it is the place's render done (`settledRows`; an empty one is sent only once settled).
     const settled = now.length ? settledRows(side, sizer, now, whole) : empty;
+    // A project whose list is empty when its page is visited: once the project side settled this visit (its `/timeline` fetch since the
+    // arrival, then a flush or the grace: `settledRows`, `settledEmpty`), the empty list is sent once, so threads that finished while
+    // the tab was elsewhere don't stay running on the Board. Never before this visit's data arrived: `settled` needs it.
+    if (side === "project" && settled && composer && !listed.length && !told.emptied && threadParam() === null) { told.emptied = true; emit({ type: "threads", threads: [] }); }
     // While the whole read is owed, it is sent again only when its rows, its settling or its turning changed (or on a full scan), not on
     // every flush: routerd learns nothing from the same read twice. It waits for the settled one, sent whatever its rows; a settled read
     // of only pending rows stays owed, and is not sent again until it changes.

@@ -117,6 +117,11 @@ def step(acc, row):
             writing, t["turn_state"] = page.turning(fields, t.get("turn_state"))
             t.update({} if writing is None else {"turning": writing})
         t.update({k: fields[k] for k in ("draft", "disabled") if k in fields})
+    elif kind == "threadlist":  # the project's page lists no thread: each one it showed is finished (idle), until a later row says otherwise
+        for k, t in list(threads.items()):
+            page_view = latest.get(("thread", k), {}).get("page")
+            if page_view is not None and t["view"].get("project") == subject and page_view.get("state") not in FINISHED:
+                thread_step(threads, latest, {**row, "kind": "thread", "subject": k, "fields": {**page_view, "state": "idle", "needs": None}})
     elif kind == "listing":
         acc["listed"] = set(fields["ids"])
     elif kind == "claim" and (fields["project"], fields["key"]) not in acc["seen_claims"]:

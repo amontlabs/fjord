@@ -73,6 +73,13 @@ offer what was asked (nothing was committed), as opposed to a step that broke. A
 `preapprove_folder`) also says what its open read (`before`: the field's text, or the list), and either `already: true` (it was so:
 nothing done) or `saved`, the HTTP status of the server's answer to its save.
 
+`threads` with an empty list (`"threads": []`) says the project's Threads list had rows since the arrival on its page and has none now, with the
+project side's composer mounted and no thread open: those threads finished and left it. The Board folds every thread of the project the page
+showed as `idle` with no ask, until a later `threads` row says otherwise. A list never seen with rows since the arrival (a page still loading)
+is also sent empty, once per arrival, when the project side settled this visit with no thread open (the same settling as its
+rows: this visit's own `/timeline` fetch, then a flush or the grace), so threads that finished while the tab was elsewhere don't stay running. It never
+fires before this visit's data arrived.
+
 `rows` and `threads` carry only what changed, except on page load, when they carry what is on screen. A full scan sends `rows` for a side
 that has its composer even when there are none, once its transcript has mounted (its column's container, `transcript-sizer`, is in the
 side's part of the page: before that, no rows is the page still loading, and an empty baseline would make an old row of yours look new),

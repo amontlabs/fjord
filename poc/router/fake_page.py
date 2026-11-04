@@ -111,6 +111,11 @@ class FakePage:
         return {"type": "threads", "threads": [{"thread": tid, **{k: t[k] for k in ("title", "state", "needs", "text", "session")}}
                                                  for tid, t in self.projects[pid]["threads"].items()]}
 
+    def clear_threads(self, pid):
+        """The project's thread list is empty on the page: its last threads finished and left it. An empty list is sent."""
+        self.projects[pid]["threads"].clear()
+        self.outbox.append(self._stamp(self._thread_event(pid), pid))
+
     def set_thread(self, pid, tid, **fields):
         """A thread changed on the page: its row in the project's list is sent."""
         self.projects[pid]["threads"][tid].update(fields)

@@ -128,6 +128,8 @@ def seen_rows(event):
         return [row("settings", project, goal=text(event.get("goal")), instructions=text(event.get("instructions")), repos=strings(event.get("repos")),
                     folders=strings(event.get("folders")), offered_folders=strings(event.get("offered_folders")))]
     if kind == "threads" and project:
+        if isinstance(event.get("threads"), list) and not event["threads"]:  # the project's list rendered with no rows: its threads are all finished
+            return [row("threadlist", project, ids=[])]
         return [thread_row(project, t) for t in items(event.get("threads")) if isinstance(t.get("thread"), str) and t["thread"]
                 and belongs(t["thread"], project)]
     if kind in ("rows", "composer") and project:

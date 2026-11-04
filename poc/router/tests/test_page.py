@@ -57,6 +57,17 @@ class Shape(unittest.TestCase):
         self.assertEqual([(r["subject"], r["fields"]["state"], r["fields"]["needs"], r["fields"]["project"]) for r in rows],
                          [("cmsg_1", "needs_you", "a choice", "chan_a"), ("cmsg_2", "unknown", None, "chan_a")])
 
+    def test_an_empty_threads_list_finishes_the_projects_threads(self):
+        rows = page.seen_rows(stamp({"type": "threads", "threads": [{"thread": "cmsg_1", "state": "working"}, {"thread": "cmsg_2", "state": "needs_you", "needs": "x"}]}))
+        rows += page.seen_rows(stamp({"type": "threads", "threads": [{"thread": "cmsg_9", "state": "working"}]}, path="/code/project/chan_b"))
+        empty = page.seen_rows(stamp({"type": "threads", "threads": []}))
+        self.assertEqual([(r["kind"], r["subject"]) for r in empty], [("threadlist", "chan_a")])
+        folded = boards.fold([{**r, "id": i, "at": NOW + i} for i, r in enumerate(rows + empty, 1)])["threads"]
+        self.assertEqual([(k, t["state"], t["needs"]) for k, t in sorted(folded.items())], [("cmsg_1", "idle", None), ("cmsg_2", "idle", None), ("cmsg_9", "working", None)])
+        back = page.seen_rows(stamp({"type": "threads", "threads": [{"thread": "cmsg_1", "state": "working"}]}))
+        again = boards.fold([{**r, "id": i, "at": NOW + i} for i, r in enumerate(rows + empty + back, 1)])["threads"]
+        self.assertEqual(again["cmsg_1"]["state"], "working")
+
     def test_projects_keep_only_project_ids(self):
         rows = page.seen_rows({"type": "projects", "projects": [{"id": "chan_a", "name": "alpha"}, {"id": "other", "name": "x"}, {"id": "chan_pending_1", "name": "new"}]})
         self.assertEqual([(r["subject"], r["fields"]["name"], r["fields"]["where"]) for r in rows], [("chan_a", "alpha", "cloud")])
