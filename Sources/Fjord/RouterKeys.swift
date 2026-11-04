@@ -124,6 +124,8 @@ final class RouterKeys {
                 return true
             }
             if isReturn, flags.isEmpty {
+                // Nothing typed and a grant waiting: Return allows it.
+                if model.draft.isEmpty, store.routerCourier.allowNewest() { return true }
                 model.send(store: store)
                 return true
             }

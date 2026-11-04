@@ -46,6 +46,9 @@ struct RouterComposer: View {
         let on = model.canSend(store)
         let suggestions = model.suggestions(store)
         VStack(alignment: .leading, spacing: 0) {
+            // What the engine is doing for claude.ai, over your messages still finding where they go.
+            RouterCourierStack(pills: store.routerCourier)
+                .padding(.bottom, store.routerCourier.items.isEmpty ? 0 : C.dockGap)
             // Your messages on their way, rising from here until they fly to where they went.
             FlightStack(store: store, flights: model.flights, showsOtherAsks: model.layout == .canvas)
                 .padding(.bottom, model.flights.pills.isEmpty && (model.layout != .canvas || store.routerDispatcher.askBacks.isEmpty) ? 0 : C.dockGap)

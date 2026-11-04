@@ -616,6 +616,8 @@ final class Store {
         dispatcher.claudePath = { [weak self] in self?.routerStatus.latestPath() }
         return dispatcher
     }()
+    /// The claude.ai deliveries and tools the engine runs, as pills over the composer (`RouterCourier`).
+    @ObservationIgnored lazy var routerCourier = RouterCourierPills()
     /// The entries of the ask-back cards still up: kept when the history is pruned.
     @ObservationIgnored var decisionsInUse: () -> Set<UUID> = { [] }
     /// A Router run's change was taken back with Revert (the run's entry): the dispatcher traces it as the outcome of the action.

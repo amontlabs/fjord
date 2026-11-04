@@ -1261,6 +1261,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
         if target.hasPrefix("session:") { return try await reply(job, session: String(target.dropFirst("session:".count)), card: nil) }
         if target.hasPrefix("new:") { return try await start(job, folder: String(target.dropFirst("new:".count))) }
+        if courierHandoff(job, to: target) != nil { return }
         if let intent = RouterRun.Intent(rawValue: target) { return try await think(job, intent) }
         throw RouterTools.Failure("Nowhere to send that")
     }

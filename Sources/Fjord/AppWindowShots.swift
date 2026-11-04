@@ -786,7 +786,59 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ]
+    ] + courierShots
+
+    // MARK: The engine's pills
+
+    private typealias CourierStep = (work: RouterCourierPills.Item.Work, updates: [(CourierState, String?, JSON?)])
+
+    /// The engine's pills over the composer, one shot per state, light and dark (`router-courier-<state>[-dark]`).
+    private static var courierShots: [Shot] {
+        let send = { (words: String, thread: String?) in RouterCourierPills.Item.Work.send(words: words, project: "lookout", thread: thread) }
+        let goal: RouterCourierPills.Item.Work = .tool(.setGoal, args: ["project": "lookout", "text": "Ship the Swift engine by Friday"])
+        let scenes: [(String, [CourierStep])] = [
+            ("sending", [(send("run the release checklist again", nil), [(.taken, nil, nil)])]),
+            ("sending-thread", [(send("yes, merge it once CI is green", "Fix the login redirect"), [(.sending, nil, nil)])]),
+            ("delivered", [(send("run the release checklist again", nil), [(.taken, nil, nil), (.delivered, nil, nil)])]),
+            ("failed", [(send("run the release checklist again", nil), [(.taken, nil, nil), (.failed, CourierCore.went, nil)])]),
+            ("late", [(send("run the release checklist again", nil), [(.failed, CourierCore.went, nil), (.deliveredLate, "confirmed late by a later row", nil)])]),
+            ("paused-signedout", [(send("run the release checklist again", nil), [(.paused, "signed out of claude.ai", nil)])]),
+            ("paused-chrome", [(send("run the release checklist again", nil), [(.paused, "Chrome isn't running", nil)])]),
+            ("paused-tab", [(send("run the release checklist again", nil), [(.paused, "Fjord's tab has left the Claude Code page", nil)])]),
+            ("paused-app", [(send("yes, merge it once CI is green", "Fix the login redirect"), [(.paused, CourierDo.appClosed, nil)])]),
+            ("awaiting", [(.tool(.preapproveFolder, args: ["project": "lookout", "path": "~/code/projects/lookout"]), [(.awaiting, nil, nil)])]),
+            ("tool-revert", [(goal, [(.taken, nil, nil), (.toolDone, nil, .string("Port the board and the store"))])]),
+            ("tool-already", [(goal, [(.toolDone, "it was already so, as far as Fjord's tab knows", nil)])]),
+            ("refused", [(.tool(.addRepo, args: ["project": "lookout", "repo": "amontlabs/x"]), [(.refused, "no repo option amontlabs/x", nil)])]),
+            ("unconfirmed", [(.tool(.createProject, args: ["name": "fjord-site"]),
+                              [(.toolUnconfirmed, "the projects page didn't list it after the create; a later read may still show it", nil)])]),
+            // Several at once: a delivery settling, one waiting for the tab, a refusal, a grant to allow.
+            ("stack", [(send("run the release checklist again", nil), [(.delivered, nil, nil)]),
+                       (.tool(.createProject, args: ["name": "lookout"]), [(.refused, "a project named lookout already exists", nil)]),
+                       (send("yes, merge it once CI is green", "Fix the login redirect"), [(.paused, "signed out of claude.ai", nil)]),
+                       (.tool(.preapproveFolder, args: ["project": "lookout", "path": "~/code/x"]), [(.awaiting, nil, nil)])]),
+        ]
+        return scenes.flatMap { name, steps in
+            [(name, NSAppearance.Name.aqua), (name + "-dark", .darkAqua)].map { shot, look in
+                Shot(name: "router-courier-\(shot)", destination: { _ in .router }, compose: { model, store in
+                    courier(model, store, steps)
+                }, appearance: look)
+            }
+        }
+    }
+
+    /// The engine's intents as `steps` left them: each tracked, then each update applied, nothing settling away.
+    private static func courier(_ model: RouterModel, _ store: Store, _ steps: [CourierStep]) {
+        model.layout = .list
+        let pills = store.routerCourier
+        pills.settleAfter = nil
+        for (i, step) in steps.enumerated() {
+            pills.track(i + 1, step.work)
+            for (state, cause, before) in step.updates {
+                pills.apply(CourierUpdate(intentID: i + 1, state: state, cause: cause, before: before, at: Date()))
+            }
+        }
+    }
 
     private static let canvasSize = CGSize(width: 1440, height: 900)
 

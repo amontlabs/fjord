@@ -757,7 +757,7 @@ struct FlightPillFace: View {
     }
 }
 
-private extension View {
+extension View {
     func flightPillShape() -> some View {
         padding(.horizontal, 12).frame(height: 34).flightPillGround()
     }
