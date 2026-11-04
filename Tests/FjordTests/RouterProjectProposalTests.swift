@@ -192,11 +192,12 @@ import Testing
         await p.settled()
         #expect(p.nameFixed)
         let create = try #require(engine.ran.first?.intent)
-        // Still unconfirmed: a new create is tried (the engine refuses a taken name itself).
-        engine.outcomes[.createProject] = .init(ok: false, cause: "a project named fjord-ios-companion already exists")
+        // Round 4, 2: still unconfirmed, it is the engine's: no second create, and Return checks again.
         p.confirm()
         await p.settled()
+        #expect(engine.ran.count == 1)
         #expect(engine.sent.isEmpty)
+        guard case .failed(let why) = p.phase, why.contains("still with the engine") else { Issue.record("went on: \(p.phase)"); return }
         // The engine proves the first one later: it is adopted, with no create run again.
         engine.statuses[create] = CourierIntentStatus(state: .toolDone, project: "chan_A")
         let runs = engine.ran.count
@@ -471,6 +472,73 @@ import Testing
         #expect(engine.delivered == ["look at it\n\n@CI: a category"])
     }
 
+    // Round 4, 1: each delivery carries the proposal's key; a surely failed one is retried under the next.
+    @Test func deliveriesCarryTheProposalsKey() async throws {
+        let engine = RouterProjectFakeEngine()
+        let store = quiet()
+        store.restoreProposals([.init(message: "m", fields: first, made: [.create, .repo, .instructions, .folder], project: "chan_A",
+                                      stopped: "x", sent: 7, id: UUID(uuidString: "00000000-0000-0000-0000-000000000001"))],
+                               reviser: RouterProjectFakeReviser(), engine: engine)
+        engine.statuses[7] = CourierIntentStatus(state: .failed)
+        let p = try #require(store.routerProposal)
+        p.settleAfter = nil
+        await store.reconciling?.value
+        p.confirm()
+        await p.settled()
+        #expect(engine.keys == ["00000000-0000-0000-0000-000000000001#1"])
+    }
+
+    // Round 4, 1: a restored proposal with no record of a send (a crash before the save) asks the engine by its words first.
+    @Test func aRestoredProposalLooksItsWordsUpBeforeItsFirstSend() async throws {
+        let engine = RouterProjectFakeEngine()
+        engine.byWords["m"] = 9
+        engine.statuses[9] = CourierIntentStatus(state: .taken)
+        let store = quiet()
+        store.restoreProposals([.init(message: "m", fields: first, made: [.create, .repo], project: "chan_A", stopped: "x")],
+                               reviser: RouterProjectFakeReviser(), engine: engine)
+        let p = try #require(store.routerProposal)
+        p.settleAfter = nil
+        await store.reconciling?.value
+        p.confirm()
+        await p.settled()
+        #expect(p.phase == .created && engine.sent.isEmpty && p.sentIntent == 9)
+    }
+
+    // Round 4, 3: a reconcile the engine couldn't answer runs again once the engine attaches.
+    @Test func reconcileRunsAgainWhenTheEngineAttaches() async throws {
+        let engine = RouterProjectFakeEngine()
+        engine.up = false
+        engine.statuses[7] = CourierIntentStatus(state: .delivered)
+        let store = quiet()
+        store.restoreProposals([.init(message: "m", fields: first, made: [.create, .repo, .instructions, .folder], project: "chan_A",
+                                      stopped: "x", sent: 7)], reviser: RouterProjectFakeReviser(), engine: engine)
+        let p = try #require(store.routerProposal)
+        p.settleAfter = nil
+        await store.reconciling?.value
+        guard case .failed = p.phase else { Issue.record("resolved early: \(p.phase)"); return }
+        engine.up = true
+        store.routerCourier.attach(RouterCourierSource(submit: { _ in 0 }, updates: AsyncStream { _ in }))
+        await store.reconciling?.value
+        #expect(p.phase == .created && engine.sent.isEmpty)
+    }
+
+    // Round 4, 4: a reconcile at launch reaches the history: the dispatcher is made and reattached first.
+    @Test func aLaunchReconcileReachesTheHistory() async throws {
+        let engine = RouterProjectFakeEngine()
+        engine.statuses[7] = CourierIntentStatus(state: .delivered)
+        let store = quiet()
+        let entry = store.logDecision(RouterDecision(trigger: .you("m"), outcome: .done))
+        store.restoreProposals([.init(message: "m", fields: first, made: [.create, .repo, .instructions, .folder], project: "chan_A",
+                                      stopped: "x", sent: 7, decision: entry)], reviser: RouterProjectFakeReviser(), engine: engine)
+        let p = try #require(store.routerProposal)
+        p.settleAfter = nil
+        await store.reconciling?.value
+        let record = store.router.decisions.first { $0.id == entry }
+        #expect(p.phase == .created)
+        #expect(record?.decision.courierIntent == 7)
+        #expect(record?.decision.target == "new claude.ai project “fjord-ios-companion”")
+    }
+
     @Test func returnInTheComposerRevisesWithWordsAndCreatesWithout() async {
         let store = quiet()
         let model = RouterModel()
@@ -501,7 +569,7 @@ import Testing
     func run(_ tool: CourierTool, _ args: [String: JSON], waiting: @escaping @MainActor (String?) -> Void) async -> RouterProjectOutcome {
         .init(ok: true, intent: 1)
     }
-    func send(_ words: String, display: String, to project: String, named name: String) async -> Int {
+    func send(_ words: String, display: String, to project: String, named name: String, key: String) async -> Int {
         asked = true
         await withCheckedContinuation { gate = $0 }
         return 5

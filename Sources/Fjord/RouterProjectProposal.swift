@@ -70,8 +70,9 @@ struct RouterProjectOutcome: Equatable, Sendable {
     /// task stops waiting (the intent goes on in the engine).
     func run(_ tool: CourierTool, _ args: [String: JSON], waiting: @escaping @MainActor (String?) -> Void) async -> RouterProjectOutcome
     /// Hands `words` (the message, then what it tags) to the project; its pill shows `display`. The delivery's intent id; 0
-    /// when the engine didn't take it: nothing was sent.
-    func send(_ words: String, display: String, to project: String, named name: String) async -> Int
+    /// when the engine didn't take it: nothing was sent. `key`: this delivery's idempotency key: the engine answers a repeat
+    /// of it with the same intent, never a second send.
+    func send(_ words: String, display: String, to project: String, named name: String, key: String) async -> Int
     /// Where intent `id` is now, from the engine's own record (it survives a relaunch); nil when it can't say yet.
     func status(of id: Int) async -> CourierIntentStatus?
     /// The delivery of exactly `words` to `project` made since `since` (a send whose id never came back).
@@ -134,6 +135,11 @@ struct RouterProjectOutcome: Equatable, Sendable {
         var tagged: String? = nil
         /// The decider's first proposal (what you changed of it is a correction).
         var first: RouterProjectFields? = nil
+        /// Its identity (the deliveries' keys are made of it) and when it began (what a relaunch looks its delivery up from).
+        var id: UUID? = nil
+        var at: Date? = nil
+        /// Deliveries that surely failed so far: the next one's key.
+        var attempt: Int? = nil
     }
 
     /// The message that started it; it goes to the project, and back in the composer if you drop this.
@@ -142,6 +148,17 @@ struct RouterProjectOutcome: Equatable, Sendable {
     let tagged: String?
     /// The decider's first proposal, as it came.
     let first: RouterProjectFields
+    /// Its identity: each delivery's idempotency key is it and `attempt`.
+    private(set) var id = UUID()
+    /// When it began: a relaunch looks for its delivery from then.
+    private(set) var at = Date()
+    /// Deliveries the engine says surely failed: a new attempt gets a new key.
+    @ObservationIgnored private var attempt = 0 { didSet { onSave() } }
+    /// Restored: the engine hasn't been asked yet whether the message went before the quit (asked before any first send).
+    @ObservationIgnored private var lookedUp = true
+    /// Made by a reconcile before the dispatcher reattached: the history hears it on `reattached`.
+    @ObservationIgnored private var createdUnheard = false
+    @ObservationIgnored private var reconcilingNow = false
     private(set) var fields: RouterProjectFields { didSet { onSave() } }
     internal(set) var phase: Phase = .proposed { didSet { onSave() } }
     /// What the last revision changed ("name, repo"); empty before one.
@@ -207,18 +224,36 @@ struct RouterProjectOutcome: Equatable, Sendable {
         sending = saved.sending
         restoredWords = saved.words ?? []
         decision = saved.decision
+        id = saved.id ?? id
+        at = saved.at ?? at
+        attempt = saved.attempt ?? 0
+        lookedUp = false
         restored = true
         if let stopped = saved.stopped { phase = .failed(stopped) }
     }
 
     /// A relaunch's look at the delivery handed over before the quit: delivered or under way, the proposal is made (nothing
     /// is sent again); failed, Return sends it; the engine can't say, it stays stopped. Nothing to look at: nothing happens.
+    /// Run at relaunch and again each time the engine attaches (it can't say before).
     func reconcile() async {
-        guard !ended, sentIntent != nil || sending != nil, made.contains(.create) || madeID != nil || sentIntent != nil else { return }
+        guard !ended, !reconcilingNow, case .failed = phase, sentIntent != nil || sending != nil || (!lookedUp && allMade) else { return }
+        reconcilingNow = true
+        defer { reconcilingNow = false }
         let went = await delivery()
         known = went
         guard !ended, went == .went else { return }
         phase = .created
+        // The history hears it once the dispatcher has reattached to it (else its `onCreated` is nobody's yet).
+        if restored && decision != nil { createdUnheard = true; return }
+        onCreated(fields, sentIntent)
+        settle()
+    }
+
+    /// The dispatcher reattached (`Store.reattachProposals`): a reconcile that made it before tells it now.
+    func reattached() {
+        restored = false
+        guard createdUnheard else { return }
+        createdUnheard = false
         onCreated(fields, sentIntent)
         settle()
     }
@@ -244,7 +279,8 @@ struct RouterProjectOutcome: Equatable, Sendable {
         let words = restoredWords + [revisingWords].compactMap { $0 } + queue
         return Saved(message: message, fields: fields, made: Step.allCases.filter(made.contains), project: madeID,
                      creates: creates.isEmpty ? nil : creates, stopped: stopped, sent: sentIntent, sending: sending,
-                     words: words.isEmpty ? nil : words, decision: decision, tagged: tagged, first: first)
+                     words: words.isEmpty ? nil : words, decision: decision, tagged: tagged, first: first, id: id, at: at,
+                     attempt: attempt == 0 ? nil : attempt)
     }
 
     /// The name is the made project's (or may be): it no longer changes.
@@ -364,7 +400,7 @@ struct RouterProjectOutcome: Equatable, Sendable {
             switch status.state {
             case .toolDone: return .made(status.project)
             case .failed, .refused: creates.removeAll { $0 == id }
-            case .toolUnconfirmed: break
+            // Unconfirmed is still the engine's: it settles it itself (a late confirmation, or failed once it stops waiting).
             default: underWay = true
             }
         }
@@ -383,6 +419,7 @@ struct RouterProjectOutcome: Equatable, Sendable {
             switch status.state {
             case .failed, .refused:
                 sentIntent = nil
+                attempt += 1
                 return .notSent
             default: return .went
             }
@@ -395,12 +432,30 @@ struct RouterProjectOutcome: Equatable, Sendable {
                 return await delivery()
             case .none:
                 sending = nil
+                lookedUp = true
                 return .notSent
+            case .unknown: return .unknown
+            }
+        }
+        if !lookedUp {
+            // Restored with no record of a send (a crash before the save): the engine's own record of the words says.
+            switch await engine.intent(matching: deliveredWords, project: madeID, since: at.addingTimeInterval(-5)) {
+            case .found(let id):
+                sentIntent = id
+                lookedUp = true
+                return await delivery()
+            case .none: lookedUp = true
             case .unknown: return .unknown
             }
         }
         return .notSent
     }
+
+    /// What the message is, as the engine gets it: your words, then what they tag.
+    private var deliveredWords: String { RouterPointers.attach(tagged, to: message) }
+
+    /// Every step the proposal has something for is made: a send can have happened.
+    private var allMade: Bool { Step.allCases.allSatisfy { made.contains($0) || Self.call($0, fields) == nil } }
 
     /// The tools, in order, each only if it isn't made (a retry goes on from where it stopped), then the message. A piece the
     /// proposal has nothing for is skipped, not counted made: a revision after a failure can still add it.
@@ -453,11 +508,12 @@ struct RouterProjectOutcome: Equatable, Sendable {
                                      + "whether it went. Return checks again (it isn't sent twice)")
                 return
             case .notSent:
-                let words = RouterPointers.attach(self.tagged, to: self.message)
+                let words = self.deliveredWords
                 let project = self.madeID ?? fields.name
-                // Kept before it is handed over: a quit from here on looks it up, never sends it twice.
+                // Kept before it is handed over: a quit from here on looks it up; and the key makes a repeat the same intent.
                 self.sending = Sending(words: words, project: self.madeID, at: Date())
-                let id = await self.engine.send(words, display: self.message, to: project, named: fields.name)
+                let id = await self.engine.send(words, display: self.message, to: project, named: fields.name,
+                                                key: "\(self.id.uuidString)#\(self.attempt)")
                 guard id > 0 else {
                     self.sending = nil
                     guard !self.ended else { return }
@@ -592,8 +648,8 @@ private extension String {
         }
     }
 
-    func send(_ words: String, display: String, to project: String, named name: String) async -> Int {
-        await pills.send(words, display: display, to: .project(project), shown: name)
+    func send(_ words: String, display: String, to project: String, named name: String, key: String) async -> Int {
+        await pills.send(words, display: display, to: .project(project), shown: name, key: key)
     }
 
     func status(of id: Int) async -> CourierIntentStatus? { await pills.status(of: id) }
@@ -699,8 +755,12 @@ extension RouterCourierPills {
         return outcome
     }
 
-    func send(_ words: String, display: String, to project: String, named name: String) async -> Int {
+    /// The keys each send came with.
+    private(set) var keys: [String] = []
+
+    func send(_ words: String, display: String, to project: String, named name: String, key: String) async -> Int {
         guard takes else { return 0 }
+        keys.append(key)
         nextIntent += 1
         sent.append((display, project))
         delivered.append(words)
@@ -739,8 +799,19 @@ extension Store {
     /// (the dispatcher's, as for a new one). Each is handed over once.
     func reattachProposals(_ attach: (RouterProjectProposal, UUID) -> Void) {
         for p in [routerProposal].compactMap({ $0 }) + routerProposalQueue where p.restored {
-            p.restored = false
             if let id = p.decision { attach(p, id) }
+            p.reattached()
+        }
+    }
+
+    /// The restored proposals ask the engine whether their messages went (at relaunch, and each time the engine attaches).
+    /// The dispatcher is made first: it reattaches their history entries before any of them can be resolved.
+    func reconcileProposals() {
+        let all = [routerProposal].compactMap { $0 } + routerProposalQueue
+        guard !all.isEmpty else { return }
+        reconciling = Task { [weak self] in
+            _ = self?.routerDispatcher
+            for p in all { await p.reconcile() }
         }
     }
 
@@ -760,10 +831,10 @@ extension Store {
             hold(p)
             back.append(p)
         }
-        guard !saved.isEmpty else { return }
+        guard !back.isEmpty else { return }
         onProposalsRestored()
         // A message handed over before the quit: the engine's record says whether it went, before anything is sent again.
-        reconciling = Task { for p in back { await p.reconcile() } }
+        reconcileProposals()
     }
 
     /// What to save of the proposals: the one up, then those waiting.

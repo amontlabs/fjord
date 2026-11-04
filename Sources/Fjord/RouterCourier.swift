@@ -327,8 +327,12 @@ struct RouterCourierSource {
         return await source.matching(words, project, since)
     }
 
+    /// Told each time an engine is attached: what waited for the engine to say something can ask now.
+    @ObservationIgnored var onAttach: () -> Void = {}
+
     /// Follows `source`'s updates from now on.
     func attach(_ source: RouterCourierSource) {
+        defer { onAttach() }
         self.source = source
         following?.cancel()
         let updates = source.updates
@@ -347,10 +351,10 @@ struct RouterCourierSource {
 
     /// Hands your words for a claude.ai place to the engine; its pill shows at once. `shown`: the project's name on the pill
     /// when the target names it by its id. `display`: what the pill shows when it isn't all that goes (your words, without what the
-    /// message tags after them).
+    /// message tags after them). `key`: an idempotency key (`CourierRequest.send`).
     @discardableResult
-    func send(_ words: String, display: String? = nil, to target: RouterCourier.Target, shown: String? = nil) async -> Int {
-        await submit(.send(words: words, project: target.project, thread: target.thread),
+    func send(_ words: String, display: String? = nil, to target: RouterCourier.Target, shown: String? = nil, key: String? = nil) async -> Int {
+        await submit(.send(words: words, project: target.project, thread: target.thread, key: key),
                      work: .send(words: display ?? words, project: shown ?? target.project, thread: threadTitle(target) ?? target.thread))
     }
 

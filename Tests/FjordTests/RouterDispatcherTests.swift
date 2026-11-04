@@ -91,7 +91,7 @@ import Testing
     func decision(_ s: Store, _ id: UUID?) -> RouterDecision? { s.router.decisions.first { $0.id == id } }
 
     func sentWords(_ f: Fakes) -> [(words: String, project: String, thread: String?)] {
-        f.requests.compactMap { if case .send(let w, let p, let t, _) = $0 { (w, p, t) } else { nil } }
+        f.requests.compactMap { if case .send(let w, let p, let t, _, _) = $0 { (w, p, t) } else { nil } }
     }
 
     func decided(_ kind: RouterProjectDecision.Kind, _ decider: RouterProjectDecision.Decider = .sonnet, p: Double = 0.9) -> RouterProjectDecision {
@@ -313,7 +313,7 @@ import Testing
         #expect(proposal?.message.contains("@CI: a category") == false)
         // The pills' engine: the tags after your words, the pill showing your words alone.
         let engine = RouterProjectPillsEngine(pills: s.routerCourier)
-        let intent = await engine.send("look at it\n\n@CI: a category", display: "look at it", to: "chan_x", named: "x")
+        let intent = await engine.send("look at it\n\n@CI: a category", display: "look at it", to: "chan_x", named: "x", key: "k")
         #expect(intent > 0)
         #expect(sentWords(f).last?.words == "look at it\n\n@CI: a category")
         #expect(s.routerCourier.items.last.map { if case .send(let w, _, _) = $0.work { w } else { "" } } == "look at it")

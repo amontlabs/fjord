@@ -15,6 +15,7 @@ create table if not exists intents (id integer primary key autoincrement, at rea
     cause text, context_hash text, output text, correction text, result text);
 create table if not exists told (key text primary key, at real not null, project text, kind text, detail text, text text);
 create table if not exists notes (topic text primary key, text text not null, at real not null);
+create table if not exists intent_keys (key text primary key, intent integer not null);
 """
 
 

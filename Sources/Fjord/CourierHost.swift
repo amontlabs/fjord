@@ -9,7 +9,8 @@ import Foundation
 
 /// What the app asks the engine to do (the doc's `CourierIntent`; named so because `CourierIntent` is already the row of the `intents` table).
 enum CourierRequest {
-    case send(words: String, project: String, thread: String?, continues: String? = nil)
+    /// `key`: the app's idempotency key: a repeat of it while its intent hasn't failed is that intent, not a second send.
+    case send(words: String, project: String, thread: String?, continues: String? = nil, key: String? = nil)
     case tool(name: CourierTool, args: [String: JSON])
     case confirm(intentID: Int)
     case correct(intentID: Int, project: String)
@@ -494,8 +495,16 @@ actor CourierHost {
         }
         safely("submit") {
             switch request {
-            case .send(let words, let project, let thread, _):
+            case .send(let words, let project, let thread, _, let key):
+                // The same key again (an app that quit before it heard the id, and sends again): the intent it named, while
+                // that one hasn't failed; a failed one is sent anew under the key.
+                if let key, let earlier = try core.db.keyedIntent(key), let row = try core.db.intent(earlier),
+                   !["failed", "refused"].contains(row["status"]?.asString ?? "") {
+                    id = earlier
+                    return
+                }
                 try core.say(words, project: project, thread: thread, reply: noted)
+                if let key, id > 0 { try core.db.keyIntent(key, id) }
             case .tool(let name, let args):
                 try core.tool(name.rawValue, args: args.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }, reply: noted)
             case .confirm(let intentID):

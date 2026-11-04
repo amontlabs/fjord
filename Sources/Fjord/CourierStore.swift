@@ -17,6 +17,7 @@ final class CourierStore {
         cause text, context_hash text, output text, correction text, result text);
     create table if not exists told (key text primary key, at real not null, project text, kind text, detail text, text text);
     create table if not exists notes (topic text primary key, text text not null, at real not null);
+    create table if not exists intent_keys (key text primary key, intent integer not null);
     """ + "\n"
 
     /// The columns a start's scans of every past intent read: not `proof`, which for a send holds its baseline's keys.
@@ -192,6 +193,16 @@ final class CourierStore {
         let stored = Self.dumpedColumns(all)
         try query("update intents set \(stored.keys.map { $0 + " = ?" }.joined(separator: ", ")) where id = ?", stored.values + [.int(intentID)])
         return try intent(intentID)
+    }
+
+    /// The intent an app's idempotency key named (`intent_keys`), if any.
+    func keyedIntent(_ key: String) throws -> Int? {
+        try query("select intent from intent_keys where key = ?", [.string(key)]).first?["intent"]?.asInt
+    }
+
+    /// `key` names `intentID` from now on.
+    func keyIntent(_ key: String, _ intentID: Int) throws {
+        try query("insert or replace into intent_keys (key, intent) values (?, ?)", [.string(key), .int(intentID)])
     }
 
     func intent(_ intentID: Int) throws -> JSON? {

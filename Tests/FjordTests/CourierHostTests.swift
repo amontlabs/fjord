@@ -288,6 +288,23 @@ import Testing
         await w.host.stop()
     }
 
+    /// Round 4, 1: a send's idempotency key: a repeat is the same intent while it hasn't failed; a failed one is sent anew.
+    @Test func aRepeatedKeyIsTheSameIntent() async throws {
+        let w = try await started(World())
+        let client = try Client(w.socket)
+        w.pageUp(client, signedIn: false)
+        #expect(await Self.eventually { await w.host.board()["projects"]?["chan_a"] != nil })
+        let first = await w.host.submit(.send(words: "once", project: "chan_a", thread: nil, key: "p#0"))
+        #expect(first > 0)
+        try await w.restart()
+        #expect(await w.host.submit(.send(words: "once", project: "chan_a", thread: nil, key: "p#0")) == first)
+        try CourierStore(path: w.dir + "/router.db").updateIntent(w.box.t, first, [("status", "failed")])
+        w.later(200)
+        let again = await w.host.submit(.send(words: "once", project: "chan_a", thread: nil, key: "p#0"))
+        #expect(again > first)
+        await w.host.stop()
+    }
+
     /// Round 3 A: a confirmed create's status carries the project its proof found.
     @Test func aConfirmedCreatesStatusCarriesItsProject() async throws {
         let w = try await started(World())

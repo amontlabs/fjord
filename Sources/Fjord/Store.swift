@@ -619,6 +619,8 @@ final class Store {
     @ObservationIgnored lazy var routerCourier: RouterCourierPills = {
         let pills = RouterCourierPills()
         pills.threadTitle = { [weak self] in self?.routerCourierLink.title($0) }
+        // The engine is up: a restored proposal's delivery can be asked about now.
+        pills.onAttach = { [weak self] in self?.reconcileProposals() }
         return pills
     }()
     /// A proposal to start a project for a message that fit none (RouterProjectProposal.swift); its pill is over the composer.
