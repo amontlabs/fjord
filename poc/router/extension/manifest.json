@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Fjord Router POC",
+  "version": "0.3.0",
+  "description": "Tells Fjord's Router what the Claude Code page shows and types in its real composer.",
+  "permissions": [
+    "tabs",
+    "alarms",
+    "storage",
+    "nativeMessaging",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/code",
+        "https://claude.ai/code/*"
+      ],
+      "js": [
+        "tag.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://claude.ai/code",
+        "https://claude.ai/code/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
