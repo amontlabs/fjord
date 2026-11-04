@@ -648,7 +648,7 @@ struct RouterAskBack: Identifiable, Equatable {
         // The pills that address it at the start of your words aren't part of them.
         let words = Self.courierWords(job.text, pills: job.context.pills)
         let id = job.id
-        let intent = await store.routerCourier.send(RouterPointers.attach(job.tools.tagged, to: words), to: courier)
+        let intent = await store.routerCourier.send(RouterPointers.attach(job.tools.tagged, to: words), display: words, to: courier)
         guard intent > 0 else { throw RouterTools.Failure(Self.notTakenWords) }
         store.updateDecision(id) {
             $0.decision.courierIntent = intent

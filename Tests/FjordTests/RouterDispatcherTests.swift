@@ -163,6 +163,7 @@ import Testing
         let words = sentWords(f).first?.words ?? ""
         #expect(words.hasPrefix("look at @CI please\n\n") && words.contains("@CI: a category"))
         // What was recorded as yours is only your words.
+        if case .send(let shown, _, _)? = s.routerCourier.items.first?.work { #expect(shown == "look at @CI please") } else { Issue.record("no pill") }
         if case .sent(_, let text, _)? = decision(s, id)?.done.first(where: \.sendsWords) { #expect(text == "look at @CI please") }
     }
 

@@ -332,11 +332,12 @@ struct RouterCourierSource {
     var threadTitle: (RouterCourier.Target) -> String? = { _ in nil }
 
     /// Hands your words for a claude.ai place to the engine; its pill shows at once. `shown`: the project's name on the pill
-    /// when the target names it by its id.
+    /// when the target names it by its id. `display`: what the pill shows when it isn't all that goes (your words, without what the
+    /// message tags after them).
     @discardableResult
-    func send(_ words: String, to target: RouterCourier.Target, shown: String? = nil) async -> Int {
+    func send(_ words: String, display: String? = nil, to target: RouterCourier.Target, shown: String? = nil) async -> Int {
         await submit(.send(words: words, project: target.project, thread: target.thread),
-                     work: .send(words: words, project: shown ?? target.project, thread: threadTitle(target) ?? target.thread))
+                     work: .send(words: display ?? words, project: shown ?? target.project, thread: threadTitle(target) ?? target.thread))
     }
 
     /// A delivery corrected (Send elsewhere): the engine keeps where it should have gone on its intent, for the measurement.
