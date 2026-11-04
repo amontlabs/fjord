@@ -61,7 +61,10 @@ class Process:
         """One line from the bridge, or a RuntimeError naming the last request after TIMEOUT seconds of silence: nothing can hang."""
         fd = self.proc.stdout.fileno()
         while b"\n" not in self.buffer:
-            if not select.select([fd], [], [], TIMEOUT)[0]:
+            # poll, not select: unittest keeps every test's core alive to the end, so descriptors pass select's 1024 limit
+            poller = select.poll()
+            poller.register(fd, select.POLLIN)
+            if not poller.poll(TIMEOUT * 1000):
                 raise RuntimeError(f"the bridge was silent for {TIMEOUT} s after {self.last}")
             chunk = os.read(fd, 65536)
             if not chunk:
