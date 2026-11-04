@@ -320,6 +320,9 @@ struct RouterCourierSource {
     @ObservationIgnored private var works: [Int: Item.Work] = [:]
     /// Updates for intents not yet tracked: the engine may say before `submit` has returned.
     @ObservationIgnored private var early: [Int: CourierUpdate] = [:]
+    /// The newest update of each intent, and who waits for one (`next`).
+    @ObservationIgnored var lastUpdates: [Int: CourierUpdate] = [:]
+    @ObservationIgnored var waiters: [Int: [(matches: (CourierState) -> Bool, continuation: CheckedContinuation<CourierUpdate, Never>)]] = [:]
     @ObservationIgnored private var source: RouterCourierSource?
     @ObservationIgnored private var following: Task<Void, Never>?
     /// How long a settled pill stays; nil keeps it (a shot, a test).
@@ -385,6 +388,14 @@ struct RouterCourierSource {
         guard let work = works[update.intentID] else {
             early[update.intentID] = update
             return
+        }
+        lastUpdates[update.intentID] = update
+        if let waiting = waiters[update.intentID] {
+            waiters[update.intentID] = waiting.filter { waiter in
+                guard waiter.matches(update.state) else { return true }
+                waiter.continuation.resume(returning: update)
+                return false
+            }
         }
         var item = items.first { $0.id == update.intentID } ?? Item(id: update.intentID, work: work, state: update.state, at: update.at)
         // A pill waved off comes back only to say a send went after all.

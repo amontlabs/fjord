@@ -63,6 +63,8 @@ final class RouterKeys {
             }
             // The suggestions shown (an @ word that names nothing shows none, and Esc goes on to what is there).
             else if !model.suggestions(store).isEmpty { model.dismissMention() }
+            // A proposed project is dropped and its message is yours again.
+            else if model.dropProposal(store: store) {}
             else if model.live.prediction != nil { model.dismissPrediction() }
             else if model.live.pinned != nil { model.live.reset() }
             // A search on, the field left: it ends before the pick's reply goes.
@@ -125,6 +127,8 @@ final class RouterKeys {
             }
             if isReturn, flags.isEmpty {
                 // Nothing typed and a grant waiting: Return allows it.
+                // A proposed project: your words revise it, nothing typed creates it.
+                if model.answerProposal(store: store) { return true }
                 if model.draft.isEmpty, store.routerCourier.allowNewest() { return true }
                 model.send(store: store)
                 return true

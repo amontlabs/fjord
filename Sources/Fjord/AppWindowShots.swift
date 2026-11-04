@@ -797,7 +797,7 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ] + courierShots
+    ] + courierShots + proposalShots
 
     // MARK: The engine's pills
 
@@ -852,6 +852,39 @@ enum AppWindowShots {
                 // A pause carries its code where a setting carries what it was (`paused`).
                 let pause = state == .paused ? before?.asString.flatMap(CourierPause.init(rawValue:)) : nil
                 pills.apply(CourierUpdate(intentID: i + 1, state: state, cause: cause, before: pause == nil ? before : nil, at: Date(), pause: pause))
+            }
+        }
+    }
+
+    // MARK: The proposal to start a project
+
+    /// The pill proposing a project for a message that fit none, one shot per state, light and dark
+    /// (`router-proposal-<state>[-dark]`).
+    private static var proposalShots: [Shot] {
+        let message = "set up a Swift package for the iOS companion app, with a CI workflow that builds on every push"
+        let first = RouterProjectFields(name: "fjord-ios-companion", folder: NSHomeDirectory() + "/code/projects/fjord-ios-companion",
+                                        repo: "amontlabs/fjord-ios-companion",
+                                        instructions: "A Swift package for Fjord's iOS companion app; keep CI green on every push.")
+        let revised = RouterProjectFields(name: "fjord-ios", folder: first.folder, repo: nil, instructions: first.instructions)
+        let scenes: [(String, RouterProjectFields, RouterProjectProposal.Phase, [String], String?)] = [
+            ("proposed", first, .proposed, [], nil),
+            ("revising", first, .revising, [], nil),
+            ("revised", revised, .proposed, ["name", "repo"], nil),
+            ("revise-failed", first, .proposed, [], "Couldn't revise that: the model didn't answer. The proposal stays as it was."),
+            ("creating", revised, .creating("Adding the repo"), [], nil),
+            ("created", revised, .created, [], nil),
+            ("failed", revised, .failed("The project wasn't created: a project named fjord-ios already exists"), [], nil),
+            ("none", RouterProjectFields(name: "scratch-notes"), .proposed, [], nil),
+        ]
+        return scenes.flatMap { name, fields, phase, changed, note in
+            [(name, NSAppearance.Name.aqua), (name + "-dark", .darkAqua)].map { shot, look in
+                Shot(name: "router-proposal-\(shot)", destination: { _ in .router }, compose: { model, store in
+                    model.layout = .list
+                    let proposal = store.proposeProject(for: message, first: first, reviser: RouterProjectFakeReviser(),
+                                                        engine: RouterProjectFakeEngine())
+                    proposal.settleAfter = nil
+                    proposal.show(fields, phase: phase, changed: changed, note: note)
+                }, appearance: look)
             }
         }
     }

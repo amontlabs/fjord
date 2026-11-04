@@ -622,6 +622,8 @@ final class Store {
         pills.threadTitle = { [weak self] in self?.routerCourierLink.title($0) }
         return pills
     }()
+    /// A proposal to start a project for a message that fit none (RouterProjectProposal.swift); its pill is over the composer.
+    var routerProposal: RouterProjectProposal?
     /// The engine itself while it runs (`RouterCourier.on`, started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The entries of the ask-back cards still up: kept when the history is pruned.

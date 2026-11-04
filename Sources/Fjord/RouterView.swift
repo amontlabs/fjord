@@ -825,6 +825,8 @@ final class RouterModel {
     /// Sends the draft with its reply, its @pills (written as "@name" where they stand, their projects going with it) and the
     /// target you pinned; the composer keeps the focus for the next one.
     func send(store: Store) {
+        // A proposed project takes the words (and an empty composer creates it).
+        if answerProposal(store: store) { return }
         let (text, mentions) = sentDraft(store)
         guard !text.isEmpty, canSend(store) else { return }
         if let editing {
