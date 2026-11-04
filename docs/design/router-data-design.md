@@ -185,6 +185,42 @@ shows a refused save as if it took.
 The notice never says why. Fjord treats words back in the draft as a failed attempt, tries again, and after three fails with the
 page's notice quoted in the cause. A project deleted or archived leaves the Board when the projects page lists without it.
 
+## One tab per project: measured cost (2026-11-04)
+
+Up to 8 hidden, pinned, inactive watcher tabs (`autoDiscardable: false`) at the test projects' pages, beside Fjord's own tab, with
+a structure-only script (row and thread ids, kinds, times; no main scan). Chrome 156 on macOS. Memory is the renderers' physical
+footprint (`footprint`; RSS swung 400 to 570 MB with no change, from compression); CPU is renderer CPU time over the window, in % of
+one core.
+
+| Watcher tabs | Renderers | Footprint | Delta vs none | Idle CPU (all renderers) |
+|---|---|---|---|---|
+| 0 | 4 | 959 MB | | 0.35% |
+| 1 | 5 | 1,245 MB | +286 MB | 0.07% settled |
+| 2 | 6 | 1,599 MB | +640 MB | 0.55% |
+| 3 | 7 | 1,877 MB | +918 MB | 0.3% settled (2.8% with a spike) |
+| 5 | 9 | 2,560 MB | +1,601 MB | 1.0 to 2.3% settled |
+| 8 | 12 | 3,550 MB | +2,591 MB | 3.3% over 4 min |
+| closed again | 4 | 947 MB | -12 MB | 0% |
+
+- Per tab: one renderer process each (same-site tabs did not share one), 286 to 354 MB, mean about 324 MB. Idle about 0.4% of a
+  core per tab: every tab wakes once a minute together (0.2 to 0.5% over 30 s), and now and then one spikes to 3 to 8% for 15 s.
+  Loading a tab costs about 40% of a core for 10 to 15 s.
+- During a coordinator turn (5 and 8 watchers): each watcher of a project in the turn 8 to 15% for about 20 s; watchers of an
+  idle project about 1%; Fjord's tab 35 to 52% (its existing cost). All renderers peaked at about 105% for 10 s, back under 1% in 20 s.
+- Liveness: no tab was frozen or discarded. Watchers hidden 1.5 to 7 min saw test-b's reply 6.8 s after the send while Fjord's tab
+  was on test-a; Fjord's tab saw that row 461 s later, when it next went there. Watchers hidden 6 to 15 min (past intensive
+  throttling) saw every new row, streaming ones too, within 0.4 s of Fjord's tab: the page's updates come over the network, not on
+  throttled timers.
+- Projection, at 324 MB a tab, pessimistic 500 MB (real projects' longer transcripts; Fjord's own tab sits at 830 MB after a long
+  session): 10 projects 3.2 GB (5 GB), 20 projects 6.5 GB (10 GB). Idle CPU 4% (10) and 8% (20) of a core, pessimistic double for
+  the spikes; a turn adds 8 to 15% per watcher of that project.
+- Caveats: test projects with short transcripts; replies of a few seconds; no thread was made, so no thread-row events were seen;
+  idle windows of at most 15 min; on power, no Energy Saver freezing; a test-b watcher moved itself to the project's last thread
+  (`?thread=`), so a watcher's address is the page's to change.
+
+Read: live enough, CPU acceptable, memory too high to keep one tab for every project. One tab per project with a turn under way,
+opened when Fjord sends and closed after a quiet spell, keeps the liveness for a few hundred MB at a time.
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
