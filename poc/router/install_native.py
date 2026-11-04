@@ -5,7 +5,7 @@ import os
 import stat
 import sys
 
-EXTENSION_ID = "ecdmddbjdlfhkbljpagofhajaldgajaa"
+EXTENSION_ID = "fphdgojechminkmbgkbipmfmlnnemejd"
 NAME = "dev.fjord.router"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))

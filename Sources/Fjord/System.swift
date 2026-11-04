@@ -616,6 +616,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.wireNotifications()
         }
         let demo = CommandLine.arguments.contains("--demo")
+        // Chrome's host manifest, kept pointing at this app (only from a bundle; see `NativeHostManifest`).
+        if !demo && NativeHostManifest.enabled { NativeHostManifest.install() }
         let window = AppWindowController(store: store)
         appWindow = window
         if CommandLine.arguments.contains("routerCanvas") {
