@@ -342,6 +342,17 @@ enum AppWindowShots {
         Shot(name: "router-actions-dark", destination: { _ in .router }, size: CGSize(width: 820, height: 560), compose: { model, store in
             routerActions(store, model: model)
         }, appearance: .darkAqua, standalone: actionCards),
+        // The claude.ai delivery setup: nothing done, partway (Chrome and the host, no tab yet), and everything done.
+        setupShot("courier-setup-missing", .aqua, facts: .init(extensionFolder: "/Applications/Fjord.app/Contents/Resources/extension"), health: .init()),
+        setupShot("courier-setup-missing-dark", .darkAqua, facts: .init(extensionFolder: "/Applications/Fjord.app/Contents/Resources/extension"), health: .init()),
+        setupShot("courier-setup-partway", .aqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
+                  health: .init(tabConnected: true, signedIn: false)),
+        setupShot("courier-setup-partway-dark", .darkAqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
+                  health: .init(tabConnected: true, signedIn: false)),
+        setupShot("courier-setup-done", .aqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
+                  health: .init(tabConnected: true, signedIn: true)),
+        setupShot("courier-setup-done-dark", .darkAqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
+                  health: .init(tabConnected: true, signedIn: true)),
         Shot(name: "router-summary-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
             store.router.cards = store.router.cards.map { var c = $0; if c.isOpen { c.addressedAt = Date(); c.addressedBy = .you }; return c }
             if let summary = store.router.summaries.last { model.expanded.insert(RouterPage.Entry.summary(summary).id) }
@@ -792,6 +803,9 @@ enum AppWindowShots {
 
     private typealias CourierStep = (work: RouterCourierPills.Item.Work, updates: [(CourierState, String?, JSON?)])
 
+    /// A pause as the engine reports it: its code, and its cause in the engine's words.
+    private static func paused(_ pause: CourierPause) -> (CourierState, String?, JSON?) { (.paused, CourierDo.sentence(pause), .string(pause.rawValue)) }
+
     /// The engine's pills over the composer, one shot per state, light and dark (`router-courier-<state>[-dark]`).
     private static var courierShots: [Shot] {
         let send = { (words: String, thread: String?) in RouterCourierPills.Item.Work.send(words: words, project: "lookout", thread: thread) }
@@ -802,10 +816,10 @@ enum AppWindowShots {
             ("delivered", [(send("run the release checklist again", nil), [(.taken, nil, nil), (.delivered, nil, nil)])]),
             ("failed", [(send("run the release checklist again", nil), [(.taken, nil, nil), (.failed, CourierCore.went, nil)])]),
             ("late", [(send("run the release checklist again", nil), [(.failed, CourierCore.went, nil), (.deliveredLate, "confirmed late by a later row", nil)])]),
-            ("paused-signedout", [(send("run the release checklist again", nil), [(.paused, "signed out of claude.ai", nil)])]),
-            ("paused-chrome", [(send("run the release checklist again", nil), [(.paused, "Chrome isn't running", nil)])]),
-            ("paused-tab", [(send("run the release checklist again", nil), [(.paused, "Fjord's tab has left the Claude Code page", nil)])]),
-            ("paused-app", [(send("yes, merge it once CI is green", "Fix the login redirect"), [(.paused, CourierDo.appClosed, nil)])]),
+            ("paused-signedout", [(send("run the release checklist again", nil), [paused(.signedOut)])]),
+            ("paused-chrome", [(send("run the release checklist again", nil), [paused(.chromeClosed)])]),
+            ("paused-tab", [(send("run the release checklist again", nil), [paused(.away)])]),
+            ("paused-app", [(send("yes, merge it once CI is green", "Fix the login redirect"), [paused(.appClosed)])]),
             ("awaiting", [(.tool(.preapproveFolder, args: ["project": "lookout", "path": "~/code/projects/lookout"]), [(.awaiting, nil, nil)])]),
             ("tool-revert", [(goal, [(.taken, nil, nil), (.toolDone, nil, .string("Port the board and the store"))])]),
             ("tool-already", [(goal, [(.toolDone, "it was already so, as far as Fjord's tab knows", nil)])]),
@@ -815,7 +829,7 @@ enum AppWindowShots {
             // Several at once: a delivery settling, one waiting for the tab, a refusal, a grant to allow.
             ("stack", [(send("run the release checklist again", nil), [(.delivered, nil, nil)]),
                        (.tool(.createProject, args: ["name": "lookout"]), [(.refused, "a project named lookout already exists", nil)]),
-                       (send("yes, merge it once CI is green", "Fix the login redirect"), [(.paused, "signed out of claude.ai", nil)]),
+                       (send("yes, merge it once CI is green", "Fix the login redirect"), [paused(.signedOut)]),
                        (.tool(.preapproveFolder, args: ["project": "lookout", "path": "~/code/x"]), [(.awaiting, nil, nil)])]),
         ]
         return scenes.flatMap { name, steps in
@@ -835,7 +849,9 @@ enum AppWindowShots {
         for (i, step) in steps.enumerated() {
             pills.track(i + 1, step.work)
             for (state, cause, before) in step.updates {
-                pills.apply(CourierUpdate(intentID: i + 1, state: state, cause: cause, before: before, at: Date()))
+                // A pause carries its code where a setting carries what it was (`paused`).
+                let pause = state == .paused ? before?.asString.flatMap(CourierPause.init(rawValue:)) : nil
+                pills.apply(CourierUpdate(intentID: i + 1, state: state, cause: cause, before: pause == nil ? before : nil, at: Date(), pause: pause))
             }
         }
     }
@@ -1132,6 +1148,16 @@ enum AppWindowShots {
     }
 
     /// The card-action changes as the history's run details draw them (`ChangeCard`, one under the other).
+    private static func setupShot(_ name: String, _ look: NSAppearance.Name, facts: CourierSetupFacts, health: CourierSetupHealth) -> Shot {
+        Shot(name: name, destination: { _ in .router }, size: CGSize(width: 680, height: 460), appearance: look, standalone: { _, _ in
+            AnyView(RouterCourierSetupView(setup: RouterCourierSetup(facts: facts, health: health, read: { facts }))
+                .padding(24)
+                .frame(width: 680, alignment: .topLeading)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(CDS.Surface.s1))
+        })
+    }
+
     private static func actionCards(_ store: Store, _ model: RouterModel) -> AnyView {
         let changes = store.router.changes.filter { if case .cardAction = $0.patch { true } else { false } }
         return AnyView(VStack(alignment: .leading, spacing: 10) {
