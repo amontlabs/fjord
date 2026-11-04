@@ -590,7 +590,7 @@ struct RouterAskBack: Identifiable, Equatable {
         if target == RouterAskBack.newProject {
             return propose(job, name: projectName ?? RouterProjectProposalSeed.name(from: job.text))
         }
-        if courierHandoff(job, to: target) != nil { return }
+        if try await courierHandoff(job, to: target) { return }
         if let intent = RouterRun.Intent(rawValue: target) { return try await think(job, intent) }
         throw RouterTools.Failure("Nowhere to send that")
     }
@@ -639,19 +639,19 @@ struct RouterAskBack: Identifiable, Equatable {
         follow(id)
     }
 
-    /// A claude.ai target goes to the engine, its pill over the composer taking over from the message's own. Nil: the target
-    /// is not one.
-    func courierHandoff(_ job: Job, to target: String) -> RouterCourier.Target? {
-        guard let store, let courier = RouterCourier.Target(target) else { return nil }
+    /// A claude.ai target goes to the engine, its pill over the composer taking over from the message's own. False: the target
+    /// is not one. The message is recorded as sent only once the engine took it (a real intent id); when it didn't (the host or
+    /// its database failed), nothing was sent, and this throws so the message shows the failure with Retry, never lost or sent
+    /// twice. What the message tags goes after your words, fenced, never inside them (`RouterPointers.attach`).
+    func courierHandoff(_ job: Job, to target: String) async throws -> Bool {
+        guard let store, let courier = RouterCourier.Target(target) else { return false }
         // The pills that address it at the start of your words aren't part of them.
         let words = Self.courierWords(job.text, pills: job.context.pills)
         let id = job.id
-        Task { [weak store] in
-            guard let store else { return }
-            let intent = await store.routerCourier.send(words, to: courier)
-            if intent > 0 { store.updateDecision(id) { $0.decision.courierIntent = intent } }
-        }
-        store.updateDecision(job.id) {
+        let intent = await store.routerCourier.send(RouterPointers.attach(job.tools.tagged, to: words), to: courier)
+        guard intent > 0 else { throw RouterTools.Failure(Self.notTakenWords) }
+        store.updateDecision(id) {
+            $0.decision.courierIntent = intent
             // The target the flights read to leave the message's pill to the engine's (`RouterFlights.handedToCourier`).
             $0.decision.targetID = courier.targetID
             $0.add(.sent(to: RouterCourierPills.place(courier.project, store.routerCourier.threadTitle(courier) ?? courier.thread),
@@ -659,8 +659,11 @@ struct RouterAskBack: Identifiable, Equatable {
             // A correction (a pick that wasn't the decider's) stays one.
             if $0.outcome == .pending { $0.outcome = .done }
         }
-        return courier
+        return true
     }
+
+    /// Why a message the engine didn't take shows as failed.
+    static let notTakenWords = "Couldn't hand it to claude.ai: nothing was sent"
 
     /// Your words without the address pills they start with; as they are when nothing is left.
     nonisolated static func courierWords(_ text: String, pills: [Range<Int>]) -> String {
@@ -1049,11 +1052,11 @@ extension RouterDispatcher.Effects {
                 let board = await link.board()
                 let read = link.readLocal
                 let local = await Task.detached { read() }.value
-                let context = RouterProjectContext.gather(board: board, local: local, store: store)
+                let context = RouterProjectContext.gather(board: board, local: local, store: store, excluding: tools.decision)
                 var decider = RouterProjectDecider.app(store)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
                 decider.jev = unattended ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
-                return try await decider.decide(message, in: context, stage: stage)
+                return try await decider.decide(message, in: context, tagged: tools.tagged, stage: stage)
             },
             prepare: { [weak dispatcher] tools, session in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }

@@ -79,6 +79,17 @@ import Testing
         #expect(!prompt.contains(Self.secret) && prompt.contains("<message>my key is [redacted]</message>"))
     }
 
+    @Test func projectNamesRoutingsAndTagsAreRedactedToo() async throws {
+        let c = C(projects: [.init(id: "p", name: "proj-\(Self.secret)", threads: [.init(id: "t", title: "x", running: false, minutesIdle: 1)])],
+                  routings: [.init(text: "a", to: "dest-\(Self.secret)", correctedTo: "fix-\(Self.secret)")])
+        let tagged = "@CI: a category \(Self.secret)"
+        let request = RouterProjectDecider.jevRequest("hello", c, tagged: tagged)
+        let wire = String(decoding: try JevClient.requestData(["route": request.question], about: request.state), as: UTF8.self)
+        #expect(!wire.contains(Self.secret) && wire.contains("@CI: a category"))
+        let prompt = RouterProjectDecider.sonnetPrompt("hello", c, tagged: tagged)
+        #expect(!prompt.contains(Self.secret) && prompt.contains("@CI: a category"))
+    }
+
     @Test func jevsOptionsAreThreadsThenNewWorkThenProjectsThenIntents() {
         var c = Self.context()
         c = C(projects: c.projects + [.init(id: "chan_dup", name: "dup", threads: [.init(id: "d1", title: "Router redesign", running: false, minutesIdle: 5)])])

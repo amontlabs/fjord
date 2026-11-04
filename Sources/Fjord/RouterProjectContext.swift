@@ -115,9 +115,9 @@ extension RouterProjectContext {
 
     /// The recipe's routing line: “words” → where (the correction when you made one).
     @MainActor static func line(_ r: Routing) -> String {
+        func place(_ text: String) -> String { UntrustedText.clean(RouterTools.redacted(text), limit: 80) }
         let words = UntrustedText.clean(RouterTools.redacted(r.text), limit: 101).prefix(100)
-        let to = r.correctedTo.map { "\(UntrustedText.clean($0, limit: 80)) (you corrected it from \(UntrustedText.clean(r.to, limit: 80)))" }
-            ?? UntrustedText.clean(r.to, limit: 80)
+        let to = r.correctedTo.map { "\(place($0)) (you corrected it from \(place(r.to)))" } ?? place(r.to)
         return "“\(words)” → \(to)"
     }
 
@@ -131,7 +131,7 @@ extension RouterProjectContext {
             out.append("")
         }
         for p in projects {
-            out.append("## \(p.name)")
+            out.append("## \(RouterTools.redacted(p.name))")
             if !p.purpose.isEmpty { out.append("about: \(Self.head(p.purpose, 300))") }
             for t in p.threads {
                 let lines = Self.lines(t)
@@ -200,13 +200,13 @@ extension RouterProjectContext {
     /// The app's context: the Board as the engine last folded it, the local sessions as the engine's `local` input
     /// (`CourierLocal.read()`, for bridge ids), the app's sessions, activity, cards and what you told them, and your last
     /// routings from the history.
-    @MainActor static func gather(board: JSON, local: JSON? = nil, store: Store, now: Date = Date()) -> RouterProjectContext {
+    @MainActor static func gather(board: JSON, local: JSON? = nil, store: Store, now: Date = Date(), excluding: UUID? = nil) -> RouterProjectContext {
         let told = store.lastTold()
         let cards = store.routerShownOpenCards
         let byCLI = Dictionary(store.claudeSessions.values.compactMap { s in s.cliID.map { ($0, s) } }, uniquingKeysWith: { a, b in
             a.lastActivity >= b.lastActivity ? a : b
         })
-        return from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store)) { cli in
+        return from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store, excluding: excluding)) { cli in
             guard let s = byCLI[cli] else { return nil }
             var f = LocalFacts(summary: s.summary?.detail ?? "")
             if s.running { f.doing = store.claudeActivity[s.id]?.text ?? "" }
@@ -218,11 +218,14 @@ extension RouterProjectContext {
         }
     }
 
-    /// Your last messages and where each went, oldest first: the decision log's own messages, a correction with where you sent it instead.
-    @MainActor static func routings(_ store: Store) -> [Routing] {
+    /// Your last messages and where each went, oldest first: the decision log's own messages that were delivered (`sent`: not a
+    /// dropped proposal, a message still waiting for your pick, or the one being decided, `excluding`), a correction with where
+    /// you sent it instead.
+    @MainActor static func routings(_ store: Store, excluding: UUID? = nil) -> [Routing] {
         var out: [Routing] = []
         for entry in store.router.decisions {
-            guard case .you(let text) = entry.trigger, let to = entry.decision.target ?? entry.decision.intent, !to.isEmpty else { continue }
+            guard entry.id != excluding, entry.done.contains(where: \.sendsWords),
+                  case .you(let text) = entry.trigger, let to = entry.decision.target ?? entry.decision.intent, !to.isEmpty else { continue }
             var r = Routing(text: text, to: to)
             if case .corrected(let from, let instead) = entry.outcome { r.to = from; r.correctedTo = instead }
             out.append(r)

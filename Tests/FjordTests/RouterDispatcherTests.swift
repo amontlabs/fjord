@@ -11,6 +11,8 @@ import Testing
         var decisions: [RouterProjectDecision] = [RouterProjectDecider.ask([], confidence: 0, decider: .none)]
         var stages: [RouterProjectDecider.Stage] = [.jev, .sonnet]
         var decided: [(message: String, unattended: Bool)] = []
+        /// What the decider was handed of the message's tags (`RouterTools.tagged`).
+        var decidedTagged: [String?] = []
         /// Holds the decider until the test lets it go.
         var holdDecide = false
         var decideHeld: CheckedContinuation<Void, Never>?
@@ -28,8 +30,9 @@ import Testing
         func install(_ d: RouterDispatcher) {
             d.onFinish = { [self] in finished.append($0) }
             d.effects = RouterDispatcher.Effects(
-                decide: { [self] _, message, unattended, stage in
+                decide: { [self] tools, message, unattended, stage in
                     decided.append((message, unattended))
+                    decidedTagged.append(tools.tagged)
                     for s in stages { stage(s) }
                     if holdDecide { await withCheckedContinuation { decideHeld = $0 } }
                     return decisions.count > 1 ? decisions.removeFirst() : decisions[0]
@@ -123,6 +126,60 @@ import Testing
         let id = d.submit("@router what needs me?")
         await finish(f, id)
         #expect(f.decided.isEmpty && f.runs.map(\.intent) == [.question])
+    }
+
+    // MARK: The engine not taking it
+
+    @Test func aMessageTheEngineDidntTakeIsAFailureNotASentOne() async {
+        let (s, d, f) = setup()
+        s.routerCourier.attach(RouterCourierSource(submit: { [f] in f.requests.append($0); return 0 }, updates: AsyncStream { _ in }))
+        f.decisions = [decided(.project("lookout", thread: nil))]
+        let id = d.submit("bump the version")
+        await finish(f, id)
+        let entry = decision(s, id)
+        #expect(entry?.done.contains(where: \.sendsWords) == false)
+        #expect(entry.flatMap(RouterFlights.failure) == RouterDispatcher.notTakenWords)
+        #expect(entry?.decision.courierIntent == nil)
+        // Retry: the engine takes it this time, and it goes once.
+        s.routerCourier.attach(RouterCourierSource(submit: { [f] in f.requests.append($0); return f.requests.count }, updates: AsyncStream { _ in }))
+        let again = d.submit("bump the version")
+        await finish(f, again)
+        #expect(decision(s, again)?.done.contains(where: \.sendsWords) == true)
+        #expect(sentWords(f).count == 2)
+    }
+
+    // MARK: What the message tags
+
+    @Test func aTaggedCategoryReachesTheDeciderAndGoesAfterYourWords() async {
+        let (s, d, f) = setup()
+        f.decisions = [decided(.project("lookout", thread: nil))]
+        let ci = s.categories[0]
+        var context = RouterContext()
+        context.tag([RouterMention(range: 8..<11, pointer: .category(ci.id), name: "CI")])
+        let id = d.submit("look at @CI please", context: context)
+        await finish(f, id)
+        await waitUntil { !f.requests.isEmpty }
+        #expect(f.decidedTagged.first??.contains("@CI: a category") == true)
+        let words = sentWords(f).first?.words ?? ""
+        #expect(words.hasPrefix("look at @CI please\n\n") && words.contains("@CI: a category"))
+        // What was recorded as yours is only your words.
+        if case .sent(_, let text, _)? = decision(s, id)?.done.first(where: \.sendsWords) { #expect(text == "look at @CI please") }
+    }
+
+    // MARK: The routing history
+
+    @Test func onlyDeliveredRoutingsAreTheDecidersHistory() async {
+        let (s, d, f) = setup()
+        f.decisions = [decided(.project("lookout", thread: nil))]
+        let sent = d.submit("bump the version")
+        await finish(f, sent)
+        f.decisions = [decided(.ask([.project("lcu", thread: nil)]), .sonnet, p: 0.3)]
+        let waiting = d.submit("what about this one")
+        await finish(f, waiting)
+        let current = d.submit("a third")
+        #expect(RouterProjectContext.routings(s).map(\.text) == ["bump the version"])
+        #expect(RouterProjectContext.routings(s, excluding: sent).isEmpty)
+        _ = current
     }
 
     // MARK: The decider
