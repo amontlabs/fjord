@@ -250,6 +250,44 @@ thread in test-a.
 - Caveats: one account and 5 sidebar projects; `data-kind` values other than `ready` were never seen, and what sets `ready` is
   unknown; a page shown in front may update its list (not tried: no focus was taken).
 
+## Sharing one renderer (2026-11-04)
+
+**A. Same-origin frames in Fjord's tab.** Hidden `<iframe src="/code/project/<id>">` nodes were added to `document.documentElement`,
+outside the React root, off screen at 1200×900. A structure-only watcher ran in each frame (`all_frames`), and Fjord's logic ran only
+in the top frame.
+
+| Frames | Renderers | Fjord's renderer footprint | Delta |
+|---|---|---|---|
+| 0 | 4 | 862 MB | |
+| 1 (test-b) | 4 | 1,035 MB | +173 MB |
+| 3 (test-b, test-a, fjord-poc-test) | 4 | 1,272 MB | +410 MB, about 137 MB a frame |
+
+- No refusal: no blank frame and no framing error. Each frame loaded the full app, with sidebar, composers, transcript and thread
+  rows, and its DOM was readable from the top frame.
+- All frames ran in Fjord's own renderer process; no process was added. Idle CPU of that renderer with 3 frames was 0.1 to 1.2%,
+  against about 0.2% without frames. During a turn it peaked at 59% for 10 s.
+- Live, in a hidden tab, both at once and after 7.5 min hidden. With Fjord's top frame on test-a, then on test-b, the test-a frame
+  saw:
+  - your row at 1.6 to 2.6 s, against 2.0 s (pending 1.3 s) in Fjord's top frame;
+  - the thread row new (`active`, `dashed`) at 4.9 to 5.7 s, against 5.0 to 5.7 s;
+  - the spinner (`running`, `.animate-spin`) at 5.8 to 6.4 s, against 5.8 to 6.3 s;
+  - the thread row leaving as it finished at 13.7 s and 19.2 s, both after Fjord's top frame had left for test-b.
+
+  The test-b frame saw test-b's rows within 0.1 to 0.5 s of the top frame.
+- Delivery kept working: 4 of 4 sends were confirmed with 3 frames present.
+- test-b's frame lands on `?thread=` (its last thread) within 2.2 s, also after setting its `src` to the overview again. There it
+  shows the project's transcript rows live but no thread rows.
+- Memory isn't given back: after the frames were removed, and even after a tab reload, Fjord's renderer stayed at about 1.45 GB
+  (same process).
+
+**B. A tab the page opens.** `window.open('/code/project/<id>')` from Fjord's hidden top frame, as a dev command without a user
+gesture, was not blocked. The tab opened in front (`active`, visible) and the Chrome window became the focused one. It was closed
+about 20 s later. Its renderer and memory were not measured. Not usable: it steals focus.
+
+Read: frames share Fjord's process for about 137 MB a project, against 324 MB for a tab, with the same liveness. The costs are
+the memory kept after removal and projects that reopen a thread. 10 projects would be about 1.4 GB on top of Fjord's tab, and 20
+about 2.7 GB.
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
