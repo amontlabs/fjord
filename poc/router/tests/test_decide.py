@@ -34,6 +34,7 @@ class Say:
         return next(e["intent"] for e in self.events if e["event"] == "decision")
 
 
+@support.python_only("model calls (Jev, Sonnet) aren't the engine's: the app's Jev tests cover deciding")
 class ToolCheck(unittest.TestCase):
     def test_an_unproved_create_holds_its_name_by_the_ids_core_keeps(self):
         core, _ = support.world()
@@ -43,6 +44,7 @@ class ToolCheck(unittest.TestCase):
                          (None, "an earlier create of gamma took, but isn't confirmed yet"))
 
 
+@support.python_only("model calls (Jev, Sonnet) aren't the engine's: the app's Jev tests cover deciding")
 class Explicit(unittest.TestCase):
     def test_an_explicit_project_uses_no_model(self):
         s = Say(self, project="beta")
@@ -59,6 +61,7 @@ class Explicit(unittest.TestCase):
         self.assertEqual(Say(self, thread="cmsg_99").intent["status"], "refused")
 
 
+@support.python_only("model calls (Jev, Sonnet) aren't the engine's: the app's Jev tests cover deciding")
 class Routed(unittest.TestCase):
     def test_a_sure_jev_is_taken_and_sonnet_is_not_called(self):
         s = Say(self, jev(), words="routing test words")
@@ -156,6 +159,7 @@ class Routed(unittest.TestCase):
         self.assertNotIn("sk-abcdef", s.jev.calls[0][0]["message"])
 
 
+@support.python_only("model calls (Jev, Sonnet) aren't the engine's: the app's Jev tests cover deciding")
 class Setup(unittest.TestCase):
     def test_a_setup_request_is_never_taken_by_jev_alone(self):
         board = support.world()[0].board()
@@ -210,6 +214,7 @@ class Setup(unittest.TestCase):
         self.assertEqual(decide.history(s.core.board(), store.intents(s.core.db))[-1], ("routing test words", "alpha"))
 
 
+@support.python_only("model calls (Jev, Sonnet) aren't the engine's: the app's Jev tests cover deciding")
 class Steps(unittest.TestCase):
     """Several setup changes in one message: one intent per step, each started once the one before it is confirmed."""
     def say(self, *steps, takes=True, lags=False):

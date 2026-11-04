@@ -71,6 +71,7 @@ class Events(unittest.TestCase):
         page.pump(core)
         self.assertGreater(store.last_seen_id(core.db), before)
 
+    @support.python_only("tests routerd's lock, link, carry_on or trace: process glue (CourierHostTests)")
     def test_a_command_sent_while_a_host_links_is_not_one_its_replay_answers_for(self):
         core, _ = support.world()
         hosts, sent, connection = [], [], core.connection
@@ -142,6 +143,7 @@ class Events(unittest.TestCase):
         self.assertEqual(sorted(core.board()["threads"]), sorted(before["threads"]))
         self.assertIn("chan_a", core.board()["projects"])
 
+    @support.python_only("tests routerd's lock, link, carry_on or trace: process glue (CourierHostTests)")
     def test_an_event_or_tick_that_raises_is_logged_and_the_next_one_runs(self):
         import contextlib
         import io
@@ -154,6 +156,7 @@ class Events(unittest.TestCase):
         self.assertIn("tick failed: KeyError('x')", err.getvalue())
         self.assertEqual(routerd.carry_on("tick", lambda: 3), 3)
 
+    @support.python_only("tests routerd's lock, link, carry_on or trace: process glue (CourierHostTests)")
     def test_the_trace_leaves_out_the_settings_words(self):
         import contextlib
         import io
@@ -904,6 +907,7 @@ class FreshOpen(unittest.TestCase):
         self.assertEqual((intent["status"], intent["cause"], len(self.fresh_opens(sent)), self.page.clicks),
                          ("failed", "the page never settled on that place", 1, 0))
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_project_send_beside_an_open_thread_bounces_too(self):
         """The tab shows a thread beside the unsettled project: the project open still counts it shown, bounces through `/code`, whose
         list is never `complete`, and comes back."""
@@ -1156,6 +1160,7 @@ class Sleep(unittest.TestCase):
         self.assertEqual(store.intents(core.db, 1)[-1]["status"], "pending")
 
 
+@support.python_only("routerd.watch: process glue (CourierHostTests)")
 class Watching(unittest.TestCase):
     class Fake:
         """A watcher whose wait blocks until the test fires an event."""
@@ -1254,6 +1259,7 @@ class Pauses(unittest.TestCase):
         core.recheck_pauses()
         self.assertIn(store.intent(core.db, intent["id"])["cause"], (do.CHROME_OPEN, "Chrome isn't running"))
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_paused_run_that_waited_for_the_tab_goes_on_when_the_newer_run_that_held_it_lets_it_go_in_the_same_pass(self):
         for let_go in (lambda core, run: run.update(stage="prove"), lambda core, run: core.runs.pop(run["id"])):  # it yields, or finishes
             core, _ = support.world()
@@ -1358,6 +1364,7 @@ class DevCommands(unittest.TestCase):
         self.assertEqual((self.core.dev_cancel(id_), len(self.replies)), (False, 1))
 
 
+@support.python_only("routerd's socket server: process glue (CourierHostTests)")
 class DevSocket(unittest.TestCase):
     """The `dev_command` op through routerd's real socket: a host connection plays the page."""
     def setUp(self):
@@ -1872,6 +1879,7 @@ class ReviewSeams(unittest.TestCase):
         page.reload(core, "chan_a")
         self.assertEqual(([r["ok"] for r in replies], core.dev), ([False], {}))
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_late_click_of_a_cut_off_send_keeps_the_opens_deadline(self):
         core, page = support.world()
         page.composerless = True  # the send waits in the page
@@ -1888,6 +1896,7 @@ class ReviewSeams(unittest.TestCase):
         core.handle({"type": "done", "id": send_id, "ok": True, "error": None, "path": "/code/project/chan_a", "thread": None})  # clicked before the cancel
         self.assertEqual((run["stage"], run["deadline"] - core.clock()), ("opening", do.TIMEOUT))
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_send_that_erred_while_another_run_held_the_tab_retries_once_it_is_free(self):
         core, page = support.world()
         page.holds = True
@@ -2258,6 +2267,7 @@ class PausedSleep(unittest.TestCase):
 class ReviewRound(unittest.TestCase):
     """The review's seeds: a queued run never deadlocks a waiting one, prefixes end on words, deltas don't end turns, sleeps move looks."""
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_run_waiting_for_a_cut_off_send_lets_a_queued_run_go_and_fails_once_a_later_done_says_it_never_ran(self):
         core, page = support.world()
         page.composerless = True  # the first send waits in the page
@@ -2460,6 +2470,7 @@ class ReviewRound(unittest.TestCase):
         core, run = self.cut_off_then_relinked(222)
         self.assertEqual(core.unheard_sends(run), [run["command"]])
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_reads_settings_lost_while_muted_come_with_its_replayed_done(self):
         core, page = support.world()
         page.save = "unanswered"  # the act commits with no answer: a read proves it
@@ -2480,6 +2491,7 @@ class ThirdRound(unittest.TestCase):
         page.pump(core)
         return store.intents(core.db, 1)[-1]
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_turning_only_delta_before_the_first_whole_read_leaves_the_rows_unread(self):
         core, page = support.world()
         core.acc["projects"]["chan_a"]["chat"], core._board = None, None
@@ -2570,6 +2582,7 @@ class ThirdRound(unittest.TestCase):
         core.say("plain test words", project="chan_a")
         self.assertEqual([c["kind"] for c in page.inbox], ["send"])
 
+    @support.python_only("hands goto a bare dict and reads what it changed in place")
     def test_an_erred_open_is_its_stages_own(self):
         core, page = support.world()
         run = {"open_error": True}
@@ -2973,6 +2986,7 @@ class LookHoldsTheTab(unittest.TestCase):
         self.assertIn("confirmed late", i["cause"])
         self.assertEqual(([c for c in page.calls if c[0] == "send"], page.clicks), (sends, 2))  # the going back typed and clicked nothing
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_watched_send_goes_back_once_per_move(self):
         core, page, a = self.failed_then_moved()
         for e in page.load("chan_b"):  # you move the tab: no run's move
@@ -3135,6 +3149,7 @@ class LookHoldsTheTab(unittest.TestCase):
         support.later(core, 1); core.tick(); page.pump(core)
         self.assertEqual([store.intent(core.db, i)["status"] for i in (1, 2)], ["confirmed", "confirmed"])
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_watched_going_back_to_a_shown_place_ends_on_the_read_before_its_open_is_done(self):
         core, page = self.two_watched()
         page.at = None
@@ -3151,6 +3166,7 @@ class LookHoldsTheTab(unittest.TestCase):
         page.outbox.append(page.whole("chan_a")); page.pump(core)  # the page's own read, before the open's `done`
         self.assertNotEqual((core.watch_open or {}).get("to"), ("chan_a", None))  # over (the other watched send's going back may follow)
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_watched_open_a_reloaded_page_never_ran_holds_nobody(self):
         core, page = self.two_watched()
         core.watch_back.clear(); core.moves += 1
@@ -3162,6 +3178,7 @@ class LookHoldsTheTab(unittest.TestCase):
         core.say("a new message right after", project="chan_a"); page.pump(core)
         self.assertEqual(store.intents(core.db, 1)[-1]["status"], "confirmed")  # not held 20 s by an open that never ran
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_sleep_moves_a_watched_opens_hold(self):
         core, page = self.two_watched()
         core.watch_back.clear(); core.moves += 1
@@ -3171,6 +3188,7 @@ class LookHoldsTheTab(unittest.TestCase):
         support.sleep(core, 3600); core.tick()
         self.assertGreaterEqual(core.watch_open["hold_until"], hold + 3600 - 1)
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_look_waits_for_a_watched_send_going_back(self):
         core, page = self.two_watched()
         page.holds = True

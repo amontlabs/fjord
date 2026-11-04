@@ -15,6 +15,7 @@ def write_session(root, name, **more):
         json.dump(d, f)
 
 
+@support.python_only("look.py's session reading becomes the app's own: Swift unit tests cover it")
 class Sessions(unittest.TestCase):
     def read(self, **files):
         with tempfile.TemporaryDirectory() as root:
@@ -40,6 +41,7 @@ class Sessions(unittest.TestCase):
         self.assertEqual((out["sessions"]["cli:a"]["detail"], out["sessions"]["cli:a"]["category"]), ("Waiting for review", "review_ready"))
 
 
+@support.python_only("look.py's session reading becomes the app's own: Swift unit tests cover it")
 class State(unittest.TestCase):
     def test_mapping(self):
         cases = [({"category": "review_ready"}, None, "idle"), ({"category": "completed"}, None, "resolved"), ({"category": "blocked"}, None, "needs_you"),
@@ -65,6 +67,7 @@ class State(unittest.TestCase):
         self.assertEqual((t["touched"], t["detail"], t["state"]), (NOW - 7200, "Reviewing the diff", "idle"))
 
 
+@support.python_only("look.py's session reading becomes the app's own: Swift unit tests cover it")
 class Gone(unittest.TestCase):
     def test_a_local_project_missing_from_the_latest_pass_leaves_the_board(self):
         core, page = support.world()
@@ -88,6 +91,7 @@ class Gone(unittest.TestCase):
         self.assertEqual(core.db.execute("select count(*) from seen").fetchone()[0], rows)
 
 
+@support.python_only("look.py's session reading becomes the app's own: Swift unit tests cover it")
 class Purpose(unittest.TestCase):
     def purpose(self, text):
         with tempfile.TemporaryDirectory() as folder:
@@ -106,6 +110,7 @@ class Purpose(unittest.TestCase):
         self.assertEqual(look.purpose("/nonexistent"), "")
 
 
+@support.python_only("look.py's session reading becomes the app's own: Swift unit tests cover it")
 class Stat(unittest.TestCase):
     def test_unchanged_files_are_not_read_again(self):
         look._FILES.clear()
@@ -130,6 +135,7 @@ class Stat(unittest.TestCase):
                 look.load_json = load
 
 
+@support.python_only("look.py's session reading becomes the app's own: Swift unit tests cover it")
 class Link(unittest.TestCase):
     def setUp(self):
         self.core, self.page = support.world(session=False)  # the live page gives no session id

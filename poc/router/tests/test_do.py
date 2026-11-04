@@ -330,6 +330,7 @@ class Deliver(unittest.TestCase):
         self.assertEqual(self.timeout()["status"], "confirmed")
         self.assertEqual(self.page.calls.count(("open", "chan_b", None)), 2)
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_run_whose_step_raises_fails_and_its_waiter_hears(self):
         import contextlib
         import io

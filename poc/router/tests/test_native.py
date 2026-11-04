@@ -9,6 +9,7 @@ import threading
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import support
 import kwatch
 import native_host
 
@@ -18,6 +19,7 @@ def frame(obj):
     return struct.pack("=I", len(body)) + body
 
 
+@support.python_only("native_host.py becomes --native-host: Swift tests cover it")
 class NativeFraming(unittest.TestCase):
     def test_frames_become_json_lines_on_the_socket(self):
         ours, theirs = socket.socketpair()
@@ -48,6 +50,7 @@ class NativeFraming(unittest.TestCase):
         self.assertEqual(out.getvalue(), b"")
 
 
+@support.python_only("native_host.py becomes --native-host: Swift tests cover it")
 class Kqueue(unittest.TestCase):
     def test_a_file_appearing_in_a_watched_directory_wakes_the_wait_at_once(self):
         with tempfile.TemporaryDirectory() as d:

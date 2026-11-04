@@ -210,3 +210,92 @@ conformance run stays a separate script, `poc/router/tests/run_swift.sh`: it bui
   machine once.
 - `install_native.py`, until the app writes the manifest.
 - `routerd.py`, which still runs during development until slice 6 is green and the live benchmark has passed through the app.
+
+## Protocol
+
+What `poc/router/tests/swift_core.py` sends and `fake_bridge.py` (its Python stand-in) answers. `Fjord --courier-test --db <path>` must
+match it line for line. One JSON object per line, UTF-8, on stdin and stdout. The proxy gives up on a reply after 15 s of silence and fails
+the test with the request it was waiting for, so the bridge must flush every line.
+
+**Request.** `{"id": n, "op": "<op>", "t": <wall seconds>, "up": <uptime seconds>, …fields}`. `id` counts up from 1 for each process.
+`t` and `up` set the injected clock (`clock()` and `uptime()`) before the op runs. `"db": true` is added when Python has written to the
+file since the last request: re-read what is cached from it (`chatted`).
+
+**Reply.** After the lines below, exactly one `{"id": n, "result": <json or null>}`, or `{"id": n, "error": "<Type>: <message>"}`. After
+an error the process goes on. The lines before the reply, in the order they happened:
+
+- `{"out": <command>}`: a command the core sent to the page (`core.out`).
+- `{"reply": cb, "event": <event>}`: the `reply` callback of `say`, `tool` or `dev_command`.
+- `{"finished": cb, "intent": <intent row>}`: the `finished` callback of `say`, `tool` or `confirm`.
+
+`cb` is the number the request carried in `cb`.
+
+**Values.** Sets and tuples go out as arrays (a set sorted by its JSON text), dict keys as strings, a Python `None` as `null`. A run
+inside a request's arguments is `{"$run": id}` (or `{"$run": id, "fields": {…}}` for a run that has ended).
+
+| Op | Fields | Result |
+|---|---|---|
+| `start` | `constants: {KEPT, DEV_WAIT}` | `null`. Sent first: builds the core on the `--db` file |
+| `set_constant` | `name` (`KEPT` or `DEV_WAIT`), `value` | `null` |
+| `handle` | `event` | `null` |
+| `connection` | `host` (bool), `current` (bool) | `null` |
+| `local` | `local` | `null` |
+| `say` | `message`, `project`, `thread`, `cb` | `null`. With neither `project` nor `thread` it is an error: no model |
+| `tool` | `name`, `args` (object), `cb` | `null` |
+| `confirm` | `intent`, `cb` | `null` |
+| `correct` | `intent`, `project` | `null` |
+| `note` | `topic`, `text` | `null` |
+| `tell` | none | `null` |
+| `tick` | `now` (absent: use `t`) | `null` |
+| `next_deadline` | none | number or `null` |
+| `dev_command` | `kind`, `fields` (object), `cb` | `null`. Its answer is a `reply` line |
+| `dev_cancel` | `target` | `null` |
+| `set_run` | `run` (id), `field`, `value` | `null` |
+| `call` | `name`, `args` (array), `kwargs` (object) | the method's result |
+| `state` | none | the dump below |
+| `pure` | `fn`, `args` (array), `kwargs` (object) | the function's result |
+
+**`call`** names: `advance_all`, `safely`, `acting`, `yielded`, `in_page`, `tab_held`, `tab_idle`, `cancel_send`, `finish`, `command`,
+`next_id`, `remember`, `recheck_pauses`, `ready`, `stale`, `goto`, `advance`, `start`, `tool_busy`, `unheard_sends`, `done`, `wake_me`.
+Anything else is an error. A `{"$run": id}` argument (also inside `kwargs`) is that live run. For `ready` and `stale`, `args` is
+`[board, [project, thread]]`: the first is ignored (the core's own board is used), the second is the place as a two-element array.
+`finish` is `[run, status, cause, row]` with the rest of the changes in `kwargs`.
+
+**`state`** result, with Python's field names throughout:
+
+```
+{"runs": {"<id>": {every field of the run}}, "ended": {"<id>": {the run's final fields}},
+ "watched": {"<id>": …}, "watch_open": {…, "to": [project, thread]} | null, "watch_back": {"<id>": …}, "moves": …, "unproved": […ids],
+ "stale_goal": …, "unsettled": [[project, thread], …], "arrived": [..], "pages": …, "linked": …, "commands": …,
+ "known": {"<key>": [subkeys]}, "dev": [ids], "closing": …, "relinked": …,
+ "claimed": [[project, thread, [row keys]], …], "board": {the folded board}}
+```
+
+`ended` holds the final fields of each run that ended since the previous `state` reply (the proxy keeps a test's reference to a run
+current, and Python's run dict keeps its last fields after it ends). `runs` fields `moving_to` and `back` are two-element arrays,
+`heard` is an array of command ids.
+
+**`pure`** `fn` names, with the shapes Swift sends (the proxy rebuilds sets, tuples and dicts from them):
+
+| `fn` | `args` | `result` |
+|---|---|---|
+| `board.fold` | `[rows]` | the board; `here` is `[project, thread]` or `null` |
+| `board.start` | `[told]` | a handle `{"acc": n}` |
+| `board.step` | `[handle, row]` | the handle |
+| `board.fold_into` | `[handle, rows]` | the handle |
+| `board.acc_set` | `[handle, field, value]` | `null`. The tests set `here` (`[project, thread]` or `null`) |
+| `board.finish` | `[handle]` | the board (the handle stays usable) |
+| `board.assign` | `[board, [[id, proof], …], claimed?]` | `[[id, key], …]` for the sends that got a row |
+| `board.proof_holds` | `[board, proof, claimed?]` | bool or `null` |
+| `board.new_rows`, `board.merge_rows`, `board.loose`, `board.starts_with`, `board.ends_shortly` | the Python arguments in order | the Python result |
+| `do.proved` | `[board, proof, claimed?]` | `[done, cause, key]` |
+| `do.proved_all` | `[board, [[id, proof], …], claimed?]` | `[[id, [done, cause, key]], …]` in proof order |
+| `do.anchor`, `do.baselined`, `do.turning` | the Python arguments | the proof |
+| `do.tool_args` | `[tool, args]` | `[tool, args]` |
+| `do.handoff` | `[thread, words]` | the pair as an array |
+| `page.seen_rows` | `[event]` | the rows |
+| `tell.facts` | `[before, after]` | the facts |
+| `tell.plan` | `[found, told, claims, now]`, `kwargs: {window?}` | `[say, quiet]` |
+
+`claimed` is an array of row keys, sent positionally or as `kwargs.claimed`. An unknown `fn` is an error. `pure` needs no `start`:
+the proxy runs one process for them on an empty database and `t`, `up` are 0.

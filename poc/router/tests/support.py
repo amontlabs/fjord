@@ -1,5 +1,7 @@
 import os
 import sys
+import tempfile
+import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import fake_page
@@ -7,6 +9,19 @@ import routerd
 import store
 
 NOW = 1_000_000.0
+
+# FJORD_CORE=swift runs these tests against the Swift core: routerd.Core is SwiftCore (swift_core.py), which speaks to
+# `Fjord --courier-test`, and the pure board, do, page and tell functions the tests call go through the same binary. See run_swift.sh.
+SWIFT = os.environ.get("FJORD_CORE") == "swift"
+if SWIFT:
+    import swift_core
+    routerd.Core = swift_core.SwiftCore
+    swift_core.install_pure()
+
+
+def python_only(reason):
+    """Skips a test (or a class) under FJORD_CORE=swift. Every use names why the Swift core can't take it: `grep -rn python_only tests`."""
+    return unittest.skip(f"python_only: {reason}") if SWIFT else (lambda test: test)
 
 
 class Clock:
@@ -37,7 +52,8 @@ class Spy:
 
 
 def memory_db():
-    return store.connect(":memory:")
+    """A fresh database. Under the switch the bridge opens the same file, so it is a temp file."""
+    return store.connect(tempfile.mkstemp(suffix=".db", dir=swift_core.TMP)[1] if SWIFT else ":memory:")
 
 
 def world(models=None, db=None, page=None, session=True):

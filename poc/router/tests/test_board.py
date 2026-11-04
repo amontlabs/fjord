@@ -68,6 +68,7 @@ class Fold(unittest.TestCase):
             core.handle(event)
         self.assertEqual(len(core.board()["claims"]), 1)
 
+    @support.python_only("reads core.acc (the state dump's board replaces it)")
     def test_rows_merge_by_index_and_the_board_equals_a_fold_of_seen(self):
         core, page = support.world()
         for n in range(3):

@@ -333,6 +333,7 @@ class Set(Tools):
         self.assertNotIn("chan_a", self.core.stale_goal)
         self.assertEqual(routerd.Core(self.core.db, self.page.receive, clock=self.core.clock).stale_goal, {})
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_marked_goal_is_forgotten_once_the_tab_was_loaded_after_it(self):
         self.core.stale_goal["chan_a"] = {"id": 1, "at": NOW, "updated": NOW, "result": {"provable": False}}
         self.core.handle({"type": "page", "signed_in": True, "page_ok": True, "loaded": int((NOW - 60) * 1000), "path": "/code", "thread": None})
@@ -974,6 +975,7 @@ class Create(Tools):
         self.assertEqual((out["status"], out["cause"]), ("failed", do.NOT_CONFIRMED))
         self.assertIn(("open", None, None), self.page.calls[n:])  # it took its look
 
+    @support.python_only("a test writes engine state or replaces a method of the core (python object identity)")
     def test_a_local_folder_of_that_name_does_not_block_a_create(self):
         self.core.acc["projects"]["local:gamma"] = {"id": "local:gamma", "name": "gamma", "where": "local", "chat": None, "draft": None}
         self.core._board = None

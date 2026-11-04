@@ -15,6 +15,7 @@ def intent(words, **more):
     return {"id": 1, "at": NOW - 60, "tool": "send_to_project", "status": "confirmed", "words": words, "project": "p", "correction": None, **more}
 
 
+@support.python_only("context.py becomes RouterContext in the app: Swift unit tests cover it")
 class Context(unittest.TestCase):
     def test_same_input_same_text_and_hash(self):
         a = context.build(board(3), {"tone": "short"}, [intent("hello")], NOW)
