@@ -1411,7 +1411,8 @@ observer.observe(document.body, {
   attributeFilter: ["disabled", "data-index", "data-entry-key", "data-perf-row-streaming", "data-perf-row", "data-home-card", "data-home-section", "data-home-title", "data-home-status-line", "data-home-status-mark", "aria-current", "aria-expanded", "aria-selected", "data-highlighted", "data-closed"],
 });
 // A script with no port (its connect failed, or its reconnect did) connects again rather than say it is alive with nothing to adopt.
-const hello = (message, _sender, reply) => { if (message.kind === "hello") reply({ ok: !stopped && !!(port ?? connect()) }); };
+// The worker asking is a reason to connect now, whatever the backoff says (`connectAfter`): it is the one that wants a page.
+const hello = (message, _sender, reply) => { if (message.kind === "hello") { if (!port) connectAfter = 0; reply({ ok: !stopped && !!(port ?? connect()) }); } };
 chrome.runtime.onMessage.addListener(hello);
 
 connect();

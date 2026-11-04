@@ -160,7 +160,19 @@ async function isFjord(tab, tagged) {
 
 // One ensureTab at a time: callers that come while one runs share it, so two never both find no tab and each create one.
 let ensuring = null;
-const ensure = (except) => (ensuring ??= ensureTab(except).finally(() => { ensuring = null; }));
+const ensure = (except) => (ensuring ??= ensureTab(except).finally(() => { ensuring = null; watchAdoption(); }));
+
+// Nothing may stay stuck without a page (after an extension reload, say): an ensure that failed (a tab not ready, an injection refused) or
+// that left no adopted page (a script that never connected, or one dropped) is tried again after a wait that doubles, a bounded number of
+// times, each one a one-shot timer (not a poll) that a page's adoption cancels. A tab left away from /code isn't retried: nothing to inject.
+const RETRY_MS = 1000, RETRY_MAX = 6;
+let retryTimer = null, retries = 0;
+function watchAdoption() {
+  clearTimeout(retryTimer);
+  if (page || retries >= RETRY_MAX) return;
+  retryTimer = setTimeout(() => { retries++; ensure().catch(() => {}); }, RETRY_MS * 2 ** retries);
+}
+const adoptedPage = () => { clearTimeout(retryTimer); retries = 0; };
 
 // Where a tab that left the Claude Code page is, by its address's structure alone: routerd is told why it has no page. A sign-in
 // (claude.ai's /login, or another origin: an identity provider) is `signed_in: false`; any other page of claude.ai is `away`.
@@ -197,6 +209,14 @@ async function ensureTab(except) {
   const alive = await chrome.tabs.sendMessage(tab.id, { kind: "hello" }).catch(() => null);  // no answer: no script, or one told to stop (it removed its listener)
   if (!alive?.ok) await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
 }
+
+// A tab that was still loading when ensureTab looked (an extension reload during a navigation) gets no script from the manifest if its
+// document had already begun: when it completes with no page adopted, it is ensured again.
+chrome.tabs.onUpdated.addListener(async (id, change) => {
+  if (change.status !== "complete" || page) return;
+  const { tabId } = await chrome.storage.session.get("tabId");
+  if (id === tabId) ensure().catch(() => {});
+});
 
 // A second Fjord tab comes from a restart: Chrome restores one, unloaded, while startup makes another. Only tagged tabs go.
 async function closeOthers(id) {
@@ -251,6 +271,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
   old?.disconnect();
   page = port;
   adopted = true;
+  adoptedPage();
   closeOthers(tab.id);
   port.postMessage({ kind: "tagged" }); // it may have loaded without the tag: it needs it for the next restart
   if (!host) connectHost(false);
