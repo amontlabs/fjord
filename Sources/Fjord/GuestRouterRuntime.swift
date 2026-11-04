@@ -438,17 +438,6 @@ import Foundation
         } == true
     }
 
-    /// What the plugin in the guest session `cliSessionID` says it can do and the turn it runs, as of the last read of its
-    /// computer; nil when the session isn't one Fjord started there, or isn't live.
-    func presence(forGuestSessionID cliSessionID: String) -> (capabilities: [String], turn: ClaudePlugin.Presence.Turn?, hasTurnField: Bool)? {
-        guard let pending = store?.router.pendingDesktopStarts.first(where: {
-            $0.guestSessionID == cliSessionID && $0.state == .matched
-        }), let desktopID = pending.desktopSessionID,
-              let found = evidence[pending.location.key]?.first(where: { $0.hostSessionID == desktopID && $0.cliSessionID == cliSessionID })
-        else { return nil }
-        return (found.capabilities, found.turn, found.hasTurnField)
-    }
-
     /// Seeds what a read of the guest would have found (tests).
     func seedEvidence(_ found: [GuestSessionEvidence], for computer: GuestReference) { evidence[computer.key] = found }
 

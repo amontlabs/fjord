@@ -378,7 +378,7 @@ extension Store {
     /// leaves them in the history.
     private static func staleFailure(_ item: RouterDecision.Done) -> Bool {
         guard case .failed(let why) = item else { return false }
-        return why == "interrupted" || why.hasPrefix("its first message wasn't sent: Fjord quit") || why.hasPrefix("It may not have arrived")
+        return why == "interrupted" || why.hasPrefix("It may not have arrived")
     }
 
     /// Makes the run an operation belongs to say what the operation now says, when it was recovered after the run had ended
