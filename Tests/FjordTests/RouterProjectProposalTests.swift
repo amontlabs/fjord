@@ -539,6 +539,22 @@ import Testing
         #expect(record?.decision.target == "new claude.ai project “fjord-ios-companion”")
     }
 
+    // Round 5, 2: a reconcile asked for while one runs isn't dropped: it runs once after.
+    @Test func aReconcileAskedForMeanwhileRunsAfter() async throws {
+        let engine = GatedEngine()
+        let p = RouterProjectProposal(saved: .init(message: "m", fields: first, made: [.create, .repo, .instructions, .folder],
+                                                   project: "chan_A", stopped: "x", sent: 7),
+                                      reviser: RouterProjectFakeReviser(), engine: engine)
+        p.settleAfter = nil
+        let firstRun = Task { await p.reconcile() }
+        await waitUntil { engine.waiting }
+        await p.reconcile()  // queued, not dropped
+        engine.answer = CourierIntentStatus(state: .delivered)
+        engine.release(with: nil)  // the first look: the engine couldn't say
+        await firstRun.value
+        #expect(p.phase == .created)
+    }
+
     @Test func returnInTheComposerRevisesWithWordsAndCreatesWithout() async {
         let store = quiet()
         let model = RouterModel()
@@ -576,4 +592,22 @@ import Testing
     }
     func status(of id: Int) async -> CourierIntentStatus? { nil }
     func intent(matching words: String, project: String?, since: Date) async -> CourierLookup { .none }
+}
+
+/// An engine whose first status look waits until released, then answers `answer`.
+@MainActor private final class GatedEngine: RouterProjectEngine {
+    private(set) var waiting = false
+    var answer: CourierIntentStatus?
+    private var gate: CheckedContinuation<CourierIntentStatus?, Never>?
+    private var gated = true
+    func release(with status: CourierIntentStatus?) { gate?.resume(returning: status); gate = nil }
+    func run(_ tool: CourierTool, _ args: [String: JSON], waiting: @escaping @MainActor (String?) -> Void) async -> RouterProjectOutcome { .done }
+    func send(_ words: String, display: String, to project: String, named name: String, key: String) async -> Int { 0 }
+    func status(of id: Int) async -> CourierIntentStatus? {
+        guard gated else { return answer }
+        gated = false
+        waiting = true
+        return await withCheckedContinuation { gate = $0 }
+    }
+    func intent(matching words: String, project: String?, since: Date) async -> CourierLookup { .unknown }
 }

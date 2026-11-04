@@ -377,6 +377,12 @@ struct RouterCourierSource {
             return 0
         }
         track(id, work, replacing: old)
+        // A keyed send the engine answered with an intent it already had (settled before a relaunch, say): the engine says
+        // nothing more of it, so its pill starts from the engine's record instead of "sending".
+        if case .send(_, _, _, _, _?) = request, lastUpdates[id] == nil, let status = await source.status(id), lastUpdates[id] == nil,
+           status.state != .sending {
+            apply(CourierUpdate(intentID: id, state: status.state, cause: status.cause, before: nil, at: Date()))
+        }
         return id
     }
 

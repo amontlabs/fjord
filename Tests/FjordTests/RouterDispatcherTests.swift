@@ -190,6 +190,17 @@ import Testing
         #expect(RouterProjectContext.routings(s, statuses: statuses).isEmpty)
     }
 
+    // Round 5, 1: a keyed send answered with an intent the engine already had starts its pill from the engine's record.
+    @Test func aRepeatedKeysPillStartsFromTheEnginesRecord() async {
+        let (s, _, _) = setup()
+        s.routerCourier.attach(RouterCourierSource(submit: { _ in 3 }, updates: AsyncStream { _ in },
+                                                   status: { $0 == 3 ? CourierIntentStatus(state: .delivered) : nil }))
+        let id = await s.routerCourier.send("once", to: .project("lookout"), key: "p#0")
+        #expect(id == 3)
+        #expect(s.routerCourier.items.first { $0.id == 3 }?.state == .delivered)
+        #expect(s.routerCourier.lastUpdates[3]?.state == .delivered)
+    }
+
     // Round 3 F: a wait on the pills ends when its task is cancelled.
     @Test func aWaitOnAnIntentEndsWhenCancelled() async {
         let (s, _, _) = setup()

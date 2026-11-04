@@ -159,6 +159,8 @@ struct RouterProjectOutcome: Equatable, Sendable {
     /// Made by a reconcile before the dispatcher reattached: the history hears it on `reattached`.
     @ObservationIgnored private var createdUnheard = false
     @ObservationIgnored private var reconcilingNow = false
+    /// A reconcile asked for while one ran (the engine attached meanwhile): it runs once more after.
+    @ObservationIgnored private var reconcileAgain = false
     private(set) var fields: RouterProjectFields { didSet { onSave() } }
     internal(set) var phase: Phase = .proposed { didSet { onSave() } }
     /// What the last revision changed ("name, repo"); empty before one.
@@ -236,9 +238,18 @@ struct RouterProjectOutcome: Equatable, Sendable {
     /// is sent again); failed, Return sends it; the engine can't say, it stays stopped. Nothing to look at: nothing happens.
     /// Run at relaunch and again each time the engine attaches (it can't say before).
     func reconcile() async {
-        guard !ended, !reconcilingNow, case .failed = phase, sentIntent != nil || sending != nil || (!lookedUp && allMade) else { return }
+        // One at a time; one asked for meanwhile isn't dropped: it runs once after.
+        guard !reconcilingNow else { reconcileAgain = true; return }
         reconcilingNow = true
         defer { reconcilingNow = false }
+        repeat {
+            reconcileAgain = false
+            await reconcileOnce()
+        } while reconcileAgain
+    }
+
+    private func reconcileOnce() async {
+        guard !ended, case .failed = phase, sentIntent != nil || sending != nil || (!lookedUp && allMade) else { return }
         let went = await delivery()
         known = went
         guard !ended, went == .went else { return }
