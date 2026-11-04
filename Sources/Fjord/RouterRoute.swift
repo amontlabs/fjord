@@ -21,31 +21,24 @@ extension RouterTools {
 }
 
 extension Store {
-    /// Everything you sent each session, oldest first. A divided message gives each session its own part's words.
+    /// Everything you sent each session, oldest first. 
     func toldAll() -> [String: [String]] {
         var out: [String: [String]] = [:]
-        for entry in router.decisions where entry.generated != true {
-            for place in entry.places {
-                guard case .you(let text) = place.trigger, let session = place.links.sessions.last,
-                      place.done.contains(where: \.sendsWords)
-                else { continue }
-                out[session, default: []].append(text)
-            }
+        for entry in router.decisions {
+            guard case .you(let text) = entry.trigger, let session = entry.links.sessions.last,
+                  entry.done.contains(where: \.sendsWords) else { continue }
+            out[session, default: []].append(text)
         }
         return out
     }
 
-    /// What you last sent each session, and when: from the decision log, your messages that went to one (a divided message's
-    /// part, its own words).
+    /// What you last sent each session, and when: from the decision log, your messages that went to one.
     func lastTold() -> [String: (text: String, at: Date)] {
         var out: [String: (text: String, at: Date)] = [:]
-        for entry in router.decisions where entry.generated != true {
-            for place in entry.places {
-                guard case .you(let text) = place.trigger, let session = place.links.sessions.last,
-                      place.done.contains(where: \.sendsWords)
-                else { continue }
-                out[session] = (text, entry.at)
-            }
+        for entry in router.decisions {
+            guard case .you(let text) = entry.trigger, let session = entry.links.sessions.last,
+                  entry.done.contains(where: \.sendsWords) else { continue }
+            out[session] = (text, entry.at)
         }
         return out
     }

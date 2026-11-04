@@ -128,22 +128,9 @@ enum RouterStream {
     }
 }
 
-/// What a `claude` process Fjord runs for a delivery is started with.
+/// The version the Router's MCP server reports.
 enum RouterAgent {
-    /// The gate: every SendMessage asks first (Claude Code's own permission prompt, which Fjord answers over stdin).
-    /// Its native path fails closed: no answer, a closed stream or a malformed one is a refusal.
-    nonisolated static func gateSettings() -> Data {
-        Data(#"{"permissions":{"ask":["SendMessage"]}}"#.utf8)
-    }
-
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1" }
-
-    /// Why SendMessage didn't deliver, from its result (`{"success":false,"message":…}`); nil when it did.
-    nonisolated static func undelivered(_ result: String) -> String? {
-        guard let obj = (try? JSONSerialization.jsonObject(with: Data(result.utf8))) as? [String: Any],
-              obj["success"] as? Bool == false else { return nil }
-        return obj["message"] as? String ?? "Not delivered"
-    }
 }
 
 /// Bytes from a pipe, cut into whole lines; touched only by the pipe's handler.

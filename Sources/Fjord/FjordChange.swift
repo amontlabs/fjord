@@ -220,15 +220,11 @@ extension FjordChange {
         }
     }
 
-    /// An action in full: what it is, when it runs, its model and effort, and its whole prompt or comment.
+    /// An action in full: what it is, when it runs, and its whole prompt or comment.
     static func describe(_ action: CategoryAction) -> String {
         let when = action.trigger == .enter ? "when a thing comes in" : "for each new fact"
-        var settings = ""
-        if case .askRouter = action.kind {
-            settings = ", model \(action.model ?? "your default"), effort \(action.effort ?? "your default")"
-        }
         switch action.kind {
-        case .askRouter(let prompt): return "\(action.title) (\(when)\(settings)), prompt: \(prompt.words())"
+        case .askRouter(let prompt): return "\(action.title) (\(when)), prompt: \(prompt.words())"
         case .comment(let body): return "\(action.title) (\(when)), comment: \(body)"
         case .rerun: return "\(action.title) (\(when))"
         }

@@ -788,14 +788,12 @@ enum RouterFeed {
     /// session was busy waits for the turn under way to end, so until that turn has (and the delivery's own turn
     /// hasn't), a message is the delivery's.
     private static func fjordSent(_ state: RouterState, _ session: String, turns: Int, atMs ms: Int64) -> Bool {
-        return state.decisions.contains { entry in
-            entry.parts.contains { part in
-                guard let sent = part.delivered, sent.session == session else { return false }
-                let at = Stamp.ms(sent.at)
-                guard at - deliveredSlack <= ms else { return false }
-                if ms <= at + deliveredSlack { return true }
-                return sent.busy && turns <= sent.turns + 1 && ms <= at + Int64(RouterDecision.Delivered.window * 1000)
-            }
+        state.decisions.contains { entry in
+            guard let sent = entry.delivered, sent.session == session else { return false }
+            let at = Stamp.ms(sent.at)
+            guard at - deliveredSlack <= ms else { return false }
+            if ms <= at + deliveredSlack { return true }
+            return sent.busy && turns <= sent.turns + 1 && ms <= at + Int64(RouterDecision.Delivered.window * 1000)
         }
     }
 
@@ -1271,10 +1269,10 @@ extension Store {
     /// Router is off, or not set up yet). The key is read off the main thread (by the switch, or `reloadRelayKey`) and used
     /// while its file is the same; here only a stat is made. A key not read yet, or changed, is read again in the
     /// background, and nil is returned meanwhile.
-    func signRelay(body: String, target: String, settings: SessionSettings? = nil) -> String? {
+    func signRelay(body: String, target: String) -> String? {
         guard let paths = routerFiles else { return nil }
         if let cached = relayKeyCache, cached.matches(paths.relayKey) {
-            return RelaySigner.sign(body: body, target: target, key: cached.key, model: settings?.model, effort: settings?.effort)
+            return RelaySigner.sign(body: body, target: target, key: cached.key)
         }
         relayKeyCache = nil
         Task { await reloadRelayKey() }

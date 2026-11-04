@@ -145,16 +145,8 @@ enum ClaudePlugin {
 
     /// The plugin takes signed messages from `relay/<session id>/` (see `RelayInbox`).
     static let inboxCapability = "inbox-v1"
-    /// The plugin reads v2 messages (a model and an effort inside the signed bytes) from its inbox and applies them.
-    static let settingsCapability = "settings-v1"
     /// The plugin takes back a delivery it was given, on a signed abort in its inbox (`RelaySigner.signAbort`).
     static let abortCapability = "abort-v1"
-    /// The plugin stops the turn under way, whoever started it, on a signed stop in its inbox (`RelaySigner.signStop`).
-    static let stopCapability = "stop-v1"
-    /// The plugin stops the turn under way and submits a message in one step, on a v3 message (`RelaySigner.sign(interrupt:)`).
-    static let interruptCapability = "interrupt-v1"
-    /// A v4 interrupt names the turn it was judged on, which the plugin enforces.
-    static let interruptTurnCapability = "interrupt-turn-v1"
     /// The plugin carries a signed message to another session through the app's own send tool, on a signed carry order in its
     /// inbox (`RelaySigner.signCarry`), and answers a message handed to its session by the app in its inbox folder.
     static let carryCapability = "carry-v1"
@@ -1216,33 +1208,11 @@ enum RelaySigner {
     /// The text to send to the session whose CLI session id is `target`: the header line, then the body's UTF-8 bytes in
     /// standard base64 (padded, one line), so the peer channel's escaping and Unicode normalization can't change them.
     ///
-    /// With a `model` or an `effort` (already allowlisted, see `SessionSettings`) the header is v2 and the MAC covers them, so
-    /// they can't be forged or changed on the way; only a plugin that says `settings-v1` knows that header, so it's the
-    /// caller's to ask `Store.supportsSettings` first. Without either it is the v1 text, which every plugin reads.
-    static func sign(body: String, target: String, key: String, nonce: UUID = UUID(), now: Date = Date(),
-                     model: String? = nil, effort: String? = nil, interrupt: Bool = false, expectTurn: String? = nil) -> String {
+    static func sign(body: String, target: String, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
         let ts = String(RouterFeed.Stamp.ms(now))
         let id = nonce.uuidString.lowercased()
         let bytes = Data(body.utf8)
-        if interrupt, let expectTurn {
-            // v4: a v3 header with the turn the interrupt was judged on, covered by the MAC; the plugin refuses it (`turn changed`)
-            // unless that turn is the one running. Only a plugin that says `interrupt-turn-v1` reads it.
-            let m = model ?? "-", e = effort ?? "-"
-            return "⟦fjord v4 \(target) \(id) \(ts) \(m) \(e) 1 \(expectTurn) \(mac(key: key, target: target, nonce: id, ts: ts, body: bytes, model: m, effort: e, interrupt: true, expectTurn: expectTurn))⟧\n"
-                + bytes.base64EncodedString()
-        }
-        if interrupt {
-            // v3: a v2 header with a signed interrupt flag; only a plugin that says `interrupt-v1` reads it.
-            let m = model ?? "-", e = effort ?? "-"
-            return "⟦fjord v3 \(target) \(id) \(ts) \(m) \(e) 1 \(mac(key: key, target: target, nonce: id, ts: ts, body: bytes, model: m, effort: e, interrupt: true))⟧\n"
-                + bytes.base64EncodedString()
-        }
-        guard model != nil || effort != nil else {
-            return "⟦fjord v1 \(target) \(id) \(ts) \(mac(key: key, target: target, nonce: id, ts: ts, body: bytes))⟧\n"
-                + bytes.base64EncodedString()
-        }
-        let m = model ?? "-", e = effort ?? "-"
-        return "⟦fjord v2 \(target) \(id) \(ts) \(m) \(e) \(mac(key: key, target: target, nonce: id, ts: ts, body: bytes, model: m, effort: e))⟧\n"
+        return "⟦fjord v1 \(target) \(id) \(ts) \(mac(key: key, target: target, nonce: id, ts: ts, body: bytes))⟧\n"
             + bytes.base64EncodedString()
     }
 
@@ -1255,19 +1225,6 @@ enum RelaySigner {
         let input = Data("abort-v1\n\(target)\n\(id)\n\(ts)\n\(cancels)\n".utf8)
         let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
         return "⟦fjord abort v1 \(target) \(id) \(ts) \(cancels) \(code.map { String(format: "%02x", $0) }.joined())⟧\n"
-    }
-
-    /// A stop for the session `target`: a header line alone, `⟦fjord stop v1 <target> <nonce> <ms> <turn id|-> <hex HMAC-SHA256>⟧`,
-    /// its MAC over `stop-v1\n<target>\n<nonce>\n<ms>\n<turn id|->\n`. With a turn id only that turn is stopped (the plugin
-    /// answers `not-running` when another runs); `nil` stops whichever runs. Only a plugin that says `stop-v1` reads it, from
-    /// its inbox alone.
-    static func signStop(target: String, turn: String?, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
-        let ts = String(RouterFeed.Stamp.ms(now))
-        let id = nonce.uuidString.lowercased()
-        let turn = turn ?? "-"
-        let input = Data("stop-v1\n\(target)\n\(id)\n\(ts)\n\(turn)\n".utf8)
-        let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
-        return "⟦fjord stop v1 \(target) \(id) \(ts) \(turn) \(code.map { String(format: "%02x", $0) }.joined())⟧\n"
     }
 
     /// A carry order for the plugin of the session `carrier`: it hands `message` (a signed message of Fjord's for another session,
@@ -1283,17 +1240,6 @@ enum RelaySigner {
         let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
         return "⟦fjord carry v1 \(carrier) \(id) \(ts) \(local) \(code.map { String(format: "%02x", $0) }.joined())⟧\n"
             + bytes.base64EncodedString()
-    }
-
-    /// The v2 MAC: `v2\n<target>\n<nonce>\n<ts>\n<model|->\n<effort|->\n` and the body; with `interrupt` the v3 one, which
-    /// has the flag (`1`) on a line of its own after the effort.
-    static func mac(key: String, target: String, nonce: String, ts: String, body: Data, model: String, effort: String,
-                    interrupt: Bool? = nil, expectTurn: String? = nil) -> String {
-        let head = expectTurn != nil ? "v4" : interrupt == nil ? "v2" : "v3", flag = interrupt.map { "\($0 ? 1 : 0)\n" } ?? ""
-        let turn = expectTurn.map { "\($0)\n" } ?? ""
-        let input = Data("\(head)\n\(target)\n\(nonce)\n\(ts)\n\(model)\n\(effort)\n\(flag)\(turn)".utf8) + body
-        let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
-        return code.map { String(format: "%02x", $0) }.joined()
     }
 
     /// HMAC-SHA256, keyed with the key's hex text (UTF-8), over the UTF-8 of `v1\n<target>\n<nonce>\n<ts>\n` followed by
@@ -1772,7 +1718,6 @@ extension RouterPaths {
 extension Store {
     /// Whether `cli`'s plugin applies a model and an effort carried in a message (it says `settings-v1`, under the key held
     /// now). An older plugin doesn't: nothing with settings is sent to it.
-    func supportsSettings(_ cli: String) async -> Bool { await supports(ClaudePlugin.settingsCapability, cli) }
 
     /// Whether `cli`'s plugin takes back a delivery on a signed abort (it says `abort-v1`, under the key held now).
     func supportsAbort(_ cli: String) async -> Bool { await supports(ClaudePlugin.abortCapability, cli) }

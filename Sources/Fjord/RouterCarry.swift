@@ -18,10 +18,8 @@ import Foundation
 /// (nothing can send it until you open the session).
 struct DeliveryOperation: Codable, Equatable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable {
-        /// Your words to a session that already existed.
+        /// Your words to a card's session.
         case message
-        /// The first message of a session Fjord started.
-        case firstMessage
     }
 
     enum State: String, Codable, Sendable { case waiting, sent, unsure, refused, needsYou }

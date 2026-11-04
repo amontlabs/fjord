@@ -2,16 +2,12 @@ import Foundation
 import Testing
 @testable import Fjord
 
-/// The Router's capability list is the one source of the routing text, the run's tools and its role.
+/// The Router's capability list is the one source of the run's tools and its role.
 @MainActor
 struct RouterCapabilitiesTests {
 
-    /// The routing text keeps the card-action clauses it was measured with (the next stage decides about them); the run itself
-    /// has no tool for a card, a project or a session.
-    @Test func theRoutingTextKeepsTheMeasuredCardClausesWhileTheRunHasNoCardTools() {
-        let text = RouterCapability.changeFjordCriteria
-        #expect(text.contains("archive a Router card") && text.contains("reopen a Router card") && text.contains("as seen"))
-        #expect(!text.contains("mute or unmute a project") && !text.contains("stop a running session"))
+    /// The run has no tool for a card, a project or a session.
+    @Test func theRunHasNoCardOrSessionTools() {
         let tools = RouterCapability.toolNames(.changeFjord, triage: true)
         for gone in ["mark_seen", "archive_cards", "reopen_card", "mute_project", "stop_session"] { #expect(!tools.contains(gone), "\(gone)") }
         // The Brief (the role says it is read through `board`) is readable in a change run too, as in a question run.

@@ -10,7 +10,6 @@ final class FakePerformer: ActionPerformer {
     var messages: [ActionMessage] = []
     var comments: [(repo: String, number: Int, body: String)] = []
     var reruns: [Int] = []
-    var cloneFolders: [String: [String]] = [:]
     var failed: [FailedRun] = []
     var failure: Error?
     /// Called as each message is sent or comment posted, before it is recorded: the world changing meanwhile.
@@ -47,7 +46,6 @@ final class FakePerformer: ActionPerformer {
         return 2
     }
 
-    func clones(of repo: String) -> [String] { cloneFolders[repo] ?? [] }
 }
 
 /// A performer that looks at actions.json on disk as each session is started.
@@ -69,7 +67,6 @@ final class DiskCheckingPerformer: ActionPerformer {
     func comment(repo: String, number: Int, body: String) async throws -> URL? { try await inner.comment(repo: repo, number: number, body: body) }
     func failedRuns(for thing: Thing) async throws -> [FailedRun] { try await inner.failedRuns(for: thing) }
     func rerun(repo: String, run: FailedRun) async throws -> Int { try await inner.rerun(repo: repo, run: run) }
-    func clones(of repo: String) -> [String] { inner.clones(of: repo) }
 }
 
 @MainActor
@@ -941,28 +938,6 @@ final class DiskCheckingPerformer: ActionPerformer {
 
     // MARK: Words
 
-    @Test func theMessageIsYourPromptWithTheThingTaggedWhereItSaysIt() async {
-        let (store, performer) = store([], actions: [session])
-        await store.runActions()
-        var thing = InboxFixture.pr(12, repo: "o/r", title: "Warm pool", by: Person(login: "alice"))
-        thing.comments = [commented("c1", by: "bob")]
-        add(store, thing)
-        await store.runActions()
-        let sent = performer.asked.first
-        #expect(sent?.source == InboxFixture.category().name)
-        // `{title}`, `{repo}#{number}` and `{url}` were made "this notification", `{author}` "its author".
-        #expect(sent?.message == "Look at @pr:o/r#12 by its author (@pr:o/r#12) @pr:o/r#12")
-        let message = performer.messages.first
-        #expect(message?.source.origin.category == InboxFixture.category().name)
-        #expect(message?.source.title == "o/r#12 Warm pool")
-        // What GitHub wrote is never in the words: it is in the thing's block, which the Router attaches fenced.
-        let (text, mentions) = store.composeForRouter(message?.parts ?? [])
-        #expect(text == "Look at @o/r#12 by its author (@o/r#12) @o/r#12")
-        #expect(!text.contains("Warm pool") && !text.contains("alice") && !text.contains("bob"))
-        let block = RouterPointers.context(mentions, store: store) ?? ""
-        #expect(block.contains("- Title: Warm pool") && block.contains("Last comment, by @bob"))
-        #expect(block.contains(UntrustedFence.github.open))
-    }
 
     @Test func aPromptWithoutTheThingHasItTaggedAtTheEnd() {
         let prompt = ActionPrompt([.text("Look at it")])
@@ -1118,16 +1093,6 @@ final class DiskCheckingPerformer: ActionPerformer {
         }
     }
 
-    @Test func theRealPerformerFailsWhileTheRouterIsOff() async {
-        let store = InboxFixture.store([])
-        store.router.enabled = false
-        let origin = SessionOrigin(category: "C", thing: "o/r#1 T", actionID: "a", runID: "r")
-        let message = ActionMessage(parts: [.text("go")], source: RouterActionSource(origin: origin, title: "o/r#1 T"))
-        await #expect(throws: ActionFailure.self) {
-            _ = try await StoreActionPerformer(store: store).sendToRouter(message)
-        }
-        #expect(store.router.decisions.isEmpty)
-    }
 
     // MARK: Re-running
 
@@ -1506,20 +1471,15 @@ final class DiskCheckingPerformer: ActionPerformer {
 
     @Test func previewDoesNothing() async {
         let performer = FakePerformer()
-        performer.cloneFolders = ["o/r": ["/code/r"]]
         let thing = InboxFixture.pr(12, repo: "o/r", title: "Warm pool")
         let clone = CategoryAction.make(.askRouter(prompt: "Look at {title}"))
         let lines = await InboxActions.preview(clone, category: "Mine", thing: thing, facts: [Fact(key: "k", label: "Greptile 3/5")],
                                                performer: performer)
         let shown = lines.joined(separator: "\n")
         #expect(shown.contains("Sends to the Router, as yours from Mine: Look at @o/r#12"))
-        #expect(shown.contains("- /code/r"))
+        #expect(shown.contains("The Router sends it to the claude.ai project or thread it is for"))
         #expect(shown.contains("- Title: Warm pool") && shown.contains("Greptile 3/5"))
         #expect(performer.asked.isEmpty)
-        // No clone: the Router would ask.
-        performer.cloneFolders = [:]
-        let none = await InboxActions.preview(clone, category: "Mine", thing: thing, facts: [], performer: performer)
-        #expect(none.contains("No local clone of o/r: the Router would ask you where it goes."))
     }
 
     @Test func theRunFollowsWhatTheRouterMadeOfItsMessage() {

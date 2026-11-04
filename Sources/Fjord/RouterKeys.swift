@@ -6,8 +6,8 @@ import Foundation
 /// with @ suggestions showing, ↑↓ walk them and Return or Tab picks one; Backspace at the very start takes the last chip off.
 /// Elsewhere: ↑↓ pick a card, Return replies to it, and typing goes to the composer; Space is no key of the Router's (a card
 /// leaves only by its Archive button). The cards are walked in the order the page shows them (`RouterModel.cards`). Esc is
-/// first the Back of a plan in revise mode (its feedback field showing), then dismisses the suggestions, then Jev's pick of a
-/// target, then the pinned target, then the search, then (on the Brief) the card open under a paragraph with its reply,
+/// first the Back of a plan in revise mode (its feedback field showing), then dismisses the suggestions, then drops a proposed
+/// project, then the search, then (on the Brief) the card open under a paragraph with its reply,
 /// then the reply chip, then (on the canvas) closes the history's panel,
 /// then is the Revise… of the plan shown in full (on the canvas, not again once Back left it), then (on the canvas) folds
 /// the card open on it and clears its filter. It never closes the window: with nothing left to step out of, it goes on to

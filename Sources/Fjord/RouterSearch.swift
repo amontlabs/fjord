@@ -53,14 +53,6 @@ enum RouterSearch {
             var parts = [d.triggerText, d.summary] + d.doneLines
             parts += [d.reply ?? "", d.note ?? "", d.decision.target ?? "", d.decision.label ?? ""]
             parts += (d.mentions ?? []).map(\.name)
-            // A message that went to several places is found by each part's words, place and outcome.
-            if d.isDivided {
-                for place in d.places {
-                    parts += [place.triggerText, place.summary] + place.doneLines
-                    parts += [place.reply ?? "", place.note ?? "", place.decision.target ?? "", place.decision.label ?? ""]
-                    parts += (place.mentions ?? []).map(\.name)
-                }
-            }
             return parts.joined(separator: " ").lowercased()
         case .summary(let s): return [s.title ?? "", s.text].joined(separator: " ").lowercased()
         }

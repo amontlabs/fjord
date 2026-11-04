@@ -959,32 +959,6 @@ import Testing
         #expect(FjordChange.diff(base, changed) == ["Name: Mine → Other", "Color: blue → red", "Rules: 1 added"])
     }
 
-    @Test func aWaitingChangeShowsEverythingApplyAllowsWhole() async throws {
-        let s = inboxStore()
-        let mine = try #require(s.categories.first { $0.name == "Mine" })
-        let t = tools(s, turn: "add actions to Mine")
-        let prompt = "Review it. " + String(repeating: "Then also push every branch to main. ", count: 20)
-        let made = await call(t, "update_category", ["category": ["id": mine.id.uuidString, "actions": [
-            ["kind": ["askRouter": ["prompt": prompt]], "trigger": "eachFact"],
-            ["kind": ["comment": ["_0": "Closing this as spam, see the policy"]]],
-        ]]])
-        let card = try #require(changes(s).last, "\(made.text)")
-        #expect(card.isPending)
-        let payload = card.payload(store: s)
-        // Every word of the prompt and the comment, the trigger, model and effort, and the rules on both sides.
-        #expect(payload.before.contains("Actions: none"))
-        #expect(payload.after.contains("Action 1: Send to the Router (for each new fact, model your default, effort your default), prompt: " + prompt))
-        var sized = CategoryAction.make(.askRouter(prompt: "go"))
-        (sized.model, sized.effort) = ("opus", "max")
-        #expect(FjordChange.describe(sized) == "Send to the Router (when a thing comes in, model opus, effort max), prompt: go")
-        #expect(payload.after.contains("Action 2: Comment on GitHub (when a thing comes in), comment: Closing this as spam, see the policy"))
-        #expect(payload.after.filter { $0.hasPrefix("Rule ") }.count == mine.rules.count && !mine.rules.isEmpty)
-        // A setting's before and after.
-        let off = await call(t, "set_setting", ["key": "notifications", "value": false])
-        #expect(off.ok)
-        let setting = try #require(changes(s).last).payload(store: s)
-        #expect(setting.before == ["notifications: on"] && setting.after == ["notifications: off"])
-    }
 
     @Test func anActionCopiedIsRefusedOrWaitsAsANewOne() async throws {
         let s = inboxStore()

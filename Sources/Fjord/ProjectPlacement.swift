@@ -102,12 +102,4 @@ extension Store {
         }
         return fallback ?? claudeSessions[sessionID]?.folderKey ?? ""
     }
-
-    func routerSessionMatchesProject(_ sessionID: String, folder: String) -> Bool {
-        routerProjectFolder(sessionID: sessionID) == folder
-    }
-
-    func routerCardMatchesProject(_ card: RouterCard, folder: String) -> Bool {
-        routerProjectFolder(sessionID: card.sessionID, fallback: card.folder) == folder
-    }
 }

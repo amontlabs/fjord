@@ -107,23 +107,7 @@ private struct ActionRow: View {
             switch action.kind {
             case .askRouter(let prompt):
                 ActionPromptField(prompt: ActionsEditor.prompt(of: $action, else: prompt), store: store)
-                    .tip("Prompt", "Sent to the Router as yours, from this category, with the thing tagged: @this notification says where it goes in your words (else it is added at the end). The Router sends it to a session working in a local clone of the repo, or starts one there; if it isn't sure where, it asks you and waits. A clone whose project runs on a computer (Runs on) gets its session in that computer instead: Fjord saves a checkpoint of it, then prepares the session in Claude with this prompt filled in, and it starts when you press Send there. Its title, link, why it is here and the last comment go with it in a block marked as written by others, so nothing others wrote reads as your words. @ also inserts a snippet, or tags a project, a session or a category.")
-                HStack(spacing: 8) {
-                    MenuChip(title: "Model: " + (action.model?.capitalized ?? "Default"), label: "Model") {
-                        Toggle("Default", isOn: Binding(get: { action.model == nil }, set: { _ in action.model = nil }))
-                        ForEach(ActionSettings.models, id: \.self) { model in
-                            Toggle(model.capitalized, isOn: Binding(get: { action.model == model }, set: { _ in action.model = model }))
-                        }
-                    }
-                    .tip("Model", "The model of a session the Router starts for it; a session already there keeps its own. Default is the one in your Claude Code settings.")
-                    MenuChip(title: "Effort: " + (action.effort ?? "Default"), label: "Effort") {
-                        Toggle("Default", isOn: Binding(get: { action.effort == nil }, set: { _ in action.effort = nil }))
-                        ForEach(ActionSettings.efforts, id: \.self) { effort in
-                            Toggle(effort, isOn: Binding(get: { action.effort == effort }, set: { _ in action.effort = effort }))
-                        }
-                    }
-                    .tip("Effort", "How hard a session the Router starts for it thinks; a session already there keeps its own. Default is the one in your Claude Code settings.")
-                }
+                    .tip("Prompt", "Sent to the Router as yours, from this category, with the thing tagged: @this notification says where it goes in your words (else it is added at the end). The Router sends it to the claude.ai project or thread it is for; if it isn't sure where, it asks you and waits. Its title, link, why it is here and the last comment go with it in a block marked as written by others, so nothing others wrote reads as your words. @ also inserts a snippet, or tags a claude.ai project or thread, a local project or a category.")
                 RouterWarning(strong: InboxActions.rulesMatchOthers(rules))
             case .comment(let text):
                 ActionTextBox(text: Binding(get: { text }, set: { action.kind = .comment($0) }),

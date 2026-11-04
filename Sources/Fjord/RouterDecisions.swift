@@ -24,14 +24,14 @@ struct RouterDecision: Identifiable, Equatable {
         var label: String?
         var confidence: Double?
         /// You went with the target: Jev's pick shown while you typed (sent as it was, or clicked), his suggestion picked on
-        /// an ask, or a target you pinned. An example for the next routings, as corrections are.
+        /// an ask, or a place you tagged. An example for the next routings, as corrections are.
         var confirmed: Bool?
         /// The target itself (`session:<id>`, `answer:<card>`, `new:<folder>`, an intent), and on a correction the one Jev
         /// suggested: what examples name it by, as titles can be shared or change. Nil in entries from before.
         var targetID: String?
         var fromID: String?
         /// Who decided where it goes (`RouterProjectDecision.Decider`: jev, sonnet), for measuring the decider against your
-        /// corrections; nil when no model did (a tag, a pin, a reply).
+        /// corrections; nil when no model did (a tag, a reply).
         var decider: String?
         /// The engine's intent that delivered it to claude.ai: a correction (Send elsewhere) is kept on it too.
         var courierIntent: Int?
@@ -138,93 +138,26 @@ struct RouterDecision: Identifiable, Equatable {
         var changes: [UUID] = []
     }
 
-    /// The entry's id. A one-part entry's only part has the same id (every entry from before, and every one-place message);
-    /// the parts of a divided one have ids of their own (`divide(into:)`).
-    var id = UUID() { didSet { if parts.count == 1 { parts[0].id = id } } }
+    var id = UUID()
     var at: Date
     var trigger: Trigger
-    /// The places the message went to, in order; never empty. Most messages are one part, which the accessors below read
-    /// and write as the entry's own (`decision`, `done`, `outcome`, `links`, `reply`, `note`, `delivered`).
-    var parts: [Part]
+    var decision = Decided()
+    var done: [Done] = []
+    var outcome: Outcome = .pending
+    var links = Links()
+    var reply: String?
+    var note: String?
+    /// The last message it sent to a card's session, for a Cancel.
+    var delivered: Delivered?
 
     /// The pills of your message (`.you`), drawn where their "@name" is; nil for anything else and in entries from before.
     var mentions: [RouterMention]?
     /// A message a category's "Then" sent for a thing (your prompt, `.you`): the category, the thing, the action and its run.
     /// Nil for anything else.
     var fromAction: SessionOrigin?
-    /// The same message's session settings: what a session the Router starts for it is called and runs on. Nil for anything
-    /// else, and in entries from before (the thing's line is the title then, on your defaults).
-    var actionStart: ActionStart?
-    /// No longer set. Kept so entries from before still decode (entries from the compound run also carry keys the decoder
-    /// ignores).
-    var generated: Bool?
 
-    /// One place a message went to: the words for it, and everything that happened there. A message that goes to one place has
-    /// one part, which is the entry itself (same id); a divided one (docs/design/spec/router.md, Several places) has one per
-    /// place, each with an id of its own so the runs, the asks and the history act on a part as they do on a message.
-    struct Part: Codable, Equatable, Identifiable {
-        var id: UUID
-        /// The words for this place; nil: the whole message.
-        var text: String?
-        /// The pills inside `text`, ranged in it (not in the whole message).
-        var mentions: [RouterMention]?
-        /// Where it was fixed to go (a target, or `project:<folder>`); nil for a message routed whole.
-        var place: String?
-        /// The target whose answer it was held for; nil when it didn't wait for one.
-        var waitsFor: String?
-        var decision = Decided()
-        var done: [Done] = []
-        var outcome: Outcome = .pending
-        var links = Links()
-        var reply: String?
-        var note: String?
-        var delivered: Delivered?
-
-        init(id: UUID = UUID(), text: String? = nil, mentions: [RouterMention]? = nil, place: String? = nil, waitsFor: String? = nil,
-             decision: Decided = Decided(), done: [Done] = [], outcome: Outcome = .pending, links: Links = Links()) {
-            self.id = id
-            self.text = text
-            self.mentions = mentions
-            self.place = place
-            self.waitsFor = waitsFor
-            self.decision = decision
-            self.done = done
-            self.outcome = outcome
-            self.links = links
-        }
-
-        /// Its last send was stopped by a cancel: one that sent its words again since (to another place) isn't cancelled.
-        var endsCancelled: Bool {
-            guard let cancelled = done.lastIndex(where: { if case .cancelled(let how) = $0 { how.stopped } else { false } }) else { return false }
-            return done.lastIndex(where: \.sendsWords).map { $0 < cancelled } ?? true
-        }
-
-        /// Adds `done` and the links it implies.
-        mutating func add(_ item: Done, session: String? = nil, card: String? = nil) {
-            done.append(item)
-            switch item {
-            case .changed(let id): if !links.changes.contains(id) { links.changes.append(id) }
-            default: break
-            }
-            if let session, !links.sessions.contains(session) { links.sessions.append(session) }
-            if let card, !links.cards.contains(card) { links.cards.append(card) }
-        }
-    }
-
-    struct ActionStart: Codable, Equatable {
-        var title: String
-        var model: String?
-        var effort: String?
-    }
-
-    /// Where an action's message came from and what a session started for it is (`RouterContext.action`), as it was sent:
-    /// what sending it elsewhere goes with again.
-    var actionSource: RouterActionSource? {
-        fromAction.map { origin in
-            RouterActionSource(origin: origin, title: actionStart?.title ?? origin.thing, model: actionStart?.model,
-                               effort: actionStart?.effort)
-        }
-    }
+    /// Where an action's message came from (`RouterContext.action`): what sending it elsewhere goes with again.
+    var actionSource: RouterActionSource? { fromAction.map { RouterActionSource(origin: $0) } }
     /// Its message was stopped where it was sent (a Cancel that wasn't too late).
     var isCancelled: Bool { delivered?.cancelled?.stopped == true }
 
@@ -233,105 +166,26 @@ struct RouterDecision: Identifiable, Equatable {
         self.id = id
         self.at = at
         self.trigger = trigger
-        self.parts = [Part(id: id, decision: decision, done: done, outcome: outcome, links: links)]
+        self.decision = decision
+        self.done = done
+        self.outcome = outcome
+        self.links = links
     }
 
     static let maxKept = 1000
 
-    /// Adds `done` and the links it implies (to the only part: a divided message's parts are written one by one, through
-    /// `Store.updateDecision` with the part's id).
+    /// Adds `done` and the links it implies.
     mutating func add(_ item: Done, session: String? = nil, card: String? = nil) {
-        guard parts.count == 1 else { return }
-        parts[0].add(item, session: session, card: card)
+        done.append(item)
+        if case .changed(let id) = item, !links.changes.contains(id) { links.changes.append(id) }
+        if let session, !links.sessions.contains(session) { links.sessions.append(session) }
+        if let card, !links.cards.contains(card) { links.cards.append(card) }
     }
 
-    // MARK: Parts
-
-    /// Whether the message went to several places.
-    var isDivided: Bool { parts.count > 1 }
-
-    // With one part these read and write the part, as the entry's own fields were. With several they read what the parts
-    // add up to, and writing them does nothing: a part is written through its own id.
-
-    /// What was decided: for a divided message, that it was split.
-    var decision: Decided {
-        get { parts.count == 1 ? parts[0].decision : Decided(intent: "message", label: "split") }
-        set { if parts.count == 1 { parts[0].decision = newValue } }
-    }
-
-    /// What was done, in the parts' order.
-    var done: [Done] {
-        get { parts.count == 1 ? parts[0].done : parts.flatMap(\.done) }
-        set { if parts.count == 1 { parts[0].done = newValue } }
-    }
-
-    /// How it ended: pending while any part is.
-    var outcome: Outcome {
-        get { parts.count == 1 ? parts[0].outcome : parts.contains { $0.outcome == .pending } ? .pending : .done }
-        set { if parts.count == 1 { parts[0].outcome = newValue } }
-    }
-
-    /// What it touched: the parts' links together.
-    var links: Links {
-        get {
-            guard parts.count > 1 else { return parts[0].links }
-            var all = Links()
-            for part in parts {
-                all.sessions += part.links.sessions.filter { !all.sessions.contains($0) }
-                all.cards += part.links.cards.filter { !all.cards.contains($0) }
-                all.changes += part.links.changes.filter { !all.changes.contains($0) }
-            }
-            return all
-        }
-        set { if parts.count == 1 { parts[0].links = newValue } }
-    }
-
-    var reply: String? {
-        get { parts.count == 1 ? parts[0].reply : nil }
-        set { if parts.count == 1 { parts[0].reply = newValue } }
-    }
-
-    var note: String? {
-        get { parts.count == 1 ? parts[0].note : nil }
-        set { if parts.count == 1 { parts[0].note = newValue } }
-    }
-
-    /// The last message it sent to a session, for a Cancel; a divided message has none of its own (its parts do).
-    var delivered: Delivered? {
-        get { parts.count == 1 ? parts[0].delivered : nil }
-        set { if parts.count == 1 { parts[0].delivered = newValue } }
-    }
-
-    /// Every id the entry answers to: its own, and its parts'.
-    var ids: [UUID] { parts.count == 1 ? [id] : [id] + parts.map(\.id) }
-
-    /// The places as entries of their own, which is what every run, ask and line works on: the entry itself for one part;
-    /// for several, one per part, with the part's id and words (the whole message's when it has none) and pills.
-    var places: [RouterDecision] { parts.count == 1 ? [self] : parts.map(projection) }
-
-    /// A part as an entry of its own (`self` when it is the only one). Writing a change made to it back is the store's
-    /// (`Store.updateDecision`).
-    func projection(_ part: Part) -> RouterDecision {
-        guard parts.count > 1 else { return self }
-        var entry = RouterDecision(id: part.id, at: at, trigger: part.text.map(Trigger.you) ?? trigger)
-        entry.parts = [part]
-        entry.mentions = part.text == nil ? mentions : part.mentions
-        entry.fromAction = fromAction
-        entry.actionStart = actionStart
-        return entry
-    }
-
-    /// Divides the message among `pieces` (two or more; nothing if it is divided already): each gets a fresh id, so the
-    /// maps of the run that read the message whole (its progress and tasks) never meet a part's. Returns the new ids.
-    @discardableResult
-    mutating func divide(into pieces: [Part]) -> [UUID] {
-        guard parts.count == 1, pieces.count >= 2 else { return [] }
-        parts = pieces.map { piece in
-            var part = piece
-            part.id = UUID()
-            return part
-        }
-        return parts.map(\.id)
+    /// Its last send was stopped by a cancel: one that sent its words again since (to another place) isn't cancelled.
+    var endsCancelled: Bool {
+        guard let cancelled = done.lastIndex(where: { if case .cancelled(let how) = $0 { how.stopped } else { false } }) else { return false }
+        return done.lastIndex(where: \.sendsWords).map { $0 < cancelled } ?? true
     }
 
     // MARK: Words
@@ -372,7 +226,6 @@ struct RouterDecision: Identifiable, Equatable {
         default: break
         }
         if isCancelled { return "cancelled" }
-        if isDivided { return dividedSummary }
         guard let first = done.first else { return note.map { Self.clip($0, 80) } ?? (outcome == .pending ? "working" : "replied") }
         let more = done.count > 1 ? " +\(done.count - 1)" : ""
         switch first {
@@ -386,24 +239,7 @@ struct RouterDecision: Identifiable, Equatable {
         }
     }
 
-    /// "split in 3: 2 sent, 1 held": how the parts of a divided message stand.
-    private var dividedSummary: String {
-        var tally: [(String, Int)] = []
-        for part in places.map({ $0.parts[0] }) {
-            let state: String
-            if part.done.contains(where: { if case .failed = $0 { true } else { false } }) { state = "failed" }
-            else if part.delivered?.cancelled?.stopped == true || part.endsCancelled { state = "cancelled" }
-            else if part.outcome == .pending, part.waitsFor != nil, part.done.isEmpty { state = "held" }
-            else if part.outcome == .pending { state = "working" }
-            else if part.done.contains(where: \.sendsWords) { state = "sent" }
-            else { state = "done" }
-            if let i = tally.firstIndex(where: { $0.0 == state }) { tally[i].1 += 1 } else { tally.append((state, 1)) }
-        }
-        return "split in \(parts.count): " + tally.map { "\($0.1) \($0.0)" }.joined(separator: ", ")
-    }
-
     var symbol: String {
-        if isDivided { return "arrow.triangle.branch" }
         if outcome == .reverted { return "arrow.uturn.backward" }
         if isCancelled, outcome == .done || outcome == .pending { return "xmark.circle" }
         if case .action = trigger { return "bolt" }
@@ -440,22 +276,6 @@ struct RouterDecision: Identifiable, Equatable {
         case .session(_, let event): who = "session: \(Self.clip(event, 100))"
         case .system: who = "Fjord"
         }
-        if isDivided {
-            let clauses = places.map { place -> String in
-                let part = place.parts[0]
-                var clause = (part.decision.target ?? part.place ?? "?") + ": “\(Self.clip(place.triggerText, 60))”"
-                if let waits = part.waitsFor { clause += " (waited for \(waits))" }
-                let did = place.lines(forModel: true)
-                if !did.isEmpty { clause += " → " + did.joined(separator: "; ") }
-                switch part.outcome {
-                case .reverted: clause += " (the user reverted this)"
-                case .corrected(let from, let to): clause += " (the user corrected this: not \(from), but \(to))"
-                case .pending, .done: break
-                }
-                return clause
-            }
-            return "\(when) · \(who) → split into \(parts.count) places: " + clauses.joined(separator: " | ")
-        }
         var parts = [who]
         if let target = decision.target { parts.append("target \(target)") }
         if let intent = decision.intent ?? decision.label { parts.append(intent) }
@@ -475,33 +295,23 @@ struct RouterDecision: Identifiable, Equatable {
 
 extension RouterDecision: Codable {
     private enum Key: String, CodingKey {
-        case id, at, trigger, decision, done, outcome, links, reply, note, delivered, mentions, fromAction, actionStart
-        case generated, parts
+        case id, at, trigger, decision, done, outcome, links, reply, note, delivered, mentions, fromAction
     }
 
-    /// A one-part entry is today's flat keys, so its file is as it was and an older build reads it; a divided one has `parts`
-    /// instead of the per-place keys.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
         try c.encode(id, forKey: .id)
         try c.encode(at, forKey: .at)
         try c.encode(trigger, forKey: .trigger)
-        if parts.count == 1 {
-            let part = parts[0]
-            try c.encode(part.decision, forKey: .decision)
-            try c.encode(part.done, forKey: .done)
-            try c.encode(part.outcome, forKey: .outcome)
-            try c.encode(part.links, forKey: .links)
-            try c.encodeIfPresent(part.reply, forKey: .reply)
-            try c.encodeIfPresent(part.note, forKey: .note)
-            try c.encodeIfPresent(part.delivered, forKey: .delivered)
-        } else {
-            try c.encode(parts, forKey: .parts)
-        }
+        try c.encode(decision, forKey: .decision)
+        try c.encode(done, forKey: .done)
+        try c.encode(outcome, forKey: .outcome)
+        try c.encode(links, forKey: .links)
+        try c.encodeIfPresent(reply, forKey: .reply)
+        try c.encodeIfPresent(note, forKey: .note)
+        try c.encodeIfPresent(delivered, forKey: .delivered)
         try c.encodeIfPresent(mentions, forKey: .mentions)
         try c.encodeIfPresent(fromAction, forKey: .fromAction)
-        try c.encodeIfPresent(actionStart, forKey: .actionStart)
-        try c.encodeIfPresent(generated, forKey: .generated)
     }
 
     init(from decoder: Decoder) throws {
@@ -512,18 +322,13 @@ extension RouterDecision: Codable {
         // A pill of a kind no longer made (a session's) leaves the entry without its pills, not without the entry.
         mentions = (try? c.decodeIfPresent([RouterMention].self, forKey: .mentions)) ?? nil
         fromAction = try c.decodeIfPresent(SessionOrigin.self, forKey: .fromAction)
-        actionStart = try c.decodeIfPresent(ActionStart.self, forKey: .actionStart)
-        generated = try c.decodeIfPresent(Bool.self, forKey: .generated)
-        if let decoded = try c.decodeIfPresent([Part].self, forKey: .parts), !decoded.isEmpty {
-            parts = decoded
-            if parts.count == 1 { parts[0].id = id }
-        } else {
-            parts = [Part(id: id, decision: try c.decode(Decided.self, forKey: .decision), done: try c.decode([Done].self, forKey: .done),
-                          outcome: try c.decode(Outcome.self, forKey: .outcome), links: try c.decode(Links.self, forKey: .links))]
-            parts[0].reply = try c.decodeIfPresent(String.self, forKey: .reply)
-            parts[0].note = try c.decodeIfPresent(String.self, forKey: .note)
-            parts[0].delivered = try c.decodeIfPresent(Delivered.self, forKey: .delivered)
-        }
+        decision = try c.decode(Decided.self, forKey: .decision)
+        done = try c.decode([Done].self, forKey: .done)
+        outcome = try c.decode(Outcome.self, forKey: .outcome)
+        links = try c.decode(Links.self, forKey: .links)
+        reply = try c.decodeIfPresent(String.self, forKey: .reply)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+        delivered = try c.decodeIfPresent(Delivered.self, forKey: .delivered)
     }
 }
 
@@ -539,7 +344,7 @@ extension RouterState {
         var over = decisions.count - RouterDecision.maxKept
         decisions = decisions.filter { entry in
             guard over > 0, !entry.links.changes.contains(where: waiting.contains),
-                  entry.fromAction == nil || entry.outcome != .pending, !entry.ids.contains(where: inUse.contains) else { return true }
+                  entry.fromAction == nil || entry.outcome != .pending, !inUse.contains(entry.id) else { return true }
             over -= 1
             return false
         }
@@ -551,39 +356,13 @@ extension RouterState {
     /// they say they were interrupted, rather than "working…" for ever.
     mutating func settleInterrupted() {
         for i in decisions.indices {
-            for j in decisions[i].parts.indices where decisions[i].parts[j].outcome == .pending {
-                var part = decisions[i].parts[j]
-                part.add(.failed("interrupted"))
-                part.outcome = .done
-                decisions[i].parts[j] = part
-            }
+            guard decisions[i].outcome == .pending else { continue }
+            decisions[i].add(.failed("interrupted"))
+            decisions[i].outcome = .done
         }
     }
 
-    /// A target in a few words, as far as the state tells (its card's title for a session; the folder of a project).
-    private func placeWords(_ target: String) -> String {
-        if target.hasPrefix("session:"), let title = cards.last(where: { $0.sessionID == String(target.dropFirst(8)) })?.title {
-            return "“\(RouterDecision.clip(title, 60))”"
-        }
-        for prefix in ["project:", "new:"] where target.hasPrefix(prefix) {
-            return URL(fileURLWithPath: String(target.dropFirst(prefix.count))).lastPathComponent
-        }
-        return target
-    }
-
-    /// An entry, or a part of a divided one as an entry of its own (`RouterDecision.projection`).
-    func record(_ id: UUID) -> RouterDecision? {
-        for entry in decisions {
-            if entry.id == id { return entry }
-            if let part = entry.parts.first(where: { $0.id == id }), entry.parts.count > 1 { return entry.projection(part) }
-        }
-        return nil
-    }
-
-    /// The entry a part belongs to; nil for an entry's own id and for anything else.
-    func parent(of id: UUID) -> UUID? {
-        decisions.first { $0.parts.count > 1 && $0.parts.contains { $0.id == id } }?.id
-    }
+    func record(_ id: UUID) -> RouterDecision? { decisions.first { $0.id == id } }
 
     /// A change waiting for your Apply or Discard, or one an older file kept in its chat, is reached only through an
     /// entry linking it: one whose entry was lost (unreadable) or never made gets an entry of Fjord's own, at its date.
@@ -607,32 +386,18 @@ extension Store {
         return decision.id
     }
 
-    /// Changes an entry in place (nothing if it has been pruned). The id of a part of a divided message changes that part
-    /// only: `change` is made to the part as an entry of its own and written back.
+    /// Changes an entry in place (nothing if it has been pruned).
     func updateDecision(_ id: UUID, _ change: (inout RouterDecision) -> Void) {
-        if let i = router.decisions.firstIndex(where: { $0.id == id }) {
-            var decision = router.decisions[i]
-            change(&decision)
-            if decision != router.decisions[i] { router.decisions[i] = decision }
-            return
-        }
-        guard let i = router.decisions.firstIndex(where: { $0.parts.count > 1 && $0.parts.contains { $0.id == id } }),
-              let j = router.decisions[i].parts.firstIndex(where: { $0.id == id }) else { return }
-        let entry = router.decisions[i]
-        let before = entry.projection(entry.parts[j])
-        var after = before
-        change(&after)
-        guard after != before else { return }
-        var part = after.parts[0]
-        if after.mentions != before.mentions { part.mentions = after.mentions }
-        if after.trigger != before.trigger, case .you(let text) = after.trigger { part.text = text }
-        router.decisions[i].parts[j] = part
+        guard let i = router.decisions.firstIndex(where: { $0.id == id }) else { return }
+        var decision = router.decisions[i]
+        change(&decision)
+        if decision != router.decisions[i] { router.decisions[i] = decision }
     }
 
     /// The last `count` decisions, oldest first, one line each: context for a model (or Jev).
     /// `excluding`: the entry of the run asking (it is the newest, and not yet history).
     func recentDecisions(_ count: Int = 10, now: Date = Date(), excluding: UUID? = nil) -> String {
-        router.decisions.filter { entry in excluding.map { !entry.ids.contains($0) } ?? true }.suffix(count).map { $0.contextLine(now: now) }.joined(separator: "\n")
+        router.decisions.filter { entry in excluding.map { entry.id != $0 } ?? true }.suffix(count).map { $0.contextLine(now: now) }.joined(separator: "\n")
     }
 
     /// A change made in Fjord: part of the run under way, else an entry of its own.
@@ -650,10 +415,8 @@ extension Store {
     func dropChange(_ change: UUID) {
         guard let i = router.decisions.firstIndex(where: { $0.links.changes.contains(change) }) else { return }
         var entry = router.decisions[i]
-        for j in entry.parts.indices where entry.parts[j].links.changes.contains(change) {
-            entry.parts[j].done.removeAll { $0 == .changed(change) }
-            entry.parts[j].links.changes.removeAll { $0 == change }
-        }
+        entry.done.removeAll { $0 == .changed(change) }
+        entry.links.changes.removeAll { $0 == change }
         if entry.done.isEmpty, entry.links.changes.isEmpty, entry.trigger == .system { router.decisions.remove(at: i) } else { router.decisions[i] = entry }
     }
 
@@ -664,10 +427,9 @@ extension Store {
         router.decisions[i].decision.intent = new
     }
 
-    /// After a revert: an entry (or, in a divided message, the part) whose changes are all taken back is reverted.
+    /// After a revert: an entry whose changes are all taken back is reverted.
     func noteReverted(_ change: UUID) {
-        guard let i = router.decisions.firstIndex(where: { $0.links.changes.contains(change) }),
-              let part = router.decisions[i].parts.first(where: { $0.links.changes.contains(change) }) else { return }
+        guard let part = router.decisions.first(where: { $0.links.changes.contains(change) }) else { return }
         let all = part.links.changes.allSatisfy { id in
             router.changes.contains { $0.id == id && $0.isReverted }
         }

@@ -120,24 +120,13 @@ struct FlightFramesKey: PreferenceKey {
         let dispatcher = store.routerDispatcher
         for id in dispatcher.flying where !seen.contains(id) {
             seen.insert(id)
-            // A part of a divided message is read as an entry of its own: its words are the pill's.
             guard let entry = store.router.record(id), case .you(let text) = entry.trigger else { continue }
             // Your next message: the answers still shown have been read.
             for old in pills { if case .answered = old.phase { drop(old.id, store: store) } }
-            // The parts take the place of the message's pill, in its order.
-            if let parent = store.router.parent(of: id), let at = pills.firstIndex(where: { $0.id == parent }) {
-                pills.insert(Pill(id: id, text: text, retries: retried[id] ?? 0), at: at)
-            } else {
-                pills.append(Pill(id: id, text: text, retries: retried[id] ?? 0))
-            }
+            pills.append(Pill(id: id, text: text, retries: retried[id] ?? 0))
         }
         for pill in pills where pill.phase == .pending && !launching.contains(pill.id) {
             guard let entry = store.router.record(pill.id) else {
-                drop(pill.id, store: store)
-                continue
-            }
-            // The message went to several places: each part has a pill, flying to its own place.
-            if entry.isDivided {
                 drop(pill.id, store: store)
                 continue
             }

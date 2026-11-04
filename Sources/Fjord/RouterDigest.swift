@@ -805,12 +805,10 @@ struct DigestHistory: View {
     static func messages(in decisions: [RouterDecision]) -> [RouterDecision] {
         decisions.filter { decision in
             guard case .you = decision.trigger else { return false }
-            return decision.places.contains { place in
-                place.done.contains { item in
-                    switch item {
-                    case .sent, .failed: true
-                    default: false
-                    }
+            return decision.done.contains { item in
+                switch item {
+                case .sent, .failed: true
+                default: false
                 }
             }
         }
@@ -863,7 +861,7 @@ struct DigestHistory: View {
     private func message(_ decision: RouterDecision) -> some View {
         let id = decision.id.uuidString
         let open = model.digest.expanded.contains(id)
-        let places = decision.places
+        let places = [decision]
         let where_ = places.map { Self.destination($0) }.joined(separator: ", ")
         return VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -917,7 +915,7 @@ struct DigestHistory: View {
 
     /// What became of it at that place.
     static func state(_ place: RouterDecision) -> String {
-        if place.isCancelled || place.parts.first?.endsCancelled == true { return "cancelled" }
+        if place.isCancelled || place.endsCancelled { return "cancelled" }
         for item in place.done.reversed() {
             switch item {
             case .failed(let why): return "didn't go: " + why

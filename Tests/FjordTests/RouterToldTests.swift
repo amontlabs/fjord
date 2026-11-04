@@ -19,39 +19,7 @@ import Testing
         return s
     }
 
-    /// "tell CI to rerun and docs to add the page", sent to both, then a one-place message to CI.
-    private func sent(in s: Store) {
-        var entry = RouterDecision(at: t0, trigger: .you("tell CI to rerun, and docs to add the page"))
-        let ids = entry.divide(into: [.init(text: "rerun", place: "session:ci"), .init(text: "add the page", place: "session:docs")])
-        s.router.decisions.append(entry)
-        s.updateDecision(ids[0]) { $0.add(.sent(to: "CI watcher", text: "rerun", original: nil), session: "ci"); $0.outcome = .done }
-        s.updateDecision(ids[1]) { $0.add(.sent(to: "Docs writer", text: "add the page", original: nil), session: "docs"); $0.outcome = .done }
-    }
 
-    @Test func eachSessionIsToldItsOwnPartsWords() {
-        let s = store()
-        sent(in: s)
-        #expect(s.toldAll() == ["ci": ["rerun"], "docs": ["add the page"]])
-        #expect(s.lastTold()["ci"]?.text == "rerun" && s.lastTold()["docs"]?.text == "add the page" && s.lastTold()["ci"]?.at == t0)
-    }
 
-    @Test func aPartThatSentNothingToldNothing() {
-        let s = store()
-        sent(in: s)
-        s.router.decisions[0].parts[1].done = [.failed("no")]
-        #expect(s.toldAll() == ["ci": ["rerun"]] && s.lastTold()["docs"] == nil)
-    }
 
-    @Test func aOnePlaceMessageIsReadAsBefore() {
-        let s = store()
-        sent(in: s)
-        var entry = RouterDecision(at: t0.addingTimeInterval(60), trigger: .you("and again"))
-        entry.add(.sent(to: "CI watcher", text: "and again", original: nil), session: "ci")
-        s.router.decisions.append(entry)
-        var skipped = RouterDecision(at: t0.addingTimeInterval(120), trigger: .you("never sent"))
-        skipped.add(.asked(["a"]), session: "ci")
-        s.router.decisions.append(skipped)
-        #expect(s.toldAll() == ["ci": ["rerun", "and again"], "docs": ["add the page"]])
-        #expect(s.lastTold()["ci"]?.text == "and again" && s.lastTold()["ci"]?.at == t0.addingTimeInterval(60))
-    }
 }

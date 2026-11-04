@@ -54,21 +54,6 @@ import Testing
         #expect(status.latestPath() == updated)
     }
 
-    @Test func everySendMessageAsksAndTheAnswerGoesBackOnStdin() throws {
-        let settings = try #require(try JSONSerialization.jsonObject(with: RouterAgent.gateSettings()) as? [String: Any])
-        #expect((settings["permissions"] as? [String: Any])?["ask"] as? [String] == ["SendMessage"])
-        let request = try JSONSerialization.data(withJSONObject: ["type": "control_request", "request_id": "r-1", "request": [
-            "subtype": "can_use_tool", "tool_name": "SendMessage",
-            "input": ["to": "a", "message": "hi", "notify_when_idle": true]]])
-        #expect(RouterStream.parse(request) == [.permission(id: "r-1", tool: "SendMessage", input: ["to": "a", "message": "hi"],
-                                                            otherFields: ["notify_when_idle"])])
-        let allow = try #require(try JSONSerialization.jsonObject(with: RouterStream.permissionLine(id: "r-1", allow: ["to": "a", "message": "hi"])) as? [String: Any])
-        let response = try #require(allow["response"] as? [String: Any])
-        #expect(allow["type"] as? String == "control_response" && response["request_id"] as? String == "r-1")
-        #expect(response["response"] as? NSDictionary == ["behavior": "allow", "updatedInput": ["to": "a", "message": "hi"]] as NSDictionary)
-        let deny = try #require(try JSONSerialization.jsonObject(with: RouterStream.permissionLine(id: "r-2", allow: nil, deny: "No")) as? [String: Any])
-        #expect((deny["response"] as? [String: Any])?["response"] as? [String: String] == ["behavior": "deny", "message": "No"])
-    }
 
     // MARK: stream-json
 

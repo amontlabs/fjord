@@ -4,18 +4,18 @@ import Observation
 // What you type (docs/design/router-redesign.md, "How a message flows"). Each message is a run of its own (several can be in
 // flight), one entry of the decision log, its stage shown on its pill over the composer. Where it goes is decided once, among
 // your claude.ai projects only: a reply armed on a card goes to the card's session; a claude.ai project or thread you tagged
-// or pinned goes there with no model; anything else is for the project decider (`RouterProjectDecider`: Jev, then Sonnet),
+// goes there with no model; anything else is for the project decider (`RouterProjectDecider`: Jev, then Sonnet),
 // whose decision is acted on as it is: a thread gets the words, a project's coordinator picks the thread, a new project is
 // proposed under the composer, the Router answers here, or you're asked where it goes. Nothing is sent when it isn't sure.
 
 /// What a message of yours comes with besides its text: the card you're replying to (its session is the target), the claude.ai
-/// place you pinned or waved off, and its pills.
+/// place a Retry goes to again or one waved off, and its pills.
 struct RouterContext: Equatable {
     /// A card id.
     var replyTo: String?
     /// The local projects the message tags (their folders): context for an answer, and the folder a new project may use.
     var projects: [String]
-    /// A claude.ai target (`RouterCourier.Target`) you pinned.
+    /// A claude.ai target (`RouterCourier.Target`) a Retry goes to again: the place you confirmed (`resendContext`).
     var target: String?
     /// A target you dismissed (or a wrong send's, on Send elsewhere): the message never goes there without asking you.
     var notTo: String?
@@ -80,7 +80,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// Where a message goes without asking a model, or that it needs the decider.
     enum Plan: Equatable {
         case reply(session: String, card: String?)
-        /// A claude.ai project or thread you tagged or pinned.
+        /// A claude.ai project or thread you tagged, or a Retry's confirmed one.
         case send(String)
         /// Wholly for the Router ("@router what needs me?").
         case answer
@@ -196,7 +196,7 @@ struct RouterAskBack: Identifiable, Equatable {
     func resendContext(_ id: UUID) -> RouterContext? {
         guard var context = sentWith[id] else { return nil }
         context.flies = true
-        // A place you confirmed (picked or pinned) is where it goes again: no new ask.
+        // A place you confirmed (tagged or picked) is where it goes again: no new ask.
         if context.target == nil, context.replyTo == nil, let entry = store?.router.record(id), entry.decision.confirmed == true,
            let target = entry.decision.targetID, RouterCourier.Target(target) != nil {
             context.target = target
@@ -243,7 +243,6 @@ struct RouterAskBack: Identifiable, Equatable {
                                    links: .init(cards: context.replyTo.map { [$0] } ?? []))
         entry.mentions = context.mentions.isEmpty ? nil : context.mentions
         entry.fromAction = context.action?.origin
-        entry.actionStart = context.action.map { .init(title: $0.title, model: $0.model, effort: $0.effort) }
         let id = store.logDecision(entry)
         if context.flies, context.action == nil {
             flying.append(id)
@@ -484,7 +483,7 @@ struct RouterAskBack: Identifiable, Equatable {
             chosen(job)
             try await reply(job, session: session, card: card)
         case .send(let target):
-            // A place you tagged or pinned: yours, as a pick is.
+            // A place you tagged (or a Retry's): yours, as a pick is.
             confirm(job, target)
             try await route(job, to: target)
         case .answer:
@@ -510,7 +509,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Where a message goes without a model: the card a reply is armed on, the claude.ai place pinned, or the one claude.ai
+    /// Where a message goes without a model: the card a reply is armed on, a Retry's confirmed place, or the one claude.ai
     /// place tagged (and nothing else that says where). Words wholly for the Router are its own. Anything else is decided.
     static func plan(text: String, context: RouterContext, store: Store) -> Plan {
         // An action's message is never the Router's own, nor a reply: it goes to a claude.ai place.
@@ -527,7 +526,7 @@ struct RouterAskBack: Identifiable, Equatable {
         return .decide
     }
 
-    /// The one claude.ai place the message tags, when it tags no other and no reply or pin fixes it: nil otherwise, or when the
+    /// The one claude.ai place the message tags, when it tags no other and no reply or Retry fixes it: nil otherwise, or when the
     /// Board hasn't that place.
     static func claudeTag(_ context: RouterContext, store: Store) -> String? {
         let tagged = context.claudeTargets

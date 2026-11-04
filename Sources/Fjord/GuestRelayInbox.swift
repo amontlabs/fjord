@@ -213,7 +213,7 @@ struct GuestRelayDelivery: Sendable {
     var timeout: TimeInterval = RelayInbox.wait
 
     func send(body: String, to cliSessionID: String, computer: GuestReference, nonce: UUID = UUID(),
-              now: Date? = nil, settings: SessionSettings? = nil) async throws -> String {
+              now: Date? = nil) async throws -> String {
         let account = try await client.account(for: computer)
         let paths = try GuestRouterPaths(home: account.home)
         let keyFile = try await client.filesRead(computer: computer, path: paths.key, offset: nil, length: nil)
@@ -225,12 +225,10 @@ struct GuestRelayDelivery: Sendable {
             else { try await GuestClock.sampleMilliseconds(client: client, computer: computer, account: account) }
         let signedAt = GuestClock.date(milliseconds: guestNowMs)
         let live = try await GuestSessionObserver(client: client).read(computer: computer, paths: paths, guestNowMs: guestNowMs)
-        guard let session = live.first(where: { $0.cliSessionID == cliSessionID && $0.capabilities.contains(ClaudePlugin.inboxCapability) }) else {
+        guard live.contains(where: { $0.cliSessionID == cliSessionID && $0.capabilities.contains(ClaudePlugin.inboxCapability) }) else {
             throw GuestClientFailure.notRunning(computer.key)
         }
-        let appliedSettings = settings.flatMap { session.capabilities.contains(ClaudePlugin.settingsCapability) ? $0 : nil }
-        let signed = RelaySigner.sign(body: body, target: cliSessionID, key: key, nonce: nonce, now: signedAt,
-                                      model: appliedSettings?.model, effort: appliedSettings?.effort)
+        let signed = RelaySigner.sign(body: body, target: cliSessionID, key: key, nonce: nonce, now: signedAt)
         return try await GuestRelayInbox(client: client, timeout: timeout, onState: onState)
             .deliver(signed, to: cliSessionID, computer: computer, now: signedAt)
     }

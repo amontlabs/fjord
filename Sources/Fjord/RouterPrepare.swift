@@ -336,8 +336,6 @@ struct Prepared: Equatable, Sendable {
     var text: String
     var original: String
     var rephrased: Bool
-    /// The project a new session was started in (`start_session`): its receipt says so.
-    var newSessionIn: String? = nil
     /// What the session gets as your words, when `text` is that signed for its plugin (the chat shows this, never the
     /// header).
     var body: String? = nil

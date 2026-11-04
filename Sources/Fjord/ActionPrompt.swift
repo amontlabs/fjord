@@ -146,9 +146,6 @@ extension ActionPrompt {
 /// when the Router isn't sure where, it waits for you (`RouterDispatcher`).
 struct RouterActionSource: Equatable {
     var origin: SessionOrigin
-    var title: String
-    var model: String?
-    var effort: String?
 }
 
 /// What a "Send to the Router" action sends for a thing: the prompt's words and pills, the thing's among them.

@@ -975,7 +975,7 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     private func signed(_ store: Store, _ ready: Prepared, title: String, cli: String?, ticket: Ticket,
-                        settings: SessionSettings? = nil, guestStart: PendingDesktopStart? = nil, asleep: Bool = false,
+                        guestStart: PendingDesktopStart? = nil, asleep: Bool = false,
                         local: String? = nil) async throws -> Prepared {
         // What the user says to the Router in an @router aside never goes on: if one is still there, nothing is sent. Text
         // Fjord wrote itself goes as it is.
@@ -1005,11 +1005,9 @@ final class RouterMCPServer: @unchecked Sendable {
             guard let session = live.first(where: { $0.cliSessionID == cli && $0.capabilities.contains(ClaudePlugin.inboxCapability) }) else {
                 throw Failure("\(title) has no live guest inbox presence; nothing was sent")
             }
-            let appliedSettings = settings.flatMap { session.capabilities.contains(ClaudePlugin.settingsCapability) ? $0 : nil }
             var out = ready
             out.body = body
-            out.text = RelaySigner.sign(body: body, target: cli, key: key, now: GuestClock.date(milliseconds: guestNowMs),
-                                        model: appliedSettings?.model, effort: appliedSettings?.effort)
+            out.text = RelaySigner.sign(body: body, target: cli, key: key, now: GuestClock.date(milliseconds: guestNowMs))
             out.guestLocation = guestStart.location
             return out
         }
@@ -1017,16 +1015,13 @@ final class RouterMCPServer: @unchecked Sendable {
             throw Failure("Fjord's plugin isn't installed in Claude Code, so nothing can be sent (Settings → Router)")
         }
         // A session that runs must have the plugin up, or it would read the message as a peer's; a sleeping one loads the plugin as
-        // it starts, and takes settings (the plugin that starts is the one installed now).
+        // it starts.
         if !asleep {
             guard await pluginSessions(store).contains(cli) else {
                 throw Failure("\(title) started before Fjord's plugin was installed: restart it or run /reload-plugins in it")
             }
         }
-        // Settings go only to a plugin that takes them; to an older one the message goes plain (the delivery says so).
-        var settings = settings
-        if settings != nil, !asleep, !(await store.supportsSettings(cli)) { settings = nil }
-        var text = store.signRelay(body: body, target: cli, settings: settings)
+        var text = store.signRelay(body: body, target: cli)
         if text == nil {
             // Not cached yet, or the file changed: read it again (bounded), and sign once more if this is still the turn.
             let reload = keyReload ?? { [weak store] in await store?.reloadRelayKey() ?? false }
@@ -1034,7 +1029,7 @@ final class RouterMCPServer: @unchecked Sendable {
             if let keyReloadRace { await keyReloadRace(reloadWork) }
             else { await Self.race(deadline: keyReloadWait, reloadWork) }
             try live(ticket)
-            text = store.signRelay(body: body, target: cli, settings: settings)
+            text = store.signRelay(body: body, target: cli)
         }
         guard let text else {
             throw Failure("Fjord couldn't sign the message (its plugin key is missing); nothing was sent")

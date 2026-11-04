@@ -158,6 +158,8 @@ import Testing
                 "local_b": ClaudeSession(id: "local_b", title: "Update the docs", folder: "/code/docs", completedTurns: 7,
                                          lastActivity: Date().addingTimeInterval(-60)),
             ]
+            s.router.cards = [RouterCard(id: "local_b#t7", sessionID: "local_b", kind: .done, title: "Update the docs",
+                                         folder: "/code/docs", text: "Updated the README.", createdAt: Date())]
             store = s
             dispatcher = RouterDispatcher(store: s)
             fakes.install(dispatcher)
@@ -182,14 +184,62 @@ import Testing
             await waitUntil { id.map { fakes.finished.contains($0) } ?? true }
         }
 
+        /// A reply to the docs session's card: the only message the Router still sends to a local session.
+        func reply(_ text: String = "add a changelog entry") async -> UUID? {
+            let id = dispatcher.submit(text, context: RouterContext(replyTo: "local_b#t7"))
+            await finish(id)
+            return id
+        }
+
     }
 
+    @Test func aReplyRecordsWhatItDeliveredForACancel() async throws {
+        let w = World()
+        let id = await w.reply()
+        let sent = try #require(w.entry(id)?.delivered)
+        #expect(sent.session == "local_b" && sent.cli == "cli-local_b" && sent.nonce == w.nonces.first)
+        // The session as it was just before: 7 turns finished, none running.
+        #expect(sent.turns == 7 && !sent.busy && sent.abortable && sent.cancelled == nil)
+        #expect(w.store.canCancel(w.entry(id)!))
+    }
 
+    @Test func aCancelIsRecordedOnTheEntry() async throws {
+        let w = World()
+        let id = try #require(await w.reply())
+        #expect(await w.dispatcher.cancel(id) == .aborted)
+        #expect(w.cancels.map(\.nonce) == [w.nonces[0]])
+        let entry = try #require(w.entry(id))
+        #expect(entry.delivered?.cancelled == .aborted && entry.done.last == .cancelled(.aborted))
+        #expect(entry.summary == "cancelled" && !w.store.canCancel(entry))
+    }
 
+    @Test func aCancelThatFailsSaysSoAndCanBeTriedAgain() async throws {
+        let w = World()
+        let id = try #require(await w.reply())
+        w.answer = .failure(RouterTools.Failure("The session's plugin didn't pick the message up"))
+        #expect(await w.dispatcher.cancel(id) == nil)
+        #expect(w.entry(id)?.done.last == .failed("couldn't cancel: The session's plugin didn't pick the message up"))
+        #expect(w.entry(id)?.delivered?.cancelled == nil && w.store.canCancel(w.entry(id)!))
+        w.answer = .success(.tooLate)
+        #expect(await w.dispatcher.cancel(id) == .tooLate)
+        #expect(w.entry(id)?.summary.hasPrefix("sent to") == true)
+    }
 
+    @Test func aSessionWhosePluginCantAbortIsNotOfferedIt() async throws {
+        let w = World()
+        w.abortable = false
+        let id = try #require(await w.reply())
+        #expect(w.entry(id)?.delivered?.abortable == false && !w.store.canCancel(w.entry(id)!))
+        #expect(await w.dispatcher.cancel(id) == nil && w.cancels.isEmpty)
+    }
 
-
-
-
-
+    @Test func aClaudeAiSendHasNothingToCancel() async throws {
+        let w = World()
+        w.store.routerCourierLink.take(CourierSnapshot(places: [RouterDispatcherTests.lookout]))
+        w.fakes.decisions = [RouterProjectDecision(kind: .project("lookout", thread: nil), confidence: 0.9, decider: .sonnet)]
+        let id = try #require(w.dispatcher.submit("bump the version"))
+        await w.finish(id)
+        #expect(w.entry(id)?.delivered == nil && !w.store.canCancel(w.entry(id)!))
+        #expect(await w.dispatcher.cancel(id) == nil)
+    }
 }

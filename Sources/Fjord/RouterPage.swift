@@ -881,11 +881,6 @@ private struct RouterHistory: View {
         switch entry {
         case .card(let card):
             HistoryCardLine(card: card, now: now, open: open, marked: marked, store: store, model: model).equatable()
-        case .decision(let decision) where decision.isDivided:
-            // A message that went to several places: its line, and under it a line for each part, opening on its own.
-            let places = decision.places.map { HistorySplitLine.Place(decision: $0, open: expanded.contains($0.id.uuidString),
-                                                                       cancel: cancelState($0, now: now)) }
-            HistorySplitLine(decision: decision, places: places, now: now, open: open, store: store, model: model).equatable()
         case .decision(let decision):
             HistoryDecisionLine(decision: decision, now: now, open: open, cancel: cancelState(decision, now: now),
                                 store: store, model: model).equatable()
@@ -1134,18 +1129,7 @@ private struct HistorySummaryLine: View, Equatable {
 }
 
 extension RouterDecision {
-    /// What a message that went to several places says on its line ("to 3 places"): its parts say how each stands. Nil for
-    /// a message that went to one.
-    var placesWords: String? { isDivided ? "to \(parts.count) places" : nil }
-
-    /// How a part ended, for a line that names its place before the words: "sent", not "sent to" the place again.
-    func summary(without place: String) -> String {
-        let text = summary, sent = "sent to \(place)"
-        return text.hasPrefix(sent) ? "sent" + text.dropFirst(sent.count) : text
-    }
-
-    /// While a typed run is under way, how far it is (classifying, sending…); else how it ended. Only a run under way reads
-    /// the dispatcher (a held part too: what it waits for). The history's line and the canvas's pending
+    /// While a typed run is under way, how far it is; else how it ended. Only a run under way reads the dispatcher. The history's line and the canvas's pending
     /// line say it.
     @MainActor func status(_ store: Store) -> String {
         guard outcome == .pending else { return summary }
@@ -1165,19 +1149,16 @@ private struct HistoryDecisionLine: View, Equatable {
     let cancel: Cancel
     let store: Store
     let model: RouterModel
-    /// One part of a divided message, under the line of the message: "→ place", then its words, with no age of its own.
-    var nested = false
     @Environment(\.historyOutOfSight) private var outOfSight
-    @State private var lastStatus = LastRead<(text: String, held: Bool)>()
+    @State private var lastStatus = LastRead<String>()
     @State private var lastTrigger = LastRead<Text>()
-    @State private var lastPlace = LastRead<String>()
     @State private var hovered = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
         a.store === b.store && a.model === b.model && a.decision == b.decision && a.now == b.now && a.open == b.open
-            && a.cancel == b.cancel && a.nested == b.nested
+            && a.cancel == b.cancel
     }
 
     /// What Cancel does and doesn't, as its tooltip and beside it when the line is open.
@@ -1190,25 +1171,17 @@ private struct HistoryDecisionLine: View, Equatable {
     private var key: String { decision.id.uuidString }
     /// While a typed run is under way, how far it is (classifying, sending…); else how it ended. Only a run under way reads
     /// the dispatcher (a held part too: what it waits for).
-    private var status: (text: String, held: Bool) {
-        // The message that went to several places: its parts say how each stands.
-        if let places = decision.placesWords { return (places, false) }
-        // A part names its place before its words: "sent", not "sent to" it again.
-        guard decision.outcome == .pending else { return (nested ? decision.summary(without: place) : decision.summary, false) }
+    private var status: String {
+        guard decision.outcome == .pending else { return decision.summary }
         // Out of sight, as last read: the dispatcher isn't read for a history hidden under Now.
         if outOfSight, let kept = lastStatus.value { return kept }
-        let read: (String, Bool)
-        if let progress = store.routerDispatcher.progress[decision.id] {
-            read = (progress + "…", false)
-        } else {
-            read = (decision.summary, false)
-        }
+        let read = store.routerDispatcher.progress[decision.id].map { $0 + "…" } ?? decision.summary
         lastStatus.value = read
         return read
     }
 
     var body: some View {
-        let (status, held) = status
+        let status = status
         VStack(alignment: .leading, spacing: 0) {
             Button { toggle() } label: {
                 HStack(spacing: 8) {
@@ -1217,15 +1190,11 @@ private struct HistoryDecisionLine: View, Equatable {
                     trigger
                         .cdsText(CDS.Transcript.text, .regular, hovered || open ? CDS.Text.secondary : CDS.Text.muted)
                         .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-                    // A held part's line gives its words up before what it waits for.
-                    Text("· \(status)").cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).layoutPriority(held ? 2 : 0)
+                    Text("· \(status)").cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1)
                     StatusCaret(hot: hovered, open: open)
                     Spacer(minLength: 8)
-                    // A part is as old as its message: the line above says.
-                    if !nested {
-                        Text(shortAgo(decision.at, now: now)).cdsText((12, 16), .regular, CDS.Text.muted).monospacedDigit()
-                            .help(exactTime(decision.at))
-                    }
+                    Text(shortAgo(decision.at, now: now)).cdsText((12, 16), .regular, CDS.Text.muted).monospacedDigit()
+                        .help(exactTime(decision.at))
                     // Room for Cancel, laid over it: the line stays one button, and Cancel one of its own.
                     if cancel != .none { Color.clear.frame(width: Self.cancelWidth, height: 1) }
                 }
@@ -1242,7 +1211,7 @@ private struct HistoryDecisionLine: View, Equatable {
             .buttonStyle(.plain)
             .focused($focused)
             .onHover { hovered = $0 }
-            .accessibilityLabel(nested ? "To \(place): \(decision.triggerText)" : decision.triggerText)
+            .accessibilityLabel(decision.triggerText)
             .accessibilityValue("\(status), \(AgentRow.spokenAge(now.timeIntervalSince(decision.at))) ago, at \(exactTime(decision.at)), \(open ? "expanded" : "collapsed")")
             .overlay(alignment: .trailing) {
                 if cancel != .none {
@@ -1266,26 +1235,7 @@ private struct HistoryDecisionLine: View, Equatable {
         toggleHistoryLine(reduceMotion: reduceMotion) { model.toggleExpanded(key) }
     }
 
-    /// What set it off; for a part, the place it went to and then its words.
-    private var trigger: Text {
-        guard nested else { return words }
-        return Text("\(Text(verbatim: "→ \(place)  ").fontWeight(.medium))\(words)")
-    }
-
-    /// Where a part went, as the pill names it: the session's title, "New session in lcu", Fjord; as last read while out of sight.
-    private var place: String {
-        if outOfSight, let kept = lastPlace.value { return kept }
-        let part = decision.parts[0]
-        let target = part.decision.targetID ?? part.place
-        var name = target.flatMap { RouterFlights.destination($0, store: store) }
-        if name == nil, let target {
-            // Not placed yet (a project's tag), or a session that is gone.
-            name = target.hasPrefix("project:") ? store.folderName(String(target.dropFirst(8))) : "a session"
-        }
-        let made = name ?? "…"
-        lastPlace.value = made
-        return made
-    }
+    private var trigger: Text { words }
 
     /// Your message with its pills drawn where they were, after its category when a "Then" sent it.
     private var words: Text {
@@ -1303,46 +1253,6 @@ private struct HistoryDecisionLine: View, Equatable {
         let message = MentionText.styled(text, mentions: mentions, store: store, role: CDS.Transcript.text)
         guard let from = decision.fromAction else { return message }
         return Text("\(Text(verbatim: "\(from.category) · ").fontWeight(.medium))\(message)")
-    }
-}
-
-/// A message that went to several places in the history: its line ("to 3 places", opening to the whole message), and under it a
-/// line for each part, indented ("→ place", its words, how it stands), each opening, cancelling and acting on its own.
-private struct HistorySplitLine: View, Equatable {
-    /// A part as an entry of its own, whether it is open and whether its send can be cancelled.
-    struct Place: Equatable {
-        let decision: RouterDecision
-        let open: Bool
-        let cancel: HistoryDecisionLine.Cancel
-    }
-
-    let decision: RouterDecision
-    let places: [Place]
-    let now: Date
-    let open: Bool
-    let store: Store
-    let model: RouterModel
-
-    nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.store === b.store && a.model === b.model && a.decision == b.decision && a.places == b.places && a.now == b.now
-            && a.open == b.open
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HistoryDecisionLine(decision: decision, now: now, open: open, cancel: .none, store: store, model: model).equatable()
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(places, id: \.decision.id) { place in
-                    HistoryDecisionLine(decision: place.decision, now: now, open: place.open, cancel: place.cancel, store: store,
-                                        model: model, nested: true).equatable()
-                }
-            }
-            .padding(.leading, CDS.Transcript.statusPad + 14)
-            .overlay(alignment: .leading) {
-                Rectangle().fill(CDS.border).frame(width: 1).padding(.leading, CDS.Transcript.statusPad + 7).padding(.vertical, 3)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1372,10 +1282,8 @@ private struct DecisionDetails: View {
         if case .you(let text) = decision.trigger, let mentions = decision.mentions, !mentions.isEmpty {
             styled = MentionText.styled(text, mentions: mentions, store: store, role: CDS.Transcript.text)
         }
-        // The message that went to several places shows its words only: each part has its own line, with the rest.
-        let whole = !decision.isDivided
-        let changes = whole ? decision.links.changes.compactMap { id in store.router.changes.first { $0.id == id } } : []
-        let sessions = whole ? decision.links.sessions.compactMap { id in store.claudeSessions[id].map { (id, $0.title) } } : []
+        let changes = decision.links.changes.compactMap { id in store.router.changes.first { $0.id == id } }
+        let sessions = decision.links.sessions.compactMap { id in store.claudeSessions[id].map { (id, $0.title) } }
         let read = Live(styled: styled, changes: changes, toolsLinked: store.toolsLinked,
                         running: store.routerDispatcher.progress[decision.id] != nil, sessions: sessions)
         last.value = read
@@ -1398,10 +1306,8 @@ private struct DecisionDetails: View {
                 CDSProse(text: decision.triggerText, color: CDS.Text.secondary, inset: false)
             }
             if let reply = decision.reply { CDSProse(text: reply, color: CDS.Text.primary, inset: false) }
-            if !decision.isDivided {
-                ForEach(Array(decision.doneLines.enumerated()), id: \.offset) { _, line in
-                    Text(line).cdsText((12, 16), .regular, CDS.Text.muted).fixedSize(horizontal: false, vertical: true)
-                }
+            ForEach(Array(decision.doneLines.enumerated()), id: \.offset) { _, line in
+                Text(line).cdsText((12, 16), .regular, CDS.Text.muted).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(live.changes) { change in ChangeCard(change: change, store: store) }
             if cancel != .none {

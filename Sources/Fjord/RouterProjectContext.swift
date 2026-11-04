@@ -218,18 +218,14 @@ extension RouterProjectContext {
         }
     }
 
-    /// Your last messages and where each went, oldest first: the decision log's own messages (not generated ones), a divided
-    /// message's parts each on their own, a correction with where you sent it instead.
+    /// Your last messages and where each went, oldest first: the decision log's own messages, a correction with where you sent it instead.
     @MainActor static func routings(_ store: Store) -> [Routing] {
         var out: [Routing] = []
-        for entry in store.router.decisions where entry.generated != true {
-            guard case .you(let whole) = entry.trigger else { continue }
-            for part in entry.parts {
-                guard let to = part.decision.target ?? part.decision.intent, !to.isEmpty else { continue }
-                var r = Routing(text: part.text ?? whole, to: to)
-                if case .corrected(let from, let instead) = part.outcome { r.to = from; r.correctedTo = instead }
-                out.append(r)
-            }
+        for entry in store.router.decisions {
+            guard case .you(let text) = entry.trigger, let to = entry.decision.target ?? entry.decision.intent, !to.isEmpty else { continue }
+            var r = Routing(text: text, to: to)
+            if case .corrected(let from, let instead) = entry.outcome { r.to = from; r.correctedTo = instead }
+            out.append(r)
         }
         return Array(out.suffix(routingCount))
     }

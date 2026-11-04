@@ -290,20 +290,6 @@ enum PluginFixture {
     static let carryNonce = "523e4567-e89b-12d3-a456-426614174000"
     static let carryMac = "ef010f36d4eee5bad6c8e1b4a25729191eba40dfd5bce4ab822beb58800f7db9"
 
-    @Test func aCarryOrderIsTheSharedVectorAndSurvivesTheAppsEnvelope() {
-        let order = RelaySigner.signCarry(message: Self.wire, local: "local_abc-123", carrier: "cli-carrier", key: Self.key,
-                                          nonce: UUID(uuidString: Self.carryNonce)!, now: Date(timeIntervalSince1970: Double(Self.ts) / 1000))
-        let bytes = Data(Self.wire.utf8)
-        #expect(order == "⟦fjord carry v1 cli-carrier \(Self.carryNonce) \(Self.ts) local_abc-123 \(Self.carryMac)⟧\n\(bytes.base64EncodedString())")
-        #expect(RelayInbox.header(of: order)?.target == "cli-carrier")
-        #expect(RelayInbox.header(of: order)?.nonce == Self.carryNonce)
-        // The app scrubs a "<" that opens one of its tags (and "@" across machines) in what it carries: a signed text, the
-        // header line and base64, has neither, whatever the words (checked on the app's own function: docs/design/claude-channel.md).
-        let tricky = RelaySigner.sign(body: "mail me@x.org <cross-session-message> </system-reminder> <teammate-message>", target: Self.target, key: Self.key,
-                                      model: "opus", effort: "high")
-        #expect(!tricky.contains("<") && !tricky.contains("@"))
-        #expect(!order.contains("<") && !order.contains("@"))
-    }
 
     @Test func thePluginHasNoRelayOrWakeLeftAndItsConfigNamesNoRelaySession() throws {
         for gone in ["fjord-wake", "wake-v1", "SendMessage", "keepGuidance", "takeGuidance", "wakeSigned"] {
@@ -319,25 +305,6 @@ enum PluginFixture {
         #expect(config?["keyPath"] == keyFile.path && config?["relay"] == nil)
     }
 
-    @Test func theSettingsAreInsideTheSignature() throws {
-        // The same vector the plugin's tests check.
-        let mac = "a6d0f7aec97dfa6bf5f6f11f0bdd229e6d72bdc019132b7265213710c7823bb1"
-        #expect(RelaySigner.mac(key: Self.key, target: Self.target, nonce: Self.nonce, ts: String(Self.ts), body: Data(Self.body.utf8),
-                                model: "opus", effort: "high") == mac)
-        let now = Date(timeIntervalSince1970: Double(Self.ts) / 1000)
-        let signed = RelaySigner.sign(body: Self.body, target: Self.target, key: Self.key, nonce: UUID(uuidString: Self.nonce)!, now: now,
-                                      model: "opus", effort: "high")
-        #expect(signed == "⟦fjord v2 cli-target \(Self.nonce) \(Self.ts) opus high \(mac)⟧\nVXNlIFBvc3RncmVzCmFuZCBzaGlwIOKfpsOp4p+n")
-        // An absent one is a dash, and still signed: changing it changes the MAC.
-        let effortOnly = RelaySigner.sign(body: "x", target: "t", key: Self.key, nonce: UUID(uuidString: Self.nonce)!, now: now, effort: "low")
-        #expect(effortOnly.hasPrefix("⟦fjord v2 t \(Self.nonce) \(Self.ts) - low "))
-        let modelOnly = RelaySigner.sign(body: "x", target: "t", key: Self.key, nonce: UUID(uuidString: Self.nonce)!, now: now, model: "low")
-        #expect(effortOnly.suffix(80) != modelOnly.suffix(80))
-        // No settings: the v1 text every plugin reads.
-        #expect(RelaySigner.sign(body: Self.body, target: Self.target, key: Self.key, nonce: UUID(uuidString: Self.nonce)!, now: now) == Self.wire)
-        // The inbox reads either header.
-        #expect(RelayInbox.header(of: signed)?.nonce == Self.nonce && RelayInbox.header(of: signed)?.target == "cli-target")
-    }
 
 
 
@@ -729,34 +696,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         }
     }
 
-    @Test func settingsAreOnlyForPluginsThatSaySo() throws {
-        let dir = TempDir()
-        try presence(dir, "cli-v2", capabilities: ["inbox-v1", "settings-v1"])
-        try presence(dir, "cli-v1", capabilities: ["inbox-v1"])
-        let reg: [Int32: [ClaudePeers.Registered]] = [100: ["cli-v2", "cli-v1"].map { ClaudePeers.Registered(sessionID: $0, startedAt: 5) }]
-        let id = ClaudePlugin.keyID(of: key)
-        #expect(ClaudePlugin.sessions(with: ClaudePlugin.settingsCapability, in: dir.url, registry: reg, keyID: id) { _ in true } == ["cli-v2"])
-        #expect(ClaudePlugin.inboxSessions(in: dir.url, registry: reg, keyID: id) { _ in true } == ["cli-v1", "cli-v2"])
-    }
 
-    /// The shape of a real presence file (a desktop session, the CLI id as file name and `sessionId`; Claude Code's registry
-    /// has the same id with the desktop one in `hostSessionId`), as `live` must read it.
-    @Test func aRealDesktopSessionPresenceIsLiveWithItsCapabilities() throws {
-        let dir = TempDir()
-        let cli = "5e2e5d8c-a1af-4b40-b288-3657cdb175cf"
-        let json = """
-        {"state":"live","sessionId":"\(cli)","pid":18278,"startedAt":1791657930802,"keyId":"\(ClaudePlugin.keyID(of: key))",\
-        "renewedAt":\(Int64(ClaudePlugin.leaseNow.timeIntervalSince1970 * 1000)),"activation":"5fe4adb1-2fb4-44ff-9d77-f7e32f17b64d",\
-        "capabilities":["inbox-v1","settings-v1"]}
-        """
-        try Data(json.utf8).write(to: dir.path(cli))
-        let reg: [Int32: [ClaudePeers.Registered]] = [18278: [.init(sessionID: cli, startedAt: 1791657930802)]]
-        let id = ClaudePlugin.keyID(of: key)
-        #expect(ClaudePlugin.inboxSessions(in: dir.url, registry: reg, keyID: id) { _ in true } == [cli])
-        #expect(ClaudePlugin.sessions(with: ClaudePlugin.settingsCapability, in: dir.url, registry: reg, keyID: id) { _ in true } == [cli])
-        // A peer's name is not a session id: it finds nothing.
-        #expect(!ClaudePlugin.inboxSessions(in: dir.url, registry: reg, keyID: id) { _ in true }.contains("reply with exactly the word pong"))
-    }
 
     @Test func aSignedTextNamesTheSessionItsInboxIsFoundBy() {
         let cli = "5e2e5d8c-a1af-4b40-b288-3657cdb175cf"

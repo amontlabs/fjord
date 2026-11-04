@@ -705,21 +705,6 @@ import Testing
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: dir.path("support/relay/cli-carrier").path)) ?? []).isEmpty)
     }
 
-    @Test func aSleepingTargetIsOrderedThroughACarrierAndNoProcessIsEverRun() async throws {
-        let dir = TempDir()
-        let s = store(dir)
-        running("cli-carrier", dir)
-        let (tools, text) = tools(s, "hello", asleep: true)
-        // Claude Code isn't known to the tools, nor to the store: the send has no binary to run.
-        #expect(tools.claudePath() == nil)
-        let inbox = RelayInbox(root: try #require(s.routerFiles).relay)
-        let seen = Seen()
-        let plugin = carrier("cli-carrier", inbox, behavior: .delivers(app: "Message delivered; its turn has started", target: "ok"), seen: seen)
-        let ack = try await RouterSender.send(store: s, to: "Target", text: text, tools: tools, session: "local_t", kind: .firstMessage,
-                                              waits: Self.fast)
-        #expect(ack == "ok" && seen.orders.count == 1 && s.router.operations.first?.kind == .firstMessage)
-        plugin.cancel()
-    }
 
     @Test func withNoOtherSessionRunningARunningTargetIsGivenItsMessageInItsOwnInboxAndASleepingOneIsOpened() async throws {
         let dir = TempDir()

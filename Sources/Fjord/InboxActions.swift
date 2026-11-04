@@ -64,10 +64,6 @@ struct CategoryAction: Codable, Hashable, Identifiable {
     var id = UUID()
     var kind: ActionKind
     var trigger: ActionTrigger = .enter
-    /// For "Send to the Router": the model and effort of a session the Router starts for it (`ActionSettings`); nil is your
-    /// Claude Code default. A message sent to a session already there goes as it is.
-    var model: String?
-    var effort: String?
 
     var title: String {
         switch kind {
@@ -847,8 +843,6 @@ protocol ActionPerformer: AnyObject {
     func failedRuns(for thing: Thing) async throws -> [FailedRun]
     /// Re-runs one run's failed jobs; how many jobs.
     func rerun(repo: String, run: FailedRun) async throws -> Int
-    /// The local clones of a repo among the known project folders.
-    func clones(of repo: String) -> [String]
 }
 
 struct ActionFailure: LocalizedError {
@@ -870,9 +864,7 @@ extension InboxActions {
                 // Your words and pills, the thing's pill among them: what GitHub wrote goes only in the thing's fenced block.
                 let origin = SessionOrigin(category: job.category.name, thing: sessionTitle(thing), actionID: job.action.id.uuidString,
                                            runID: UUID().uuidString)
-                let source = RouterActionSource(origin: origin, title: sessionTitle(thing),
-                                                model: ActionSettings.clean(job.action.model, in: ActionSettings.models),
-                                                effort: ActionSettings.clean(job.action.effort, in: ActionSettings.efforts))
+                let source = RouterActionSource(origin: origin)
                 // Sent: where it goes is the Router's to say, and the run follows it there.
                 run.message = try await performer.sendToRouter(ActionMessage(parts: prompt.parts(thing: thing.id), source: source))
                 run.state = .running
@@ -912,16 +904,8 @@ extension InboxActions {
             }
             lines.append("Sends to the Router, as yours from \(category): \(words)")
             let addressed = prompt.pointers.contains { $0.addresses }
-            let folders = performer?.clones(of: thing.repo) ?? []
-            lines.append(addressed ? "It goes where its project or session pill says."
-                         : folders.isEmpty ? "No local clone of \(thing.repo): the Router would ask you where it goes."
-                         : "The Router sends it to a session working in \(folders.count == 1 ? "this clone" : "one of these clones"), "
-                            + "or starts one there; if unsure, it asks you:\n" + folders.map { "- " + $0 }.joined(separator: "\n"))
-            let model = ActionSettings.clean(action.model, in: ActionSettings.models), effort = ActionSettings.clean(action.effort, in: ActionSettings.efforts)
-            if model != nil || effort != nil {
-                lines.append("A session it starts runs with " + [model.map { "model \($0)" }, effort.map { "effort \($0)" }]
-                    .compactMap { $0 }.joined(separator: ", ") + ".")
-            }
+            lines.append(addressed ? "It goes to the claude.ai project or thread its pill names."
+                         : "The Router sends it to the claude.ai project or thread it is for; if unsure, it asks you.")
             lines.append("With what Fjord knows of \(reference), marked as written by others:")
             lines.append(RouterPointers.notification(name: reference, thing: thing, category: category, facts: facts, done: false))
         case .comment(let text):
@@ -1452,7 +1436,6 @@ final class StoreActionPerformer: ActionPerformer {
     private unowned let store: Store
     init(store: Store) { self.store = store }
 
-    func clones(of repo: String) -> [String] { store.localClones(of: repo) }
 
     func sendToRouter(_ message: ActionMessage) async throws -> UUID {
         // Only while Triage and the Router are both on: the dispatcher checks again before each step that reaches a session
