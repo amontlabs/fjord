@@ -1293,7 +1293,18 @@ const createProject = sequence(function* (command, state) {
   return { ok: true };
 });
 
-const steps = { open: openStep, send: sendStep, create_project: createProject, set_field: setField, add_repo: addRepo, preapprove_folder: preapproveFolder, remove_folder: removeFolder, read_settings: readSettings };
+// Dev only, on the owner's word: the project shown unarchived. Its note (`standIn`) holds one button, pressed once, and the step ends
+// when its composer has replaced the note. Run it after an open of the project; the note is found by structure, never by its words.
+const unarchive = sequence(function* (_command, state) {
+  const note = yield* wait(state, "no archived note on this project", () => standIn("project"));
+  const button = yield* wait(state, "no button in the note", () => note.querySelector("button"));
+  button.click();
+  state.committed = true;
+  yield* wait(state, "the composer never replaced the note", () => !note.isConnected && box("project"));
+  return { ok: true };
+});
+
+const steps = { open: openStep, send: sendStep, create_project: createProject, set_field: setField, add_repo: addRepo, preapprove_folder: preapproveFolder, remove_folder: removeFolder, read_settings: readSettings, unarchive };
 
 // Stops this instance for good: no observer, no waiting step, no port. A step woken by a timer afterwards finds nothing to run.
 function stop() {
