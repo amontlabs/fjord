@@ -288,6 +288,56 @@ Read: frames share Fjord's process for about 137 MB a project, against 324 MB fo
 the memory kept after removal and projects that reopen a thread. 10 projects would be about 1.4 GB on top of Fjord's tab, and 20
 about 2.7 GB.
 
+## Keeping frames on the overview, and handing over to a fresh tab (2026-11-04)
+
+**Staying on the overview.** A framed project that jumps to `?thread=` is restoring the view last shown for that project in this
+browser. On its own, test-b's frame jumped back to `?thread=` 1.5 to 2.2 s after each load.
+- **(a) The crumb** (`overview-thread-crumb-back`, clicked by test id in the frame): the frame moved to the overview at once and
+  stayed there. Reloads after that stayed on the overview too (one reload, watched 25 s).
+- **(b) Thread view:** it has no `overview-thread-row` and no `data-home-*`. The only trace of a thread there is a
+  `channel-created-thread` card in the project's transcript, with no running or finished state. Not enough.
+- **(c) URL variants:** the projects page links to the plain `/code/project/<id>`, which is what jumps. The page uses no other
+  overview address.
+- **(d) In-frame move as content.js makes it** (`history.pushState` to `/code/project/<id>`, then a `popstate`): the frame went to
+  the overview and showed its thread rows, and the next reload stayed there, as with (a).
+- **Recurrence:** while the frame is on the overview, nothing moves it. That held through a new thread made by a send and through
+  Fjord's own tab opening a thread in that project. But the next load of the frame went back to that thread (1.5 s after the load).
+- **Chosen:** each frame's script moves it back with (d) whenever it lands on `?thread=`, and falls back to (a) if the move doesn't
+  take. That needs no crumb to exist, and it covers every load: a reload, a handover, or a thread opened since.
+- **Live on the overview, hidden 6 min or more** (test-b, thread asked by a send):
+
+| Event | Frame | Fjord's tab |
+|---|---|---|
+| Thread row new (`active`, `dashed`) | 5.0 s | 5.1 s |
+| Spinner (`running`, `.animate-spin`) | 5.8 s | 5.9 s |
+| Back to `active`, `dashed` when finished | 22.8 s | 31.2 s |
+
+  A send in that thread showed the spinner at 1.1 s and the finish at 18.3 s. In the fresh tab (frames hidden 4 min) the
+  thread was new at 4.7 s and the spinner came at 5.5 s, both with Fjord's tab. It left the list at 15.1 s; Fjord's tab saw that
+  only at 33.6 s.
+
+**Fresh-tab handover.** The extension made a pinned, inactive tab at the projects page (`#fjord`), waited for its load, and
+closed the old tab. The worker then adopted the new tab through its usual path for a removed tab: find the tagged tab, then
+inject.
+
+| | Old tab | New tab |
+|---|---|---|
+| Renderer | exited (its process went) | new process |
+| Footprint | 1,166 MB with 3 frames after 9 min | 330 to 400 MB with no frames; 698 to 784 MB with 3 frames |
+
+- **Timing:** new tab created at 0.1 s, loaded at 0.7 s, old tab closed at 0.7 s, new page adopted at 0.8 s.
+- **Sends:** one sent just before and one 1 s into the handover were both confirmed on the first attempt, in 4.0 s and 2.4 s.
+- **Focus:** no focus or tab-activation event in the whole run.
+- **Frames:** they load again in the new tab, landing on the overview. Their first rows came in 1 to 3 s. A change during that
+  gap shows up as the current state, not as an event.
+
+**Growth with 3 frames.**
+- First tab: 648 MB with no frames, 1,011 to 1,022 MB 2 to 5 min after the frames were added, 954 to 969 MB at 6 min, 1,166 MB
+  at 9 min. Each frame reload (5 in that time) added about 70 to 100 MB, and garbage collection gave some back.
+- Fresh tab: 698 to 784 MB over 7 min, with a thread made in that time; 652 MB after the frames were removed.
+- Threshold: hand over when Fjord's renderer is about 400 MB over what its frames cost at the start (about 1.2 GB for 3
+  projects), or after a run of frame reloads. A handover costs under 1 s and lost neither send.
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
