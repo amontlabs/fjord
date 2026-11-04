@@ -14,7 +14,7 @@ globalThis.chrome = {
   runtime: { onConnect: ev("connect"), onStartup: ev("startup"), onInstalled: ev("installed"), onMessage: ev("msg"),
     connectNative: () => ({ postMessage() {}, disconnect() {}, onMessage: ev("n"), onDisconnect: ev("nd") }), reload() {} },
   alarms: { create() {}, onAlarm: ev("alarm") },
-  storage: { session: { _d: {}, get: async function (k) { return { [k]: this._d[k] }; }, set: async function (o) { Object.assign(this._d, o); }, remove: async function (k) { delete this._d[k]; } } },
+  storage: { session: { _d: {}, get: async function (k) { return Object.fromEntries([].concat(k).map((key) => [key, this._d[key]])); }, set: async function (o) { Object.assign(this._d, o); }, remove: async function (k) { for (const key of [].concat(k)) delete this._d[key]; } } },
   tabs: { query: async () => [tab], get: async () => tab, update: async () => tab, create: async () => tab, remove: async () => {},
     sendMessage: async () => { throw new Error("no receiver"); }, onActivated: ev("act"), onRemoved: ev("rem"), onUpdated: ev("upd") },
   windows: { getAll: async () => [{ id: 1 }], onCreated: ev("wc") },
@@ -49,6 +49,34 @@ class ReloadRecovers(unittest.TestCase):
 
     def test_tab_still_loading_is_ensured_when_it_completes(self):
         self.assertGreaterEqual(self.run_worker(0, "loading"), 1)
+
+
+def run_cases(script):
+    """Runs one of extension/test/*.test.js (node, stubbed `chrome` / fake DOM) and returns its cases, one dict per line."""
+    out = subprocess.run(["node", os.path.join(EXT, "test", script)], capture_output=True, text=True, timeout=60)
+    if out.returncode != 0:
+        raise AssertionError(out.stderr)
+    return [json.loads(line) for line in out.stdout.splitlines() if line.startswith("{")]
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class NodeStubs(unittest.TestCase):
+    """router-watch-and-briefs.md 6: the port table, routing to frames, frame loads and blanks, the alive check, the budget and the
+    handover (worker.test.js); watch mode, the overview move, `listed` and departures, cards, the answer's guards and the top frame's
+    frame set (content.test.js)."""
+
+    def check(self, script, expected):
+        cases = run_cases(script)
+        self.assertGreaterEqual(len(cases), expected, cases)
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                self.assertTrue(case["ok"], case.get("error"))
+
+    def test_worker(self):
+        self.check("worker.test.js", 15)
+
+    def test_content(self):
+        self.check("content.test.js", 10)
 
 
 if __name__ == "__main__":

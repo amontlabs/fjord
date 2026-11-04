@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fjord Router POC",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp1T/xAz7JmE6ophecNt+QMAKF6sp9uLu4pbonANTgNJ0d8VzosL8cFP9i2WPICCKRVJAchw+gf/zFnueX/avDGUXxePMMOjDZmc1MOP2mMBXJyj4yNk3U029139C9GqNfriceKzQci1pJXcektwRE7MDiBqoodHQgFihQAhOg7cPDjiQ40RAapDFlDPovWXtOQG+k4y6GEsT0bNkJLAKHbL3YYBHKl3LhChkjJLXCw6a2yijVpZTdLobB8DqVi51y7pW/KFvfWN+TFWEps7XpdSer/s9sETrq3wUmiPq4XnL9qaIvFHVAICmnaciJj1Nxhqw1mPdlM2aCBhi7za4nQIDAQAB",
   "description": "Tells Fjord's Router what the Claude Code page shows and types in its real composer.",
   "permissions": [
@@ -9,7 +9,8 @@
     "alarms",
     "storage",
     "nativeMessaging",
-    "scripting"
+    "scripting",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://claude.ai/*"
@@ -36,7 +37,8 @@
       "js": [
         "content.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ]
 }

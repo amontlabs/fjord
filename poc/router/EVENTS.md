@@ -484,6 +484,106 @@ folder that continues it. Last state: … Message: …"), with the same proof, a
 app, and "Claude app closed; N threads waiting" once for a closed app, in place of a line per thread. A loss that is back before the
 tell isn't told.
 
+## Watching every project: frames, answers, the handover
+
+Design: [router-watch-and-briefs.md](../../docs/design/router-watch-and-briefs.md) 1, 3.5 and 3.6. Fjord's tab's top frame keeps hidden
+same-origin `<iframe>`s, one per project (`/code/project/<id>`) and per watched thread (`?thread=<key>`), each running `content.js` in
+**watch mode**: it reports, and runs only `wake`, `overview` and, in a thread frame, `answer`. A frame's identity is its `<iframe>` name,
+`fjord:<project>:<thread|->`, read from `window.name`, never from its address (a project frame jumps to `?thread=` as it loads). A
+frame whose name isn't Fjord's runs nothing.
+
+Up, from a frame (each stamped by the worker with `frame: {project, thread, frameId}`; the page's own `path`/`thread` stay the address):
+
+```json
+{"type": "frame_hello", "name": "fjord:chan_…:-"}
+{"type": "page", "signed_in": true, "page_ok": true, "loaded": 1793706095915, "instance": "…", "stand_in": true, "frame": {"project": "chan_…", "thread": null, "frameId": 3}}
+{"type": "threads", "listed": true, "threads": [{"thread": "cmsg_…", "state": "working|paused|needs_you|done|unknown", "section": "needs|running|active|done", "unread": false, "time": "2026-11-05T10:00:00Z", "title": "…", "needs": null, "text": "…"}, {"thread": "cmsg_…", "gone": true}], "frame": {…}}
+{"type": "rows", "side": "thread", "rows": [{"key": "cmsg_…", "decision": true, "answered": false, "options": ["…", "…"], "…": "…"}], "stop": true, "approval": null, "turning": false, "frame": {…}}
+{"type": "frame_stuck", "frame": {…}}
+{"type": "done", "id": "a1", "ok": true, "error": null, "clicked": true, "frame": {…}}
+```
+
+- `frame_hello` is a frame port's first message (before its snapshot, though muted); the worker ties `sender.frameId` to that name.
+  It is distinct from the top frame's `hello` alive check, which frames never answer.
+- `commands` from a frame lists only that frame's waiting commands and last 20 `done`s; `wake_me` carries the `frame`, and routerd's
+  `wake` must carry it back (`wake {frame}`); a `wake` without one goes to the top frame.
+- A project frame reports `page`, `threads`, project-side `rows`, `notice`, `wake_me`; a thread frame `page`, thread-side `rows`,
+  `notice`, `wake_me`, `done`. Frames send no `composer` and no `projects`. `page.stand_in: true` (frames only): the project side shows
+  the composer's stand-in (`data-composer-stand-in`, an archived project), never read.
+- `threads` (top frame and frames): row `state` is now `needs_you` (section `needs`), `working` (section `running`, or `active` with the
+  spinner), `paused` (`active` + `dashed`: a turn ended, idle or waiting on a card), `done` (section `done`), else `unknown`; `idle` and
+  `resolved` are gone. `section` is the row's `data-home-section`; `unread` the page's read mark as data (`bdi.text-prose-semibold` +
+  `span.sr-only`); `time` the row's `time[datetime]`. **Departures**: `{thread, gone: true}` for a thread last told in `needs`/`running`/
+  `active` and no longer rendered, with the project composer mounted and no thread open (a `done` row dropping out of the group's 20 says
+  nothing). This replaces the old one-off `threads: []` for an emptied list (the empty-at-visit `threads: []` stays). **`listed: true`**
+  only on a whole read (a snapshot's, or this visit's first) taken while the overview is loaded by structure (composer mounted, no thread
+  open, this visit's `/timeline` fetch ended, and either an active row under a `[data-home-sort=priority][data-home-state=ready]`, or
+  the empty line in `active` with one non-done group); every other `threads` event has `listed: false` and replaces nothing.
+- `rows` row additions (any side): a decision card's `answered` (the card has a `data-state`) and `options` (its `ul[role=list] button`
+  texts in the page's order, the first's badge left out, as data); `card: {glyph}` for a row with a `channel-created-thread-glyph`;
+  `entry_index` (`data-epitaxy-entry-index`) where present. **`index` stays `data-index`** (the engine sorts by it); the entry index is
+  its own field. A thread frame's thread-side `rows` events also carry `stop` (the thread dock's `code-prompt-stop`) and `approval` (the
+  approval slots' text, or null), and an event with no rows is sent when either changes.
+- `frame_stuck`: a project frame that couldn't get back to its overview (moved by `pushState`+`popstate` at each load and each jump to
+  `?thread=`, then `overview-thread-crumb-back` once), or a thread frame off its thread for 1.5 s. Once per document. The worker only
+  relays it: **the engine** answers with `reload {frame}` or marks the frame stale (1.5); the worker never reloads on its own.
+
+Up, from the worker (stamped `path: null, thread: null`):
+
+```json
+{"type": "frame_loaded", "frame": {"project": "chan_…", "thread": null, "frameId": 3}, "frameId": 3}
+{"type": "frame_blank", "frame": {…}}
+{"type": "frame_gone", "frame": {…}}
+{"type": "handover_wanted", "budget": 6}
+{"type": "handover_wanted", "budget": 2, "reloaded": true}
+{"type": "handover_done", "tabId": 812, "instance": "…"}
+```
+
+- `frame_loaded`: `webNavigation.onCompleted` for a direct child frame of Fjord's tab, named by `executeScript(() => window.name)`; the
+  engine's own 20 s deadline then sends `frame_inject` if that frame sent no `page`. `frame_blank`: that read failed (a `chrome-error://`
+  document) or `onErrorOccurred` (not `net::ERR_ABORTED`), named by the frame's last known name or the `src` in the top frame's latest
+  `frames {have}`; a frame no longer in `have` says nothing. `frame_gone`: a frame port dropped (not one of a handed-over tab's frames).
+- `handover_wanted`: at every counted load from a budget of 6 (frames added by a non-base `frames`, each `reload`; a `base: true` set
+  counts 0), and once for a top-frame `page` whose `loaded` the worker didn't load (`reloaded: true`). `handover_done` follows the new
+  page's `commands` (its `instance`); the engine then sends `frames {want, base: true}`.
+- The top frame's `page` carries `heap` (`performance.memory.usedJSHeapSize`), a logged measurement only; it never makes a `page` news.
+
+Down:
+
+```json
+{"kind": "frames", "want": [{"project": "chan_…", "thread": null}, {"project": "chan_…", "thread": "cmsg_…"}], "base": true}
+{"kind": "reload", "frame": {"project": "chan_…", "thread": null}}
+{"kind": "answer", "id": "a1", "project": "chan_…", "thread": "cmsg_…", "card": "cmsg_…", "option": 1}
+{"kind": "overview", "id": "o1"}
+{"kind": "open", "id": "h1", "project": null, "home": true}
+{"kind": "wake", "frame": {"project": "chan_…", "thread": null}}
+{"kind": "frame_inject", "frame": {…}, "frameId": 3}
+{"kind": "handover"}
+{"kind": "handover_abort"}
+```
+
+- `frames` (no id, no `done`) is the engine's whole wanted set each time; the worker relays it to the top frame (queued like any
+  command while there is no page, a newer one replacing it) and never sends one of its own. The top frame diffs its `<iframe>` nodes
+  against it (on `document.documentElement`, off screen, 1200×900, `aria-hidden`) and answers `frames {have: [{name, project, thread,
+  src}]}`, also after every snapshot's `commands`. `reload {frame}` (no id) sets that node's `src` again; queued, it replaces only a
+  waiting reload of the same frame.
+- `answer` goes to the thread frame of `(project, thread)`; with no port for it yet it waits in that frame's list (a newer answer
+  replaces it: `done` `superseded`), and an answer sent to a port that drops before its `done` goes back on that list for the frame's
+  next port, before its snapshot (whose `commands` then lists it as waiting). **`option` is 1-based** (option N, keys 1 to 9). The
+  frame clicks the Nth `ul[role=list] button` of `[data-testid=decision-card]` in the row keyed `card`, once its thread side sent a
+  settled whole read: `done {ok: true, clicked: true}`. Refused (`refused: true`): `already answered` (the card has a `data-state`, also
+  after waiting on a busy card), `card gone`, `no such option`, `not this thread's frame`. A button `aria-busy`, `aria-disabled` or
+  `disabled` is never clicked: the step waits. A `cancel` of an answer is removed from a frame's list (no `done`) or told to its frame.
+- `overview` (project frames): get back to the overview now, the move's counts reset. Any other command in a frame is refused
+  (`a watching frame only reports`); `answer` and `overview` in the top frame are refused (`only a frame runs that`).
+- `open {home: true}` is a plain open of the projects page: the page's same-kind collapse lets a run's `open` supersede it.
+- `handover`: the worker opens a pinned, inactive tab at the projects page (`handover: {newTabId, since}` in `storage.session`), sends its
+  top frame a snapshot without stopping or adopting it, and on its `commands` re-points `tabId`, replays what waits for the page,
+  sends `handover_done`, then closes the old tab. The old tab's frames leave the table without `frame_gone`. `handover_abort`, the new
+  tab leaving `/code`, or the new tab closing: the new tab is closed, `handover` cleared, the old tab kept, the budget unchanged. A
+  worker restart mid-handover goes on (injecting the new tab if its top frame has no script).
+- `ensureTab`'s alive check asks `{frameId: 0}`, and its injection is `allFrames: true`.
+
 ## Rules
 
 - No polling on the page or in the worker, apart from what Chrome needs to keep the connection alive. The page asks routerd to wake a step

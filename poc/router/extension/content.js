@@ -6,7 +6,19 @@ let stopped = false;
 // This script's own run in the document: an extension reload keeps the document (and its `loaded`) but injects a fresh script, whose
 // `recent` starts empty. Every `page` and `commands` event carries it, so routerd tells the two apart by (`loaded`, `instance`).
 const INSTANCE = crypto.randomUUID();
-const alive = () => { try { return !stopped && !!chrome.runtime.id; } catch { return false; } };
+// Watch mode (router-watch-and-briefs.md 1.1): in one of the hidden <iframe>s Fjord's top frame keeps, the script only reports, and runs
+// only `wake`, `overview` and, in a thread frame, `answer`: it never types, never clicks a composer, never opens a place. Its identity is
+// the <iframe>'s name, `fjord:<project>:<thread|->` (`window.name`), never its address: a project frame jumps to `?thread=` as it loads.
+// A frame whose name isn't Fjord's (the page's own) runs nothing.
+const FRAME = window !== window.top;
+const parseName = (name) => {
+  const m = /^fjord:(chan_[^:]+):([^:]+)$/.exec(name ?? "");
+  return m ? { project: m[1], thread: m[2] === "-" ? null : m[2] } : null;
+};
+const NAME = FRAME ? parseName(window.name) : null;
+if (FRAME && !NAME) return;
+const THREAD_FRAME = !!NAME?.thread, PROJECT_FRAME = !!NAME && !NAME.thread;
+const alive =() => { try { return !stopped && !!chrome.runtime.id; } catch { return false; } };
 // A script left behind by a reloaded extension can't see its runtime any more, so it doesn't count. It is stopped (observers, waiting
 // steps) before this one takes over, in case it still runs in the same isolated world; if a reload doesn't share the world, there is
 // nothing to stop and this is harmless.
@@ -61,13 +73,18 @@ function sendFor(composer) {
   return all("code-prompt-send")[index] ?? null;
 }
 
-// A row's section is the `data-home-section` of its ancestor. "needs" holds rows that need you; "active" holds idle and
-// working rows, told apart by the row's status mark (only "dashed", idle, has been seen). Anything else is unknown.
+// A row's section is the `data-home-section` of its ancestor (measured: `needs`, `running`, `active`, `done`). `needs` holds rows that
+// need you; `running` (in a `data-home-group=running` that exists only while a thread runs) and an `active` row with the spinner are
+// working; an `active` row with the `dashed` mark has ended a turn (idle, or waiting on a card: only the thread view tells, so `paused`);
+// `done` (the collapsed `data-home-group=done`) is finished. Anything else is unknown.
+const ACTIVE_SECTIONS = new Set(["needs", "running", "active"]);
+const sectionOf = (row) => (row.closest("[data-home-section]")?.getAttribute("data-home-section") ?? "").toLowerCase() || null;
 function rowState(row) {
-  const section = (row.closest("[data-home-section]")?.getAttribute("data-home-section") ?? "").toLowerCase();
+  const section = sectionOf(row);
   if (section === "needs") return "needs_you";
-  if (section.includes("resolved")) return "resolved";
-  if (section === "active") return row.querySelector("[data-home-status-mark]")?.getAttribute("data-home-status-mark") === "dashed" ? "idle" : "unknown";
+  if (section === "done") return "done";
+  if (section === "running" || (section === "active" && row.querySelector(".animate-spin"))) return "working";
+  if (section === "active") return row.querySelector("[data-home-status-mark]")?.getAttribute("data-home-status-mark") === "dashed" ? "paused" : "unknown";
   return "unknown";
 }
 
@@ -85,10 +102,34 @@ function readThreads() {
       thread: row.getAttribute("data-home-card"),
       title: rowTitle(row),
       state,
+      section: sectionOf(row),
+      // The page's own read mark, as data (measured: unread is the title as `bdi.text-prose-semibold` with a `span.sr-only`).
+      unread: !!row.querySelector("bdi.text-prose-semibold") && !!row.querySelector("span.sr-only"),
+      time: row.querySelector("time[datetime]")?.getAttribute("datetime") ?? null,
       needs: squash(line?.innerText) || null,
       text: row.innerText.replace(/\n+/g, " | ").trim(),
     };
   }).filter((row) => row.thread);
+}
+
+// Whether the overview's active list is loaded, by structure alone (router-watch-and-briefs.md 2), judged on the active sections only:
+// a `data-home-state=ready` that belongs to done rows never passes a still-loading active list. Loaded with rows: a row in `needs`,
+// `running` or `active` outside the done group, with a `[data-home-sort=priority][data-home-state=ready]` over it or in its group. Loaded
+// empty: `[data-home-section=active]` holding `section[data-testid=home-empty-band]` and `div[data-home-empty-line=true]`, no active row,
+// and exactly one non-done `[data-home-group]`. Also needed: the project's composer, no thread open, and this visit's `/timeline` fetch
+// ended. Only then may a whole `threads` read replace the project's active list (`listed: true`).
+function overviewListed() {
+  if (threadParam() !== null || !box("project")) return false;
+  const project = shownProject();
+  if (!timelines.some((t) => t.project === project && t.end >= told.arrived)) return false;
+  const active = all("overview-thread-row").filter((row) => ACTIVE_SECTIONS.has(sectionOf(row)) && !row.closest('[data-home-group="done"]'));
+  if (active.length) {
+    const ready = [...document.querySelectorAll('[data-home-sort="priority"][data-home-state="ready"]')];
+    return ready.some((node) => active.some((row) => node.contains(row) || !!row.closest("[data-home-group]")?.contains(node)));
+  }
+  const section = document.querySelector('[data-home-section="active"]');
+  if (!section?.querySelector('section[data-testid="home-empty-band"]') || !section.querySelector('[data-home-empty-line="true"]')) return false;
+  return [...document.querySelectorAll("[data-home-group]")].filter((group) => group.getAttribute("data-home-group") !== "done").length === 1;
 }
 
 // In a thread view, the thread's part of the page: the lowest ancestor of the thread's composer that does not also hold the project's
@@ -230,6 +271,31 @@ function ownRow(row) {
   return !row.key || row.pending || ownId(row.key);
 }
 
+// What a row holds besides its words, by structure, as data (router-watch-and-briefs.md 1.8, 2):
+// - a decision card (`[data-testid=decision-card]`, a question or a plan alike): `answered` (it has a `data-state`; measured:
+//   `answered`, and a pending card has none) and `options`, the texts of its `ul[role=list] button`s in the page's order (the first
+//   one's badge left out), passed on as written, never read;
+// - the coordinator's thread card (`channel-created-thread`): `card: {glyph}`, its glyph's `data-glyph` (`working`, then `CheckCircle`);
+// - `entry_index`: the row's `data-epitaxy-entry-index`, where it has one (the coordinator's start row is the opening row's + 1).
+const optionWords = (button) => {
+  const copy = button.cloneNode(true);
+  copy.querySelectorAll('[data-cds="Badge"], .sr-only, svg, [aria-hidden="true"]').forEach((node) => node.remove());
+  return squash(copy.textContent.replace(/[-]/g, ""));
+};
+function cardOf(row) {
+  const more = {};
+  const card = row.querySelector('[data-testid="decision-card"]');
+  if (card) {
+    more.answered = card.hasAttribute("data-state");
+    more.options = [...card.querySelectorAll('ul[role="list"] button')].map(optionWords);
+  }
+  const glyph = row.querySelector('[data-testid="channel-created-thread-glyph"]');
+  if (glyph) more.card = { glyph: glyph.getAttribute("data-glyph") };
+  const entry = (row.hasAttribute("data-epitaxy-entry-index") ? row : row.querySelector("[data-epitaxy-entry-index]"))?.getAttribute("data-epitaxy-entry-index");
+  if (entry != null && entry !== "") more.entry_index = Number(entry);
+  return more;
+}
+
 // Null while every row on screen belongs to another project (the render right after an address change): the side isn't shown yet,
 // which is not its being empty.
 function rowsNow(thread) {
@@ -246,6 +312,7 @@ function rowsNow(thread) {
       decision: !!row.querySelector('[data-testid="decision-card"]'),
       streaming: row.getAttribute("data-perf-row-streaming") === "true",
       text: messageText(row),
+      ...cardOf(row),
     };
   // A card or a reply still being written can have no words yet. A keyed row told while streaming stays, words or not: one that settles
   // with none still sends its `streaming: false`. Any other told row with no words left is left out, as it was before it was told.
@@ -302,7 +369,9 @@ function pageState() {
   const login = !!document.querySelector('input[type="email"], input[type="password"]');
   const known = sidebar || composers().length > 0;
   // `loaded`: when this document was loaded (ms since 1970). A document loaded after a goal went unproved read its goals from the server.
-  return { type: "page", signed_in: known ? true : login ? false : null, page_ok: known || login, loaded: Math.round(performance.timeOrigin), instance: INSTANCE };
+  // A frame says when its project side shows the composer's stand-in (an archived project: `data-composer-stand-in`, never read).
+  return { type: "page", signed_in: known ? true : login ? false : null, page_ok: known || login, loaded: Math.round(performance.timeOrigin), instance: INSTANCE,
+    ...(FRAME && standIn("project") ? { stand_in: true } : {}) };
 }
 
 // What the host has been told, so that only changes are sent.
@@ -316,7 +385,9 @@ const QUICK_DROP_MS = 1000, BACKOFF_MAX_MS = 30_000;
 let connectedAt = 0, backoff = 0, connectAfter = 0;
 function connect() {
   if (stopped || !alive() || performance.now() < connectAfter) return null;
-  try { port = chrome.runtime.connect({ name: tagged ? "fjord-page-tagged" : "fjord-page" }); } catch { return null; }
+  try { port = chrome.runtime.connect({ name: FRAME ? "fjord-frame" : tagged ? "fjord-page-tagged" : "fjord-page" }); } catch { return null; }
+  // A frame speaks first with its name, before anything else and though muted: the worker ties its port to that name (`frame_hello`).
+  if (FRAME) { try { port.postMessage({ type: "frame_hello", name: window.name }); } catch { port = null; return null; } }
   connectedAt = performance.now();
   muted = true;  // until this port's `snapshot`: it speaks first, `commands` before anything else
   port.onMessage.addListener(onMessage);
@@ -343,17 +414,20 @@ function emit(event) {
   if (muted) return;
   const open = port ?? connect();
   if (!open || muted) return;
-  try { open.postMessage({ ...event, path: location.pathname, thread: threadParam() }); } catch { port = null; }
+  // A frame's events carry its identity (the worker adds its frameId): `frame`, from its name, never its address.
+  const frame = NAME ? { frame: { project: NAME.project, thread: NAME.thread } } : {};
+  try { open.postMessage({ ...event, path: location.pathname, thread: threadParam(), ...frame }); } catch { port = null; }
 }
 
 // A key or position change is a change: the row is sent again.
 // A streaming row's text changes with every flush: it is sent when it starts and once settled, not as each snapshot.
-const rowSignature = (row) => `${row.key}|${row.index}|${row.from}|${row.decision}|${row.streaming ? "" : row.text}|${row.streaming}`;
+// A card answered, its options or the coordinator card's glyph changing are changes too. The streaming flag stays last (`|true`).
+const rowSignature = (row) => `${row.key}|${row.index}|${row.from}|${row.decision}|${row.answered ?? ""}|${JSON.stringify(row.options ?? null)}|${row.card?.glyph ?? ""}|${row.streaming ? "" : row.text}|${row.streaming}`;
 
 // Fjord's tab carries `#fjord` in its address (the worker uses it to find the tab again after Chrome restarts). A tab that
 // loaded with it gets it back after each in-page navigation; any other tab is never tagged.
 const TAG = "#fjord";
-let tagged = globalThis.__fjordTagged || location.hash === "#fjord";
+let tagged = !FRAME && (globalThis.__fjordTagged || location.hash === "#fjord");  // a frame is never the tagged tab
 function keepTag() {
   if (tagged && location.hash !== TAG) history.replaceState(history.state, "", location.pathname + location.search + TAG);
 }
@@ -376,9 +450,12 @@ function scan(full) {
     }
     told.owed = { project: true, thread: true }; told.empty = { project: false, thread: false }; told.quiet.thread = told.settle.thread = null; told.composer = { project: "", thread: "" };
     told.unsettled = { project: null, thread: null }; told.turning = { project: null, thread: null };
+    told.listed = false; told.dock = null;
   }
   const page = JSON.stringify(pageState());
-  if (full || page !== told.page) { told.page = page; emit(JSON.parse(page)); }
+  // The top frame's JS heap rides on each of its `page` events, a logged measurement only (1.7), never part of what counts as a change.
+  const heap = !FRAME && performance.memory?.usedJSHeapSize;
+  if (full || page !== told.page) { told.page = page; emit({ ...JSON.parse(page), ...(heap ? { heap } : {}) }); }
 
   // The page's notices (a polite live region's open dialogs) are passed on as written: Fjord shows them, never reads them for meaning.
   // Only the dialogs that weren't up at the last scan: one left open (piled up in a hidden tab) isn't said again with each new one.
@@ -396,21 +473,40 @@ function scan(full) {
   // The projects page lists them all, so a project missing there is gone (deleted or archived); elsewhere only some are linked. Its
   // first render can hold the sidebar's links alone: the list counts as complete once the page's own list (outside the sidebar) shows,
   // and the view a move left is gone (`oldView`).
+  // Frames render no sidebar and never list projects: only the top frame says `projects`.
   const complete = location.pathname === "/code/projects/browse" && ownList();
   const projectsKey = JSON.stringify([found, complete]);  // becoming complete is news even when the same projects show
-  if (found.length && (full || projectsKey !== told.projects)) { told.projects = projectsKey; emit({ type: "projects", projects: found, complete }); }
+  if (!FRAME && found.length && (full || projectsKey !== told.projects)) { told.projects = projectsKey; emit({ type: "projects", projects: found, complete }); }
 
   // A thread's id starts with its project's id too: right after an address change the Threads panel can still list the last project's.
-  const listed = readThreads().filter((row) => ownId(row.thread));
-  const threads = listed.filter((row) => full || told.threads.get(row.thread) !== JSON.stringify(row));
+  // A thread frame shows a thread's view, which has no thread rows: it says no `threads`.
+  const listed = THREAD_FRAME ? [] : readThreads().filter((row) => ownId(row.thread));
+  // `listed` (router-watch-and-briefs.md 2): the first read of this visit whose overview is loaded by structure (`overviewListed`) is sent
+  // whole with `listed: true`, as is every full scan's while it holds: only such a read may replace the project's active list. Others are deltas.
+  const isListed = !THREAD_FRAME && overviewListed();
+  const whole = full || (isListed && !told.listed);
+  if (isListed) told.listed = true;
+  const threads = listed.filter((row) => whole || told.threads.get(row.thread) !== JSON.stringify(row));
   for (const row of threads) told.threads.set(row.thread, JSON.stringify(row));
-  if (threads.length) emit({ type: "threads", threads });
-  // The list that had rows on this project's page and has none now, with the project side rendered (its composer mounted) and no thread
-  // open (a thread's view may hide the list): its rows left because those threads are finished. Sent empty, once. A list never seen with
-  // rows since the arrival (`told.threads` is cleared by a new path) says nothing: that is the page still loading.
-  else if (!listed.length && told.threads.size && threadParam() === null && box("project")) { told.threads.clear(); told.emptied = true; emit({ type: "threads", threads: [] }); }
+  // Departures: a thread told in an active section (`needs`, `running`, `active`) and no longer rendered leaves, said as `{thread, gone:
+  // true}` in the same event, under the emptied case's conditions (project composer mounted, no thread open, this visit's rows seen:
+  // `told.threads` is cleared by a new path). A `done` row dropping out of the group's 20 is no departure, and says nothing.
+  const gone = [];
+  if (threadParam() === null && box("project")) {
+    const shown = new Set(listed.map((row) => row.thread));
+    for (const [id, said] of told.threads) {
+      if (shown.has(id)) continue;
+      told.threads.delete(id);
+      if (ACTIVE_SECTIONS.has(JSON.parse(said).section)) gone.push({ thread: id, gone: true });
+    }
+  }
+  if (threads.length || gone.length || (whole && isListed)) {
+    emit({ type: "threads", threads: [...threads, ...gone], listed: whole && isListed });
+    if (!listed.length && gone.length) told.emptied = true;
+  }
 
-  for (const side of ["project", "thread"]) {
+  // A project frame reports its project side, a thread frame its thread side; neither the other.
+  for (const side of FRAME ? [THREAD_FRAME ? "thread" : "project"] : ["project", "thread"]) {
     const seen = told.rows[side];
     const whole = full || told.owed[side];  // a page mounts its transcript late: the first rows replace what Fjord held, whenever they come
     const now = rowsNow(side === "thread");
@@ -449,13 +545,16 @@ function scan(full) {
     // While the whole read is owed, it is sent again only when its rows, its settling or its turning changed (or on a full scan), not on
     // every flush: routerd learns nothing from the same read twice. It waits for the settled one, sent whatever its rows; a settled read
     // of only pending rows stays owed, and is not sent again until it changes.
-    const unsettledKey = whole ? JSON.stringify([settled, turning, rows.map(rowSignature)]) : null;
+    // A thread frame's thread side also says its dock (`dockState`) with each rows event.
+    const dock = THREAD_FRAME && side === "thread" ? dockState() : null;
+    const unsettledKey = whole ? JSON.stringify([settled, turning, rows.map(rowSignature), dock]) : null;
     const same = !full && unsettledKey !== null && unsettledKey === told.unsettled[side];
     // `turning` (`turningNow`) goes with every rows event, whole or delta, and whenever it changed since last told: alone, as a delta
     // with no rows. A delta without it would leave routerd reading the delta's rows, where an older row settling says nothing.
     if (!same && (rows.length || (whole && empty && (full || !told.empty[side])))) {
-      emit({ type: "rows", side, rows, full: whole, ...(whole ? { settled } : {}), turning });
+      emit({ type: "rows", side, rows, full: whole, ...(whole ? { settled } : {}), turning, ...(dock ?? {}) });
       told.turning[side] = turning;
+      if (dock) told.dock = JSON.stringify(dock);
       told.unsettled[side] = unsettledKey;
       told.empty[side] = !rows.length;
       // The whole read is owed until it held a row routerd keeps (a server key, not pending): pending and keyless rows are dropped
@@ -472,10 +571,15 @@ function scan(full) {
     // Alone, only once the side's whole read isn't owed (the whole read says it), never the first `false` (nothing was turning), and on the
     // thread side only with a thread open (`box`).
     if (told.turning[side] !== turning && !told.owed[side] && (turning || told.turning[side] !== null) && (side === "project" || composer)) {
-      emit({ type: "rows", side, rows: [], full: false, turning }); told.turning[side] = turning;
+      emit({ type: "rows", side, rows: [], full: false, turning, ...(dock ?? {}) }); told.turning[side] = turning;
+      if (dock) told.dock = JSON.stringify(dock);
+    }
+    // A thread frame's dock changing (a running tool's stop, an approval slot filling) is said alone too, with the turning.
+    if (dock && told.dock !== JSON.stringify(dock) && !told.owed[side]) {
+      emit({ type: "rows", side, rows: [], full: false, turning, ...dock }); told.dock = JSON.stringify(dock);
     }
 
-    if (!composer) continue;  // a thread side has one only with two composers mounted (`box`)
+    if (!composer || FRAME) continue;  // frames say no composer: they never type  // a thread side has one only with two composers mounted (`box`)
     if (moving?.composers.includes(composer)) {
       if (!moveShown(moving, side)) continue;  // the old view's, still up after an open's move
       moving.composers = moving.composers.filter((node) => node !== composer);  // kept by the page for the new place
@@ -485,9 +589,22 @@ function scan(full) {
     const key = JSON.stringify(state);
     if (full || key !== told.composer[side]) { told.composer[side] = key; emit(state); }
   }
+  if (FRAME) watchPlace();  // a frame keeps its place after every look (1.4)
 }
 
 const snapshot = () => scan(true);
+
+// A thread view's dock, by structure (router-watch-and-briefs.md 1.8, 3.7): `stop`, the thread composer dock's (the second
+// `rail-composer-dock`) `[data-testid=code-prompt-stop]` (measured: shown while a tool runs, and it can linger after a `needs`, so it only
+// ever withholds a finish); `approval`, the text of the approval slots (`data-approval-cluster-host`, `data-approval-dock`) when any holds
+// an element or text, else null, passed on as data (Fjord clicks nothing in a prompt).
+function dockState() {
+  const docks = all("rail-composer-dock");
+  const dock = docks.length >= 2 ? docks.at(-1) : threadScope();
+  const scope = threadScope() ?? document;
+  const slots = [...scope.querySelectorAll("[data-approval-cluster-host], [data-approval-dock]")].filter((slot) => slot.children.length || squash(slot.textContent));
+  return { stop: !!dock?.querySelector('[data-testid="code-prompt-stop"]'), approval: slots.length ? squash(slots.map((slot) => slot.textContent).join(" ")) : null };
+}
 
 // Commands wait here as steps. A step returns nothing while it waits, or { ok, error } when it is over. Every flush of
 // the observer runs the waiting steps again, so a command waits for the page and never for a timer. A step's `ended` (optional) hears
@@ -1312,7 +1429,130 @@ const unarchive = sequence(function* (_command, state) {
   return { ok: true };
 });
 
-const steps = { open: openStep, send: sendStep, create_project: createProject, set_field: setField, add_repo: addRepo, preapprove_folder: preapproveFolder, remove_folder: removeFolder, read_settings: readSettings, unarchive };
+// ---- The top frame's frames (router-watch-and-briefs.md 1.1, 1.3). `frames {want: [{project, thread}], base}` is the engine's whole
+// wanted set each time: the top frame diffs it against its own <iframe> nodes (removes what isn't wanted, adds what is missing) and says
+// what it shows, `frames {have: [{name, project, thread, src}]}`, after each change and with every snapshot. Nodes go on
+// `document.documentElement`, outside the page's React root, off screen at 1200×900 (measured: same renderer, same liveness). Their name is
+// the frame's identity, `fjord:<project>:<thread|->`. `reload {frame}` sets a node's `src` again (a load). The top frame never decides a
+// frame is blank or stale: it can't see a frame's port or a failed document; the worker and the engine do.
+const frameName = (f) => `fjord:${f.project}:${f.thread ?? "-"}`;
+const frameSrc = (f) => `${location.origin}/code/project/${f.project}${f.thread ? `?thread=${encodeURIComponent(f.thread)}` : ""}`;
+const frameNodes = () => [...document.documentElement.children].filter((node) => node.tagName === "IFRAME" && parseName(node.name));
+const FRAME_STYLE = "position:fixed;left:-12000px;top:0;width:1200px;height:900px;border:0;pointer-events:none;";
+function framesHave() {
+  emit({ type: "frames", have: frameNodes().map((node) => ({ name: node.name, ...parseName(node.name), src: node.getAttribute("data-fjord-src") })) });
+}
+function applyFrames(want) {
+  const wanted = new Map((Array.isArray(want) ? want : []).filter((f) => typeof f?.project === "string").map((f) => [frameName(f), f]));
+  for (const node of frameNodes()) if (!wanted.has(node.name)) node.remove();
+  const have = new Set(frameNodes().map((node) => node.name));
+  for (const [name, f] of wanted) {
+    if (have.has(name)) continue;
+    const node = document.createElement("iframe");
+    node.name = name;
+    node.setAttribute("aria-hidden", "true");
+    node.setAttribute("tabindex", "-1");
+    node.setAttribute("style", FRAME_STYLE);
+    node.setAttribute("data-fjord-src", frameSrc(f));
+    node.src = frameSrc(f);
+    document.documentElement.appendChild(node);
+  }
+  framesHave();
+}
+function reloadFrame(frame) {
+  const node = frame && frameNodes().find((other) => other.name === frameName(frame));
+  if (node) node.src = node.getAttribute("data-fjord-src");
+}
+
+// ---- A frame's place (1.4). A project frame stays on its overview: whenever it is elsewhere (it lands on `?thread=`, the thread last
+// shown for that project in this browser, at each load and 1.5 to 2.2 s after) it moves itself the way the page's links do
+// (`history.pushState` to `/code/project/<id>`, then `popstate`; measured to take and to hold). Once the page shows its project side and the
+// overview container (`[data-home-section]`) is still missing MOVE_GRACE after the move, it clicks `overview-thread-crumb-back` by test id,
+// once; still none MOVE_GRACE later, or a move that keeps being undone (MOVES_MAX), and it reports `frame_stuck`, once per document: the
+// engine reloads it (`reload`) or marks it stale. A thread frame never moves: one off its thread for MOVE_GRACE reports `frame_stuck` too.
+const MOVE_GRACE = 1500, MOVES_MAX = 6;
+const place = { phase: null, at: 0, moves: 0, stuck: false, off: null };
+const onOverview = () => !!document.querySelector("[data-home-section]");
+function moveToOverview() {
+  place.phase = "moved"; place.at = performance.now(); place.moves++;
+  history.pushState(history.state, "", `/code/project/${NAME.project}`);
+  dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+  wakeAfter(MOVE_GRACE + 50);
+}
+function stuck() {
+  if (place.stuck) return;
+  place.stuck = true; place.phase = "stuck";
+  emit({ type: "frame_stuck" });
+}
+function watchPlace() {
+  if (!FRAME || place.stuck) return;
+  const now = performance.now();
+  if (THREAD_FRAME) {
+    if (shownProject() === NAME.project && threadParam() === NAME.thread) { place.off = null; return; }
+    if (place.off === null) { place.off = now; wakeAfter(MOVE_GRACE + 50); return; }
+    if (now - place.off >= MOVE_GRACE) stuck();
+    return;
+  }
+  const right = shownProject() === NAME.project && threadParam() === null;
+  if (right && onOverview()) { place.phase = null; return; }
+  if (!right) {
+    if (place.phase === "moved" && now - place.at < MOVE_GRACE) return;  // the move is under way
+    if (place.moves >= MOVES_MAX) return stuck();
+    return moveToOverview();
+  }
+  if (!box("project")) return;  // the page is still coming up: the engine's deadline covers a frame that never does
+  if (place.phase === null) { place.phase = "moved"; place.at = now; wakeAfter(MOVE_GRACE + 50); return; }
+  if (now - place.at < MOVE_GRACE) return;
+  if (place.phase === "moved") {
+    const crumb = all("overview-thread-crumb-back")[0];
+    if (!crumb) return stuck();
+    crumb.click();
+    place.phase = "crumbed"; place.at = now;
+    wakeAfter(MOVE_GRACE + 50);
+    return;
+  }
+  stuck();
+}
+// `overview`: the engine asks a project frame to get back to its overview now (its counts start again).
+function overviewStep() {
+  return () => {
+    if (!PROJECT_FRAME) return { ok: false, refused: true, error: "not a project frame" };
+    Object.assign(place, { phase: null, at: 0, moves: 0, stuck: false, off: null });
+    watchPlace();
+    return { ok: true };
+  };
+}
+
+// ---- Answering a card by click (router-watch-and-briefs.md 3.5), in a thread frame only. `answer {id, project, thread, card, option}`:
+// once this frame's thread side has sent a settled whole read (`told.owed.thread` false), the row whose `data-entry-key` is `card` must
+// hold `[data-testid=decision-card]` with no `data-state` (pending); then the `option`th (1-based) `ul[role=list] button` of that card is
+// clicked, by structure, once: no composer, no move. Guards: a card with a `data-state` ends `refused` ("already answered"), a row or card
+// that isn't there ends `refused` ("card gone"), an option past the last ends `refused`; a button `aria-busy`, `aria-disabled` or
+// `disabled` (the page is taking an answer, measured 0.2 to 0.8 s after a click) is never clicked: the step waits until the card shows
+// answered, then ends `refused` ("already answered"). The `done` says `clicked: true`; the proof is the card's `answered` in this
+// frame's rows, then the thread's row going `running`.
+function answerStep(command) {
+  const step = () => {
+    if (!THREAD_FRAME || NAME.project !== command.project || NAME.thread !== command.thread) return { ok: false, refused: true, error: "not this thread's frame" };
+    if (shownProject() !== NAME.project || threadParam() !== NAME.thread || told.owed.thread) return;  // its settled read hasn't come
+    const row = (chatRows(true) ?? []).find((node) => [...node.querySelectorAll("[data-entry-key]")].some((key) => key.getAttribute("data-entry-key") === command.card));
+    const card = row?.querySelector('[data-testid="decision-card"]');
+    if (!card) return { ok: false, refused: true, error: "card gone" };
+    if (card.hasAttribute("data-state")) return { ok: false, refused: true, error: "already answered" };
+    const buttons = [...card.querySelectorAll('ul[role="list"] button')];
+    if (buttons.some((b) => b.getAttribute("aria-busy") === "true" || b.getAttribute("aria-disabled") === "true" || b.disabled)) return;
+    const button = Number.isInteger(command.option) ? buttons[command.option - 1] : null;
+    if (!button) return { ok: false, refused: true, error: "no such option" };
+    button.click();
+    return { ok: true, clicked: true };
+  };
+  step.why = () => ({ error: told.owed.thread ? "the thread's read never settled" : "the card never took the answer" });
+  return step;
+}
+
+// A frame runs only its watching steps; the top frame everything else.
+const FRAME_STEPS = new Set(["answer", "overview"]);
+const steps = { answer: answerStep, overview: overviewStep, open: openStep, send: sendStep, create_project: createProject, set_field: setField, add_repo: addRepo, preapprove_folder: preapproveFolder, remove_folder: removeFolder, read_settings: readSettings, unarchive };
 
 // Stops this instance for good: no observer, no waiting step, no port. A step woken by a timer afterwards finds nothing to run.
 function stop() {
@@ -1363,10 +1603,14 @@ function settle() {
 function onMessage(message) {
   if (message.kind === "stop") return stop();
   if (message.kind === "wake") return woken();  // routerd's timer for a `wake_me`: runs the scan and the waiting steps, has no id and sends no `done`
-  if (message.kind === "tagged") { tagged = globalThis.__fjordTagged = true; return keepTag(); }  // kept for a script injected after a stop
+  if (message.kind === "tagged") { if (!FRAME) { tagged = globalThis.__fjordTagged = true; keepTag(); } return; }  // kept for a script injected after a stop
+  // The engine's frame set and a frame's reload, for the top frame only: no id, no `done`; what it shows is said as `frames {have}`.
+  if (message.kind === "frames") return void (!FRAME && applyFrames(message.want));
+  if (message.kind === "reload") return void (!FRAME && reloadFrame(message.frame));
   if (message.kind === "snapshot") {
     muted = false;
     emit({ type: "commands", waiting: [...waiting.keys()], done: [...recent], instance: INSTANCE });
+    if (!FRAME) framesHave();  // what the top frame shows, with every snapshot: the engine diffs its wanted set against it
     // A wake asked since the last link may have gone unsaid or been lost: a `wake_me` for each distinct due time still to come asks again
     // for all of them, the sides' settle wakes too (they are owed wakes like any other: `settleWakes` stays, so the snapshot's scan doesn't
     // add a second one for a side), and a step that asked once (`woke`/`woken`/`armed`) doesn't ask again. They stay kept until they pass:
@@ -1390,6 +1634,7 @@ function onMessage(message) {
   }
   const make = steps[message.kind];
   if (!make) return done(message.id, { ok: false, error: "unknown command" });
+  if (FRAME !== FRAME_STEPS.has(message.kind)) return done(message.id, { ok: false, refused: true, error: FRAME ? "a watching frame only reports" : "only a frame runs that" });
   // A newer command of the same kind on the same side replaces the one still waiting. A replaced tool step says what it got to, as a
   // cut-off one does (`committed`, `before`, `refused`), so routerd can judge what it may have left done.
   for (const [id, step] of waiting) {
@@ -1412,7 +1657,8 @@ observer.observe(document.body, {
 });
 // A script with no port (its connect failed, or its reconnect did) connects again rather than say it is alive with nothing to adopt.
 // The worker asking is a reason to connect now, whatever the backoff says (`connectAfter`): it is the one that wants a page.
-const hello = (message, _sender, reply) => { if (message.kind === "hello") { if (!port) connectAfter = 0; reply({ ok: !stopped && !!(port ?? connect()) }); } };
+// A frame never answers it: the alive check is the top frame's (the worker asks frameId 0 anyway).
+const hello = (message, _sender, reply) => { if (message.kind === "hello" && !FRAME) { if (!port) connectAfter = 0; reply({ ok: !stopped && !!(port ?? connect()) }); } };
 chrome.runtime.onMessage.addListener(hello);
 
 connect();
