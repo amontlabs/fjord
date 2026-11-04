@@ -249,7 +249,7 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable {
     func sonnetDecision(_ a: RouterProjectSonnetAnswer, context: RouterProjectContext) -> RouterProjectDecision {
         let sure = a.confidence >= sendBar
         let known = context.thread(a.session)
-        let project = known?.project.name ?? context.project(named: a.project)?.name
+        let project = known?.project.name ?? resolve(a.project, in: context)?.name
         func decided(_ kind: RouterProjectDecision.Kind) -> RouterProjectDecision {
             RouterProjectDecision(kind: kind, confidence: a.confidence, decider: .sonnet, reason: a.reason)
         }
@@ -272,9 +272,14 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable {
         else if let project { add(.project(project, thread: nil)) }
         for alt in a.alternatives {
             if let t = context.thread(alt) { add(.project(t.project.name, thread: t.thread.id)) }
-            else if let p = context.project(named: alt) { add(.project(p.name, thread: nil)) }
+            else if let p = resolve(alt, in: context) { add(.project(p.name, thread: nil)) }
         }
         return Self.ask(Array(places.prefix(3)), confidence: a.confidence, decider: .sonnet, reason: a.reason)
+    }
+
+    /// A project a model named: by its name or id, or by its name as the model read it (redacted), mapped back to the real one.
+    func resolve(_ name: String, in context: RouterProjectContext) -> RouterProjectContext.Project? {
+        context.project(named: name) ?? context.projects.first { RouterTools.redacted($0.name) == name }
     }
 
     static func ask(_ places: [RouterProjectDecision.Kind], confidence: Double, decider: RouterProjectDecision.Decider,

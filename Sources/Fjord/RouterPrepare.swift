@@ -361,7 +361,7 @@ enum Addressing {
     }
 
     /// `message` with its addressing taken out. `pills`: where its @project pills are (`RouterContext.pills`). `envelope`:
-    /// false for a new session's task, whose request was already taken out (`SessionStart.task`): only the asides go.
+    /// false for a message whose request was already taken out: only the asides go.
     static func edit(_ message: String, pills: [Range<Int>] = [], envelope: Bool = true) throws -> Prepared {
         var text = message
         if envelope, let rest = withoutLeadingPills(message, pills) { text = rest }

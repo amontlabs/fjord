@@ -222,9 +222,15 @@ extension RouterProjectContext {
     /// dropped proposal, a message still waiting for your pick, or the one being decided, `excluding`), a correction with where
     /// you sent it instead.
     @MainActor static func routings(_ store: Store, excluding: UUID? = nil) -> [Routing] {
+        /// A send the engine took but then failed (or refused) wasn't delivered: no example. One it hasn't reported on (or has
+        /// forgotten, as after a restart) stands as it was recorded.
+        func delivered(_ entry: RouterDecision) -> Bool {
+            guard let intent = entry.decision.courierIntent, let state = store.routerCourier.lastUpdates[intent]?.state else { return true }
+            return state == .delivered || state == .deliveredLate
+        }
         var out: [Routing] = []
         for entry in store.router.decisions {
-            guard entry.id != excluding, entry.done.contains(where: \.sendsWords),
+            guard entry.id != excluding, entry.done.contains(where: \.sendsWords), delivered(entry),
                   case .you(let text) = entry.trigger, let to = entry.decision.target ?? entry.decision.intent, !to.isEmpty else { continue }
             var r = Routing(text: text, to: to)
             if case .corrected(let from, let instead) = entry.outcome { r.to = from; r.correctedTo = instead }

@@ -324,9 +324,9 @@ struct RouterAskBack: Identifiable, Equatable {
             if corrected {
                 $0.outcome = .corrected(from: ask.suggestion.map { describe($0, store: store) } ?? "no clear target", to: chosen)
                 $0.decision.fromID = ask.suggestion
-            } else {
-                $0.decision.confirmed = true
             }
+            // A place you picked, or corrected to, is yours: a Retry keeps it (`resendContext`).
+            $0.decision.confirmed = true
         }
         let tools = makeTools(id, ask.message, pills: ask.context.pills, mentions: ask.context.mentions,
                               action: ask.context.action != nil)

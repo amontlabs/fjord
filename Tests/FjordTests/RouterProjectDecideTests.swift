@@ -90,6 +90,16 @@ import Testing
         #expect(!prompt.contains(Self.secret) && prompt.contains("@CI: a category"))
     }
 
+    @Test func aDecisionNamingARedactedProjectStillTargetsIt() {
+        let name = "proj-\(Self.secret)"
+        let c = C(projects: [.init(id: "p", name: name, threads: [])])
+        let decider = RouterProjectDecider(jev: nil, sonnet: nil)
+        let seen = RouterTools.redacted(name)
+        #expect(seen != name)
+        let answer = RouterProjectSonnetAnswer(action: "new_work", project: seen, session: "", confidence: 0.9)
+        #expect(decider.sonnetDecision(answer, context: c).kind == .newWork(project: name))
+    }
+
     @Test func jevsOptionsAreThreadsThenNewWorkThenProjectsThenIntents() {
         var c = Self.context()
         c = C(projects: c.projects + [.init(id: "chan_dup", name: "dup", threads: [.init(id: "d1", title: "Router redesign", running: false, minutesIdle: 5)])])

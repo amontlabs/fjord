@@ -148,6 +148,32 @@ import Testing
         #expect(sentWords(f).count == 2)
     }
 
+    @Test func aCorrectionWhoseSendFailedRetriesToTheSamePlace() async {
+        let (s, d, f) = setup()
+        f.decisions = [decided(.ask([.project("lookout", thread: nil)]), .sonnet, p: 0.3)]
+        let id = d.submit("bump the version", context: { var c = RouterContext(); c.flies = true; return c }())!
+        await finish(f, id)
+        s.routerCourier.attach(RouterCourierSource(submit: { [f] in f.requests.append($0); return 0 }, updates: AsyncStream { _ in }))
+        #expect(d.pick(id, target: "claude-project:lcu"))
+        await waitUntil { d.askBacks.isEmpty && d.progress[id] == nil }
+        let entry = decision(s, id)
+        #expect(entry?.decision.confirmed == true && entry?.decision.targetID == "claude-project:lcu")
+        #expect(d.resendContext(id)?.target == "claude-project:lcu")
+    }
+
+    @Test func aSendTheEngineFailedIsNotARoutingExample() async {
+        let (s, d, f) = setup()
+        f.decisions = [decided(.project("lookout", thread: nil))]
+        let id = d.submit("bump the version")
+        await finish(f, id)
+        await waitUntil { decision(s, id)?.decision.courierIntent == 1 }
+        #expect(RouterProjectContext.routings(s).count == 1)
+        s.routerCourier.lastUpdates[1] = CourierUpdate(intentID: 1, state: .failed, cause: "x", before: nil, at: Date())
+        #expect(RouterProjectContext.routings(s).isEmpty)
+        s.routerCourier.lastUpdates[1] = CourierUpdate(intentID: 1, state: .delivered, cause: nil, before: nil, at: Date())
+        #expect(RouterProjectContext.routings(s).count == 1)
+    }
+
     // MARK: What the message tags
 
     @Test func aTaggedCategoryReachesTheDeciderAndGoesAfterYourWords() async {
