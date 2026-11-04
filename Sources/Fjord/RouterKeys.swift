@@ -65,8 +65,6 @@ final class RouterKeys {
             else if !model.suggestions(store).isEmpty { model.dismissMention() }
             // A proposed project is dropped and its message is yours again.
             else if model.dropProposal(store: store) {}
-            else if model.live.prediction != nil { model.dismissPrediction() }
-            else if model.live.pinned != nil { model.live.reset() }
             // A search on, the field left: it ends before the pick's reply goes.
             else if !model.search.query.isEmpty { model.endSearch() }
             // On the Brief, the card open under a paragraph closes, with its reply.

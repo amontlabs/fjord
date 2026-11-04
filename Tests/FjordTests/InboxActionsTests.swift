@@ -28,7 +28,7 @@ final class FakePerformer: ActionPerformer {
         var entry = RouterDecision(trigger: .you(words), outcome: .done)
         entry.fromAction = message.source.origin
         let session = "local_\(asked.count)"
-        entry.add(.started(session: session, project: "r", model: message.source.model, effort: message.source.effort), session: session)
+        entry.add(.sent(to: "r", text: words, original: nil), session: session)
         return store?.logDecision(entry) ?? entry.id
     }
 
@@ -1317,36 +1317,6 @@ final class DiskCheckingPerformer: ActionPerformer {
         #expect(performer.asked.count == 13)
     }
 
-    @Test func theRunFollowsWhatTheRouterMadeOfItsMessage() {
-        var entry = RouterDecision(trigger: .you("Fix @o/r#1"))
-        entry.fromAction = SessionOrigin(category: "C", thing: "o/r#1 T", actionID: "a", runID: "r")
-        func outcome(_ e: RouterDecision, waiting: Bool = false, busy: Bool = false, held: Bool = false) -> (ActionRun.State, String, String?) {
-            let o = InboxActions.outcome(of: e, waiting: waiting, busy: busy, held: held) { $0 == "s1" ? "Fix the flaky test" : nil }
-            return (o.state, o.detail, o.session)
-        }
-        #expect(outcome(entry, busy: true) == (.running, "", nil))
-        #expect(outcome(entry, waiting: true) == (.running, InboxActions.waitingWords, nil))
-        var sent = entry
-        sent.add(.sent(to: "peer-1", text: "Fix @o/r#1", original: nil), session: "s1")
-        #expect(outcome(sent) == (.done, "sent to Fix the flaky test", "s1"))
-        var started = entry
-        started.add(.started(session: "s2", project: "r", model: "opus", effort: nil), session: "s2")
-        started.add(.failed("model/effort: the session's plugin is older and can't set them"))
-        #expect(outcome(started) == (.done, "session started", "s2"))
-        // Started, its first message held for the app to run the session; then never sent.
-        var held = entry
-        held.add(.started(session: "s3", project: "r", model: nil, effort: nil), session: "s3")
-        #expect(outcome(held, held: true) == (.running, "session started", "s3"))
-        held.add(.failed("its first message wasn't sent"))
-        #expect(outcome(held) == (.failed, "its first message wasn't sent", "s3"))
-        var failed = entry
-        failed.add(.failed("Claude Code wasn't found"))
-        #expect(outcome(failed) == (.failed, "Claude Code wasn't found", nil))
-        var dismissed = entry
-        dismissed.add(.asked(["New session · r"]))
-        dismissed.reply = "Dismissed: nothing was sent."
-        #expect(outcome(dismissed) == (.failed, "dismissed in the Router", nil))
-    }
 
     @Test func theChipSaysWhereTheMessageWentWhileItWaitsAndOnceItWent() {
         let action = CategoryAction.make(.askRouter(prompt: "go"))
@@ -1374,20 +1344,6 @@ final class DiskCheckingPerformer: ActionPerformer {
         #expect(failed?.label == "failed: No clone of o/r" && failed?.tint == .danger)
     }
 
-    @Test func theChipSaysTheRouterWasAskedAndThenOpensTheSessionItStarted() async {
-        let (store, _) = store([], actions: [session])
-        await store.runActions()
-        add(store, InboxFixture.pr(2))
-        await store.runActions()
-        #expect(store.actionChips(for: store.entries[0]).first?.label.hasPrefix("session started") == true)
-        // The session is linked directly, with no round-trip through a chat message.
-        #expect(store.actionChips(for: store.entries[0]).first?.target == .session("local_1"))
-        let key = store.actionLedger.runs.keys.first { store.actionLedger.runs[$0]?.state == .done }!
-        store.actionLedger.runs[key]?.sessionID = nil
-        #expect(store.actionChips(for: store.entries[0]).first?.target == .router)
-        store.actionLedger.runs[key]?.sessionID = "local_1"
-        #expect(store.actionChips(for: store.entries[0]).first?.target == .session("local_1"))
-    }
 
     /// The row's previous per-action scan, retained to check the latest-run and queue selection together.
     private func previousChips(for entry: InboxEntry, category: InboxCategory, groups: [InboxGroup], ledger: ActionLedger,
@@ -1564,5 +1520,26 @@ final class DiskCheckingPerformer: ActionPerformer {
         performer.cloneFolders = [:]
         let none = await InboxActions.preview(clone, category: "Mine", thing: thing, facts: [], performer: performer)
         #expect(none.contains("No local clone of o/r: the Router would ask you where it goes."))
+    }
+
+    @Test func theRunFollowsWhatTheRouterMadeOfItsMessage() {
+        var entry = RouterDecision(trigger: .you("Fix @o/r#1"))
+        entry.fromAction = SessionOrigin(category: "C", thing: "o/r#1 T", actionID: "a", runID: "r")
+        func outcome(_ e: RouterDecision, waiting: Bool = false, busy: Bool = false) -> (ActionRun.State, String, String?) {
+            let o = InboxActions.outcome(of: e, waiting: waiting, busy: busy) { $0 == "s1" ? "Fix the flaky test" : nil }
+            return (o.state, o.detail, o.session)
+        }
+        #expect(outcome(entry, busy: true) == (.running, "", nil))
+        #expect(outcome(entry, waiting: true) == (.running, InboxActions.waitingWords, nil))
+        var sent = entry
+        sent.add(.sent(to: "peer-1", text: "Fix @o/r#1", original: nil), session: "s1")
+        #expect(outcome(sent) == (.done, "sent to Fix the flaky test", "s1"))
+        var failed = entry
+        failed.add(.failed("Claude Code wasn't found"))
+        #expect(outcome(failed) == (.failed, "Claude Code wasn't found", nil))
+        var dismissed = entry
+        dismissed.add(.asked(["New session · r"]))
+        dismissed.reply = "Dismissed: nothing was sent."
+        #expect(outcome(dismissed) == (.failed, "dismissed in the Router", nil))
     }
 }

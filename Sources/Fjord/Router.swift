@@ -34,11 +34,6 @@ struct RouterState: Codable, Equatable {
     var pendingTurns: [String: PendingTurn] = [:]
     /// What started a session the Router made for an inbox action, by session (its cards say so).
     var origins: [String: SessionOrigin] = [:]
-    /// Sessions Fjord started (the Router, or an inbox action), by session → when. The app imports and shows such a
-    /// session on its own, so "viewed" and "read" mean nothing for it: its cards come at once, until you write in it
-    /// yourself from the app (a message no run of Fjord's sent: see `RouterFeed.update`), after which the usual rules
-    /// apply.
-    var fjordStarted: [String: Date] = [:]
     /// By session, the latest turn whose card was handled and then pruned away (`RouterFeed.prune`): the launch's look back
     /// never makes such a turn a card again, though its card is gone.
     var handledTurns: [String: Int] = [:]
@@ -67,9 +62,6 @@ struct RouterState: Codable, Equatable {
     /// The messages of yours Fjord ordered to sessions, each kept before it was ordered and settled by what the target's plugin
     /// said (RouterCarry.swift).
     var operations: [DeliveryOperation] = []
-    /// The sessions Fjord began to make for a message, kept before anything was made (RouterCarry.swift): a Retry of the
-    /// message continues with the same session rather than making another.
-    var starts: [StartReservation] = []
 
     /// Questions and plans asked while you looked at the session in the app, by session: no card while you do; one is made
     /// when you leave it, if the wait is still on.
@@ -125,7 +117,7 @@ struct RouterState: Codable, Equatable {
     /// `chat` is read, never written (an older file's changes); `claudeSessionID`, and an older file's `autoContinue` and
     /// `autoContinueSessions`, are ignored.
     private enum CodingKeys: String, CodingKey {
-        case enabled, enabledAt, cards, changes, chat, decisions, summaries = "overviews", lives, seen, waits, waitTools, formSeen, pendingTurns, origins, heldWaits, fjordStarted, handledTurns, replies, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries, guestPendingForms, pendingGuestDisables, pendingGuestRemovals, digest, operations, starts
+        case enabled, enabledAt, cards, changes, chat, decisions, summaries = "overviews", lives, seen, waits, waitTools, formSeen, pendingTurns, origins, heldWaits, handledTurns, replies, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries, guestPendingForms, pendingGuestDisables, pendingGuestRemovals, digest, operations
     }
 
     func encode(to encoder: Encoder) throws {
@@ -144,7 +136,6 @@ struct RouterState: Codable, Equatable {
         try c.encode(pendingTurns, forKey: .pendingTurns)
         try c.encode(origins, forKey: .origins)
         try c.encode(heldWaits, forKey: .heldWaits)
-        try c.encode(fjordStarted, forKey: .fjordStarted)
         try c.encode(handledTurns, forKey: .handledTurns)
         try c.encode(replies, forKey: .replies)
         try c.encodeIfPresent(style, forKey: .style)
@@ -156,7 +147,6 @@ struct RouterState: Codable, Equatable {
         try c.encode(pendingGuestRemovals, forKey: .pendingGuestRemovals)
         try c.encodeIfPresent(digest, forKey: .digest)
         try c.encode(operations, forKey: .operations)
-        try c.encode(starts, forKey: .starts)
     }
 
     init(from decoder: Decoder) throws {
@@ -202,7 +192,6 @@ struct RouterState: Codable, Equatable {
         pendingTurns = map(.pendingTurns)
         origins = map(.origins)
         heldWaits = map(.heldWaits)
-        fjordStarted = map(.fjordStarted)
         handledTurns = map(.handledTurns)
         replies = map(.replies)
         style = value(.style)
@@ -214,7 +203,6 @@ struct RouterState: Codable, Equatable {
         pendingGuestRemovals = list(.pendingGuestRemovals)
         digest = value(.digest)
         operations = list(.operations)
-        starts = list(.starts)
         linkUnlinkedChanges(legacy: legacy)
         dropped = lost
     }
@@ -538,9 +526,6 @@ enum RouterFeed {
 
         private init(turns: Int) { self.turns = turns }
 
-        /// A session before anything happened in it.
-        static let start = Stamp(turns: 0)
-
         init?(_ text: String) {
             let parts = text.split(separator: "|", omittingEmptySubsequences: false)
             guard parts.count == 3, let turns = Int(parts[0]) else { return nil }
@@ -626,9 +611,7 @@ enum RouterFeed {
         for session in live.values.sorted(by: { $0.id < $1.id }) {
             let id = session.id
             let stamp = Stamp(session)
-            // A session Fjord started has no backlog: seen for the first time after its first turn ended (a quick reply
-            // can end before the next look), that turn is still new.
-            let before = state.seen[id].flatMap(Stamp.init) ?? (state.fjordStarted[id] != nil ? Stamp.start : nil)
+            let before = state.seen[id].flatMap(Stamp.init)
             let busy = !(tasks[id] ?? []).isEmpty
             let previous = state.waits[id]
             let read = session.running ? activity[id] : nil
@@ -642,14 +625,7 @@ enum RouterFeed {
             }
             if let current { ongoing = current.ms }
 
-            // A session Fjord started is yours to read only once you've written in it from the app: a message that none
-            // of Fjord's runs on it sent. Until then the app showing it (it brings it to the front itself) means
-            // nothing.
-            if let before, state.fjordStarted[id] != nil, stamp.message != before.message, let message = stamp.message,
-               !fjordSent(state, id, turns: stamp.turns, atMs: message) {
-                state.fjordStarted[id] = nil
-            }
-            let watching = id == viewing && state.fjordStarted[id] == nil
+            let watching = id == viewing
 
             // First sight: only what it is now, so turning the Router on doesn't bring the backlog.
             if let before {
@@ -773,12 +749,8 @@ enum RouterFeed {
             let kept = Set(state.handledTurns.keys.sorted { (known[$0] ?? .distantPast, $0) > (known[$1] ?? .distantPast, $1) }.prefix(maxHandled))
             state.handledTurns = state.handledTurns.filter { kept.contains($0.key) }
         }
-        // One the app doesn't list yet is kept for an hour (it is imported a moment after it is made).
-        keep(&state.fjordStarted) { key, at in live[key] != nil || now.timeIntervalSince(at) < 3600 }
-        // What started a session goes with it, past the same hour (a session is noted as Fjord's before its origin is):
-        // its cards keep their own copy.
-        let started = state.fjordStarted
-        keep(&state.origins) { key, _ in live[key] != nil || started[key] != nil }
+        // What started a session goes with it: its cards keep their own copy.
+        keep(&state.origins) { key, _ in live[key] != nil }
         prune(&state)
     }
 
@@ -816,8 +788,6 @@ enum RouterFeed {
     /// session was busy waits for the turn under way to end, so until that turn has (and the delivery's own turn
     /// hasn't), a message is the delivery's.
     private static func fjordSent(_ state: RouterState, _ session: String, turns: Int, atMs ms: Int64) -> Bool {
-        // The session's own first message goes out as soon as it is made, before any run links it.
-        if let made = state.fjordStarted[session], Stamp.ms(made) - 5_000 <= ms, ms <= Stamp.ms(made) + 300_000 { return true }
         return state.decisions.contains { entry in
             entry.parts.contains { part in
                 guard let sent = part.delivered, sent.session == session else { return false }

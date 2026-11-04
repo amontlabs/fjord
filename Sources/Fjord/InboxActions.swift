@@ -730,10 +730,9 @@ enum InboxActions {
     /// inside a fenced block.
     static func categoryLabel(_ name: String) -> String { neutralized(UntrustedText.clean(name, limit: 80)) }
 
-    /// The title of a session the Router starts for an action's message: the thing's reference and what it is about, in one
-    /// short line.
+    /// The title of an action's message for its thing: the thing's reference and what it is about, in one short line.
     static func sessionTitle(_ thing: Thing) -> String {
-        SessionStart.cleanTitle(reference(thing) + " " + inline(thing.title))
+        String((reference(thing) + " " + inline(thing.title)).split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(80))
     }
 
     static func reference(_ thing: Thing) -> String {
@@ -805,11 +804,6 @@ enum InboxActions {
         case .done:
             switch action.kind {
             case .askRouter:
-                if run.detail == readyInClaudeWords {
-                    return Chip(id: action.id, label: "ready in Claude: press Send", tint: .attention, target: .router,
-                                help: "The session in the computer is prepared in Claude with its prompt. Press Send there to start it. "
-                                    + "Open the Router", message: run.message)
-                }
                 if let session = run.sessionID, run.detail.hasPrefix("sent to ") {
                     let label = run.detail.count > 48 ? String(run.detail.prefix(47)) + "…" : run.detail
                     return Chip(id: action.id, label: label, tint: .neutral, target: .session(session),

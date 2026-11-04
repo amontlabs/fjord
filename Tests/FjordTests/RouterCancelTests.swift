@@ -167,14 +167,13 @@ import Testing
                 let signed = RelaySigner.sign(body: "body-\(session)", target: "cli-\(session)", key: RelaySigning.key)
                 nonces.append(RelayInbox.header(of: signed)!.nonce)
                 return RouterDispatcher.Delivery(to: "peer-\(session)", text: signed, body: "body-\(session)", original: "orig",
-                                                 rephrased: false, session: session, newSessionIn: nil)
+                                                 rephrased: false, session: session)
             }
             dispatcher.effects.abortable = { [unowned self] _ in abortable }
             dispatcher.effects.cancel = { [unowned self] sent in
                 cancels.append(sent)
                 return try answer.get()
             }
-            dispatcher.traceLog = RouterTraceLog(url: dir.path("router-trace.jsonl"))
         }
 
         func entry(_ id: UUID?) -> RouterDecision? { store.router.decisions.first { $0.id == id } }
@@ -183,204 +182,14 @@ import Testing
             await waitUntil { id.map { fakes.finished.contains($0) } ?? true }
         }
 
-        func trace() -> [RouterTrace] {
-            dispatcher.traceLog.flush()
-            guard let url = dispatcher.traceLog.url, let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return text.split(separator: "\n").compactMap { try? decoder.decode(RouterTrace.self, from: Data($0.utf8)) }
-        }
     }
 
-    @Test func aSendRecordsWhatItDeliveredForACancel() async throws {
-        let w = World()
-        w.fakes.ranked = [.init(target: "session:local_b", p: 0.95)]
-        let id = w.dispatcher.submit("add a changelog entry")
-        await w.finish(id)
-        let sent = try #require(w.entry(id)?.delivered)
-        #expect(sent.session == "local_b" && sent.cli == "cli-local_b" && sent.nonce == w.nonces.first)
-        // The session as it was just before: 7 turns finished, none running.
-        #expect(sent.turns == 7 && !sent.busy && sent.abortable && sent.cancelled == nil)
-        #expect(w.store.canCancel(w.entry(id)!))
-    }
 
-    @Test func aCancelIsRecordedOnTheEntryAndInTheTrace() async throws {
-        let w = World()
-        w.fakes.ranked = [.init(target: "session:local_b", p: 0.95)]
-        let id = try #require(w.dispatcher.submit("add a changelog entry"))
-        await w.finish(id)
-        #expect(await w.dispatcher.cancel(id) == .aborted)
-        #expect(w.cancels.map(\.nonce) == [w.nonces[0]])
-        let entry = try #require(w.entry(id))
-        #expect(entry.delivered?.cancelled == .aborted && entry.done.last == .cancelled(.aborted))
-        #expect(entry.summary == "cancelled" && !w.store.canCancel(entry))
-        let line = try #require(w.trace().first { $0.kind == .cancelled })
-        #expect(line.id == id && line.how == "aborted" && line.target == "session:local_b" && line.elsewhere == nil)
-        #expect((line.after ?? -1) >= 0)
-        // Once is all: a second cancel sends nothing.
-        #expect(await w.dispatcher.cancel(id) == nil)
-        #expect(w.cancels.count == 1)
-    }
 
-    @Test func aCancelThatFailsSaysSoAndCanBeTriedAgain() async throws {
-        let w = World()
-        w.fakes.ranked = [.init(target: "session:local_b", p: 0.95)]
-        let id = try #require(w.dispatcher.submit("add a changelog entry"))
-        await w.finish(id)
-        w.answer = .failure(RouterTools.Failure("The session's plugin didn't pick the message up"))
-        #expect(await w.dispatcher.cancel(id) == nil)
-        #expect(w.entry(id)?.done.last == .failed("couldn't cancel: The session's plugin didn't pick the message up"))
-        #expect(w.entry(id)?.delivered?.cancelled == nil && w.store.canCancel(w.entry(id)!))
-        #expect(!w.trace().contains { $0.kind == .cancelled })
-        w.answer = .success(.tooLate)
-        #expect(await w.dispatcher.cancel(id) == .tooLate)
-        #expect(w.entry(id)?.summary.hasPrefix("sent to") == true)
-    }
 
-    @Test func aSessionWhosePluginCantAbortIsNotOfferedIt() async throws {
-        let w = World()
-        w.abortable = false
-        w.fakes.ranked = [.init(target: "session:local_b", p: 0.95)]
-        let id = try #require(w.dispatcher.submit("add a changelog entry"))
-        await w.finish(id)
-        #expect(w.entry(id)?.delivered?.abortable == false && !w.store.canCancel(w.entry(id)!))
-        #expect(await w.dispatcher.cancel(id) == nil && w.cancels.isEmpty)
-    }
 
-    @Test func aWrongSendIsCancelledAndAskedAgainWithoutWhereItWent() async throws {
-        let w = World()
-        w.fakes.ranked = [.init(target: "session:local_b", p: 0.95), .init(target: "session:local_a", p: 0.04)]
-        let id = try #require(w.dispatcher.submit("fix the login redirect"))
-        await w.finish(id)
-        w.fakes.finished = []
-        w.dispatcher.sendElsewhere(id)
-        #expect(w.entry(id)?.outcome == .pending, "the line shows it under way")
-        await w.finish(id)
-        #expect(w.cancels.count == 1 && w.entry(id)?.delivered?.cancelled == .aborted)
-        // Asked again, the wrong place left out; a pick corrects it.
-        let ask = try #require(w.dispatcher.askBacks.first { $0.id == id })
-        #expect(!ask.options.contains { $0.target == "session:local_b" } && ask.options.first?.target == "session:local_a")
-        #expect(ask.suggestion == "session:local_b")
-        w.fakes.finished = []
-        #expect(w.dispatcher.pick(id, target: "session:local_a"))
-        await w.finish(id)
-        let entry = try #require(w.entry(id))
-        #expect(w.fakes.sent.map(\.to) == ["peer-local_b", "peer-local_a"])
-        if case .corrected = entry.outcome {} else { Issue.record("not a correction: \(entry.outcome)") }
-        #expect(entry.decision.fromID == "session:local_b" && entry.decision.targetID == "session:local_a")
-        // The new send is the one a Cancel now takes back.
-        #expect(entry.delivered?.session == "local_a" && entry.delivered?.cancelled == nil)
-        let lines = w.trace()
-        #expect(lines.contains { $0.kind == .cancelled && $0.elsewhere == true && $0.target == "session:local_b" })
-        // The re-ask is a line of its own kind: the first decided line stays the wrong send's.
-        #expect(lines.contains { $0.kind == .reasked && $0.path == "elsewhere" && $0.action == "ask" })
-        #expect(lines.filter { $0.kind == .decided && $0.id == id }.map(\.action) == ["send"])
-        #expect(lines.contains { $0.kind == .corrected && $0.from == "session:local_b" && $0.target == "session:local_a" })
-    }
 
-    @Test func anActionsMessageSentElsewhereIsStillAnActionsMessage() async throws {
-        let w = World()
-        w.store.codeFolders.scan = { _ in .init(repos: ["/code/lookout": ["o/lookout"], "/code/lookout-2": ["o/lookout"]]) }
-        w.store.addCodeFolders(["/code"])
-        await w.store.codeFolders.settled()
-        w.store.things["pr:o/lookout#7"] = InboxFixture.pr(7, repo: "o/lookout", title: "Login fails")
-        let (text, mentions) = w.store.composeForRouter([.text("Address "), .pointer(.notification("pr:o/lookout#7"))])
-        var context = RouterContext()
-        context.tag(mentions)
-        context.action = RouterActionSource(origin: SessionOrigin(category: "Contributions", thing: "o/lookout#7 Login fails",
-                                                                  actionID: "a", runID: "r"),
-                                            title: "o/lookout#7 Login fails", model: "opus", effort: "high")
-        w.fakes.ranked = [.init(target: "session:local_a", p: 0.95), .init(target: "unclear", p: 0.05)]
-        let id = try #require(w.dispatcher.submit(text, context: context))
-        await w.finish(id)
-        #expect(w.fakes.prepared == ["local_a"] && w.entry(id)?.actionSource == context.action)
-        // Asked again, Jev now sure it changes Fjord: still never the Router's own runs, nor a folder not offered.
-        w.fakes.finished = []
-        w.fakes.ranked = [.init(target: "change_fjord", p: 0.9), .init(target: "question", p: 0.05), .init(target: "new:/code/lookout-2", p: 0.05)]
-        w.dispatcher.sendElsewhere(id)
-        await w.finish(id)
-        let ask = try #require(w.dispatcher.askBacks.first { $0.id == id })
-        #expect(ask.options.map(\.target) == ["new:/code/lookout-2"] && ask.context.action == context.action)
-        #expect(!w.dispatcher.pick(id, target: "question") && !w.dispatcher.pick(id, target: "change_fjord"))
-        #expect(!w.dispatcher.pick(id, folder: "/somewhere"))
-        // The new session is the action's: called after its thing, on its model and effort, tagged with its origin.
-        w.fakes.finished = []
-        #expect(w.dispatcher.pick(id, target: "new:/code/lookout-2"))
-        await w.finish(id)
-        #expect(w.fakes.started.map(\.title) == ["o/lookout#7 Login fails"])
-        #expect(w.fakes.startSettings.first??.model == "opus" && w.fakes.startSettings.first??.effort == "high")
-        #expect(w.store.router.origins["local_new"]?.category == "Contributions")
-        // An entry from before the settings were kept: its thing's line is the title, on your defaults.
-        var old = try #require(w.entry(id))
-        old.actionStart = nil
-        let back = try JSONDecoder().decode(RouterDecision.self, from: JSONEncoder().encode(old))
-        #expect(back.actionSource == RouterActionSource(origin: context.action!.origin, title: "o/lookout#7 Login fails"))
-        // Triage off: not sent elsewhere at all.
-        w.store.settings.triage = false
-        w.dispatcher.sendElsewhere(id)
-        #expect(w.dispatcher.progress[id] == nil)
-    }
 
-    @Test func anActionsMessageSentElsewhereFromItsReposOnlyCloneOffersAFolder() async throws {
-        let w = World()
-        w.store.codeFolders.scan = { _ in .init(repos: ["/code/solo": ["o/solo"]]) }
-        w.store.addCodeFolders(["/code"])
-        await w.store.codeFolders.settled()
-        w.store.things["pr:o/solo#3"] = InboxFixture.pr(3, repo: "o/solo", title: "Solo")
-        // The new session's first message is signed, so it can be taken back.
-        w.dispatcher.effects.start = { _, _, title, settings in
-            let signed = RelaySigner.sign(body: "hello", target: "cli-new", key: RelaySigning.key)
-            return .delivery(RouterDispatcher.Delivery(to: "peer-new", text: signed, body: "hello", original: "hello", rephrased: false,
-                                                       session: "local_new", newSessionIn: "solo", settings: settings, settingsSigned: false))
-        }
-        let (text, mentions) = w.store.composeForRouter([.text("Fix "), .pointer(.notification("pr:o/solo#3"))])
-        var context = RouterContext()
-        context.tag(mentions)
-        context.action = RouterActionSource(origin: SessionOrigin(category: "C", thing: "o/solo#3 Solo", actionID: "a", runID: "r"),
-                                            title: "o/solo#3 Solo")
-        w.fakes.ranked = [.init(target: "new:/code/solo", p: 0.97), .init(target: "unclear", p: 0.03)]
-        let id = try #require(w.dispatcher.submit(text, context: context))
-        await w.finish(id)
-        #expect(w.entry(id)?.delivered?.session == "local_new")
-        // Its one clone, and the session started there, are where it went: what is left is a folder of your choosing.
-        w.fakes.finished = []
-        w.dispatcher.sendElsewhere(id)
-        await w.finish(id)
-        let ask = try #require(w.dispatcher.askBacks.first { $0.id == id })
-        #expect(ask.options.map(\.target) == [RouterAskBack.chooseFolder])
-        w.fakes.finished = []
-        #expect(w.dispatcher.pick(id, folder: "/elsewhere/solo"))
-        await w.finish(id)
-        #expect(w.fakes.sent.count == 2)
-    }
 
-    @Test func aWrongSendDismissedIsSentNowhereElse() async throws {
-        let w = World()
-        w.fakes.ranked = [.init(target: "session:local_b", p: 0.95), .init(target: "session:local_a", p: 0.04)]
-        let id = try #require(w.dispatcher.submit("fix the login redirect"))
-        await w.finish(id)
-        w.fakes.finished = []
-        w.dispatcher.sendElsewhere(id)
-        await w.finish(id)
-        w.dispatcher.dismiss(id)
-        #expect(w.entry(id)?.reply == "Dismissed: sent nowhere else." && w.entry(id)?.outcome == .done)
-        #expect(w.fakes.sent.count == 1)
-    }
 
-    @Test func aWrongSendThatWasntStoppedIsNotSentElsewhere() async throws {
-        for answer in [Result<RouterDecision.Cancelled, Error>.success(.tooLate), .success(.together), .success(.unknown),
-                       .failure(RouterTools.Failure("The session's plugin didn't pick the message up"))] {
-            let w = World()
-            w.answer = answer
-            w.fakes.ranked = [.init(target: "session:local_b", p: 0.95), .init(target: "session:local_a", p: 0.04)]
-            let id = try #require(w.dispatcher.submit("fix the login redirect"))
-            await w.finish(id)
-            w.fakes.finished = []
-            w.dispatcher.sendElsewhere(id)
-            await w.finish(id)
-            #expect(w.dispatcher.askBacks.isEmpty && w.fakes.sent.count == 1 && w.fakes.ranks == 1)
-            #expect(w.entry(id)?.outcome == .done && w.entry(id)?.reply?.contains("wasn't sent elsewhere") == true)
-            #expect(!w.trace().contains { $0.kind == .reasked })
-        }
-    }
 }

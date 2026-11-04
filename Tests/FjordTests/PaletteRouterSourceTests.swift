@@ -144,8 +144,6 @@ import Testing
         #expect(!f.model.shownFolds.contains(.working))
         #expect(f.model.listZones(f.store).working.contains { $0.id == working.id })
         #expect(f.model.revealRequest?.id == RouterModel.workingID(working.id))
-        try action("ask", of: item).run()
-        #expect(f.went.places == [.router, .router])
     }
 
     @Test func soloedOtherStatesAreJoinedByTheWorkingOne() throws {

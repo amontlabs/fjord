@@ -197,18 +197,13 @@ struct ProjectLabel: View {
     }
 }
 
-/// A session's context menu in the Router: open it, fork it, pick it another icon, give its project a colour, mute the project.
+/// A session's context menu in the Router: open it, pick it another icon, give its project a colour, mute the project.
 struct SessionMenu: View {
     let row: AgentRow
     let store: Store
 
     var body: some View {
         Button("Open in Claude") { store.openAgent(row.id) }
-        // A new session that continues from this one's conversation (files aren't forked).
-        if store.routerOn, row.session.cliID != nil {
-            Button("Fork") { store.forkSession(row.id) }
-            Button("Fork from before your last message") { store.forkSession(row.id, point: .beforeLast) }
-        }
         if store.canPickIcons && row.entry.label == nil {
             Button(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") { store.repickIcon(row.id) }
         }

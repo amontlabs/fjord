@@ -57,9 +57,8 @@ struct RouterComposer: View {
             // Your messages on their way, rising from here until they fly to where they went.
             FlightStack(store: store, flights: model.flights, showsOtherAsks: model.layout == .canvas)
                 .padding(.bottom, model.flights.pills.isEmpty && (model.layout != .canvas || store.routerDispatcher.askBacks.isEmpty) ? 0 : C.dockGap)
-            // Who your words go to, as the Code tab's strip over its composer: the card's session, the projects you tagged.
-            if model.replyTo != nil || model.live.pinned != nil || model.live.prediction != nil || model.editing != nil
-                || !model.live.recipients.isEmpty || !model.live.chips.isEmpty || model.live.dividing {
+            // Who your words go to, as the Code tab's strip over its composer: the card you reply to.
+            if model.replyTo != nil {
                 strip.padding(.bottom, C.dockGap)
             }
             card(on: on, working: working)
@@ -77,36 +76,15 @@ struct RouterComposer: View {
                     }
                 }
                 .zIndex(1)
-            // And what it can go to: a chip whose target was addressed, superseded or is gone goes with it.
-            LiveTargetWatch(store: store, model: model)
         }
         .motion(.fade, value: suggestions.map(\.id))
-        .motion(.fade, value: model.live.shown)
-        // Jev's pick follows the draft and what fixes its target; the page marks its card or row while it shows.
-        .onChange(of: model.draft) { model.predictTarget(store: store) }
-        .onChange(of: model.pointers) { model.predictTarget(store: store) }
-        .onChange(of: model.replyTo) { model.predictTarget(store: store) }
-        .onChange(of: model.live.pinned) { model.predictTarget(store: store) }
-        .onChange(of: model.live.prediction?.mark) { old, new in model.markPrediction(from: old, to: new) }
-        .onChange(of: model.highlighted) { _, now in
-            if now == nil, let mark = model.live.prediction?.mark { model.highlighted = mark }
-        }
         .onAppear {
             if on { requestFocus() }
-            // What was pinned or picked before the page was left may be gone since (the watch below only sees changes from
-            // now on). A pick still good for the draft as it is stays, and asks Jev nothing: only new words are asked about.
-            model.live.revalidate(store: store)
-            model.predictTarget(store: store)
-            // Its card or row marked again, unless something else is marked for now (it comes back after).
-            if model.highlighted == nil, let mark = model.live.prediction?.mark { model.markPrediction(from: nil, to: mark) }
         }
         .onChange(of: model.focusRequest) { requestFocus() }
         .onDisappear {
             focused = false
             model.composerFocused = false
-            model.markPrediction(from: model.live.prediction?.mark, to: nil)
-            // Nothing of the draft goes to Jev while the composer isn't there.
-            model.live.suspend()
         }
         // The @ suggestions follow the caret, wherever it is in the text.
         .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { note in
@@ -145,37 +123,9 @@ struct RouterComposer: View {
     /// The card the message replies to, removable.
     private var strip: some View {
         FlowLayout(spacing: C.stripGap) {
-            if let editing = model.editing {
-                let title = store.claudeSessions[editing.session]?.title ?? "the session"
-                ComposerChip(symbol: "pencil", text: "Editing your message to \(title)", tint: CDS.Text.accent,
-                             removeLabel: "Stop editing (the draft stays)") { model.editing = nil }
-                Text("Sends to a fork from before it; files the agent changed aren't rolled back")
-                    .cdsText((12, 16), .regular, CDS.Text.muted)
-            }
             if let id = model.replyTo, let card = store.router.cards.first(where: { $0.id == id }) {
                 ComposerChip(symbol: "arrow.right", text: card.title, tint: card.kind.color,
                              removeLabel: "Stop replying to \(card.title)") { model.replyTo = nil }
-            }
-            if model.live.pinned != nil, let title = model.live.pinnedTitle {
-                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.accent,
-                             removeLabel: "Let the Router decide where this goes") { model.live.reset() }
-            }
-            // Items ⌘-clicked on the Brief: each gets the whole message.
-            ForEach(model.live.recipients, id: \.self) { target in
-                let title = RouterFlights.destination(target, store: store) ?? "a session"
-                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.accent,
-                             removeLabel: "Don't send it to \(title)") { model.live.recipients.removeAll { $0 == target } }
-            }
-            // While editing, the draft goes to a fork: no pick of Jev's is offered for it.
-            if model.editing == nil {
-                if !model.live.chips.isEmpty {
-                    // Several places: each with its words, in place of the one chip.
-                    DivisionChips(chips: model.live.chips)
-                } else if model.live.dividing {
-                    DividingChip()
-                } else if let prediction = model.live.prediction {
-                    PredictionChip(prediction: prediction, store: store, model: model)
-                }
             }
         }
         .padding(CDS.Density.compact.pad.md)
@@ -361,176 +311,6 @@ struct ComposerChip: View {
     }
 }
 
-/// Jev's pick while you type: a ghost of the reply chip (dashed, no fill, no ×), muted. A click opens the places the message
-/// can go instead (`RedirectMenu`): his pick first, a pick there fixes it as the target.
-private struct PredictionChip: View {
-    let prediction: RouterLiveTarget.Prediction
-    let store: Store
-    let model: RouterModel
-    @State private var hovering = false
-    @State private var menuHeight: CGFloat = 0
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
-        Button { open() } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
-                    .accessibilityHidden(true)
-                Text(prediction.title + (prediction.unsure ? "?" : "")).font(CDS.mono(13)).foregroundStyle(hovering ? CDS.Text.secondary : CDS.Text.muted)
-                    .lineLimit(1).truncationMode(.tail)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .medium)).foregroundStyle(CDS.Text.muted)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, CDS.Density.compact.pad.md)
-            .frame(height: CDS.Density.compact.control)
-            .background(shape.fill(hovering || model.live.redirecting ? CDS.Fill.ghostHover : .clear))
-            .overlay(shape.strokeBorder(CDS.border, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-            .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .overlay(alignment: .topLeading) {
-            if model.live.redirecting {
-                RedirectMenu(store: store, model: model)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
-                    .offset(y: -menuHeight - 4)
-            }
-        }
-        .tip("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)", "Click to change where it goes, Esc to clear")
-        .accessibilityLabel("Jev \(prediction.unsure ? "isn't sure, maybe" : "thinks") this goes to \(prediction.detail)")
-        .accessibilityHint("Opens the places it can go instead")
-    }
-
-    private func open() {
-        model.live.redirectIndex = 0
-        model.live.redirecting.toggle()
-    }
-}
-
-/// The places the message can go instead of Jev's pick, styled as the @ suggestions: his pick lit first, ↑↓ and Return (or a
-/// click) fix one as the target, Esc closes it.
-private struct RedirectMenu: View {
-    let store: Store
-    let model: RouterModel
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        let d = CDS.Density.compact
-        let shape = RoundedRectangle(cornerRadius: d.panelRadius, style: .continuous)
-        let options = model.redirectOptions(store: store)
-        let index = min(model.live.redirectIndex, max(0, options.count - 1))
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(options.enumerated()), id: \.element.id) { i, option in
-                Button { pick(option) } label: {
-                    HStack(spacing: d.gap.xs) {
-                        Image(systemName: Self.symbol(option.target)).font(.system(size: 12)).foregroundStyle(CDS.Text.secondary)
-                            .frame(width: d.icon, height: d.icon)
-                        Text(option.title).font(CDS.sans(d.body.0)).foregroundStyle(CDS.Text.primary).lineLimit(1).layoutPriority(1)
-                        if !option.detail.isEmpty {
-                            Text(option.detail).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        if i == 0 { Text("Jev").font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted) }
-                    }
-                    .padding(.horizontal, d.pad.md)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: d.control)
-                    .background(RoundedRectangle(cornerRadius: d.radius, style: .continuous).fill(i == index ? CDS.Fill.ghostHover : .clear))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onHover { if $0 { model.live.redirectIndex = i } }
-                .accessibilityLabel("\(option.title) \(option.detail)")
-                .accessibilityAddTraits(i == index ? .isSelected : [])
-            }
-        }
-        .padding(d.pad.xs)
-        .frame(width: 400)
-        .fixedSize(horizontal: true, vertical: true)
-        .background(shape.fill(CDS.Surface.s3))
-        .overlay(shape.strokeBorder(CDS.border, lineWidth: 1))
-        .shadow(color: CDS.PanelShadow.near.color, radius: CDS.PanelShadow.near.radius, y: CDS.PanelShadow.near.y)
-        .shadow(color: CDS.PanelShadow.far.color, radius: CDS.PanelShadow.far.radius, y: CDS.PanelShadow.far.y)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($focused)
-        .onAppear { focused = true }
-        .onKeyPress(.upArrow) { model.live.redirectIndex = max(0, index - 1); return .handled }
-        .onKeyPress(.downArrow) { model.live.redirectIndex = min(options.count - 1, index + 1); return .handled }
-        .onKeyPress(.return) { if options.indices.contains(index) { pick(options[index]) }; return .handled }
-        .onKeyPress(.escape) { close(); return .handled }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Where this goes")
-    }
-
-    private func pick(_ option: RouterAskBack.Option) {
-        model.live.redirecting = false
-        if option.target == RouterAskBack.chooseFolder { model.redirectToChosenFolder(store: store) }
-        else { model.redirect(to: option.target, store: store) }
-    }
-
-    private func close() {
-        model.live.redirecting = false
-        model.focusRequest &+= 1
-    }
-
-    static func symbol(_ target: String) -> String {
-        if target == RouterAskBack.chooseFolder { return "folder" }
-        return DivisionChips.glyph(target)
-    }
-}
-
-/// The draft divided into several places, while you type: a ghost chip for each part (its place, then its words), not clickable;
-/// Return sends them as shown. A part that waits for another place's answer is marked, and is held until you send it.
-private struct DivisionChips: View {
-    let chips: [RouterLiveTarget.DivisionChip]
-
-    var body: some View {
-        ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
-            let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
-            HStack(spacing: 4) {
-                Image(systemName: chip.waits ? "pause.circle" : Self.glyph(chip.target)).font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(CDS.Text.muted).accessibilityHidden(true)
-                Text(chip.title).font(CDS.mono(13).weight(.medium)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
-                    .layoutPriority(1)
-                Text(chip.words).font(CDS.mono(13)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
-            }
-            .padding(.horizontal, CDS.Density.compact.pad.md)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(height: CDS.Density.compact.control)
-            .overlay(shape.strokeBorder(CDS.border, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-            .tip(chip.waits ? "Held until you send it" : "Jev will send this to \(chip.detail)", chip.words)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(chip.waits ? "Held for" : "Sends to") \(chip.detail): \(chip.words)")
-        }
-    }
-
-    /// The glyph the history gives a message that went to a place like it.
-    static func glyph(_ target: String) -> String {
-        if target.hasPrefix("new:") { return "plus.square" }
-        if target.hasPrefix("answer:") { return "checkmark" }
-        if target.hasPrefix("session:") { return "paperplane" }
-        return target == "question" ? "questionmark.bubble" : "slider.horizontal.3"
-    }
-}
-
-/// The divider being asked of a draft Jev read as for several places: a quiet ghost chip until its parts are in.
-private struct DividingChip: View {
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
-        HStack(spacing: 4) {
-            Image(systemName: "arrow.triangle.branch").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
-                .accessibilityHidden(true)
-            Text("dividing…").font(CDS.mono(13)).foregroundStyle(CDS.Text.muted)
-        }
-        .padding(.horizontal, CDS.Density.compact.pad.md)
-        .frame(height: CDS.Density.compact.control)
-        .overlay(shape.strokeBorder(CDS.border, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Jev is dividing this between places")
-    }
-}
-
 /// The chip's ×: ghost, muted, primary and white 7.5% on hover.
 struct ChipClose: View {
     let label: String
@@ -581,7 +361,7 @@ struct MentionList: View {
                         .padding(.horizontal, d.pad.md).padding(.top, i == 0 ? 2 : 6).padding(.bottom, 2)
                         .accessibilityAddTraits(.isHeader)
                 }
-                HStack(spacing: 2) {
+                Group {
                     Button { pick(row) } label: {
                         HStack(spacing: d.gap.xs) {
                             Image(systemName: row.look.symbol ?? "folder").font(.system(size: 12))
@@ -604,10 +384,6 @@ struct MentionList: View {
                     }
                     .buttonStyle(.plain)
                     .onHover { if $0 { hover?(i) } }
-                    if let folder = row.folder, let store {
-                        RunsOnProjectMenu(store: store, folder: folder, opensGuestFolderPromptForShot: store.routerPlacementShot)
-                            .padding(.trailing, 3)
-                    }
                 }
                 .accessibilityLabel("\(row.section.title.dropLast()) \(row.name), \(row.detail)")
                 .accessibilityAddTraits(i == index ? .isSelected : [])
@@ -686,74 +462,5 @@ private struct AnchorView: NSViewRepresentable {
         }
 
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
-    }
-}
-
-/// Where a message can go now, watched in a view of its own (the composer doesn't redraw for every session's activity): when
-/// it changes, Jev's pick and the target you pinned are checked against it (`RouterModel.revalidateTarget`). Only while
-/// there is a pick or a pin to check: with neither, nothing is worked out as the sessions change.
-private struct LiveTargetWatch: View {
-    let store: Store
-    let model: RouterModel
-
-    var body: some View {
-        Group {
-            if model.live.pinned != nil || model.live.prediction != nil || !model.live.chips.isEmpty || !model.live.recipients.isEmpty {
-                Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
-                    .onChange(of: RouterModel.targets(store, predicted: model.live.prediction?.target,
-                                                      watching: model.live.watchedTargets)) {
-                        model.revalidateTarget(store: store)
-                    }
-            }
-        }
-        // The recipients picked on the Brief fix where the message goes: the pick or the parts shown for it go.
-        .onChange(of: model.live.recipients) { model.predictTarget(store: store) }
-    }
-}
-
-extension RouterModel {
-    /// What a pick or a pin can go to, and where the page shows it: the open cards, the working sessions, the sessions kept.
-    struct Targets: Equatable {
-        var cards: [String]
-        var working: Set<String>
-        var sessions: Set<String>
-        /// The `new:<folder>` targets among the ones the pick, the pin or the parts shown name whose project is still known: a
-        /// code-folder scan that drops one changes this.
-        var projects: Set<String> = []
-        /// The words Jev's pick shows for its target, as they would be now (a session renamed changes them).
-        var predicted: String? = nil
-
-        func contains(_ id: String) -> Bool { cards.contains(id) || working.contains(id) || sessions.contains(id) }
-    }
-
-    /// The open cards as stored (the page's order doesn't matter here: no sort of every card), the working rows and the
-    /// sessions kept as sets.
-    static func targets(_ store: Store, predicted: String? = nil, watching: [String] = []) -> Targets {
-        let tasks = store.routerTasks
-        let words = predicted.flatMap { target in
-            store.routerDispatcher.option(target, store: store).map {
-                RouterLiveTarget.title(target, $0) + "\n" + store.routerDispatcher.describe(target, store: store)
-            }
-        }
-        // `projectFolders` is what a scan changes and the view sees; Scratch ("") is no folder of it.
-        let known = watching.isEmpty ? [] : Set(store.projectFolders)
-        let projects = Set(watching.lazy.filter {
-            guard $0.hasPrefix("new:") else { return false }
-            let folder = String($0.dropFirst(4))
-            return known.contains(folder) || store.isProjectFolder(folder)
-        })
-        return Targets(cards: store.router.cards.filter { $0.isOpen && RouterPage.shows($0, tasks: tasks) }.map(\.id),
-                       // The Working rows' sessions, as `routerWorkingRows` picks them, unsorted: a set.
-                       working: Set(store.allAgentRows.lazy
-                           .filter { ($0.session.running && !$0.waitsForYou) || (!$0.session.running && !$0.tasks.isEmpty) }
-                           .map { workingID($0.id) }),
-                       sessions: Set(store.claudeSessions.values.lazy.filter { !$0.isArchived }.map(\.id)),
-                       projects: projects,
-                       predicted: words)
-    }
-
-    /// The targets changed: a pick or pin that can't go there any more goes (and Jev is asked again for the draft as it is).
-    func revalidateTarget(store: Store) {
-        if live.revalidate(store: store) { predictTarget(store: store) }
     }
 }

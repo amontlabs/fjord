@@ -13,7 +13,6 @@ final class Store {
     private(set) var hasEngineConnection: Bool
     @ObservationIgnored let engineLauncher: EngineLauncher?
     @ObservationIgnored let computers: ComputersModel
-    @ObservationIgnored var routerPlacementShot = false
     @ObservationIgnored private var engineConnectAttempt: Task<Void, Never>?
 
     init(engineClient: (any EngineClient)? = nil, engineLauncher: EngineLauncher? = nil) {
@@ -624,7 +623,7 @@ final class Store {
     }()
     /// A proposal to start a project for a message that fit none (RouterProjectProposal.swift); its pill is over the composer.
     var routerProposal: RouterProjectProposal?
-    /// The engine itself while it runs (`RouterCourier.on`, started at launch): its places for the dispatcher, its health for the setup.
+    /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The entries of the ask-back cards still up: kept when the history is pruned.
     @ObservationIgnored var decisionsInUse: () -> Set<UUID> = { [] }

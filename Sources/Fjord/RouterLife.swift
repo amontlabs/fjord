@@ -136,7 +136,7 @@ extension Claude {
         }
         for line in tail.split(separator: UInt8(ascii: "\n")) {
             let raw = Data(line)
-            if let message = SessionFork.message(raw) {
+            if let message = YourMessages.message(raw) {
                 close(last: false)
                 user = message.text
                 ended = false
@@ -174,7 +174,7 @@ extension Claude {
             lines.append(line)
             evaluated = false
             // A message of yours starts a turn: from here on the lines hold whole turns.
-            if SessionFork.message(line) != nil {
+            if YourMessages.message(line) != nil {
                 evaluate()
                 evaluated = true
             }

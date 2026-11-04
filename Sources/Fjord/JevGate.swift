@@ -10,8 +10,6 @@ import Foundation
 enum JevUse {
     /// Where a message you send goes.
     case routing
-    /// Where the draft you are typing goes (asked while you type).
-    case drafts
     /// How a session's turn ended.
     case triage
     /// Whether your message resolves a session's cards.
@@ -133,7 +131,6 @@ extension Store {
     func jevAllows(_ use: JevUse) -> Bool {
         switch use {
         case .routing: routerOn
-        case .drafts: routerOn && jevReadsDrafts
         case .triage, .cards: router.enabled
         case .icons: agents.enabled && agents.iconsEnabled
         case .inbox: jevReadsInbox

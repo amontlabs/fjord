@@ -30,6 +30,11 @@ struct RouterDecision: Identifiable, Equatable {
         /// suggested: what examples name it by, as titles can be shared or change. Nil in entries from before.
         var targetID: String?
         var fromID: String?
+        /// Who decided where it goes (`RouterProjectDecision.Decider`: jev, sonnet), for measuring the decider against your
+        /// corrections; nil when no model did (a tag, a pin, a reply).
+        var decider: String?
+        /// The engine's intent that delivered it to claude.ai: a correction (Send elsewhere) is kept on it too.
+        var courierIntent: Int?
         init(target: String? = nil, intent: String? = nil, label: String? = nil, confidence: Double? = nil) {
             self.target = target
             self.intent = intent
@@ -39,19 +44,13 @@ struct RouterDecision: Identifiable, Equatable {
     }
 
     enum Done: Codable, Equatable {
-        /// Your words went to a session (or started one): what `lastTold` reads.
+        /// Your words went somewhere: what `lastTold` reads.
         var sendsWords: Bool {
-            switch self {
-            case .sent, .started, .interrupted: true
-            default: false
-            }
+            if case .sent = self { true } else { false }
         }
 
-        /// A message sent to a session, with what you wrote when it was rephrased.
+        /// A message sent to a claude.ai place or a card's session, with what you wrote when it was rephrased.
         case sent(to: String, text: String, original: String?)
-        case started(session: String?, project: String, model: String?, effort: String?)
-        /// A prefilled guest session handed off to Claude Desktop, without a local peer or first delivery.
-        case preparedGuest(project: String, location: String, pendingStart: String)
         case changed(UUID)
         /// A card answered or marked handled (its id).
         case answered(card: String)
@@ -62,12 +61,6 @@ struct RouterDecision: Identifiable, Equatable {
         case failed(String)
         /// A message sent here taken back (`RouterDispatcher.cancel`): how far it had gone.
         case cancelled(Cancelled)
-        /// A card archived at once on the words (`RouterActionChecks`), its change (with Revert) and the card's title.
-        case archived(title: String, change: UUID)
-        /// A session's running turn stopped on the words: the session's title and project, and when the turn began.
-        case stopped(title: String, project: String, since: Date?)
-        /// A running turn stopped and the words sent as the session's next message (`stopped`: one was running).
-        case interrupted(title: String, text: String, stopped: Bool)
     }
 
     /// How a cancel went, as the session's plugin answered it.
@@ -210,7 +203,7 @@ struct RouterDecision: Identifiable, Equatable {
         mutating func add(_ item: Done, session: String? = nil, card: String? = nil) {
             done.append(item)
             switch item {
-            case .changed(let id), .archived(_, let id): if !links.changes.contains(id) { links.changes.append(id) }
+            case .changed(let id): if !links.changes.contains(id) { links.changes.append(id) }
             default: break
             }
             if let session, !links.sessions.contains(session) { links.sessions.append(session) }
@@ -361,19 +354,12 @@ struct RouterDecision: Identifiable, Equatable {
         done.map { item in
             switch item {
             case .sent(let to, let text, _): "sent to \(to): \(Self.clip(text, 80))"
-            case .started(_, let project, let model, let effort): "started a session in \(project)" + settingsWords(model, effort)
-            case .preparedGuest(let project, let location, _): "ready in Claude · \(project) on \(location)"
             case .changed(let id): "changed Fjord (\(id.uuidString.prefix(8)))"
             case .answered(let card): "answered \(card)"
             case .asked(let options): "asked which: " + options.joined(separator: " / ")
             case .resolved(let card, let message): "closed \(card) by \(forModel ? "the user\'s" : "your") message: \(Self.clip(message, 80))"
             case .failed(let reason): "failed: \(reason)"
             case .cancelled(let how): how.words
-            case .archived(let title, _): "archived “\(Self.clip(title, 60))”"
-            case .stopped(let title, let project, let since):
-                "stopped “\(Self.clip(title, 60))” (\(project)" + (since.map { ", since \(Self.clock($0))" } ?? "") + ")"
-            case .interrupted(let title, let text, let stopped):
-                (stopped ? "interrupted" : "sent to") + " “\(Self.clip(title, 60))”" + (stopped ? " and sent: " : ": ") + Self.clip(text, 80)
             }
         }
     }
@@ -391,18 +377,12 @@ struct RouterDecision: Identifiable, Equatable {
         let more = done.count > 1 ? " +\(done.count - 1)" : ""
         switch first {
         case .sent(let to, _, _): return "sent to \(to)" + more
-        case .started(_, let project, let model, let effort):
-            return "started in \(project)" + settingsWords(model, effort) + more
-        case .preparedGuest(let project, _, _): return "ready in Claude · \(project)" + more
         case .changed: return "changed Fjord" + more
         case .answered: return "answered" + more
         case .asked: return "asked you" + more
         case .resolved: return "addressed a card" + more
         case .failed: return "failed" + more
         case .cancelled: return "cancelled" + more
-        case .archived: return "archived" + more
-        case .stopped: return "stopped" + more
-        case .interrupted(_, _, let stopped): return (stopped ? "interrupted" : "sent") + more
         }
     }
 
@@ -422,14 +402,6 @@ struct RouterDecision: Identifiable, Equatable {
         return "split in \(parts.count): " + tally.map { "\($0.1) \($0.0)" }.joined(separator: ", ")
     }
 
-    /// "09:41": when a stopped turn began.
-    static func clock(_ date: Date) -> String {
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.dateFormat = "HH:mm"
-        return format.string(from: date)
-    }
-
     var symbol: String {
         if isDivided { return "arrow.triangle.branch" }
         if outcome == .reverted { return "arrow.uturn.backward" }
@@ -439,28 +411,17 @@ struct RouterDecision: Identifiable, Equatable {
         if fromAction != nil, done.isEmpty { return "bolt" }
         switch done.first {
         case .sent: return "paperplane"
-        case .started: return "plus.square"
-        case .preparedGuest: return "desktopcomputer"
         case .changed: return "slider.horizontal.3"
         case .answered: return "checkmark"
         case .asked: return "questionmark.bubble"
         case .resolved: return "checkmark"
         case .failed: return "exclamationmark.triangle"
         case .cancelled: return "xmark.circle"
-        case .archived: return "archivebox"
-        case .stopped: return "stop.circle"
-        case .interrupted: return "paperplane"
         case nil: return "text.bubble"
         }
     }
 
     /// " (opus, high)", or nothing.
-    private func settingsWords(_ model: String?, _ effort: String?) -> String {
-        let set = [model, effort].compactMap { $0 }
-        guard !set.isEmpty else { return "" }
-        return " (" + set.joined(separator: ", ") + ")"
-    }
-
     static func clip(_ text: String, _ n: Int) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         return line.count > n ? String(line.prefix(n - 1)) + "…" : line
@@ -548,7 +509,8 @@ extension RouterDecision: Codable {
         id = try c.decode(UUID.self, forKey: .id)
         at = try c.decode(Date.self, forKey: .at)
         trigger = try c.decode(Trigger.self, forKey: .trigger)
-        mentions = try c.decodeIfPresent([RouterMention].self, forKey: .mentions)
+        // A pill of a kind no longer made (a session's) leaves the entry without its pills, not without the entry.
+        mentions = (try? c.decodeIfPresent([RouterMention].self, forKey: .mentions)) ?? nil
         fromAction = try c.decodeIfPresent(SessionOrigin.self, forKey: .fromAction)
         actionStart = try c.decodeIfPresent(ActionStart.self, forKey: .actionStart)
         generated = try c.decodeIfPresent(Bool.self, forKey: .generated)
@@ -591,17 +553,7 @@ extension RouterState {
         for i in decisions.indices {
             for j in decisions[i].parts.indices where decisions[i].parts[j].outcome == .pending {
                 var part = decisions[i].parts[j]
-                // A start whose first message was held for the session to run: the session is there, the message never went.
-                let held = part.done.contains { if case .started = $0 { true } else { false } }
-                let guestPrepared = part.done.contains { if case .preparedGuest = $0 { true } else { false } }
-                if !guestPrepared {
-                    // Held, as against a part sent now (it has its delivery or other lines by then, whatever it waited for).
-                    if let waits = part.waitsFor, part.done.isEmpty {
-                        part.add(.failed("wasn't sent: Fjord quit while it waited for \(placeWords(waits))"))
-                    } else {
-                        part.add(.failed(held ? "its first message wasn't sent: Fjord quit while it waited for the session to run" : "interrupted"))
-                    }
-                }
+                part.add(.failed("interrupted"))
                 part.outcome = .done
                 decisions[i].parts[j] = part
             }

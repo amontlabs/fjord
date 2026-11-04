@@ -141,19 +141,17 @@ struct FlightFramesKey: PreferenceKey {
                 drop(pill.id, store: store)
                 continue
             }
-            let running = dispatcher.progress[pill.id] != nil || dispatcher.held[pill.id] != nil
+            let running = dispatcher.progress[pill.id] != nil
             let asking = dispatcher.askBacks.contains { $0.id == pill.id }
-            // A part held for another place's answer is in the history, with Send now: its pill goes there, not on spinning.
-            let holding = dispatcher.held[pill.id] != nil && Self.holds(entry)
             // Handed to the delivery engine: its own pill over the composer says where it is from now on, so this one goes at once.
             if Self.went(entry), Self.handedToCourier(entry) {
                 drop(pill.id, store: store)
                 continue
             }
-            if Self.went(entry) || holding || (!running && !asking && entry.outcome != .pending && entry.reply != nil && !Self.failed(entry)) {
-                let target = holding ? "history" : Self.landing(entry)
+            if Self.went(entry) || (!running && !asking && entry.outcome != .pending && entry.reply != nil && !Self.failed(entry)) {
+                let target = Self.landing(entry)
                 // An answer in the history stays where it was said, readable, rather than flying into a history out of sight.
-                if target == "history", !holding, let reply = entry.reply, !reply.isEmpty { set(pill.id, .answered(reply)) } else {
+                if target == "history", let reply = entry.reply, !reply.isEmpty { set(pill.id, .answered(reply)) } else {
                     launch(pill, to: target, store: store)
                 }
             } else if !running, !asking, entry.outcome != .pending {
@@ -181,10 +179,9 @@ struct FlightFramesKey: PreferenceKey {
     func status(_ id: UUID, store: Store) -> String {
         let dispatcher = store.routerDispatcher
         let entry = store.router.record(id)
-        if dispatcher.held[id] != nil { return "held until you send it" }
-        // A sleeping session being opened in the Claude app: said while it takes.
-        if let opening = dispatcher.progress[id], opening.hasPrefix("opening ") { return opening + "…" }
         if let title = Self.destination(entry?.decision.targetID, store: store) { return "→ " + title }
+        // The decider's stage (Jev, then Sonnet), as it goes.
+        if let stage = dispatcher.progress[id], stage != "starting", stage != RouterDispatcher.waitingTurn { return stage }
         return "finding where it goes"
     }
 
@@ -256,16 +253,6 @@ struct FlightFramesKey: PreferenceKey {
             session.lastUserMessage = now
             session.lastActivity = now
             store.claudeSessions[id] = session
-        } else if let entry = store.router.record(pill.id),
-                  let new = entry.decision.targetID, new.hasPrefix("new:") {
-            var session = ClaudeSession(id: id, title: RouterDispatcher.title(for: pill.text), folder: String(new.dropFirst(4)),
-                                        lastActivity: now, running: true)
-            session.lastUserMessage = now
-            store.claudeSessions[id] = session
-            // Listed as the sessions' read would list it on first sight.
-            if !store.agents.entries.contains(where: { $0.id == id }) {
-                store.agents.entries.append(AgentEntry(id: id, seen: session.activity))
-            }
         }
     }
 
@@ -352,7 +339,7 @@ struct FlightFramesKey: PreferenceKey {
     static func went(_ entry: RouterDecision) -> Bool {
         entry.done.contains {
             switch $0 {
-            case .sent, .started, .preparedGuest, .answered, .changed, .resolved, .archived, .stopped, .interrupted: true
+            case .sent, .answered, .changed, .resolved: true
             case .asked, .failed, .cancelled: false
             }
         }
@@ -365,11 +352,6 @@ struct FlightFramesKey: PreferenceKey {
         entry.decision.targetID.flatMap(RouterCourier.Target.init) != nil
     }
 
-    /// A part of a divided message that waits for another place's answer and hasn't gone: held for you to send.
-    static func holds(_ entry: RouterDecision) -> Bool {
-        entry.outcome == .pending && entry.done.isEmpty && entry.parts.first?.waitsFor != nil
-    }
-
     static func failure(_ entry: RouterDecision) -> String? {
         for item in entry.done.reversed() { if case .failed(let why) = item { return why } }
         return nil
@@ -379,7 +361,6 @@ struct FlightFramesKey: PreferenceKey {
     static func landing(_ entry: RouterDecision) -> String {
         let target = entry.decision.targetID ?? ""
         if target.hasPrefix("answer:") { return "card:\(entry.links.cards.first ?? String(target.dropFirst(7)))" }
-        for item in entry.done { if case .started(let session?, _, _, _) = item { return "session:\(session)" } }
         if let session = entry.links.sessions.first { return "session:\(session)" }
         if target.hasPrefix("session:") { return target }
         return "history"
@@ -521,7 +502,7 @@ struct FlightStack: View {
         let dispatcher = store.routerDispatcher
         return dispatcher.flying.map { id in
             let entry = store.router.record(id)
-            return [id.uuidString, dispatcher.progress[id] ?? "", dispatcher.held[id] ?? "",
+            return [id.uuidString, dispatcher.progress[id] ?? "",
                     dispatcher.askBacks.contains { $0.id == id } ? "ask" : "", entry.map { "\($0.outcome)" } ?? "",
                     "\(entry?.done.count ?? -1)", entry?.decision.targetID ?? "", entry?.reply == nil ? "" : "r"].joined(separator: "|")
         }

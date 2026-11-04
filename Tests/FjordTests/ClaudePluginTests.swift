@@ -339,33 +339,7 @@ enum PluginFixture {
         #expect(RelayInbox.header(of: signed)?.nonce == Self.nonce && RelayInbox.header(of: signed)?.target == "cli-target")
     }
 
-    @Test func theSettingsAreAllowlistedAndParsedFromWords() {
-        #expect(SessionSettings(model: "gpt", effort: "--x") == nil)
-        #expect(SessionSettings(model: "sonnet[1m]", effort: "bogus") == SessionSettings(model: "sonnet[1m]", effort: nil))
-        #expect(SessionSettings(model: "claude-opus-4-5", effort: "xhigh")?.effort == "xhigh")
-        #expect(SessionSettings(model: "claude-x; rm", effort: nil) == nil)
-        #expect(SessionSettings.parse("@lookout fix the bug, with opus, high effort") == SessionSettings(model: "opus", effort: "high"))
-        #expect(SessionSettings.parse("start a new session using Sonnet") == SessionSettings(model: "sonnet", effort: nil))
-        #expect(SessionSettings.parse("do it, with xhigh effort") == SessionSettings(model: nil, effort: "xhigh"))
-        #expect(SessionSettings.parse("start a session, effort max: fix it") == SessionSettings(model: nil, effort: "max"))
-        #expect(SessionSettings.parse("write about opus the band") == nil)
-        #expect(SessionSettings.parse("fix the thing") == nil)
-        // A negation in the task doesn't reach a settings clause set apart from it.
-        let both = SessionSettings(model: "opus", effort: "high")
-        #expect(SessionSettings.parse("start a session in lookout to fix login without changing the UI (with opus, high effort)") == both)
-        #expect(SessionSettings.parse("fix login without changing the UI - with opus, high effort") == both)
-        #expect(SessionSettings.parse("fix login without changing the UI \u{2014} with opus, high effort") == both)
-    }
 
-    @Test func theAckSaysWhatWasApplied() {
-        let asked = SessionSettings(model: "opus", effort: "high")!
-        #expect(AppliedSettings.from(ack: "ok model=opus effort=high", requested: asked, supported: true) == AppliedSettings(model: "opus", effort: "high"))
-        let partial = AppliedSettings.from(ack: "ok model=error:unknown_model effort=high", requested: asked, supported: true)
-        #expect(partial.model == nil && partial.effort == "high" && partial.problems == ["model not set: unknown model"])
-        #expect(AppliedSettings.from(ack: "ok", requested: asked, supported: true).problems.count == 2)
-        #expect(AppliedSettings.from(ack: nil, requested: asked, supported: true).problems.count == 1)
-        #expect(AppliedSettings.from(ack: "ok", requested: asked, supported: false).problems.first?.contains("older") == true)
-    }
 
     @Test func theWireIsTheHeaderLineThenTheBodyInBase64() throws {
         let signed = RelaySigner.sign(body: Self.body, target: Self.target, key: Self.key, nonce: UUID(uuidString: Self.nonce)!,

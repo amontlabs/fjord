@@ -25,8 +25,8 @@ timing is ported line for line. Everything that decides or reads the Mac already
 | `page.py` (events become Seen rows) | Swift engine | Pure |
 | `store.py` (seen, intents, told, notes) | Swift engine, **same SQLite schema** | The Python tests and `router.py` read the file directly |
 | `tell.py` fact diff and `plan` | Swift engine (`CourierTell`), pure | Small, and `Core.tell` has 28 tests. Turning facts into words stays in the app's brief (`RouterBrief`, `RouterDigest`) |
-| `decide.py` (Jev 0.7, Sonnet 0.5, setup question 0.5) | **App**: `RouterJev.swift`, `RouterDispatcher.swift` | The app already decides with Jev. The engine never calls a model |
-| `context.py` | **App**: `RouterContext` in `RouterDispatcher.swift`, built from the engine's Board snapshot | Same job |
+| `decide.py` (Jev 0.7, Sonnet 0.5, setup question 0.5) | **App**: `RouterProjectDecide.swift` (Jev 0.7, then Sonnet 0.8) | The engine never calls a model |
+| `context.py` | **App**: `RouterProjectContext.swift`, built from the engine's Board | Same job |
 | `look.py` (session files, registry, `pgrep`) | **App**: its existing local-session reading, fed to the engine as `local(...)` | The app already watches these files. The engine keeps the decisions (`waiting_app`, stranded, the 20 s grace) |
 | `native_host.py` | `--native-host` mode (the other agent's work) | Done elsewhere |
 | `routerd.py` server (socket, timers, `watch`) | Swift `CourierHost` actor | Glue specific to the app |
@@ -34,8 +34,13 @@ timing is ported line for line. Everything that decides or reads the Mac already
 
 ### The seam
 
-`RouterDispatcher` decides the target as it does today. Local sessions still go through `RouterSender.send`. A target that is a
-claude.ai project or thread is handed to the engine instead:
+Updated 2026-11-04: claude.ai projects are the Router's only routing. `RouterDispatcher` decides among them alone: a tagged
+project or thread goes there with no model, anything else goes to `RouterProjectDecider` (Jev, then Sonnet), and every target
+it acts on is a claude.ai project or thread handed to the engine. The old session routing (Jev's per-session ranking and
+`RouteFusion`, the divider and tag splits, the action checks, session starts, forks, the Desktop deep-link start, the
+`RouterCourier.on`/`--courier` switch) is gone; the engine starts at launch, except in a demo or under a test. Only a reply
+armed on a card still goes to that card's local session, through `RouterSender.send` and the signed plugin. The engine's
+side of the seam:
 
 ```swift
 enum CourierIntent {
@@ -81,7 +86,7 @@ The prefix is `Courier`, which nothing in the app uses yet. Each file names the 
 | `CourierCoreTools.swift` | `extension CourierCore`: `advanceTool`, `stepTool`, `toolDone`, `already`, `reconcile` | lines 1330–1560 |
 | `CourierHost.swift` | `actor CourierHost`: socket, timer, clocks, app API, update stream | `serve`, `link`, `wake` |
 | `CourierTestMode.swift` | `enum CourierTestMode` (`--courier-test`) | none: the conformance bridge |
-| `RouterCourier.swift` | the dispatcher's handoff to `CourierHost`, and the pill's view model | none |
+| `RouterCourier.swift` | the link to `CourierHost` and the pill's view model (the handoff is `RouterDispatcher.courierHandoff`) | none |
 | `RouterCourierPill.swift`, `RouterCourierSetup.swift` | the pill's views and the one-screen setup | none |
 
 ### Threading and clocks

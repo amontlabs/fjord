@@ -131,24 +131,6 @@ import Testing
         #expect(s.router.decisions.count == 1 && s.router.decisions[0].parts[0].note == nil)
     }
 
-    @Test func aPartIsAnEntryOfItsOwnToWhateverReadsIt() {
-        let s = store()
-        let ids = divided(in: s)
-        let mention = RouterMention(range: 0..<3, pointer: .session("docs"), name: "docs")
-        s.updateDecision(ids.docs) { $0.mentions = [mention]; $0.add(.sent(to: "Docs", text: "add the page", original: nil), session: "docs") }
-        let part = s.router.record(ids.docs)
-        #expect(part?.id == ids.docs && part?.trigger == .you("add the page") && part?.mentions == [mention])
-        #expect(part?.done == [.sent(to: "Docs", text: "add the page", original: nil)] && part?.links.sessions == ["docs"])
-        #expect(part?.parts.count == 1 && part?.at == t0)
-        #expect(s.router.record(ids.id)?.parts.count == 2)
-        #expect(s.router.record(UUID()) == nil)
-        #expect(s.router.parent(of: ids.ci) == ids.id && s.router.parent(of: ids.id) == nil && s.router.parent(of: UUID()) == nil)
-        #expect(s.router.decisions[0].places.map(\.id) == [ids.ci, ids.docs])
-        // A part without words of its own is the whole message.
-        var whole = RouterDecision(trigger: .you("both of you, rerun"))
-        whole.divide(into: [.init(place: "session:ci"), .init(place: "session:docs")])
-        #expect(whole.places.map(\.trigger) == [.you("both of you, rerun"), .you("both of you, rerun")])
-    }
 
     @Test func aOnePartEntryIsItsOwnRecordAndHasNoParent() {
         let s = store()
@@ -167,23 +149,6 @@ import Testing
         #expect(state.decisions.first?.trigger == .you("m6"))
     }
 
-    @Test func aQuitSettlesEachPartAndSaysWhatAHeldOneWaitedFor() {
-        var state = RouterState()
-        state.cards = [RouterCard(id: "ci#t1", sessionID: "ci", kind: .done, title: "Rerun CI", folder: nil, text: "", createdAt: Date())]
-        var entry = RouterDecision(trigger: .you("ask CI, then tell docs"))
-        entry.divide(into: [
-            .init(text: "ask CI", place: "session:ci", outcome: .done),
-            .init(text: "tell docs", place: "session:docs", waitsFor: "session:ci"),
-            .init(text: "and project", place: "project:/code/lookout"),
-        ])
-        state.decisions = [entry, RouterDecision(trigger: .you("one"))]
-        state.settleInterrupted()
-        let parts = state.decisions[0].parts
-        #expect(parts[0].done.isEmpty && parts[0].outcome == .done)
-        #expect(parts[1].done == [.failed("wasn't sent: Fjord quit while it waited for “Rerun CI”")] && parts[1].outcome == .done)
-        #expect(parts[2].done == [.failed("interrupted")] && parts[2].outcome == .done)
-        #expect(state.decisions[0].outcome == .done && state.decisions[1].doneLines == ["failed: interrupted"])
-    }
 
     @Test func aQuitDoesNotCallAPartSentNowUnsent() {
         var state = RouterState()
@@ -220,28 +185,6 @@ import Testing
         #expect(s.router.decisions.count == 1 && s.router.decisions[0].parts[1].done.isEmpty && s.router.decisions[0].links.changes.isEmpty)
     }
 
-    @Test func aPartsDeliveryIsFjordsOwnMessage() {
-        func session(_ message: Double) -> ClaudeSession {
-            ClaudeSession(id: "local_a", title: "A", folder: "/code/app", completedTurns: 1, lastActivity: at(message), lastFocused: at(-20),
-                          lastUserMessage: at(message), running: false, cliID: "cli-local_a")
-        }
-        func run(_ entry: RouterDecision) -> RouterState {
-            var state = RouterState()
-            state.enabled = true
-            RouterFeed.update(&state, sessions: [session(-10)], activity: [:], muted: [], viewing: nil, now: at(0))
-            state.fjordStarted["local_a"] = at(-10)
-            state.decisions = [entry]
-            RouterFeed.update(&state, sessions: [session(20.1)], activity: [:], muted: [], viewing: "local_a", now: at(21))
-            return state
-        }
-        var entry = RouterDecision(at: at(19.5), trigger: .you("two places"))
-        entry.divide(into: [.init(text: "a", place: "session:other"), .init(text: "b", place: "session:local_a")])
-        entry.parts[1].delivered = .init(session: "local_a", cli: "cli-local_a", nonce: "n", at: at(20.1), turns: 1, busy: false, abortable: true)
-        #expect(run(entry).fjordStarted["local_a"] != nil)
-        // Without the delivery the message in the session is yours.
-        entry.parts[1].delivered = nil
-        #expect(run(entry).fjordStarted["local_a"] == nil)
-    }
 
     @Test func recentDecisionsLeaveOutTheRunAskingAndItsParent() {
         let s = store()

@@ -2,35 +2,19 @@ import AppKit
 import Foundation
 import Observation
 
-// A message or a tool for a claude.ai project goes to the Swift delivery engine (`CourierHost`), not through a session:
-// the dispatcher hands it over here, and its pill over the composer follows the engine's updates (docs/design/
-// router-swift-port.md, "The seam"). The pill says only what the engine said: its causes are plain sentences, shown as
-// they are. Nothing routes here until `enabled`, once the fuzz gate is green.
+// Every message the Router sends goes to a claude.ai project or thread through the Swift delivery engine (`CourierHost`): the
+// dispatcher hands it over here, and its pill over the composer follows the engine's updates (docs/design/
+// router-swift-port.md, "The seam"). The pill says only what the engine said: its causes are plain sentences, shown as they
+// are. The engine starts at launch (never in a demo or under a test).
 
 enum RouterCourier {
-    /// The dispatcher hands claude.ai targets to the engine. Off: no target is one, and local targets go as they always went.
-    /// Flipping this is the only change the code needs; a live run turns it on without it (`on`).
-    static let enabled = false
-
-    /// The hidden switch: `--courier` at launch, or `defaults write <Fjord's bundle id> routerCourier -bool YES`. Never under
-    /// a test or in a demo, whatever the defaults say.
-    static let flag = "--courier"
-    static let defaultsKey = "routerCourier"
-
-    /// Whether the engine runs and claude.ai places are targets: `enabled`, or the hidden switch.
-    static var on: Bool { override ?? (enabled || (!UnderTest.isRunning && !Store.isDemo && hiddenSwitch)) }
-
-    /// A test turns it on for itself.
-    nonisolated(unsafe) static var override: Bool?
-
-    /// The claude.ai places the dispatcher offers: the engine's Board as last shared, while it is on.
+    /// The claude.ai places the dispatcher offers: the engine's Board as last shared.
     @MainActor static func places(_ store: Store) -> [CourierPlace] {
-        on ? store.routerCourierLink.places : []
+        store.routerCourierLink.places
     }
 
-    /// Whether a claude.ai target can be sent to now: the engine is on and the Board has its project (and thread).
+    /// Whether a claude.ai target can be sent to now: the Board has its project (and thread).
     @MainActor static func eligible(_ target: Target, store: Store) -> Bool {
-        guard on else { return false }
         let link = store.routerCourierLink
         return target.thread == nil ? link.place(target) != nil : link.thread(target) != nil
     }
@@ -45,8 +29,6 @@ enum RouterCourier {
         }
         return .init(target: target.targetID, title: target.project, detail: "claude.ai project")
     }
-
-    private static let hiddenSwitch = CommandLine.arguments.contains(flag) || UserDefaults.standard.bool(forKey: defaultsKey)
 
     /// A claude.ai place, as a target id: `claude-project:<project>` or `claude-thread:<project>/<thread>` (a thread id has no
     /// slash; a project's name may).
@@ -100,7 +82,7 @@ enum RouterCourier {
     }
 }
 
-/// The engine in the app: started at launch while `RouterCourier.on` (never in a demo or a test), its updates fed to the pills,
+/// The engine in the app: started at launch (never in a demo or a test), its updates fed to the pills,
 /// its Board's health and places kept here on the main actor for the setup and the dispatcher, stopped on quit.
 @MainActor final class RouterCourierLink: RouterCourierSetupHost {
     private(set) var host: CourierHost?
@@ -114,8 +96,6 @@ enum RouterCourier {
     /// The app's reading of the local sessions (a test gives its own).
     var readLocal: @Sendable () -> JSON = { CourierLocal.read() }
     private var watchers: [UUID: AsyncStream<CourierSetupHealth>.Continuation] = [:]
-    /// Called when the places change (the dispatcher's targets are read again).
-    var placesChanged: () -> Void = {}
 
     lazy var setup = RouterCourierSetup(host: self)
 
@@ -188,10 +168,13 @@ enum RouterCourier {
 
     /// A snapshot taken in (the host's, or a test's).
     func take(_ next: CourierSnapshot) {
-        let moved = next.places != snapshot.places
         snapshot = next
         for w in watchers.values { w.yield(next.health) }
-        if moved { placesChanged() }
+    }
+
+    /// The engine's Board now (`.null` while it doesn't run): what the project decider reads.
+    func board() async -> JSON {
+        await host?.board() ?? .null
     }
 
     /// The project a target names, on the Board as last shared: by name, else by id.
@@ -348,11 +331,17 @@ struct RouterCourierSource {
     /// The title a thread target shows by (the Board's); nil when unknown, and the pill shows the thread's id.
     var threadTitle: (RouterCourier.Target) -> String? = { _ in nil }
 
-    /// Hands your words for a claude.ai place to the engine; its pill shows at once.
+    /// Hands your words for a claude.ai place to the engine; its pill shows at once. `shown`: the project's name on the pill
+    /// when the target names it by its id.
     @discardableResult
-    func send(_ words: String, to target: RouterCourier.Target) async -> Int {
+    func send(_ words: String, to target: RouterCourier.Target, shown: String? = nil) async -> Int {
         await submit(.send(words: words, project: target.project, thread: target.thread),
-                     work: .send(words: words, project: target.project, thread: threadTitle(target) ?? target.thread))
+                     work: .send(words: words, project: shown ?? target.project, thread: threadTitle(target) ?? target.thread))
+    }
+
+    /// A delivery corrected (Send elsewhere): the engine keeps where it should have gone on its intent, for the measurement.
+    func correct(_ intentID: Int, project: String) {
+        Task { _ = await source?.submit(.correct(intentID: intentID, project: project)) }
     }
 
     /// One of the Router's tools for claude.ai.
@@ -557,31 +546,5 @@ struct RouterCourierSource {
                                                           "\(project) may use \(p)", "\(p) for \(project)")
             }
         }
-    }
-}
-
-// MARK: - The dispatcher's handoff
-
-extension RouterDispatcher {
-    /// A claude.ai target goes to the engine, its pill over the composer taking over from the message's own. Nil: the target is
-    /// not one (or the handoff is off), and it goes as it always went.
-    func courierHandoff(_ job: Job, to target: String) -> RouterCourier.Target? {
-        guard RouterCourier.on, let store, let courier = RouterCourier.Target(target) else { return nil }
-        // The pills that address it at the start of your words aren't part of them (the reply path drops them so too).
-        let words = Self.courierWords(job.text, pills: job.context.pills)
-        Task { await store.routerCourier.send(words, to: courier) }
-        store.updateDecision(job.id) {
-            // The target the flights read to leave the message's pill to the engine's (`RouterFlights.handedToCourier`).
-            $0.decision.targetID = courier.targetID
-            $0.add(.sent(to: RouterCourierPills.place(courier.project, store.routerCourier.threadTitle(courier) ?? courier.thread), text: words, original: words == job.text ? nil : job.text))
-            $0.outcome = .done
-        }
-        return courier
-    }
-
-    /// Your words without the address pills they start with; as they are when nothing is left.
-    nonisolated static func courierWords(_ text: String, pills: [Range<Int>]) -> String {
-        let rest = (Addressing.withoutLeadingPills(text, pills) ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
-        return rest.isEmpty ? text : rest
     }
 }

@@ -618,8 +618,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let demo = CommandLine.arguments.contains("--demo")
         // Chrome's host manifest, kept pointing at this app (only from a bundle; see `NativeHostManifest`).
         if !demo && NativeHostManifest.enabled { NativeHostManifest.install() }
-        // The claude.ai delivery engine (`RouterCourier.on`: the code's switch, `--courier`, or the hidden default), never in a demo.
-        if !demo && RouterCourier.on { startCourier() }
+        // The claude.ai delivery engine: every message the Router sends goes through it. Never in a demo.
+        if !demo && !UnderTest.isRunning { startCourier() }
         let window = AppWindowController(store: store)
         appWindow = window
         if CommandLine.arguments.contains("routerCanvas") {
@@ -831,7 +831,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if action == .openSetup { self?.showWindow(.settings) } else { RouterCourierPills.openOutside(action) }
         }
         let link = store.routerCourierLink
-        link.placesChanged = { [weak store] in store?.routerDispatcher.forgetLive() }
         Task { await link.start(pills: pills) }
     }
 

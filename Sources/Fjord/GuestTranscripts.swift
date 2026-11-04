@@ -10,7 +10,7 @@ struct GuestTranscriptSnapshot: Equatable, Sendable {
     var mtimeMs: Int64
     var tail: Data
 
-    var messages: [SessionFork.Message] { SessionFork.messages(in: tail) }
+    var messages: [YourMessages.Message] { YourMessages.messages(in: tail) }
     var activity: ClaudeActivity? { Claude.activity(tail: tail) }
     var finalMessage: String? { Claude.finalMessage(tail: tail) }
     var recentSteps: [Claude.TranscriptStep] { Claude.recentTimedSteps(tail: tail) }

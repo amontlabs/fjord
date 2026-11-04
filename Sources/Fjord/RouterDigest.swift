@@ -808,7 +808,7 @@ struct DigestHistory: View {
             return decision.places.contains { place in
                 place.done.contains { item in
                     switch item {
-                    case .sent, .started, .interrupted, .preparedGuest, .failed: true
+                    case .sent, .failed: true
                     default: false
                     }
                 }
@@ -909,8 +909,6 @@ struct DigestHistory: View {
         for item in place.done.reversed() {
             switch item {
             case .sent(let to, _, _): return place.decision.target ?? "“\(to)”"
-            case .started(_, let project, _, _): return "a new session in \(project)"
-            case .interrupted(let title, _, _): return "“\(title)”"
             default: continue
             }
         }
@@ -924,9 +922,6 @@ struct DigestHistory: View {
             switch item {
             case .failed(let why): return "didn't go: " + why
             case .sent: return "sent"
-            case .started: return "started a session"
-            case .interrupted: return "stopped its turn and sent"
-            case .preparedGuest: return "handed to Claude Desktop"
             default: continue
             }
         }
@@ -1091,8 +1086,7 @@ struct DigestState {
 
 /// A highlight: its state's mark, its words on a ground of its state's colour, and its session's own icon after them, so
 /// you see which session it is and what it's at before you hover it. Hovered, its card's gist floats under it; clicked,
-/// the card opens under the paragraph and the composer answers it. Clicked with ⌘, it is picked as a recipient instead: your
-/// message goes to it whole, with every other one picked (a chip over the composer for each).
+/// the card opens under the paragraph and the composer answers it.
 private struct DigestSpan: View {
     let store: Store
     let model: RouterModel
@@ -1122,10 +1116,7 @@ private struct DigestSpan: View {
         let status = handled ? DigestState.handled : DigestState(item, kind: kind)
         let quiet = kind == .run
         let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
-        let recipient = model.live.recipients.contains(target)
         Button {
-            // ⌘-click picks the session to send your message to; it opens nothing.
-            if NSEvent.modifierFlags.contains(.command) { return toggleRecipient() }
             withAnimation(Motion.spatial.resolved(reduce: false)) {
                 if open { model.closeDigestCard(store: store) } else { state.open = id }
                 state.hovered = nil
@@ -1157,17 +1148,6 @@ private struct DigestSpan: View {
                 if !quiet { shape.fill(status.tint.opacity(hovered || open ? 0.24 : 0.11)) }
             }
             .overlay { if open { shape.strokeBorder(status.tint.opacity(0.7), lineWidth: 1) } }
-            // A recipient: ringed in the accent and marked with an arrow, whatever its state's colour.
-            .overlay {
-                if recipient { shape.strokeBorder(CDS.Text.accent, lineWidth: 1.5).padding(-1) }
-            }
-            .overlay(alignment: .topTrailing) {
-                if recipient {
-                    Image(systemName: "arrow.right.circle.fill").font(.system(size: size * 0.7))
-                        .foregroundStyle(CDS.Text.accent).background(Circle().fill(CDS.Surface.s1).padding(2))
-                        .offset(x: size * 0.3, y: -size * 0.4).accessibilityHidden(true)
-                }
-            }
             .contentShape(shape)
         }
         .buttonStyle(.plain)
@@ -1185,7 +1165,6 @@ private struct DigestSpan: View {
             }
         }
         .contextMenu {
-            Button(recipient ? "Don't send my message here" : "Send my message here") { toggleRecipient() }
             if let item, let card = DigestSpan.cardID(item) {
                 Button("Open card") {
                     withAnimation(Motion.spatial.resolved(reduce: false)) { state.open = id }
@@ -1199,16 +1178,8 @@ private struct DigestSpan: View {
             }
         }
         .accessibilityLabel(status.label.isEmpty ? text : "\(text), \(status.label)")
-        .accessibilityValue(recipient ? "Your message goes here" : "")
-        .accessibilityHint(item == nil ? "Command-click picks it to send your message to" : "Opens its card. Command-click picks it to send your message to")
-        .accessibilityAction(named: recipient ? "Don't send my message here" : "Send my message here") { toggleRecipient() }
+        .accessibilityHint(item == nil ? "" : "Opens its card")
     }
-
-    /// The target of a recipient: the session itself.
-    private var target: String { "session:\(session)" }
-
-    /// Picks the session as a recipient of your message, or takes it off; the composer takes the keyboard for the words.
-    private func toggleRecipient() { model.toggleRecipient(target, store: store) }
 
     /// The keys that act on it while the pointer is on it, as they are bound now.
     private var hints: [DigestHint] {

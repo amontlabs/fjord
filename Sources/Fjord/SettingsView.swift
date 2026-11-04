@@ -28,7 +28,7 @@ struct SettingsView: View {
     static let claudeID = "claude"
     static let codeFoldersID = "code-folders"
     static let shortcutsID = "shortcuts"
-    /// The claude.ai delivery's setup, under Claude (only while `RouterCourier.on`).
+    /// The claude.ai delivery's setup, under Claude.
     static let courierID = "courier"
     /// Every section's anchor, in page order (the ⌘K palette scrolls to one for each of its rows).
     static let anchors = [toolsID, computerDefaultsID, connectedMacsID, githubID, notificationsID, claudeID, codeFoldersID,
@@ -45,7 +45,7 @@ struct SettingsView: View {
                     // The Router's own sections read the Router's state in views of their own: what changes with every read of
                     // Claude's sessions redraws them, not the whole page.
                     if store.routerOn { RouterSettings(store: store, part: .claude).id(Self.claudeID) }
-                    if store.routerOn && RouterCourier.on { RouterCourierSetupView(setup: store.routerCourierLink.setup).id(Self.courierID) }
+                    if store.routerOn { RouterCourierSetupView(setup: store.routerCourierLink.setup).id(Self.courierID) }
                     if store.triageOn || store.routerOn { CodeFoldersSettings(store: store).id(Self.codeFoldersID) }
                     shortcuts.id(Self.shortcutsID)
                     updates.id(Self.updatesID)
@@ -387,8 +387,6 @@ private struct RouterSettings: View {
             routerStyle
             SettingsDivider()
             mutedFolders
-            SettingsDivider()
-            draftsJev
             if store.triageOn {
                 SettingsDivider()
                 inboxJev
@@ -456,15 +454,6 @@ private struct RouterSettings: View {
     private var claudeCodeStatus: (String, Color) {
         if let found = store.routerStatus.claudeCode { return ("Claude Code \(found.version), from the Claude app", Theme.tertiary) }
         return ("Claude Code not found: it comes with the Claude desktop app", Theme.amber)
-    }
-
-    /// Whether the Router's draft goes to TypeSafe while you type, for Jev's pick over the composer (RouterLiveTarget).
-    private var draftsJev: some View {
-        SettingsRow("Let Jev read what you type",
-                    info: ("Let Jev read what you type", "With a TypeSafe API key, once you pause typing in the Router, your draft goes to TypeSafe (api.typesafe.ai) so Jev can show where it would go before you send it. What goes: the draft's words and its @projects, the Router's last decisions, how you routed messages before, and what it could go to: your Claude sessions' titles, projects and what each is doing, the open cards' titles and what they ask, and your projects' names. The same goes when you send a message, to route it. Off, nothing goes while you type: a message is routed when you send it.")) {
-            SettingsSwitch("Let Jev read what you type",
-                           isOn: Binding(get: { store.jevReadsDrafts }, set: { store.settings.jevReadsDrafts = $0 }))
-        }
     }
 
     /// Whether Jev labels the inbox's new comments and rates its review requests (InboxJev.swift), which sends them to TypeSafe.

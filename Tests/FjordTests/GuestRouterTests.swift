@@ -526,35 +526,6 @@ private struct AccountPausingGuestClient: GuestClient {
         #expect(await guest.execRecords().last?.argv == [account.nodeExecutable, "-e", "process.stdout.write(String(Date.now()))"])
     }
 
-    @Test func guestDeepLinkUsesDocumentedSSHFieldsAndPreservesGuestFolderAndPrompt() async throws {
-        let guest = client()
-        try await guest.filesWrite(.init(computer: computer, path: "/workspace/repo/.git/config",
-            data: Data("[remote \"origin\"]\nurl = https://github.com/acme/widget.git\n".utf8), mode: 0o600))
-        let tempHome = FileManager.default.temporaryDirectory.appendingPathComponent("fjord-guest-start-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-        let project = RunsOnProject(name: "widget", sourceFolder: "/local/widget",
-                                    placement: .computer(deviceId: computer.deviceId, computerId: computer.computerId,
-                                                         guestPath: "/workspace/repo"))
-        let prepared = try await GuestDesktopStart.prepare(client: guest, placement: project.placement, project: project,
-            prompt: "Fix café & query?", computerName: "Linux dev", settings: ClaudeSSHSettings(home: tempHome))
-        let parts = try #require(URLComponents(url: prepared.url, resolvingAgainstBaseURL: false))
-        let fields = Dictionary(uniqueKeysWithValues: (parts.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        let settingsData = try Data(contentsOf: tempHome.appendingPathComponent(".claude/settings.json"))
-        let settingsRoot = try #require(try JSONSerialization.jsonObject(with: settingsData) as? [String: Any])
-        let ssh = try #require(settingsRoot["sshConfigs"] as? [[String: Any]])
-
-        #expect(parts.scheme == "claude")
-        #expect(parts.host == "code")
-        #expect(parts.path == "/new")
-        #expect(fields["ssh_host"] == prepared.alias.alias)
-        #expect(fields["ssh_folder"] == "/workspace/repo")
-        #expect(fields["q"] == "Fix café & query?")
-        #expect(prepared.pending.state == .readyInClaude)
-        #expect(prepared.pending.prompt == "Fix café & query?")
-        #expect(ssh.first?["sshHost"] as? String == prepared.alias.alias)
-        #expect(ssh.first?["startDirectory"] == nil)
-        #expect(FileManager.default.fileExists(atPath: "/workspace/repo/.git/config") == false)
-    }
 
     @Test func guestCodeFolderScannerReadsWorktreeConfigWithoutNormalizingAgainstHost() async throws {
         let guest = client()
@@ -572,7 +543,7 @@ private struct AccountPausingGuestClient: GuestClient {
         let opened = Date(timeIntervalSince1970: 1_800_000_000)
         let pending = PendingDesktopStart(projectID: UUID(), location: .computer(deviceId: "owner-1", computerId: "computer-1"),
             alias: "ssh-computer-1", folder: "/workspace/repo", prompt: "Fix the bug", openedAt: opened)
-        let message = SessionFork.Message(uuid: "message-1", parent: nil, text: "Fix the bug now", cwd: "/workspace/repo",
+        let message = YourMessages.Message(uuid: "message-1", parent: nil, text: "Fix the bug now", cwd: "/workspace/repo",
                                           at: opened.addingTimeInterval(10))
         let evidence = GuestSessionEvidence(computer: computer, cliSessionID: "cli-1", hostSessionID: "local_desktop-1",
             pid: 42, startedAt: 123, renewedAt: 1_800_000_010_000, capabilities: [ClaudePlugin.inboxCapability],
@@ -590,7 +561,7 @@ private struct AccountPausingGuestClient: GuestClient {
         let opened = Date(timeIntervalSince1970: 1_800_000_000)
         let pending = PendingDesktopStart(projectID: UUID(), location: .computer(deviceId: "owner-1", computerId: "computer-1"),
             alias: "ssh-computer-1", folder: "/workspace/repo", prompt: "Fix the bug", openedAt: opened)
-        let message = SessionFork.Message(uuid: "message-1", parent: nil, text: "Fix the bug now", cwd: "/workspace/repo",
+        let message = YourMessages.Message(uuid: "message-1", parent: nil, text: "Fix the bug now", cwd: "/workspace/repo",
                                           at: opened.addingTimeInterval(10))
         var evidence = GuestSessionEvidence(computer: computer, cliSessionID: "cli-1", hostSessionID: "local_desktop-1",
             pid: 42, startedAt: 123, renewedAt: 1_800_000_010_000, capabilities: [], transcriptMessages: [message])
@@ -625,7 +596,7 @@ private struct AccountPausingGuestClient: GuestClient {
     @MainActor @Test func emptyPrefillsMatchAndADesktopSessionCanOnlyBeClaimedOnce() {
         let opened = Date(timeIntervalSince1970: 1_800_000_000)
         let location = SessionLocation.computer(deviceId: computer.deviceId, computerId: computer.computerId)
-        let message = SessionFork.Message(uuid: "message-1", parent: nil, text: "Fix the bug", cwd: "/workspace/repo",
+        let message = YourMessages.Message(uuid: "message-1", parent: nil, text: "Fix the bug", cwd: "/workspace/repo",
                                           at: opened.addingTimeInterval(10))
         let evidence = GuestSessionEvidence(computer: computer, cliSessionID: "cli-1", hostSessionID: "local_desktop-1",
             pid: 42, startedAt: 123, renewedAt: 1_800_000_010_000, capabilities: [ClaudePlugin.inboxCapability],
@@ -655,7 +626,7 @@ private struct AccountPausingGuestClient: GuestClient {
         let editedEvidence = GuestSessionEvidence(computer: computer, cliSessionID: evidence.cliSessionID,
             hostSessionID: evidence.hostSessionID, pid: evidence.pid, startedAt: evidence.startedAt,
             renewedAt: evidence.renewedAt, capabilities: evidence.capabilities,
-            transcriptMessages: [SessionFork.Message(uuid: "message-edited", parent: nil,
+            transcriptMessages: [YourMessages.Message(uuid: "message-edited", parent: nil,
                 text: "The person edited the prefilled task", cwd: "/workspace/repo", at: opened.addingTimeInterval(10))])
         #expect(PendingDesktopStartMatcher.match(edited, desktop: [desktop], evidence: [editedEvidence]) == nil)
         #expect(PendingDesktopStartMatcher.match(edited, desktop: [desktop], evidence: [editedEvidence],
@@ -711,68 +682,6 @@ private struct AccountPausingGuestClient: GuestClient {
         #expect(store.router.pendingDesktopStarts.first?.guestSessionID == cliID)
     }
 
-    @MainActor @Test func dispatcherSendsAndChecksAbortForGuestWithoutLocalClaude() async throws {
-        defer { GuestRouterRuntime.shared.stopAll() }
-        let store = Store(engineClient: MockEngineClient())
-        store.persists = false
-        store.router.enabled = true
-        store.agents.enabled = true
-        let desktopID = "local_guest_dispatch"
-        let cliID = "guest-cli-dispatch"
-        let location = SessionLocation.computer(deviceId: computer.deviceId, computerId: computer.computerId)
-        let start: Int64 = 1_800_000_000_000
-        let guest = client()
-        let paths = try GuestRouterPaths(home: account.home)
-        let key = String(repeating: "ef", count: 32)
-        _ = try await guest.filesWrite(.init(computer: computer, path: paths.key, data: Data(key.utf8), mode: 0o600))
-        let presence = try JSONSerialization.data(withJSONObject: [
-            "state": "live", "sessionId": cliID, "pid": 42, "startedAt": 123,
-            "keyId": ClaudePlugin.keyID(of: key), "renewedAt": start,
-            "capabilities": [ClaudePlugin.inboxCapability, ClaudePlugin.abortCapability],
-        ])
-        _ = try await guest.filesWrite(.init(computer: computer, path: GuestRouterPaths.join(paths.presence, cliID), data: presence, mode: 0o600))
-        let registry = try JSONSerialization.data(withJSONObject: [
-            "hostSessionId": desktopID, "sessionId": cliID, "pid": 42, "startedAt": 123,
-        ])
-        _ = try await guest.filesWrite(.init(computer: computer, path: GuestRouterPaths.join(paths.registry, "42.json"), data: registry, mode: 0o600))
-        let transcript = try JSONSerialization.data(withJSONObject: [
-            "type": "user", "uuid": "dispatch-user", "cwd": "/workspace/repo", "timestamp": "2027-01-15T08:00:10.000Z",
-            "message": ["role": "user", "content": "Run the checks"],
-        ], options: [.sortedKeys]) + Data("\n".utf8)
-        _ = try await guest.filesWrite(.init(computer: computer,
-            path: GuestRouterPaths.join(GuestRouterPaths.join(paths.projects, "workspace-repo"), "\(cliID).jsonl"),
-            data: transcript, mode: 0o600))
-        let clockArgv = [account.nodeExecutable, "-e", "process.stdout.write(String(Date.now()))"]
-        await guest.setExecResult(GuestExecResult(exitCode: 0, stdout: Data(String(start + 1_000).utf8), stderr: Data()), argv: clockArgv)
-        let nonce = "0123456789abcdef0123456789abcdef"
-        let signed = "⟦fjord v1 \(cliID) \(nonce) \(start + 60_000) \(String(repeating: "a", count: 64))⟧\nRun the checks"
-        let ackPath = GuestRouterPaths.join(GuestRouterPaths.join(paths.inbox, cliID), "\(nonce).ack")
-        let messagePath = GuestRouterPaths.join(GuestRouterPaths.join(paths.inbox, cliID), "\(nonce).msg")
-        await guest.acknowledgeWhenMessageIsAdmitted(computer: computer, messagePath: messagePath,
-                                                      ackPath: ackPath, data: Data("ok".utf8))
-        store.claudeSessions[desktopID] = ClaudeSession(id: desktopID, title: "Guest task", folder: "/workspace/repo",
-            lastActivity: Date(timeIntervalSince1970: Double(start) / 1000), running: true, cliID: cliID, sshHost: "ssh-computer-1")
-        store.router.pendingDesktopStarts = [PendingDesktopStart(projectID: UUID(), location: location,
-            alias: "ssh-computer-1", folder: "/workspace/repo", prompt: "Run the checks", openedAt: Date(timeIntervalSince1970: Double(start) / 1000),
-            state: .matched, desktopSessionID: desktopID, guestSessionID: cliID)]
-        try await GuestRouterRuntime.shared.startWatching(store: store, client: guest, computer: computer)
-
-        let tools = RouterTools(store: store)
-        tools.beginTurn("Run the checks")
-        tools.prepared["peer-guest"] = Prepared(text: signed, original: "Run the checks", rephrased: false,
-            body: "Run the checks", guestLocation: location)
-        store.routerDispatcher.claudePath = { nil }
-        let effects = RouterDispatcher.Effects.live(store.routerDispatcher)
-        #expect(await effects.abortable(cliID))
-        do {
-            let ack = try await effects.send(tools, .init(to: "peer-guest", text: signed, body: "Run the checks",
-                original: "Run the checks", rephrased: false, session: desktopID, newSessionIn: nil))
-            #expect(ack == "ok")
-        } catch {
-            Issue.record("guest delivery required local Claude Code: \(error.localizedDescription)")
-        }
-        #expect(await guest.writeRecords().contains { $0.path == messagePath && $0.data == Data(signed.utf8) })
-    }
 
     @MainActor @Test func matchedSessionKeepsGuestIdentityWhenMappedBackToItsRouterProject() {
         let store = Store(engineClient: MockEngineClient())
@@ -901,150 +810,8 @@ private struct AccountPausingGuestClient: GuestClient {
         #expect(Array(exec.argv.suffix(2)) == [String(account.uid), root])
     }
 
-    @MainActor @Test func routerGuestStartPersistsReadyStateBeforeOpenWithoutSendingPrompt() async throws {
-        let tempHome = FileManager.default.temporaryDirectory.appendingPathComponent("fjord-router-guest-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-        let engine = engineWithComputer(state: .stopped)
-        let store = Store(engineClient: engine)
-        store.stateFile = tempHome.appendingPathComponent("state.json")
-        store.router.enabled = true
-        store.agents.enabled = true
-        let source = "/local/widget"
-        store.claudeSessions["local_existing"] = ClaudeSession(id: "local_existing", title: "Existing", folder: source,
-            lastActivity: Date(), running: false)
-        store.setRunsOnPlacement(.computer(deviceId: nil, computerId: computer.computerId,
-                                           guestPath: "/workspace/repo"), for: source)
-        let guest = MockGuestClient(accounts: [localComputer: account])
-        let clockArgv = [account.nodeExecutable, "-e", "process.stdout.write(String(Date.now()))"]
-        await guest.setExecResult(GuestExecResult(exitCode: 0, stdout: Data("1800000000000".utf8), stderr: Data()), argv: clockArgv)
-        var captured: String?
-        var openCount = 0
-        var sawPersistedPendingStart = false
-        store.interceptOpen = { message in
-            openCount += 1
-            captured = message
-            guard let data = try? Data(contentsOf: tempHome.appendingPathComponent("state.json")),
-                  let state = Store.decodeState(data) else { return }
-            sawPersistedPendingStart = state.router?.pendingDesktopStarts.count == 1
-        }
-        let tools = RouterTools(store: store)
-        tools.guestClient = guest
-        tools.guestSSHSettings = ClaudeSSHSettings(home: tempHome)
-        tools.beginTurn("Fix the bug in widget")
-        defer { GuestRouterRuntime.shared.stopAll() }
 
-        let result = try await tools.startSession(store, project: "widget", title: "Fix it", ticket: tools.ticket())
-        let object = try #require(try JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
-        let pending = try #require(store.router.pendingDesktopStarts.first)
-        let callsBeforeRetry = await guest.execRecords().count
-        let retry = try await tools.startSession(store, project: "widget", title: "Fix it", ticket: tools.ticket())
-        let retryObject = try #require(try JSONSerialization.jsonObject(with: Data(retry.utf8)) as? [String: Any])
-        let guestPaths = try GuestRouterPaths(home: account.home)
-        let calls = await guest.callLog()
-        let watchLog = calls.filter { $0.hasPrefix("watch:") }
 
-        #expect(sawPersistedPendingStart)
-        #expect(engine.inventory.computer(computer.computerId)?.displayState == .running)
-        #expect(openCount == 1)
-        #expect(captured?.contains("claude://code/new?") == true)
-        #expect((retryObject["pendingStart"] as? String) == pending.id.uuidString)
-        #expect(store.router.pendingDesktopStarts.count == 1)
-        #expect(await guest.execRecords().count == callsBeforeRetry)
-        #expect(watchLog.contains { $0.contains(guestPaths.projects) })
-        #expect(object["state"] as? String == "ready_in_claude")
-        #expect(pending.state == .readyInClaude)
-        #expect(pending.guestSessionID == nil)
-        #expect(tools.prepared.isEmpty)
-        #expect((object["next"] as? String)?.contains("press Send in Claude") == true)
-    }
-
-    @MainActor @Test func dispatcherRecordsGuestStartWithoutExpectingLocalPeerPreparation() async throws {
-        let tempHome = FileManager.default.temporaryDirectory.appendingPathComponent("fjord-router-dispatch-guest-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
-        defer {
-            GuestRouterRuntime.shared.stopAll()
-            try? FileManager.default.removeItem(at: tempHome)
-        }
-
-        let store = Store(engineClient: engineWithComputer(state: .running))
-        store.stateFile = tempHome.appendingPathComponent("state.json")
-        store.persists = false
-        store.router.enabled = true
-        store.agents.enabled = true
-        let source = "/local/widget"
-        store.claudeSessions["local_existing"] = ClaudeSession(id: "local_existing", title: "Existing", folder: source,
-            lastActivity: Date(), running: false)
-        store.setRunsOnPlacement(.computer(deviceId: nil, computerId: computer.computerId,
-                                           guestPath: "/workspace/repo"), for: source)
-        var opens = 0
-        store.interceptOpen = { _ in opens += 1 }
-
-        let guest = MockGuestClient(accounts: [localComputer: account])
-        await guest.setExecResult(GuestExecResult(exitCode: 0, stdout: Data("1800000000000".utf8), stderr: Data()),
-            argv: [account.nodeExecutable, "-e", "process.stdout.write(String(Date.now()))"])
-        let dispatcher = store.routerDispatcher
-        let finished = GuestRouterGate()
-        dispatcher.onFinish = { _ in Task { await finished.open() } }
-        dispatcher.configure = { tools in
-            tools.guestClient = guest
-            tools.guestSSHSettings = ClaudeSSHSettings(home: tempHome)
-        }
-
-        let id = try #require(dispatcher.submit("start a new session to fix the bug", context: RouterContext(projects: [source])))
-        await finished.wait()
-        let entry = try #require(store.router.decisions.first(where: { $0.id == id }))
-
-        let prepared = try #require(entry.done.compactMap { item -> (String, String, String)? in
-            if case .preparedGuest(let project, let location, let pendingStart) = item { return (project, location, pendingStart) }
-            return nil
-        }.first)
-        #expect(entry.doneLines.allSatisfy { !$0.contains("Not prepared") && !$0.hasPrefix("failed:") })
-        #expect(entry.outcome == .done)
-        #expect(opens == 1)
-        #expect(store.router.pendingDesktopStarts.count == 1)
-        #expect(prepared.0 == "widget")
-        #expect(prepared.1 == "local/\(computer.computerId)")
-        #expect(prepared.2 == store.router.pendingDesktopStarts[0].id.uuidString)
-    }
-
-    @MainActor @Test func disablingRouterDuringGuestInstallWaitsAndRevokesTheInstallation() async throws {
-        defer { GuestRouterRuntime.shared.stopAll() }
-        let tempHome = FileManager.default.temporaryDirectory.appendingPathComponent("fjord-router-disable-race-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-
-        let store = Store(engineClient: engineWithComputer(state: .running))
-        store.stateFile = tempHome.appendingPathComponent("state.json")
-        store.persists = false
-        store.router.enabled = true
-        store.agents.enabled = true
-        let source = "/local/widget"
-        store.claudeSessions["local_existing"] = ClaudeSession(id: "local_existing", title: "Widget", folder: source,
-            lastActivity: Date(), running: false)
-        store.setRunsOnPlacement(.computer(deviceId: nil, computerId: computer.computerId, guestPath: "/workspace/repo"), for: source)
-        let guest = MockGuestClient(accounts: [localComputer: account])
-        let paths = try GuestRouterPaths(home: account.home)
-        let marketplace = [account.claudeExecutable, "plugin", "marketplace", "add", paths.plugin, "--scope", "user"]
-        await guest.pauseNextExec(argv: marketplace)
-        let tools = RouterTools(store: store)
-        tools.guestClient = guest
-        tools.guestSSHSettings = ClaudeSSHSettings(home: tempHome)
-        tools.beginTurn("Fix the bug in widget")
-
-        let starting = Task { try await tools.startSession(store, project: "widget", title: "Fix it", ticket: tools.ticket()) }
-        await guest.waitForExecPause(argv: marketplace)
-        store.switchRouter(false)
-        await guest.resumeExec(argv: marketplace)
-        do { _ = try await starting.value } catch { }
-
-        let location = SessionLocation.computer(deviceId: nil, computerId: computer.computerId)
-        await GuestRouterRuntime.shared.waitForDisable()
-        #expect(store.router.pendingDesktopStarts.isEmpty)
-        #expect(store.router.pendingGuestDisables.isEmpty)
-        #expect(await guest.filesSnapshot(for: localComputer)[paths.key] == nil)
-        #expect(await guest.filesSnapshot(for: localComputer)[GuestRouterPaths.join(paths.forms, FormBridge.marker)] == nil)
-    }
 
     @Test func guestPresenceRequiresGuestPIDRegistryAndAuthoritativeTranscript() async throws {
         let guest = client()
@@ -1258,62 +1025,7 @@ private struct AccountPausingGuestClient: GuestClient {
         }
     }
 
-    @MainActor @Test func aGuestSessionRunsATurnWhenItsPluginSaysSoAndItCanBeStoppedAndInterrupted() async throws {
-        defer { GuestRouterRuntime.shared.stopAll() }
-        let store = Store(engineClient: MockEngineClient())
-        store.persists = false
-        store.agents.enabled = true
-        let desktopID = "local_desktop-control", cliID = "guest-cli-ctl"
-        let guest = client()
-        let paths = try await controllableGuest(store, desktopID: desktopID, cliID: cliID, guest: guest, capabilities: [
-            ClaudePlugin.inboxCapability, ClaudePlugin.stopCapability, ClaudePlugin.interruptCapability])
-        let inbox = GuestRouterPaths.join(paths.inbox, cliID)
 
-        // The transcript says the turn ended; the plugin's presence says one runs, and that wins.
-        #expect(store.claudeSessions[desktopID]?.running == true)
-        #expect(store.guestExecutionStates[desktopID]?.isRunning == true)
-        #expect(store.canStop(sessionID: desktopID))
-        #expect(store.runningTurn(sessionID: desktopID)?.id == "t9")
-
-        // A gate that refuses stops it before the write: nothing reaches the inbox.
-        let refused = await store.stopTurn(sessionID: desktopID) { "The card is gone" }
-        guard case .failed(let why) = refused, why.contains("The card is gone") else { Issue.record("\(refused)"); return }
-        let interrupted = await store.interrupt(sessionID: desktopID, text: "Never mind", gate: { "The card is gone" })
-        guard case .refused(let reason) = interrupted, reason == "The card is gone" else { Issue.record("\(interrupted)"); return }
-        #expect(await guest.writeRecords().filter { $0.path.hasPrefix(inbox) }.isEmpty)
-
-        // The stop names the turn presence shows, signed with the guest's key.
-        var fake = guestPlugin(guest, inbox: inbox, answer: "ok stopped t9")
-        #expect(await store.stopTurn(sessionID: desktopID) == .stopped("t9"))
-        await fake.value
-        let stop = try #require(await guest.writeRecords().first { $0.path.hasPrefix(inbox) && $0.path.hasSuffix(".msg") })
-        let stopText = String(decoding: stop.data, as: UTF8.self)
-        #expect(stopText.hasPrefix("⟦fjord stop v1 \(cliID) ") && stopText.contains(" t9 "))
-
-        // The interrupt is a v3 message with the flag.
-        fake = guestPlugin(guest, inbox: inbox, answer: "ok interrupted t9")
-        let done = await store.interrupt(sessionID: desktopID, text: "Do this instead")
-        #expect(done == .delivered(ack: "ok interrupted t9", interrupted: "t9"))
-        await fake.value
-        let sent = await guest.writeRecords().filter { $0.path.hasPrefix(inbox) && $0.path.hasSuffix(".msg") }
-        let text = String(decoding: try #require(sent.last).data, as: UTF8.self)
-        #expect(text.hasPrefix("⟦fjord v3 \(cliID) ") && text.split(separator: "\n")[0].contains(" - - 1 "))
-    }
-
-    @MainActor @Test func aGuestPluginWithoutStopIsUnsupportedAndNothingIsWritten() async throws {
-        defer { GuestRouterRuntime.shared.stopAll() }
-        let store = Store(engineClient: MockEngineClient())
-        store.persists = false
-        store.agents.enabled = true
-        let desktopID = "local_desktop-old", cliID = "guest-cli-old"
-        let guest = client()
-        let paths = try await controllableGuest(store, desktopID: desktopID, cliID: cliID, guest: guest,
-                                                capabilities: [ClaudePlugin.inboxCapability, ClaudePlugin.abortCapability])
-        #expect(!store.canStop(sessionID: desktopID))
-        guard case .unsupported = await store.stopTurn(sessionID: desktopID) else { Issue.record("stop"); return }
-        guard case .unsupported = await store.interrupt(sessionID: desktopID, text: "hi") else { Issue.record("interrupt"); return }
-        #expect(await guest.writeRecords().filter { $0.path.hasPrefix(GuestRouterPaths.join(paths.inbox, cliID)) }.isEmpty)
-    }
 
     @Test func guestRelayRetryReconcilesTheOriginalNonceAfterAdmissionReplyIsLost() async throws {
         let guest = client()

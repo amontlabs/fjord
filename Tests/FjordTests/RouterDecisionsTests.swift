@@ -59,18 +59,6 @@ import Testing
 
     // MARK: Persistence
 
-    @Test func theLogSurvivesEncodingAndOldStateHasNone() throws {
-        var state = RouterState()
-        var d = RouterDecision(trigger: .action(category: "C", thing: "t", actionID: "a", runID: "r"),
-                               decision: .init(target: "Docs", intent: "reply", label: "x", confidence: 0.8), outcome: .corrected(from: "A", to: "B"))
-        d.add(.started(session: "s", project: "p", model: "haiku", effort: nil), session: "s")
-        d.add(.asked(["a", "b"]))
-        state.log(d)
-        let back = try JSONDecoder().decode(RouterState.self, from: JSONEncoder().encode(state))
-        #expect(back.decisions == [d])
-        let old = try JSONDecoder().decode(RouterState.self, from: Data(#"{"enabled":true,"cards":[],"chat":[]}"#.utf8))
-        #expect(old.decisions.isEmpty && old.enabled)
-    }
 
     @Test func theOldestAreDroppedPastTheCap() {
         var state = RouterState()
@@ -158,5 +146,18 @@ import Testing
         let d = s.logDecision(RouterDecision(trigger: .you("hi")))
         let ids = s.routerPage.history.map(\.id)
         #expect(ids == [d.uuidString])
+    }
+
+    @Test func theLogSurvivesEncodingAndOldStateHasNone() throws {
+        var state = RouterState()
+        var d = RouterDecision(trigger: .action(category: "C", thing: "t", actionID: "a", runID: "r"),
+                               decision: .init(target: "Docs", intent: "reply", label: "x", confidence: 0.8), outcome: .corrected(from: "A", to: "B"))
+        d.add(.sent(to: "p", text: "hi", original: nil), session: "s")
+        d.add(.asked(["a", "b"]))
+        state.log(d)
+        let back = try JSONDecoder().decode(RouterState.self, from: JSONEncoder().encode(state))
+        #expect(back.decisions == [d])
+        let old = try JSONDecoder().decode(RouterState.self, from: Data(#"{"enabled":true,"cards":[],"chat":[]}"#.utf8))
+        #expect(old.decisions.isEmpty && old.enabled)
     }
 }

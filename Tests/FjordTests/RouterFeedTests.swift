@@ -225,43 +225,9 @@ import Testing
         #expect(state.cards.count == 1)
     }
 
-    @Test func aSessionFjordStartedIsCardedAtOnceEvenWhileTheAppShowsIt() {
-        var state = seen([session(turns: 0)])
-        state.fjordStarted["local_a"] = at(-10)
-        update(&state, [session(turns: 1, running: true)], viewing: "local_a", now: 1)
-        update(&state, [session(turns: 1)], viewing: "local_a", unread: [], now: 2)
-        #expect(state.cards.map(\.id) == ["local_a#t1"])
-        #expect(state.pendingTurns.isEmpty)
-        #expect(state.fjordStarted["local_a"] != nil)
-    }
 
-    @Test func aSessionFjordStartedWhoseTurnEndedBeforeTheFeedSawItIsCarded() {
-        var state = RouterState()
-        state.fjordStarted["local_a"] = at(-10)
-        update(&state, [session(turns: 3, message: -9)], viewing: "local_a", unread: [], now: 1)
-        #expect(state.cards.map(\.id) == ["local_a#t3"])
-        #expect(state.fjordStarted["local_a"] != nil)
-    }
 
-    @Test func aQuestionInASessionFjordStartedIsCardedWhileTheAppShowsIt() {
-        var state = seen([session(turns: 0, running: true)])
-        state.fjordStarted["local_a"] = at(-10)
-        update(&state, [session(turns: 0, running: true)], activity: ["local_a": question(1)], viewing: "local_a", now: 1)
-        #expect(state.cards.map(\.kind) == [.question])
-        #expect(state.heldWaits.isEmpty)
-    }
 
-    @Test func onceYouWriteInASessionFjordStartedTheUsualRulesApply() {
-        var state = seen([session(turns: 1)])
-        state.fjordStarted["local_a"] = at(-10)
-        // A message of yours, well after the start and none of Fjord's runs sent it.
-        update(&state, [session(turns: 1, message: 20)], viewing: "local_a", now: 21)
-        #expect(state.fjordStarted["local_a"] == nil)
-        update(&state, [session(turns: 2, message: 20)], viewing: "local_a", unread: [], now: 22)
-        #expect(state.cards.isEmpty)
-        update(&state, [session(turns: 2, message: 20)], unread: [], now: 100)
-        #expect(state.cards.isEmpty)
-    }
 
     /// A run that started at `started` (minutes) and delivered its message to local_a at `sent`.
     private func delivery(started: Double, sent: Double, turns: Int = 1, busy: Bool = false) -> RouterDecision {
@@ -271,14 +237,6 @@ import Testing
         return run
     }
 
-    @Test func aMessageFjordSentIsNotYouWritingInTheSession() {
-        var state = seen([session(turns: 1)])
-        state.fjordStarted["local_a"] = at(-10)
-        // Routing took a while: the message went half a minute after the run began, and shows as it went.
-        state.decisions = [delivery(started: 19.5, sent: 20.1)]
-        update(&state, [session(turns: 1, message: 20.1)], viewing: "local_a", now: 21)
-        #expect(state.fjordStarted["local_a"] != nil)
-    }
 
     @Test func aReplyOfYoursMinutesAfterARunSentOneIsYours() {
         // The run sent its message at 0; its turn ended, and you replied in the session two and a half minutes on.
@@ -314,26 +272,7 @@ import Testing
         #expect(state.replies["local_a"] == RouterFeed.Stamp.ms(at(5)))
     }
 
-    @Test func whatStartedASessionIsForgottenWithIt() {
-        var state = RouterState()
-        let origin = SessionOrigin(category: "Mine", thing: "o/r#1 T", actionID: "a", runID: "r")
-        state.origins = ["local_a": origin, "local_gone": origin, "local_new": origin]
-        // Just made: the app doesn't list it yet.
-        state.fjordStarted["local_new"] = at(-10)
-        update(&state, [session(turns: 0)], now: 1)
-        #expect(state.origins.keys.sorted() == ["local_a", "local_new"])
-        // An hour on, it never came.
-        update(&state, [session(turns: 0)], now: 61)
-        #expect(state.origins.keys.sorted() == ["local_a"])
-    }
 
-    @Test func missingFjordStartedDefaultsToEmpty() throws {
-        let data = try JSONEncoder().encode(RouterState())
-        var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        json["fjordStarted"] = nil
-        let state = try JSONDecoder().decode(RouterState.self, from: JSONSerialization.data(withJSONObject: json))
-        #expect(state.fjordStarted.isEmpty)
-    }
 
     @Test func aTurnEndedWhileTheAppIsNotInFrontIsCarded() {
         var state = seen([session(turns: 1)])

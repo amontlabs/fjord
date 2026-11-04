@@ -87,7 +87,7 @@ extension Store {
     func sendToRouter(_ text: String, context: RouterContext = RouterContext(), now: Date = Date()) -> Bool {
         let text = RouterModel.sendable(text)
         guard !text.isEmpty else { return false }
-        if routerIsPretend && !RouterFlightDemo.on {
+        if routerIsPretend {
             var entry = RouterDecision(at: now, trigger: .you(text), decision: .init(intent: "message"), outcome: .done,
                                        links: .init(cards: context.replyTo.map { [$0] } ?? []))
             let mentions = RouterDispatcher.mentions(context.mentions, in: text)
@@ -455,34 +455,8 @@ final class RouterModel {
         show(.history)
         messageRequest = ScrollRequest(id: message.uuidString, seq: (messageRequest?.seq ?? 0) + 1)
     }
-    /// The card your next message answers: it goes to that card's session ("Replying to …" over the composer). Armed, it
-    /// ends an edit (the draft then answers the card).
-    var replyTo: String? {
-        didSet { if replyTo != nil, editing != nil { editing = nil } }
-    }
-    /// A message of yours being edited ("Edit and resend"): sending the draft forks its session from before it, with the
-    /// draft as the fork's first message. The session stays as it was; files its agent changed aren't rolled back.
-    var editing: Editing?
-    struct Editing: Equatable {
-        var session: String
-        /// The message as it was sent, and when the run that sent it began: where the fork is cut.
-        var original: String
-        var sentAt: Date? = nil
-    }
-
-    /// "Edit and resend": the message in the composer, which takes the keyboard; no reply or pin goes with it (picking one
-    /// later ends the edit: the draft then goes there as a message of its own). Its pills come back as the "@name" they were
-    /// sent as; an attachment character in it (pasted before the composer left them out) goes, as a paste's does.
-    func edit(session: String, message: String, sentAt: Date? = nil) {
-        replyTo = nil
-        live.reset()
-        pointers = []
-        editing = Editing(session: session, original: message, sentAt: sentAt)
-        let words = message.replacingOccurrences(of: MentionText.markString, with: "")
-        draft = words
-        caretRequest = (words as NSString).length
-        focusRequest &+= 1
-    }
+    /// The card your next message answers: it goes to that card's session ("Replying to …" over the composer).
+    var replyTo: String?
     /// In a narrow window, the side of the page shown: it follows what you pick (an open card is in Now, an addressed one and
     /// the Router's conversation in History). A wide window shows both.
     var pane: RouterPane = .now
@@ -542,12 +516,9 @@ final class RouterModel {
     var searchFolds: Set<RouterZone> = []
     /// The history as the search last left it, for its words and the history's revision (`searchedHistory`).
     @ObservationIgnored var searchedHistoryMemo: (query: String, revision: Int, entries: [RouterPage.Entry])?
-    /// Jev's pick for the draft while you type, and the target you fixed from it (see RouterJev.swift).
-    let live = RouterLiveTarget()
     /// What the pills in the draft point to, one for each `MentionText.mark` in it, in order.
     var pointers: [RouterPointer] = []
-    /// Projects tagged with @ (their folders), in the order they stand in the draft: the Router looks there, and starts a
-    /// session there.
+    /// Local projects tagged with @ (their folders), in the order they stand in the draft: context for the Router.
     var projects: [String] {
         var seen = Set<String>()
         return pointers.compactMap { if case .project(let folder) = $0 { folder } else { nil } }.filter { seen.insert($0).inserted }
@@ -827,20 +798,8 @@ final class RouterModel {
     func send(store: Store) {
         // A proposed project takes the words (and an empty composer creates it).
         if answerProposal(store: store) { return }
-        let (text, mentions) = sentDraft(store)
+        let (text, _) = sentDraft(store)
         guard !text.isEmpty, canSend(store) else { return }
-        if let editing {
-            // Resent to a fork from before the original: never to the session itself, never routed. What it tags goes with
-            // it, fenced after your words, as to a session it is delivered to.
-            guard store.forkSession(editing.session, point: .before(editing.original, after: editing.sentAt), message: text,
-                                    edited: true, mentions: mentions) != nil else { return }
-            caret = nil
-            pointers = []
-            draft = ""
-            self.editing = nil
-            show(.history)
-            return
-        }
         // A pill over the composer from here until it lands where it went (`RouterFlights`): the page stays where it is.
         var context = context(store)
         context.flies = true
@@ -853,7 +812,6 @@ final class RouterModel {
         pointers = []
         draft = ""
         replyTo = nil
-        live.reset()
     }
 
     /// A card clicked: its session opens in Claude, and the card is picked (it stays open).
@@ -890,13 +848,10 @@ final class RouterModel {
 
     // MARK: Chips and @
 
-    /// Backspace at the start of the composer: the last recipient's chip goes, then the pinned target's, then the reply chip.
+    /// Backspace at the start of the composer: the reply chip goes.
     @discardableResult
     func removeLastChip() -> Bool {
-        if !live.recipients.isEmpty { live.recipients.removeLast(); return true }
-        if live.pinned != nil { live.reset(); return true }
         if replyTo != nil { replyTo = nil; return true }
-        if editing != nil { editing = nil; return true }
         return false
     }
 

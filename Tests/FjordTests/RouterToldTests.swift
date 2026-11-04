@@ -54,14 +54,4 @@ import Testing
         #expect(s.toldAll() == ["ci": ["rerun", "and again"], "docs": ["add the page"]])
         #expect(s.lastTold()["ci"]?.text == "and again" && s.lastTold()["ci"]?.at == t0.addingTimeInterval(60))
     }
-
-    @Test func jevSeesWhatTheSessionWasLastToldNotTheWholeMessage() throws {
-        let s = store()
-        sent(in: s)
-        let options = RouterTools(store: s).destinations(s, now: t0.addingTimeInterval(60))
-        let told = { (id: String) in (options.first { $0.sessionID == id }?.criteria as? [String: Any])?["the user last told it"] as? String }
-        let ci = try #require(told("ci")), docs = try #require(told("docs"))
-        #expect(ci.hasPrefix("rerun (") && docs.hasPrefix("add the page ("))
-        #expect(!ci.contains("docs") && !docs.contains("CI"))
-    }
 }

@@ -160,33 +160,6 @@ import UserNotifications
         #expect(model.cards(store).contains { $0.id == hidden.id })
     }
 
-    @Test func aFinishedTurnNotShownIsNeitherATargetOfJevsNorOfASend() {
-        let store = demo()
-        let model = RouterModel()
-        let hidden = store.openRouterCards.first { $0.sessionID == "local_demo-ci" && $0.kind == .done }!
-        var older = hidden
-        older.id = hidden.id + "-older"
-        older.addressedAt = hidden.createdAt
-        older.addressedBy = .superseded
-        store.router.cards.append(older)
-        // The superseded card picked in the history: it is replied to.
-        model.select(older.id, store: store)
-        #expect(model.selection == older.id && model.replyTo == older.id)
-        // Jev neither offers it nor goes to it, and a pin on it doesn't hold; the history's card is still replied to.
-        let tools = RouterTools(store: store)
-        #expect(!tools.targets(store).contains { $0.target == "answer:\(hidden.id)" })
-        #expect(!store.routerDispatcher.eligible("answer:\(hidden.id)", store: store))
-        #expect(store.routerDispatcher.option("answer:\(hidden.id)", store: store) == nil)
-        #expect(!RouterModel.targets(store).contains(hidden.id))
-        #expect(store.routerDispatcher.option("answer:\(older.id)", store: store) != nil)
-        #expect(RouterDispatcher.plan(text: "hi", context: RouterContext(replyTo: older.id), store: store)
-                == .reply(session: older.sessionID, card: older.id))
-        // Once what it ran ends, it is all of these.
-        store.claudeTasks["local_demo-ci"] = nil
-        #expect(tools.targets(store).contains { $0.target == "answer:\(hidden.id)" })
-        #expect(store.routerDispatcher.eligible("answer:\(hidden.id)", store: store))
-        #expect(RouterModel.targets(store).contains(hidden.id))
-    }
 
     @Test func reopenOpensAgainACardYouArchivedNotOneWhoseSessionIsGone() {
         let store = demo()
@@ -236,26 +209,6 @@ import UserNotifications
         #expect(store.routerCanReopen(handled[1]))
     }
 
-    @Test func aPinnedSessionDeletedWhileThePageWasAwayIsUnpinnedWhenItIsBack() async {
-        let store = demo()
-        let model = RouterModel()
-        guard let session = store.claudeSessions.values.first(where: { !$0.isArchived }) else { Issue.record("no session"); return }
-        model.live.pinned = "session:\(session.id)"
-        model.live.pinnedTitle = session.title
-        model.live.suspend()
-        // Deleted while the composer wasn't there to watch.
-        store.claudeSessions[session.id] = nil
-        let hosting = NSHostingView(rootView: RouterComposer(store: store, model: model).frame(width: 600, height: 200))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 200), styleMask: .borderless, backing: .buffered,
-                              defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        defer { window.contentView = nil; window.orderOut(nil) }
-        await waitUntil { model.live.pinned == nil }
-        #expect(model.live.pinned == nil && model.live.pinnedTitle == nil && model.context(store).target == nil)
-    }
 
     @Test func returnInTheComposerSendsAndShiftReturnDoesNot() {
         let store = demo()

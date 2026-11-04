@@ -30,7 +30,6 @@ import Testing
         for other in ["session:x", "new:/code", "claude-project:", "claude-thread:lookout", "claude-thread:/t", "claude-thread:p/"] {
             #expect(RouterCourier.Target(other) == nil)
         }
-        #expect(!RouterCourier.enabled)
     }
 
     @Test func aSendShowsSendingThenDeliveredAndSettles() {

@@ -170,7 +170,32 @@ enum Demo {
     /// The Router on, over the `agents` sessions: the one that asks is stopped on its question (whose form
     /// Fjord holds), a plan and a stuck turn wait, a turn is done, older cards are addressed; a short chat
     /// with what the Router did.
+    /// The demo's claude.ai projects and their threads, as the engine's Board would share them: where the Router sends.
+    static func claudeProjects(_ store: Store, now: Date = Date()) {
+        func thread(_ id: String, _ title: String, _ state: String, minutes: Double) -> CourierPlace.Thread {
+            .init(id: id, title: title, state: state, touched: now.addingTimeInterval(-minutes * 60).timeIntervalSince1970)
+        }
+        var snapshot = CourierSnapshot()
+        snapshot.health = CourierSetupHealth(tabConnected: true, signedIn: true)
+        snapshot.places = [
+            CourierPlace(id: "chan_demo_lookout", name: "lookout", purpose: "Fjord, the macOS app", threads: [
+                thread("thr_demo_notify", "Agent completion notifications", "working", minutes: 3),
+                thread("thr_demo_ci", "CI failure diagnosis", "idle", minutes: 4),
+            ]),
+            CourierPlace(id: "chan_demo_lcu", name: "lcu", purpose: "Computer use for agents", threads: [
+                thread("thr_demo_updates", "Update notifications", "needs_you", minutes: 2),
+            ]),
+            CourierPlace(id: "chan_demo_sandbox", name: "microsandbox", purpose: "Sandboxes for untrusted code", threads: [
+                thread("thr_demo_transfer", "Repository ownership transfer setup", "idle", minutes: 12),
+                thread("thr_demo_linux", "Linux sandbox in a Firecracker microVM", "needs_you", minutes: 9),
+            ]),
+            CourierPlace(id: "chan_demo_zig", name: "zig", purpose: "", threads: []),
+        ]
+        store.routerCourierLink.take(snapshot)
+    }
+
     private static func router(_ store: Store, _ now: Date) {
+        claudeProjects(store, now: now)
         let lcu = blockedAgentID
         store.claudeSessions[lcu]?.running = true
         store.claudeSessions[lcu]?.cliID = "cli-demo-lcu"
@@ -233,31 +258,37 @@ enum Demo {
             for item in done {
                 switch item {
                 case .changed: d.add(item)
-                case .sent: d.add(item, session: "local_demo-transfer")
                 default: d.add(item)
                 }
             }
             return d
         }
         let changes = state.changes
+        var sentToThread = entry(3.3, .you("remove the old remote"), "message",
+                                 [.sent(to: "microsandbox · Repository ownership transfer setup", text: "remove the old remote", original: nil)])
+        sentToThread.decision.targetID = RouterCourier.Target.thread(project: "microsandbox", thread: "thr_demo_transfer").targetID
+        sentToThread.decision.target = "thread “Repository ownership transfer setup” in claude.ai project microsandbox"
+        sentToThread.decision.decider = "jev"
         var asked = entry(5, .you("what needs me?"), "question", [])
         asked.reply = "**3 need you**: *LCU update notifications* asks how updates install; the Linux sandbox has a plan to approve; "
             + "*Calculator display reading* is stuck on the VPN.\nDone: CI failure diagnosis."
         asked.note = "answered"
-        var undelivered = entry(0.2, .you("tell Game recommendations to rebase"), "reply",
-                                [.failed("SendMessage to Game recommendations: not delivered (the session isn't open in Claude)")])
-        undelivered.links.sessions = ["local_demo-games"]
-        // A category's "Then" sent its prompt with the thing tagged; the Router started a session in its clone.
+        var undelivered = entry(0.2, .you("rebase the games branch on main"), "reply",
+                                [.failed("Not delivered to microsandbox: Fjord's tab in Chrome isn't connected")])
+        undelivered.decision.targetID = RouterCourier.Target.project("microsandbox").targetID
+        undelivered.decision.decider = "sonnet"
+        // A category's "Then" sent its prompt with the thing tagged; the Router sent it to its claude.ai project.
         let pill = "@ziglang/zig#1"
         let prompt = "Address what \(pill) is waiting on."
-        var sentByThen = entry(0.3, .you(prompt), "message", [.started(session: nil, project: "zig", model: nil, effort: nil)])
+        var sentByThen = entry(0.3, .you(prompt), "message", [.sent(to: "zig", text: prompt, original: nil)])
+        sentByThen.decision.targetID = RouterCourier.Target.project("zig").targetID
+        sentByThen.decision.decider = "jev"
         sentByThen.fromAction = SessionOrigin(category: "Contributions", thing: "ziglang/zig#1", actionID: "demo", runID: "demo")
         sentByThen.mentions = [RouterMention(range: 13..<(13 + pill.count), pointer: .notification("pr:ziglang/zig#1"), name: "ziglang/zig#1")]
         state.decisions = [
             asked,
-            entry(3.3, .you("transfer: remove the old remote"), "reply",
-                  [.sent(to: "Repository ownership transfer setup", text: "Remove the old remote.", original: "transfer: remove the old remote")]),
-            entry(0.5, .you("start a session to bump the version"), "start", [.failed("Cancelled")]),
+            sentToThread,
+            entry(0.5, .you("bump the version for the release"), "message", [.failed("Stopped")]),
             undelivered,
             sentByThen,
             entry(9, .you("add a category for my contributions that need a look, and snooze banners for an hour"), "change",
@@ -277,19 +308,21 @@ enum Demo {
                           title: "CI failure diagnosis"),
         ]
         // A message the Router couldn't place: asks where it goes (its run's entry waits for the pick), and one run under way.
-        var asking = RouterDecision(at: now.addingTimeInterval(-15), trigger: .you("ship it tomorrow morning"), decision: .init(intent: "message", label: "reply", confidence: 0.48))
-        asking.add(.asked(["Fix the flaky sandbox test", "Repository ownership transfer setup"]))
-        var running = RouterDecision(at: now.addingTimeInterval(-4), trigger: .you("tell the transfer session to archive the old fork"), decision: .init(intent: "message"))
-        running.decision.label = "reply"
-        running.decision.confidence = 0.93
+        var asking = RouterDecision(at: now.addingTimeInterval(-15), trigger: .you("ship it tomorrow morning"), decision: .init(intent: "message", label: "unclear", confidence: 0.48))
+        asking.decision.decider = "sonnet"
+        asking.add(.asked(["CI failure diagnosis", "Repository ownership transfer setup", "lcu"]))
+        var running = RouterDecision(at: now.addingTimeInterval(-4), trigger: .you("archive the old fork once the transfer is done"), decision: .init(intent: "message"))
         state.decisions += [asking, running]
         store.router = state
-        func option(_ session: String) -> RouterAskBack.Option? { store.routerDispatcher.option("session:\(session)", store: store) }
+        let ci = RouterCourier.Target.thread(project: "lookout", thread: "thr_demo_ci").targetID
+        let places = [ci, RouterCourier.Target.thread(project: "microsandbox", thread: "thr_demo_transfer").targetID,
+                      RouterCourier.Target.project("lcu").targetID]
+        let options = places.compactMap { store.routerDispatcher.option($0, store: store) }
+            + [.init(target: RouterAskBack.newProject, title: "New project…", detail: "on claude.ai")]
         store.routerDispatcher.preview(
             ask: RouterAskBack(id: asking.id, message: "ship it tomorrow morning", context: RouterContext(),
-                               options: [option("local_demo-ci"), option("local_demo-transfer"), option("local_demo-calc")].compactMap { $0 },
-                               suggestion: "session:local_demo-ci", at: now.addingTimeInterval(-15)),
-            progress: [running.id: "sending"])
+                               options: options, suggestion: ci, at: now.addingTimeInterval(-15)),
+            progress: [running.id: RouterProjectDecider.Stage.sonnet.words])
     }
 
     /// What Jev's triage makes of finished turns, on top of the Router's demo: a turn asking your OK, one asking two

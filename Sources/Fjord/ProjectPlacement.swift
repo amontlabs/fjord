@@ -93,25 +93,6 @@ enum GuestFolderPath {
 }
 
 extension Store {
-    func runsOnProject(for folder: String) -> RunsOnProject {
-        if let saved = router.runsOnProjects.first(where: { $0.sourceFolder == folder }) { return saved }
-        let name = folderName(folder)
-        return RunsOnProject(name: name, sourceFolder: folder, placement: .thisMac(path: folder))
-    }
-
-    func setRunsOnPlacement(_ placement: ProjectPlacement, for folder: String) {
-        let current = runsOnProject(for: folder)
-        var state = router
-        if let index = state.runsOnProjects.firstIndex(where: { $0.id == current.id }) {
-            state.runsOnProjects[index].placement = placement
-        } else {
-            var project = current
-            project.placement = placement
-            state.runsOnProjects.append(project)
-        }
-        router = state
-    }
-
     /// The controller folder is an input to the Runs on picker; the matched session's actual guest folder remains in its
     /// PendingDesktopStart. Use this identity only when relating a session back to a tagged Router project.
     func routerProjectFolder(sessionID: String, fallback: String? = nil) -> String {

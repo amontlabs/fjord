@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-// What an @ in your message points to: a project, a session, a notification of the Triage inbox (a PR, an issue, a
+// What an @ in your message points to: a claude.ai project or thread, a local project, a notification of the Triage inbox (a PR, an issue, a
 // workflow) or one of its categories. It is a pill in the composer and in the history. The models get the message with
 // each pill as "@name" where it stands and, after your words, a fenced block of what Fjord knows of each notification
 // and category tagged (`RouterPointers.context`): what others wrote is never put in your words.
@@ -10,8 +10,6 @@ import SwiftUI
 enum RouterPointer: Hashable, Codable {
     /// A project, by its folder.
     case project(String)
-    /// A Claude Code session, by the Claude app's id.
-    case session(String)
     /// A claude.ai project or thread the delivery engine sends to, by its target (`claude-project:<project>`,
     /// `claude-thread:<project>/<thread>`, `RouterCourier.Target`). Offered only while the engine runs.
     case claude(String)
@@ -23,16 +21,17 @@ enum RouterPointer: Hashable, Codable {
     /// the action makes it the thing's notification pill (`ActionPrompt.parts`).
     case thisItem
 
-    /// Whether it says where the message goes (a project, a session): such a pill is taken out of your words where they
-    /// start with it, as an address (`RouterContext.pills`). A notification or a category is what you talk about, and stays.
+    /// Whether it says where the message goes (a claude.ai place): such a pill is taken out of your words where they start
+    /// with it, as an address (`RouterContext.pills`). A local project, a notification or a category is what you talk about,
+    /// and stays.
     var addresses: Bool {
         switch self {
-        case .project, .session, .claude: true
-        case .notification, .category, .thisItem: false
+        case .claude: true
+        case .project, .notification, .category, .thisItem: false
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case project, session, claude, notification, category, thisItem }
+    private enum CodingKeys: String, CodingKey { case project, claude, notification, category, thisItem }
 
     /// `{"project": "/code/lookout"}` and so on; a bare string, a project's folder (as the pills were kept before there
     /// were other kinds), is a project.
@@ -43,7 +42,6 @@ enum RouterPointer: Hashable, Codable {
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try c.decodeIfPresent(String.self, forKey: .project) { self = .project(v) }
-        else if let v = try c.decodeIfPresent(String.self, forKey: .session) { self = .session(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .claude) { self = .claude(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .notification) { self = .notification(v) }
         else if let v = try c.decodeIfPresent(UUID.self, forKey: .category) { self = .category(v) }
@@ -55,7 +53,6 @@ enum RouterPointer: Hashable, Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .project(let folder): try c.encode(folder, forKey: .project)
-        case .session(let id): try c.encode(id, forKey: .session)
         case .claude(let target): try c.encode(target, forKey: .claude)
         case .notification(let id): try c.encode(id, forKey: .notification)
         case .category(let id): try c.encode(id, forKey: .category)
@@ -96,8 +93,6 @@ extension Store {
         switch pointer {
         case .project(let folder):
             return folderName(folder)
-        case .session(let id):
-            return claudeSessions[id].map { RouterPointers.inert($0.title, 40) } ?? "session"
         case .claude(let target):
             return RouterPointers.inert(RouterCourier.Target(target).flatMap { RouterCourier.option($0, store: self)?.title ?? $0.project } ?? "claude.ai", 40)
         case .notification(let id):
@@ -116,10 +111,6 @@ extension Store {
         switch pointer {
         case .project(let folder):
             return MentionLook(label: name ?? folderName(folder), symbol: nil, tint: projectColor(folder))
-        case .session(let id):
-            let session = claudeSessions[id]
-            return MentionLook(label: session.map { RouterDecision.clip($0.title, 32) } ?? name ?? "session",
-                               symbol: "text.bubble", tint: session.flatMap { projectColor($0.folderKey) } ?? CDS.Text.secondary)
         case .claude:
             return MentionLook(label: name ?? pointerName(pointer), symbol: "cloud", tint: CDS.Text.secondary)
         case .notification(let id):
@@ -174,12 +165,6 @@ extension RouterContext {
             .filter { seen.insert($0).inserted }
         pills = mentions.filter(\.pointer.addresses).map(\.range)
         self.mentions = mentions
-    }
-
-    /// The sessions tagged (their ids), in order: the message goes to them.
-    var sessions: [String] {
-        var seen = Set<String>()
-        return mentions.compactMap { if case .session(let id) = $0.pointer { id } else { nil } }.filter { seen.insert($0).inserted }
     }
 
     /// The notifications tagged (their things' ids), in order.
@@ -308,7 +293,7 @@ enum RouterPointers {
                 let open = store.entries(in: c.id)
                 blocks.append(category(name: m.name, rules: RuleWords(store: store).summary(c), open: open.count,
                                        unread: open.filter(\.isUnread).count))
-            case .project, .session, .claude, .thisItem:
+            case .project, .claude, .thisItem:
                 continue
             }
         }
@@ -371,14 +356,13 @@ enum RouterPointers {
 struct MentionSuggestion: Identifiable, Equatable {
     /// The list's sections, in order.
     enum Section: Int, CaseIterable, Comparable {
-        case projects, sessions, notifications, categories
+        case projects, notifications, categories
         /// Text to insert (a snippet's): picked, it takes the @ word's place as text, not as a pill.
         case snippets
 
         var title: String {
             switch self {
             case .projects: "Projects"
-            case .sessions: "Sessions"
             case .notifications: "Notifications"
             case .categories: "Categories"
             case .snippets: "Snippets"
@@ -409,7 +393,6 @@ struct MentionSuggestion: Identifiable, Equatable {
     var id: String {
         switch pick {
         case .pointer(.project(let v)): "project:" + v
-        case .pointer(.session(let v)): "session:" + v
         case .pointer(.claude(let v)): v
         case .pointer(.notification(let v)): "notification:" + v
         case .pointer(.category(let v)): "category:" + v.uuidString
@@ -461,19 +444,21 @@ extension RouterMentions {
             out.append(MentionSuggestion(section: .projects, pick: .pointer(.claude(target)), name: place.name, detail: "claude.ai",
                                          look: MentionLook(label: place.name, symbol: "cloud", tint: CDS.Text.secondary), keys: [place.name]))
         }
-        let sessions = MentionBase.sessions(store).lazy.filter { !except.contains(.session($0.id)) }.prefix(40)
-        var made = 0
-        for s in sessions where made < limit {
-            let project = store.routerSessionProject(s.id).name
-            guard found([s.title, project]) else { continue }
-            let look = store.pointerLook(.session(s.id))
-            out.append(MentionSuggestion(section: .sessions, pick: .pointer(.session(s.id)), name: look.label,
-                                         detail: project + (s.running ? " · working" : ""), look: look, keys: [s.title, project]))
-            made += 1
+        // Their threads, latest first, after the projects' own rows.
+        for place in RouterCourier.places(store) {
+            for t in place.threads.prefix(6) {
+                let target = RouterCourier.Target.thread(project: place.name, thread: t.id).targetID
+                let title = t.title.isEmpty ? "Untitled thread" : RouterPointers.inert(t.title, 40)
+                guard !except.contains(.claude(target)), found([t.title, place.name]) else { continue }
+                out.append(MentionSuggestion(section: .projects, pick: .pointer(.claude(target)), name: title,
+                                             detail: "claude.ai · \(place.name)",
+                                             look: MentionLook(label: title, symbol: "text.bubble", tint: CDS.Text.secondary),
+                                             keys: [t.title, place.name]))
+            }
         }
+        var made = 0
         let open = MentionBase.open(store).lazy.filter { !except.contains(.notification($0.id)) }.prefix(300)
         let tints = Dictionary(store.categories.map { ($0.id, $0.color.swatch) }, uniquingKeysWith: { a, _ in a })
-        made = 0
         for e in open where made < limit {
             let label = RouterPointers.label(e.thing)
             let reference = e.thing.number.map { "\(e.thing.repo)#\($0)" } ?? e.thing.repo
@@ -510,18 +495,7 @@ extension RouterMentions {
     /// keystroke. One slot each: what they were sorted from is compared (the sessions with the store they are of).
     @MainActor
     enum MentionBase {
-        private static var sessionsMemo: (store: Weak, sessions: [String: ClaudeSession], sorted: [ClaudeSession])?
         private static var openMemo: (entries: [InboxEntry], sorted: [InboxEntry])?
-        private struct Weak { weak var store: Store? }
-
-        static func sessions(_ store: Store) -> [ClaudeSession] {
-            let all = store.claudeSessions
-            if let memo = sessionsMemo, memo.store.store === store, memo.sessions == all { return memo.sorted }
-            let sorted = all.values.filter { !$0.isArchived }
-                .sorted { ($0.running ? 0 : 1, $1.lastActivity) < ($1.running ? 0 : 1, $0.lastActivity) }
-            sessionsMemo = (Weak(store: store), all, sorted)
-            return sorted
-        }
 
         static func open(_ store: Store) -> [InboxEntry] {
             // The inbox's memo hands out the same array until it changes: compared by its storage first.

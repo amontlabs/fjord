@@ -67,7 +67,6 @@ struct RouterMain: View {
             // under it, fading out under a soft edge down to the window's bottom, as under Claude's composer.
             VStack(spacing: 0) {
                 RouterSetupNotice(store: store, model: model)
-                RouterPendingDesktopStarts(store: store)
                 RouterPageView(store: store, model: model)
                     .frame(maxHeight: .infinity)
             }
@@ -90,7 +89,6 @@ struct RouterMain: View {
             VStack(spacing: 0) {
                 topBar
                 RouterSetupNotice(store: store, model: model)
-                RouterPendingDesktopStarts(store: store)
                 RouterPageView(store: store, model: model)
                     .frame(maxHeight: .infinity)
                 composer

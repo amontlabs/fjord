@@ -24,7 +24,6 @@ import Foundation
     private var reconciliationSubscription: String?
     private var reconciliationSettings = ClaudeSSHSettings()
     private var evidence: [String: [GuestSessionEvidence]] = [:]
-    private var activeStartKeys: Set<String> = []
     private var operationTails: [String: Task<Void, Never>] = [:]
     private var disableTask: Task<Void, Never>?
     /// Completion hooks let tests await watch and reconnect work without polling.
@@ -33,37 +32,11 @@ import Foundation
 
     init() {}
 
-    func reserveStart(projectID: UUID, location: SessionLocation, prompt: String) -> String? {
-        let material = "\(projectID.uuidString)|\(location.key)|\(prompt)"
-        let key = SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
-        guard activeStartKeys.insert(key).inserted else { return nil }
-        return key
-    }
-
-    func releaseStart(_ key: String) { activeStartKeys.remove(key) }
-
     /// Makes the target visible to Router-off before any guest file or command can be changed.
     func registerInstallationTarget(store: Store, client: any GuestClient, computer: GuestReference) {
         self.store = store
         clients[computer.key] = client
         computers[computer.key] = computer
-    }
-
-    func prepareDesktopStart(client: any GuestClient, placement: ProjectPlacement, project: RunsOnProject,
-                            prompt: String, computerName: String, settings: ClaudeSSHSettings,
-                            store: Store, computer: GuestReference, generation: UInt64) async throws -> GuestDesktopStart.Prepared {
-        registerInstallationTarget(store: store, client: client, computer: computer)
-        let allowed: @MainActor @Sendable () -> Bool = { [weak store] in
-            guard let store else { return false }
-            return store.routerOn && store.routerGeneration == generation
-        }
-        return try await serialized(computer) { [self] in
-            guard allowed() else { throw GuestRouterInstaller.Failure.routerTurnedOff }
-            try await applyPendingDisableNow(computer: computer, client: client)
-            guard allowed() else { throw GuestRouterInstaller.Failure.routerTurnedOff }
-            return try await GuestDesktopStart.prepare(client: client, placement: placement, project: project,
-                prompt: prompt, computerName: computerName, settings: settings, activationAllowed: allowed)
-        }
     }
 
     func startWatching(store: Store, client: any GuestClient, computer: GuestReference) async throws {

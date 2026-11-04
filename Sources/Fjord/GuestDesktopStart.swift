@@ -1,63 +1,5 @@
 import Foundation
 
-/// The supported one-click path for a computer project. Desktop receives a prefilled task and remains responsible for
-/// asking about SSH and letting the person send it.
-enum GuestDesktopStart {
-    enum Failure: LocalizedError, Equatable {
-        case computerFolderRequired
-        case invalidLink
-        var errorDescription: String? {
-            switch self {
-            case .computerFolderRequired: "Choose an absolute folder in the computer before starting a session."
-            case .invalidLink: "Fjord couldn't build Claude's SSH session link."
-            }
-        }
-    }
-
-    struct Prepared: Equatable, Sendable {
-        var pending: PendingDesktopStart
-        var url: URL
-        var alias: GuestSSHAlias
-    }
-
-    static func prepare(client: any GuestClient, placement: ProjectPlacement, project: RunsOnProject,
-                        prompt: String, computerName: String,
-                        settings: ClaudeSSHSettings = ClaudeSSHSettings(), now: Date = Date(),
-                        activationAllowed: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> Prepared {
-        guard case .computer(let deviceId, let computerId, let rawFolder) = placement else { throw Failure.computerFolderRequired }
-        let folder = try GuestFolderPath.validate(rawFolder)
-        let computer = GuestReference(deviceId: deviceId, computerId: computerId)
-        // Explicitly validate in the guest filesystem. Empty directories are valid; no controller path API touches it.
-        _ = try await client.filesList(computer: computer, path: folder)
-        _ = try await GuestRouterInstaller(client: client).install(computer: computer, activationAllowed: activationAllowed)
-        guard await activationAllowed() else {
-            try? await GuestRouterInstaller(client: client).disable(computer: computer)
-            throw GuestRouterInstaller.Failure.routerTurnedOff
-        }
-        let alias = try await client.sshAliasEnsure(computer: computer, installInclude: true)
-        try settings.install(.init(deviceId: deviceId, computerId: computerId, computerName: computerName,
-                                   ownerName: alias.ownerName, alias: alias.alias))
-        guard let url = deepLink(alias: alias.alias, folder: folder, prompt: prompt) else { throw Failure.invalidLink }
-        let pending = PendingDesktopStart(projectID: project.id,
-            location: .computer(deviceId: deviceId, computerId: computerId), alias: alias.alias, folder: folder,
-            prompt: prompt, openedAt: now, state: .readyInClaude)
-        return Prepared(pending: pending, url: url, alias: alias)
-    }
-
-    static func deepLink(alias: String, folder: String, prompt: String) -> URL? {
-        guard let folder = try? GuestFolderPath.validate(folder), !alias.isEmpty,
-              var components = URLComponents(string: "claude://code/new") else { return nil }
-        components.queryItems = [URLQueryItem(name: "ssh_host", value: alias),
-                                 URLQueryItem(name: "ssh_folder", value: folder),
-                                 URLQueryItem(name: "q", value: prompt)]
-        return components.url
-    }
-
-    static func reopen(_ pending: PendingDesktopStart) -> URL? {
-        deepLink(alias: pending.alias, folder: pending.folder, prompt: pending.prompt)
-    }
-}
-
 /// Guest evidence is separate from the Desktop session id. A matcher can mark a pending start only with an unambiguous
 /// same-owner host id and a live plugin presence joined to the guest registry.
 struct GuestSessionEvidence: Equatable, Sendable {
@@ -68,7 +10,7 @@ struct GuestSessionEvidence: Equatable, Sendable {
     var startedAt: Int64?
     var renewedAt: Int64
     var capabilities: [String]
-    var transcriptMessages: [SessionFork.Message]
+    var transcriptMessages: [YourMessages.Message]
     var transcript: GuestTranscriptSnapshot? = nil
     var tasks: [ClaudeTask]? = nil
     /// Live by the Router hook's held form and the guest registry, with no plugin presence (so no relay): enough to

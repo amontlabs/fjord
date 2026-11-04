@@ -11,13 +11,7 @@ enum AppWindowDev {
         Demo.populate(store, .router)
         let controller = AppWindowController(store: store, remembers: false)
         controller.onClose = { NSApp.terminate(nil) }
-        if CommandLine.arguments.contains(RouterFlightDemo.flag) {
-            RouterFlightDemo.install(store)
-            controller.show(.router)
-            RouterFlightDemo.play(store: store, model: controller.routerModel)
-        } else {
-            controller.show()
-        }
+        controller.show()
         return controller
     }
 }
@@ -262,75 +256,11 @@ enum AppWindowShots {
              palette: PaletteShot(query: "e", fixture: true)),
         Shot(name: "palette-fixture-actions", destination: { $0.shownCategories[0].id.asCategory },
              palette: PaletteShot(query: "fix", actions: true, fixture: true)),
-        Shot(name: "router-placement-popover", destination: { _ in .router }, compose: { model, store in
-            model.draft = "@lookout"
-            model.caret = nil
-        }, prepare: { store in
-            store.routerPlacementShot = true
-            guard let engine = store.engineClient as? MockEngineClient else { return }
-            let ownerID = "shot-owner"
-            engine.connectedDevices = [SiloWireDevice(address: "dev@example.test", id: ownerID, name: "Dev box")]
-            let inventory = engine.inventory
-            engine.ownerInventories[ownerID] = inventory
-        }),
         Shot(name: "router-composing", destination: { _ in .router }, compose: { model, store in
             let folder = store.knownFolders.first { !$0.isEmpty } ?? "/Users/me/code/lookout"
             model.pointers = [.project(folder)]
             model.draft = "check the failing tests in \(MentionText.markString) and tell me what you find"
         }),
-        // Typing paused: Jev's pick of where the draft goes is a ghost chip over the composer, its card marked on the page.
-        Shot(name: "router-predicting", destination: { _ in .router }, compose: { model, store in
-            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
-            model.draft = "use sqlite for now, and add an index on the user id"
-            let target = "answer:\(card.id)"
-            model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
-                                     text: model.draft, mark: card.id))
-            model.highlighted = card.id
-        }),
-        // Jev not sure of his pick: the same chip with a "?", nothing marked on the page.
-        Shot(name: "router-predicting-unsure", destination: { _ in .router }, compose: { model, store in
-            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
-            model.draft = "use sqlite for now, and add an index on the user id"
-            let target = "answer:\(card.id)"
-            model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
-                                     text: model.draft, mark: nil, unsure: true))
-        }),
-        // The chip's tooltip open on a long card title: it wraps inside its box.
-        Shot(name: "router-predicting-tip", destination: { _ in .router }, compose: { model, store in
-            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
-            model.draft = "use sqlite for now, and add an index on the user id"
-            let target = "answer:\(card.id)"
-            let long = "Migrate the authentication middleware to the new session token format and keep the legacy cookie working"
-            model.live.preview(.init(target: target, title: long,
-                                     detail: "card “\(long)” (Question · lookout-with-a-rather-long-project-name)",
-                                     text: model.draft, mark: card.id))
-            model.highlighted = card.id
-        }, tip: "Jev thinks"),
-        // A click on Jev's pick: the places the message can go instead, his pick first.
-        Shot(name: "router-predicting-redirect", destination: { _ in .router }, compose: { model, store in
-            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
-            model.draft = "use sqlite for now, and add an index on the user id"
-            let target = "answer:\(card.id)"
-            let others = store.claudeSessions.values.sorted { $0.lastActivity > $1.lastActivity }.prefix(2).map { "session:\($0.id)" }
-            let found = RouterDispatcher.Classification(ranked: ([target] + others).enumerated().map { .init(target: $1, p: 0.6 / Double($0 + 1)) },
-                                                        sure: true, assisted: true)
-            model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
-                                     text: model.draft, mark: card.id, found: found))
-            model.highlighted = card.id
-            model.live.redirecting = true
-            model.live.redirectIndex = 1
-        }),
-        Shot(name: "router-predicting-redirect-dark", destination: { _ in .router }, compose: { model, store in
-            guard let card = store.openRouterCards.first(where: { $0.kind == .question }) ?? store.openRouterCards.first else { return }
-            model.draft = "use sqlite for now, and add an index on the user id"
-            let target = "answer:\(card.id)"
-            let others = store.claudeSessions.values.sorted { $0.lastActivity > $1.lastActivity }.prefix(2).map { "session:\($0.id)" }
-            let found = RouterDispatcher.Classification(ranked: ([target] + others).enumerated().map { .init(target: $1, p: 0.6 / Double($0 + 1)) },
-                                                        sure: true, assisted: true)
-            model.live.preview(.init(target: target, title: card.title, detail: store.routerDispatcher.describe(target, store: store),
-                                     text: model.draft, mark: card.id, found: found))
-            model.live.redirecting = true
-        }, appearance: .darkAqua),
         Shot(name: "router-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
             store.router.cards = store.router.cards.map { var c = $0; if c.isOpen { c.addressedAt = Date(); c.addressedBy = .you }; return c }
             if let d = store.router.decisions.first(where: { !$0.links.changes.isEmpty }) { model.expanded.insert(d.id.uuidString) }
@@ -680,15 +610,6 @@ enum AppWindowShots {
         Shot(name: "router-canvas-pending-dark", destination: { _ in .router }, size: canvasSize, compose: { model, store in
             pending(model, store)
         }, appearance: .darkAqua),
-        // The same ask when the checks are in doubt: its buttons are verbs on their targets (stop and send, archive, send to…).
-        Shot(name: "router-canvas-ask-typed", destination: { _ in .router }, size: canvasSize, compose: { model, store in
-            typedAsk(store)
-            pending(model, store)
-        }, appearance: .aqua),
-        Shot(name: "router-canvas-ask-typed-dark", destination: { _ in .router }, size: canvasSize, compose: { model, store in
-            typedAsk(store)
-            pending(model, store)
-        }, appearance: .darkAqua),
         Shot(name: "router-canvas-pending-pill", destination: { _ in .router }, size: canvasSize, compose: { model, store in
             pending(model, store, asks: false)
         }, appearance: .aqua),
@@ -746,43 +667,6 @@ enum AppWindowShots {
         Shot(name: "router-canvas-flight-dark", destination: { _ in .router }, size: canvasSize, compose: { model, store in
             flight(model, store)
         }, appearance: .darkAqua),
-        // One message that went to several places, its history entry open with a line for each part: sent (with its Cancel),
-        // answered, started, held (Send now, Don't send), failed and cancelled.
-        Shot(name: "router-split-history", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
-            splitHistory(model, store)
-        }, appearance: .aqua),
-        Shot(name: "router-split-history-dark", destination: { _ in .router }, size: CGSize(width: 1280, height: 1000), compose: { model, store in
-            splitHistory(model, store)
-        }, appearance: .darkAqua),
-        // A message that divided into three, a pill for each part over the composer.
-        Shot(name: "router-list-split-pills", destination: { _ in .router }, compose: { model, store in
-            splitPills(store)
-            model.layout = .list
-        }, appearance: .aqua),
-        // The same, two parts held halfway to the two cards they go to.
-        Shot(name: "router-canvas-split-flight", destination: { _ in .router }, size: canvasSize, compose: { model, store in
-            splitFlight(model, store)
-        }, appearance: .aqua),
-        // Typing paused with Jev's read for several places: the divider's parts under the composer, each place with its words,
-        // the last one held for another place's answer.
-        Shot(name: "router-split-live", destination: { _ in .router }, compose: { model, store in
-            splitLive(model, store)
-        }, appearance: .aqua),
-        Shot(name: "router-split-live-dark", destination: { _ in .router }, compose: { model, store in
-            splitLive(model, store)
-        }, appearance: .darkAqua),
-        // The same, while the divider is still being asked.
-        Shot(name: "router-split-dividing", destination: { _ in .router }, compose: { model, store in
-            model.draft = "rerun the build, add the page, and mute notifications for an hour"
-            model.live.previewDividing()
-        }, appearance: .aqua),
-        // Two sessions ⌘-clicked on the Brief: marked in the text, a chip each over the composer, the message going to both whole.
-        Shot(name: "router-brief-recipients", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 1600, height: 1420),
-             compose: { model, store in
-                 Demo.routerDigest(store); model.pickBrief()
-                 model.live.recipients = ["session:local_demo-silo-guest", "session:local_demo-api"]
-                 model.draft = "pull main before you go on"
-             }, appearance: .aqua),
         Shot(name: "settings") { _ in .settings },
         Shot(name: "categories") { _ in .categories },
         Shot(name: "snippets") { _ in .snippets },
@@ -932,22 +816,6 @@ enum AppWindowShots {
         model.canvas.scroll(folders[0].key).offset = 70
     }
 
-    /// The demo's ask with typed options (`RouterActionChecks`): the checks name a stop, an archive and a send.
-    private static func typedAsk(_ store: Store) {
-        guard let ask = store.routerDispatcher.askBacks.first else { return }
-        var acts: [RouterAct] = [.interrupt(session: "local_demo-ci"), .stop(session: "local_demo-ci")]
-        if let card = store.routerShownOpenCards.first(where: { $0.kind == .done }) { acts.append(.archive(card: card.id)) }
-        acts += [.say(session: "local_demo-ci"), .say(session: "local_demo-transfer")]
-        var typed = ask
-        typed.message = "stop the CI run and use the staging config"
-        typed.options = acts.compactMap { store.routerDispatcher.option($0.target, store: store, verb: true) }.prefix(4).map { $0 }
-        typed.suggestion = typed.options.first?.target
-        if let i = store.router.decisions.firstIndex(where: { $0.id == ask.id }) {
-            store.router.decisions[i].trigger = .you(typed.message)
-        }
-        store.routerDispatcher.preview(ask: typed, progress: store.routerDispatcher.progress)
-    }
-
     /// Messages you sent, each in the state of one line under its session in the Brief.
     private static func briefSent(_ store: Store) {
         let now = Date()
@@ -983,7 +851,9 @@ enum AppWindowShots {
             decisions[i].add(.sent(to: "Repository ownership transfer setup", text: decisions[i].triggerText, original: nil),
                              session: "local_demo-transfer")
             decisions[i].outcome = .done
-            decisions[i].decision.targetID = "session:local_demo-transfer"
+            if let card = store.router.cards.first(where: { $0.sessionID == "local_demo-transfer" && $0.isOpen }) {
+                decisions[i].decision.targetID = "answer:\(card.id)"
+            }
             store.router.decisions = decisions
         }
     }
@@ -1055,119 +925,10 @@ enum AppWindowShots {
             let text = decisions[i].triggerText
             decisions[i].add(.sent(to: "Repository ownership transfer setup", text: text, original: nil), session: "local_demo-transfer")
             decisions[i].outcome = .done
-            decisions[i].decision.targetID = "session:local_demo-transfer"
+            if let card = store.router.cards.first(where: { $0.sessionID == "local_demo-transfer" && $0.isOpen }) {
+                decisions[i].decision.targetID = "answer:\(card.id)"
+            }
             store.router.decisions = decisions
-        }
-    }
-
-    /// Logs a message that divided into `parts` (its words, the place each went to as `session:<id>`, `answer:<card>` or
-    /// `new:<folder>`) and returns the parts' ids.
-    @discardableResult
-    private static func divided(_ store: Store, _ message: String, at: Date, _ parts: [(text: String, place: String, waitsFor: String?)])
-        -> (entry: UUID, parts: [UUID]) {
-        var entry = RouterDecision(at: at, trigger: .you(message))
-        let ids = entry.divide(into: parts.map {
-            RouterDecision.Part(text: $0.text, place: $0.place, waitsFor: $0.waitsFor, decision: .init(intent: "message"))
-        })
-        store.router.decisions.append(entry)
-        return (entry.id, ids)
-    }
-
-    /// One message to six places, each part at a different point: the history entry open, and the first part open with its Cancel.
-    private static func splitHistory(_ model: RouterModel, _ store: Store) {
-        let now = Date()
-        let card = store.router.cards.first { $0.sessionID == "local_demo-linux" }?.id ?? ""
-        let (entry, ids) = divided(store, "rerun the build, approve the Linux plan, add a plugin page in lcu, tell the transfer to use the version CI "
-            + "picked, rebase the games, and drop the calculator run", at: now.addingTimeInterval(-90), [
-                (text: "rerun the build", place: "session:local_demo-ci", waitsFor: nil),
-                (text: "approve the plan", place: "answer:\(card)", waitsFor: nil),
-                (text: "add a plugin page", place: "new:/Users/demo/lcu", waitsFor: nil),
-                (text: "use the version CI picked", place: "session:local_demo-transfer", waitsFor: "session:local_demo-ci"),
-                (text: "rebase the games", place: "session:local_demo-games", waitsFor: nil),
-                (text: "drop the calculator run", place: "session:local_demo-calc", waitsFor: nil),
-            ])
-        func title(_ session: String) -> String { store.claudeSessions[session]?.title ?? session }
-        func delivered(_ session: String, _ cancelled: RouterDecision.Cancelled? = nil) -> RouterDecision.Delivered {
-            RouterDecision.Delivered(session: session, cli: "cli-" + session, nonce: UUID().uuidString, at: now.addingTimeInterval(-80),
-                                     turns: store.claudeSessions[session]?.completedTurns ?? 0, busy: false, abortable: true,
-                                     cancelled: cancelled)
-        }
-        func sent(_ n: Int, _ session: String, cancelled: RouterDecision.Cancelled? = nil) {
-            store.updateDecision(ids[n]) { part in
-                part.decision.targetID = "session:" + session
-                part.add(.sent(to: title(session), text: part.triggerText, original: nil), session: session)
-                if let cancelled { part.add(.cancelled(cancelled)) }
-                part.delivered = delivered(session, cancelled)
-                part.outcome = .done
-            }
-        }
-        sent(0, "local_demo-ci")
-        store.updateDecision(ids[1]) { part in
-            part.decision.targetID = "answer:" + card
-            part.add(.answered(card: card), card: card)
-            part.outcome = .done
-        }
-        store.updateDecision(ids[2]) { part in
-            part.decision.targetID = "new:/Users/demo/lcu"
-            part.add(.started(session: nil, project: "lcu", model: nil, effort: nil))
-            part.outcome = .done
-        }
-        store.updateDecision(ids[3]) { $0.decision.targetID = "session:local_demo-transfer" }
-        store.routerDispatcher.held[ids[3]] = "waits for session “\(title("local_demo-ci"))” in microsandbox; it isn't sent unless you "
-            + "send it, and is dropped after 30 minutes"
-        store.updateDecision(ids[4]) { part in
-            part.decision.targetID = "session:local_demo-games"
-            part.add(.failed("not delivered (the session isn't open in Claude)"))
-            part.outcome = .done
-        }
-        sent(5, "local_demo-calc", cancelled: .aborted)
-        model.pane = .history
-        model.expanded.insert(entry.uuidString)
-        model.expanded.insert(ids[0].uuidString)
-    }
-
-    /// A draft for three places, the divider's parts shown under the composer, one of them waiting for another's answer.
-    private static func splitLive(_ model: RouterModel, _ store: Store) {
-        let text = "rerun the build, tell the transfer to use the version CI picked, and mute notifications for an hour"
-        model.draft = text
-        model.live.preview(division: RouterDivision(text: text, parts: [
-            RouterDivider.Part(target: "session:local_demo-ci", text: "rerun the build", waitsFor: nil),
-            RouterDivider.Part(target: "session:local_demo-transfer", text: "use the version CI picked", waitsFor: "session:local_demo-ci"),
-            RouterDivider.Part(target: "change_fjord", text: "mute notifications for an hour", waitsFor: nil),
-        ]), store: store)
-    }
-
-    /// A message divided into three, its parts being sent: a pill each over the composer, two placed and one still looking.
-    private static func splitPills(_ store: Store) {
-        let (_, ids) = divided(store, "rerun the build, add the page, and mute notifications for an hour", at: Date(), [
-            (text: "rerun the build", place: "session:local_demo-ci", waitsFor: nil),
-            (text: "add the page", place: "session:local_demo-transfer", waitsFor: nil),
-            (text: "mute notifications for an hour", place: "change_fjord", waitsFor: nil),
-        ])
-        store.updateDecision(ids[0]) { $0.decision.targetID = "session:local_demo-ci" }
-        store.updateDecision(ids[1]) { $0.decision.targetID = "session:local_demo-transfer" }
-        store.routerDispatcher.preview(progress: Dictionary(uniqueKeysWithValues: ids.map { ($0, "sending") }), flying: ids)
-    }
-
-    /// Two parts of a message flying to the cards they went to, held halfway.
-    private static func splitFlight(_ model: RouterModel, _ store: Store) {
-        let (_, ids) = divided(store, "tell the transfer to remove the old remote, and CI to rerun", at: Date(), [
-            (text: "remove the old remote", place: "session:local_demo-transfer", waitsFor: nil),
-            (text: "rerun", place: "session:local_demo-ci", waitsFor: nil),
-        ])
-        model.pickCanvas()
-        model.canvas.freezeFlight = 0.5
-        model.flights.freezeFlight = 0.5
-        store.routerDispatcher.preview(progress: Dictionary(uniqueKeysWithValues: ids.map { ($0, "sending") }), flying: ids)
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1200))
-            for (id, session) in zip(ids, ["local_demo-transfer", "local_demo-ci"]) {
-                store.updateDecision(id) { part in
-                    part.decision.targetID = "session:" + session
-                    part.add(.sent(to: store.claudeSessions[session]?.title ?? session, text: part.triggerText, original: nil), session: session)
-                    part.outcome = .done
-                }
-            }
         }
     }
 

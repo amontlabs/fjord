@@ -28,24 +28,4 @@ import Testing
         return engine
     }
 
-    @Test func removingAThisMacComputerLeavesTheSameIdComputerOnAnotherDeviceAlone() async throws {
-        let engine = engine()
-        let model = ComputersModel(client: engine, initialInventory: engine.inventory)
-        var removed: [GuestReference] = []
-        model.prepareComputerRemoval = { removed.append($0) }
-        model.computerRemovalCompleted = { removed.append($0) }
-        // The local twin is stopped, so it can be deleted.
-        await model.delete(.thisMac(computerID))
-        #expect(removed == [local, local])
-        #expect(engine.ownerInventories[deviceID]?.computer(computerID) != nil)
-
-        let store = Store(engineClient: engine)
-        store.persists = false
-        store.setRunsOnPlacement(.computer(deviceId: deviceID, computerId: computerID, guestPath: "/a"), for: "/src/one")
-        store.setRunsOnPlacement(.computer(deviceId: nil, computerId: computerID, guestPath: "/b"), for: "/src/two")
-        GuestRouterRuntime.shared.computerRemoved(store: store, computer: local)
-        defer { GuestRouterRuntime.shared.stopAll() }
-        #expect(store.runsOnProject(for: "/src/one").placement.location == .computer(deviceId: deviceID, computerId: computerID))
-        if case .computer = store.runsOnProject(for: "/src/two").placement.location { Issue.record("the local placement stayed") }
-    }
 }

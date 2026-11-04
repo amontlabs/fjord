@@ -112,7 +112,6 @@ struct ActionPrompt: Hashable, ExpressibleByStringLiteral {
         switch pointer {
         case .thisItem: thisItemName
         case .project(let folder): (folder as NSString).lastPathComponent
-        case .session: "a session"
         case .claude(let target): RouterCourier.Target(target)?.project ?? "claude.ai"
         case .notification(let id): id
         case .category: "a category"
@@ -163,40 +162,23 @@ struct ActionMessage: Equatable {
 extension InboxActions {
     /// What a run's chip says while the Router waits for your pick.
     static let waitingWords = "waiting on you in the Router"
-    /// A session in a computer, prepared in the Claude app with its prompt: it starts when you press Send there.
-    static let readyInClaudeWords = "ready in Claude"
 
     /// What the Router made of an action's message, for its run: still routing (`.running`, no words), waiting for your pick
-    /// on an ask, sent to a session ("sent to <its title>"), a session started ("session started"), or failed and why.
-    /// `waiting`, `busy`, `held`: the dispatcher has an ask for it, a run under way, a held first message. `title`: a
-    /// session's title.
-    static func outcome(of entry: RouterDecision, waiting: Bool, busy: Bool, held: Bool, title: (String) -> String?)
+    /// on an ask, sent to a claude.ai place ("sent to <it>"), or failed and why.
+    /// `waiting`, `busy`: the dispatcher has an ask for it, a run under way. `title`: a session's title.
+    static func outcome(of entry: RouterDecision, waiting: Bool, busy: Bool, title: (String) -> String?)
         -> (state: ActionRun.State, detail: String, session: String?) {
         if waiting { return (.running, waitingWords, nil) }
         if busy { return (.running, "", nil) }
-        let failures = entry.done.compactMap { if case .failed(let why) = $0 { why } else { nil } }
-        // A model or effort that couldn't be set is said in the history; the message went all the same.
-        let failed = failures.last { !$0.hasPrefix("model/effort:") }
-        var started: String??
-        var guestPrepared = false
+        let failed = entry.done.compactMap { if case .failed(let why) = $0 { why } else { nil } }.last
         var sent: String?
         for item in entry.done {
             switch item {
-            case .started(let session, _, _, _): started = .some(session)
-            case .preparedGuest: guestPrepared = true
             case .sent(let to, _, _): sent = to
             case .answered(let card): sent = sent ?? card
             default: break
             }
         }
-        if let started {
-            // Its first message held for the app to run the session: started, still under way until it goes (a quit
-            // meanwhile says it was interrupted, as the entry does).
-            if held { return (.running, "session started", started) }
-            if let failed, sent == nil { return (.failed, failed, started) }
-            return (.done, "session started", started)
-        }
-        if guestPrepared { return failed.map { (.failed, $0, nil) } ?? (.done, readyInClaudeWords, nil) }
         if let sent {
             let session = entry.links.sessions.last
             return (.done, "sent to " + (session.flatMap(title) ?? sent), session)
@@ -225,7 +207,7 @@ extension Store {
         let dispatcher = dispatcher ?? routerDispatcher
         let (state, detail, session) = InboxActions.outcome(
             of: entry, waiting: dispatcher.askBacks.contains { $0.id == decision }, busy: dispatcher.progress[decision] != nil,
-            held: dispatcher.held[decision] != nil, title: { [claudeSessions] in claudeSessions[$0]?.title })
+            title: { [claudeSessions] in claudeSessions[$0]?.title })
         var ledger = actionLedger
         for (key, run) in ledger.runs where run.message == decision && run.state != .baselined {
             var next = run

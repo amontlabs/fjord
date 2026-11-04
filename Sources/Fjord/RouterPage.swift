@@ -1150,8 +1150,6 @@ extension RouterDecision {
     @MainActor func status(_ store: Store) -> String {
         guard outcome == .pending else { return summary }
         if let progress = store.routerDispatcher.progress[id] { return progress + "…" }
-        // A part held for another place's answer: what it waits for.
-        if let held = store.routerDispatcher.held[id] { return summary + " · " + held }
         return summary
     }
 }
@@ -1199,16 +1197,9 @@ private struct HistoryDecisionLine: View, Equatable {
         guard decision.outcome == .pending else { return (nested ? decision.summary(without: place) : decision.summary, false) }
         // Out of sight, as last read: the dispatcher isn't read for a history hidden under Now.
         if outOfSight, let kept = lastStatus.value { return kept }
-        let held = store.routerDispatcher.held[decision.id]
         let read: (String, Bool)
         if let progress = store.routerDispatcher.progress[decision.id] {
-            read = (progress + "…", held != nil)
-        } else if let held {
-            // A part held for another place's answer: held, and what it waits for.
-            // The line names just the place it waits for; the rest is in its details.
-            let holding = RouterFlights.holds(decision)
-            let waitsFor = holding ? RouterFlights.destination(decision.parts.first?.waitsFor, store: store) : nil
-            read = (holding ? "held" + (waitsFor.map { " · waits for \($0)" } ?? " · " + held) : decision.summary + " · " + held, true)
+            read = (progress + "…", false)
         } else {
             read = (decision.summary, false)
         }
@@ -1228,18 +1219,6 @@ private struct HistoryDecisionLine: View, Equatable {
                         .lineLimit(1).truncationMode(.tail).layoutPriority(1)
                     // A held part's line gives its words up before what it waits for.
                     Text("· \(status)").cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1).layoutPriority(held ? 2 : 0)
-                    // A part held for another place's answer: sent when you say so.
-                    if held, RouterFlights.holds(decision) {
-                        Button("Send now") { store.routerDispatcher.sendNow(decision.id) }
-                            .buttonStyle(.link).font(CDS.sans(12)).fixedSize()
-                            .help("Sends it now, without waiting for the answer it needs")
-                    }
-                    // A held part: yours to drop (Stop leaves it be).
-                    if held {
-                        Button("Don't send") { store.routerDispatcher.dropHeld(decision.id) }
-                            .buttonStyle(.link).font(CDS.sans(12)).fixedSize()
-                            .help("It isn't sent")
-                    }
                     StatusCaret(hot: hovered, open: open)
                     Spacer(minLength: 8)
                     // A part is as old as its message: the line above says.
@@ -1385,9 +1364,6 @@ private struct DecisionDetails: View {
         var toolsLinked: Bool
         var running: Bool
         var sessions: [(id: String, title: String)]
-        var canEdit: Bool
-        /// What a part held for another place's answer waits for, and what happens to it.
-        var waits: String?
     }
 
     private var live: Live {
@@ -1400,12 +1376,8 @@ private struct DecisionDetails: View {
         let whole = !decision.isDivided
         let changes = whole ? decision.links.changes.compactMap { id in store.router.changes.first { $0.id == id } } : []
         let sessions = whole ? decision.links.sessions.compactMap { id in store.claudeSessions[id].map { (id, $0.title) } } : []
-        let canEdit = decision.sentMessage.map { sent in
-            store.routerOn && store.claudeSessions[sent.session].map { !$0.isArchived } == true
-        } ?? false
-        let waits = RouterFlights.holds(decision) ? store.routerDispatcher.held[decision.id] : nil
         let read = Live(styled: styled, changes: changes, toolsLinked: store.toolsLinked,
-                        running: store.routerDispatcher.progress[decision.id] != nil, sessions: sessions, canEdit: canEdit, waits: waits)
+                        running: store.routerDispatcher.progress[decision.id] != nil, sessions: sessions)
         last.value = read
         return read
     }
@@ -1426,10 +1398,6 @@ private struct DecisionDetails: View {
                 CDSProse(text: decision.triggerText, color: CDS.Text.secondary, inset: false)
             }
             if let reply = decision.reply { CDSProse(text: reply, color: CDS.Text.primary, inset: false) }
-            if let waits = live.waits {
-                Text(waits.prefix(1).uppercased() + waits.dropFirst()).cdsText((12, 16), .regular, CDS.Text.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             if !decision.isDivided {
                 ForEach(Array(decision.doneLines.enumerated()), id: \.offset) { _, line in
                     Text(line).cdsText((12, 16), .regular, CDS.Text.muted).fixedSize(horizontal: false, vertical: true)
@@ -1444,35 +1412,25 @@ private struct DecisionDetails: View {
                         let id = decision.id
                         Task { await store.routerDispatcher.cancel(id) }
                     }
-                    if case .you = decision.trigger {
-                        ClaudeButton("Cancel and send elsewhere…", variant: .ghost, size: .sm) {
-                            store.routerDispatcher.sendElsewhere(decision.id)
-                        }
-                        // An action's message goes anywhere only while Triage and the Router are both on.
-                        .help(decision.fromAction != nil && !live.toolsLinked
-                              ? "Triage is off: an action's message can't be sent elsewhere until it is on again"
-                              : "Cancels it here, then asks where it should go instead, this session left out. Your pick teaches the Router.")
-                        .disabled(cancel == .cancelling || live.running || (decision.fromAction != nil && !live.toolsLinked))
-                    }
                 }
+            }
+            // Sent to a claude.ai place: asked again where it goes, that place left out; the pick is a correction of it.
+            if case .you = decision.trigger, decision.decision.targetID.flatMap(RouterCourier.Target.init) != nil,
+               decision.outcome != .pending {
+                ClaudeButton("Send elsewhere…", variant: .ghost, size: .sm) {
+                    store.routerDispatcher.sendElsewhere(decision.id)
+                }
+                // An action's message goes anywhere only while Triage and the Router are both on.
+                .help(decision.fromAction != nil && !live.toolsLinked
+                      ? "Triage is off: an action's message can't be sent elsewhere until it is on again"
+                      : "Asks where it should go instead, this place left out; what went there stays. Your pick teaches the Router.")
+                .disabled(live.running || (decision.fromAction != nil && !live.toolsLinked))
             }
             if !live.sessions.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(live.sessions, id: \.id) { session in
                         ClaudeButton("Open \(session.title)", variant: .ghost, size: .sm,
                                      icon: ClaudeMark.openSymbol) { store.openAgent(session.id) }
-                    }
-                    // The message it sent, taken back in a fork: the session as it was before it (this one stays as it is),
-                    // and that again with the message edited.
-                    if let sent = decision.sentMessage, live.canEdit {
-                        ClaudeButton("Edit and resend", variant: .ghost, size: .sm, icon: "pencil") {
-                            model.edit(session: sent.session, message: sent.text, sentAt: sent.at)
-                        }
-                        .help("Opens it in the composer; sending it starts a fork of the session from before this message. Files the agent changed aren't rolled back")
-                        ClaudeButton("Fork from before this", variant: .ghost, size: .sm, icon: "arrow.triangle.branch") {
-                            store.forkSession(sent.session, point: .before(sent.text, after: sent.at))
-                        }
-                        .help("A new session with this one's conversation up to before this message; files aren't rolled back")
                     }
                 }
             }
@@ -2909,7 +2867,7 @@ struct AskBackCard: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.bubble").font(.system(size: 13, weight: .medium)).foregroundStyle(warm)
-                Text(ask.context.part ? "Where should this part go?" : "Where should this go?").cdsText((14, 20), .semibold, CDS.Text.primary)
+                Text("Where should this go?").cdsText((14, 20), .semibold, CDS.Text.primary)
                 Spacer(minLength: 4)
                 CardAge(date: ask.at)
             }
@@ -2924,27 +2882,15 @@ struct AskBackCard: View, Equatable {
                 let newest = ask.id == store.routerDispatcher.askBacks.last?.id
                 ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                     ClaudeButton(option.title + (option.detail.isEmpty ? "" : " · \(option.detail)"), variant: .secondary, size: .sm) {
-                        if option.target == RouterAskBack.chooseFolder { chooseFolder() }
-                        else { store.routerDispatcher.pick(ask.id, target: option.target) }
+                        store.routerDispatcher.pick(ask.id, target: option.target)
                     }
                     // RouterKeys: ⌘1–⌘4 on the newest ask.
                     .help(newest && index < RouterKeys.pickKeys.count ? "⌘\(index + 1)" : "")
                 }
-                // A message whose delivery is unconfirmed is only sent again as it was, or the session looked at.
-                if !store.routerDispatcher.resendsOnly(ask.id) { Menu {
-                    if !pickers.sessions.isEmpty {
-                        Section("Send to a session") {
-                            ForEach(pickers.sessions) { option in
-                                Button("\(option.title) · \(option.detail)") { store.routerDispatcher.pick(ask.id, target: option.target) }
-                            }
-                        }
-                    }
-                    if !pickers.projects.isEmpty {
-                        Section("Start a session in") {
-                            ForEach(pickers.projects) { option in
-                                Button(option.detail) { store.routerDispatcher.pick(ask.id, target: option.target) }
-                            }
-                        }
+                // Every claude.ai project and its latest threads.
+                if !pickers.isEmpty { Menu {
+                    ForEach(pickers.filter { !options.contains($0) }) { option in
+                        Button("\(option.title) · \(option.detail)") { store.routerDispatcher.pick(ask.id, target: option.target) }
                     }
                 } label: {
                     Text("Something else…").cdsText((13, 18), .medium, CDS.Text.secondary)
@@ -2962,17 +2908,5 @@ struct AskBackCard: View, Equatable {
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(warm.opacity(0.8), lineWidth: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Where should this go? \(ask.message)")
-    }
-
-    /// "Choose folder…": a folder picked in the open panel gets a new session with the message.
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Start a session here"
-        panel.message = ask.note.map { "\($0). Choose the folder a new session should work in." } ?? "Choose the folder a new session should work in."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        store.routerDispatcher.pick(ask.id, folder: url.path)
     }
 }

@@ -90,7 +90,6 @@ extension PaletteRouterSource {
         actions.append(PaletteAction(id: "archive", title: "Archive", symbol: "archivebox", destructive: true) {
             model.address(card.id, store: store)
         })
-        if store.claudeSessions[card.sessionID]?.cliID != nil { actions.append(forkAction(card.sessionID, store)) }
 
         return PaletteItem(id: "card:" + card.id, kind: .card, title: store.claudeSessions[card.sessionID]?.title ?? card.title,
                            subtitle: label + " · " + project, keywords: keywords, icon: .session(card.sessionID),
@@ -138,17 +137,12 @@ extension PaletteRouterSource {
             actions.append(PaletteAction(id: "show", title: "Show in Router", symbol: "rectangle.stack") { showSession(id, context) })
         }
         actions.append(open)
-        actions.append(PaletteAction(id: "ask", title: "Ask the Router about it", symbol: "sparkles") {
-            model.prefill([.session(id)])
-            context.go(.router)
-        })
         if session.running {
             actions.append(PaletteAction(id: "summary", title: "Summary", symbol: "text.alignleft") {
                 model.summarizer.request(id, store: store)
             })
         }
         if let thing { actions.append(linkAction(thing, context)) }
-        if session.cliID != nil { actions.append(forkAction(id, store)) }
 
         var subtitle = project
         if session.running { subtitle += " · Working" }
@@ -158,12 +152,6 @@ extension PaletteRouterSource {
         return PaletteItem(id: "session:" + id, kind: .session, title: session.title, subtitle: subtitle, keywords: keywords,
                            icon: .session(id), dot: row?.waitsForYou == true ? .attention : session.running ? .running : nil,
                            date: session.lastActivity, weight: weight, actions: actions)
-    }
-
-    /// A fork is offered where the session's menu offers it: the Router is on (the caller has checked) and the session has a
-    /// Claude Code id.
-    private static func forkAction(_ session: String, _ store: Store) -> PaletteAction {
-        PaletteAction(id: "fork", title: "Fork", symbol: "arrow.triangle.branch") { store.forkSession(session) }
     }
 }
 

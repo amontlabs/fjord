@@ -337,7 +337,7 @@ import Testing
     /// what was saved with them still loads.
     @Test func stateSavedWithJevsSessionModelPickStillLoads() throws {
         let state = try JSONDecoder().decode(PersistedState.self, from: Data(#"{"settings":{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"centerPill":true,"jevPicksSessionModels":true,"jevReadsDrafts":false}}"#.utf8))
-        #expect(state.dropped.isEmpty && state.settings.centerPill == true && state.settings.jevReadsDrafts == false)
+        #expect(state.dropped.isEmpty && state.settings.centerPill == true)
         let decided = try JSONDecoder().decode(RouterDecision.Decided.self, from: Data(#"{"target":"lookout","settingsBy":"Jev"}"#.utf8))
         #expect(decided.target == "lookout")
     }

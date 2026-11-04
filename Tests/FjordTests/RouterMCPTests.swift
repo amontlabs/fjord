@@ -230,7 +230,6 @@ import Testing
         let dir = TempDir()
         let store = await store(dir)
         let s = tools(store)
-        #expect(await s.tool("start_session", ["project": "lookout", "title": "  "])?.isError == true)
         #expect(await s.tool("answer_form", ["card": "local_a#w500"])?.isError == true)
         #expect(await s.call("rm", [:]) == nil)
     }
@@ -286,26 +285,6 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: localAnswer.path))
     }
 
-    @Test func aNewSessionStartsInAKnownProjectOnly() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s)
-        var started: [String] = []
-        t.starter = { folder, title in
-            started.append("\(folder) · \(title)")
-            return SessionStart.Started(sessionID: "local_new", peer: title)
-        }
-        t.beginTurn("Add a test")
-        let out = try #require(await t.tool("start_session", ["project": "LOOKOUT", "title": "Add a test"]))
-        #expect(!out.isError && started == ["/code/lookout · Add a test"])
-        let unknown = try #require(await t.tool("start_session", ["project": "web", "title": "Hi there"]))
-        #expect(unknown.isError && unknown.text.contains("api") && unknown.text.contains("lookout"))
-        #expect(started.count == 1)
-        #expect(try RouterTools.folder("/code/api/", folders: ["/code/api"], name: { $0 }) == "/code/api")
-        #expect(throws: RouterTools.Failure.self) {
-            try RouterTools.folder("app", folders: ["/a/app", "/b/app"], name: { $0 })
-        }
-    }
 
     // MARK: Review fixes
 
@@ -550,46 +529,7 @@ import Testing
         #expect(out.isError && out.text.contains("nothing can be sent") && t.prepared.isEmpty)
     }
 
-    @Test func startingPreparesFirstThenStartsAndHandsBackThePeer() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s)
-        var started = 0
-        t.starter = { _, title in
-            started += 1
-            return SessionStart.Started(sessionID: "local_new", peer: title)
-        }
-        t.beginTurn("start a session in lookout to bump the version")
-        let out = try #require(await t.tool("start_session", ["project": "lookout", "title": "  Bump the\nversion "]))
-        let result = try #require(json(Data(out.text.utf8)) as? [String: Any])
-        #expect(result["session"] as? String == "local_new" && result["peer"] as? String == "Bump the version")
-        // Signed for the new session (its Claude Code id is the bootstrap's uuid).
-        #expect((result["text"] as? String)?.hasPrefix("⟦fjord v1 new ") == true && started == 1)
-        #expect(t.prepared["Bump the version"]?.newSessionIn == "lookout")
-        #expect(gate(t, to: "Bump the version", message: "bump the version").allow)
-        // The task left once the request is taken out goes whole: what it says to tell others isn't taken out again.
-        t.beginTurn("start a session in lookout to tell them to rotate the keys")
-        _ = try #require(await t.tool("start_session", ["project": "lookout", "title": "Rotate"]))
-        #expect(t.prepared["Rotate"]?.body ?? t.prepared["Rotate"]?.text == "tell them to rotate the keys")
-    }
 
-    @Test func stoppingVoidsAStartWaitingOnItsSession() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s)
-        let held = RouterGate()
-        t.starter = { _, title in
-            await held.wait()
-            return SessionStart.Started(sessionID: "local_new", peer: title)
-        }
-        t.beginTurn("start a session in lookout to bump the version")
-        let starting = Task { await t.tool("start_session", ["project": "lookout", "title": "Bump"]) }
-        await held.waitUntilWaiting()
-        t.endTurn()
-        held.open()
-        let out = await starting.value
-        #expect(out?.isError == true && t.prepared.isEmpty)
-    }
 
     /// Claude Code's own input for a SendMessage of `message`, as 2.1.293 builds it (captured from the binary).
     private func asked(_ to: String, _ message: String, summary: String, content: String) -> [String: String] {
@@ -655,37 +595,6 @@ import Testing
 
     // MARK: Signed for Fjord's plugin
 
-    @Test func noPluginNoMessage() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s, turn: "tell them to ship")
-        // A live session whose plugin isn't running (started before it was installed).
-        let sessions = dir.path("claude/sessions")
-        let peer = try JSONSerialization.data(withJSONObject: ["pid": Int(getppid()), "hostSessionId": "local_b", "sessionId": "cli-local_b",
-                                                               "name": "Write the README", "status": "idle"])
-        try peer.write(to: sessions.appendingPathComponent("\(getppid()).json"))
-        let stale = try #require(await t.tool("prepare", ["session": "local_b"]))
-        #expect(stale.isError)
-        #expect(t.prepared.isEmpty)
-        // Two processes claim the same desktop session with different ids: ambiguous, refused.
-        let twin = try JSONSerialization.data(withJSONObject: ["pid": 1, "hostSessionId": "local_a", "sessionId": "cli-other",
-                                                               "name": "Fix the login bug", "status": "idle"])
-        try twin.write(to: sessions.appendingPathComponent("1.json"))
-        #expect(await t.tool("prepare", ["session": "local_a"])?.isError == true)
-        try FileManager.default.removeItem(at: sessions.appendingPathComponent("1.json"))
-        // The plugin not installed at all: said, and nothing prepared, nor any session started.
-        s.routerPluginStatus = .notInstalled
-        #expect(await t.tool("prepare", ["session": "local_a"])?.isError == true)
-        var started = 0
-        t.starter = { _, title in started += 1; return SessionStart.Started(sessionID: "local_new", peer: title) }
-        #expect(await t.tool("start_session", ["project": "lookout", "title": "Ship"])?.isError == true)
-        #expect(started == 0 && t.prepared.isEmpty)
-        // Installed but with no key to sign with: refused too (no presence counts without the key it was written under).
-        s.routerPluginStatus = .installed
-        try FileManager.default.removeItem(at: dir.path("support/relay.key"))
-        let keyless = await t.tool("prepare", ["session": "local_a"])
-        #expect(keyless?.isError == true && t.prepared.isEmpty)
-    }
 
     @Test func theGateLetsThroughOnlyTheSignedText() async throws {
         let dir = TempDir()
@@ -706,28 +615,6 @@ import Testing
                                 body: "bump the version") == String(parts[5]))
     }
 
-    @Test func aNewSessionsFirstMessageIsSignedForItWithoutWaitingForItsPlugin() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s, turn: "start a session in lookout to bump the version")
-        // The app has the session; whether it runs is the first message's business (it starts it): no process, no plugin yet.
-        t.starter = { _, title in SessionStart.Started(sessionID: "local_late", peer: "local_late") }
-        let out = try #require(await t.tool("start_session", ["project": "lookout", "title": "Bump it"]))
-        #expect(!out.isError, "\(out.text)")
-        let ready = try #require(t.prepared["local_late"])
-        #expect(ready.text.hasPrefix("⟦fjord v1 late ") && ready.asleep && ready.local == "local_late" && ready.newSessionIn == "lookout")
-        // With settings the first message is v2: a sleeping session loads the plugin installed now, which takes them.
-        let withSettings = tools(s, turn: "start a session in lookout with opus, high effort: bump the version")
-        withSettings.starter = { _, title in SessionStart.Started(sessionID: "local_other", peer: "local_other") }
-        _ = try await withSettings.startSession(s, project: "lookout", title: "Bump it", ticket: withSettings.ticket(),
-                                                settings: SessionSettings(model: "opus", effort: "high"))
-        #expect(withSettings.prepared["local_other"]?.text.hasPrefix("⟦fjord v2 other ") == true)
-        // No task left in the words: the session is started, nothing to send.
-        let bare = tools(s, turn: "start a session in lookout")
-        bare.starter = { _, _ in SessionStart.Started(sessionID: "local_bare", peer: "local_bare") }
-        let none = try #require(await bare.tool("start_session", ["project": "lookout", "title": "Nothing"]))
-        #expect(!none.isError && bare.prepared.isEmpty)
-    }
 
     // MARK: A session with no process
 
@@ -768,45 +655,6 @@ import Testing
         #expect(out.isError && out.text.contains("two processes claim it") && t.prepared.isEmpty)
     }
 
-    @Test func aForkIsCutFromTheOriginalsTranscriptAndItsFirstMessagePrepared() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let project = dir.path("projects/-code-lookout")
-        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-        // Claude Code's ids are UUIDs: only such an id is put in a path or the CLI's arguments.
-        let cli = "0b0e9b9e-3c1f-4c55-9a52-1d1a3b7c9e01"
-        s.claudeSessions["local_a"]?.cliID = cli
-        try RouterForkTests.transcript().write(to: project.appendingPathComponent("\(cli).jsonl"))
-        let t = tools(s, turn: "try SQLite instead")
-        t.transcriptsRoot = dir.path("projects")
-        var plans: [SessionFork.Plan] = []
-        t.forker = { plan in
-            plans.append(plan)
-            return SessionStart.Started(sessionID: "local_new", peer: plan.title)
-        }
-        let out = try await t.forkSession(s, .init(session: "local_a", point: .beforeLast, message: "try SQLite instead"), ticket: t.ticket())
-        // Run in the session's project, not the worktree its last message was sent from (gone, or another project).
-        #expect(plans == [SessionFork.Plan(cwd: "/code/lookout", cliID: cli, at: "a2", title: "Fork of Fix the login bug")])
-        #expect(out.contains("local_new") && t.prepared["Fork of Fix the login bug"]?.text.hasPrefix("⟦fjord v1 new ") == true)
-        // No first message: the fork waits for yours, nothing prepared.
-        let quiet = tools(s, turn: "Fork")
-        quiet.transcriptsRoot = dir.path("projects")
-        quiet.forker = { plan in plans.append(plan); return SessionStart.Started(sessionID: "local_new", peer: plan.title) }
-        _ = try await quiet.forkSession(s, .init(session: "local_a"), ticket: quiet.ticket())
-        #expect(plans.last?.at == nil && quiet.prepared.isEmpty)
-        // A session with an id that isn't a UUID, one whose conversation isn't found, or one that Fjord doesn't know:
-        // said, nothing made.
-        let none = tools(s, turn: "Fork")
-        none.transcriptsRoot = dir.path("projects")
-        none.forker = { _ in Issue.record("forked"); throw RouterTools.Failure("no") }
-        await #expect(throws: RouterTools.Failure.self) { try await none.forkSession(s, .init(session: "local_b"), ticket: none.ticket()) }
-        s.claudeSessions["local_b"]?.cliID = "1b0e9b9e-3c1f-4c55-9a52-1d1a3b7c9e02"
-        await #expect(throws: RouterTools.Failure.self) { try await none.forkSession(s, .init(session: "local_b"), ticket: none.ticket()) }
-        await #expect(throws: RouterTools.Failure.self) { try await none.forkSession(s, .init(session: "local_z"), ticket: none.ticket()) }
-        await #expect(throws: SessionFork.Failure.self) {
-            try await none.forkSession(s, .init(session: "local_a", point: .before("never sent", after: nil)), ticket: none.ticket())
-        }
-    }
 
     @Test func aBodyInAnotherUnicodeFormIsNotThePreparedOne() async throws {
         let dir = TempDir()
@@ -954,24 +802,6 @@ import Testing
 
     // MARK: @router asides
 
-    @Test func anAsideForTheRouterNeverGoesOn() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s, turn: "Bump the version and push (@router this one is slow, don't wait on it)")
-        // Taken out: it goes, without the aside.
-        #expect(await t.tool("prepare", ["session": "local_a"])?.isError == false)
-        #expect(t.prepared["Fix the login bug"]?.body == "Bump the version and push")
-        // A mention that isn't an aside is the message's own text: it goes as written. Any case.
-        t.prepared = [:]
-        t.beginTurn("Bump it **@ROUTER later**")
-        #expect(await t.tool("prepare", ["session": "local_a"])?.isError == false)
-        #expect(t.prepared["Fix the login bug"]?.body == "Bump it **@ROUTER later**")
-        // A new session's first message has its asides taken out too.
-        t.starter = { _, title in SessionStart.Started(sessionID: "local_new", peer: title) }
-        t.beginTurn("start a session in lookout to ship it [@router quietly]")
-        _ = try #require(await t.tool("start_session", ["project": "lookout", "title": "Ship it"]))
-        #expect(t.prepared["Ship it"]?.body ?? t.prepared["Ship it"]?.text == "ship it")
-    }
 
     @Test func aMessageThatIsAllAsideHasNothingToPassOn() async throws {
         let dir = TempDir()
@@ -1038,4 +868,6 @@ import Testing
         continuation?.resume()
         continuation = nil
     }
+
+
 }

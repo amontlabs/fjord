@@ -47,26 +47,7 @@ import Testing
         #expect(throws: Addressing.NothingLeft.self) { try edit("@router what needs me?") }
     }
 
-    @Test func aPastedBodyKeepsItsOwnTrailingCommaAndSemicolon() {
-        let one = "@lookout start a session to explain why this returns a tuple:\n    return value,"
-        #expect(SessionStart.task(from: one, pills: [0..<8], projects: ["lookout"]) == "explain why this returns a tuple:\n    return value,")
-        let two = "start a session to fix this;\nlet x = 1;"
-        #expect(SessionStart.task(from: two) == "fix this;\nlet x = 1;")
-        // A comma left where a settings clause was cut from the end of the request still goes.
-        #expect(SessionStart.task(from: "start a session to fix the tests, with opus,") == "fix the tests")
-    }
 
-    @Test func aPillInCodeIsTheCodesTextAndNeverTakenOut() throws {
-        // A project named "cache": the decorator of an indented or fenced method is the code's, pill or not.
-        for message in ["    @cache\n    def f(self):\n        return 1", "```\n@cache\ndef f(): pass\n```", "`@cache` it"] {
-            let at = pills(message, ["cache"])
-            #expect(!at.isEmpty)
-            #expect(try edit(message, pills: at) == message, "\(message)")
-            #expect(SessionStart.task(from: message, pills: at, projects: ["cache"]) == message, "\(message)")
-        }
-        #expect(try edit("@cache\n    @cache\n    def f(): pass", pills: pills("@cache\n    @cache", ["cache"]))
-                == "\n    @cache\n    def f(): pass")
-    }
 
     @Test func onlyAPillIsATagAndAnAddressGoesAsYouWroteIt() throws {
         // "@lookout" typed, not a pill: your words.
@@ -193,35 +174,7 @@ import Testing
 
     // MARK: Starting a session
 
-    @Test func theBootstrapRenamesAndMakesNoModelCall() throws {
-        // No permission mode: the app gives the imported session the one in the user's settings.
-        let args = SessionStart.bootstrapArguments(uuid: "u-1", title: "Bump the version")
-        #expect(args == ["-p", "/rename Bump the version", "--session-id", "u-1", "--output-format", "json", "--setting-sources", ""])
-        #expect(SessionStart.importURL(uuid: "abc")?.absoluteString == "claude://resume?session=abc")
-        #expect(SessionStart.cleanTitle("  Bump\nthe   version  ") == "Bump the version")
-    }
 
-    @Test func aNewSessionIsWaitedForOnlyUntilTheAppHasItNotUntilItRuns() async throws {
-        let dir = TempDir()
-        // Whether the app has it: its file under the app's sessions folder (account/org/local_<uuid>.json).
-        let root = dir.path("claude-code-sessions")
-        let org = root.appendingPathComponent("acct/org")
-        try FileManager.default.createDirectory(at: org, withIntermediateDirectories: true)
-        Task.detached {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            try? Data("{}".utf8).write(to: org.appendingPathComponent("local_u-9.json"))
-        }
-        // No process is looked for: the app having the session is all there is to wait for.
-        try await SessionStart.waitForImport(uuid: "u-9", timeout: 120, root: root)
-        await #expect(throws: RouterTools.Failure.self) { try await SessionStart.waitForImport(uuid: "other", timeout: 0.5, root: root) }
-        // Stop, a reset or the Router off ends the wait as itself.
-        struct Stopped: Error {}
-        await #expect(throws: Stopped.self) { try await SessionStart.waitForImport(uuid: "other", timeout: 120, root: root, check: { throw Stopped() }) }
-        // Whether the app has it: its file under the app's sessions folder (account/org/local_<uuid>.json).
-        #expect(!SessionStart.imported("u-1", root: root))
-        try Data("{}".utf8).write(to: org.appendingPathComponent("local_u-1.json"))
-        #expect(SessionStart.imported("u-1", root: root) && !SessionStart.imported("u-2", root: root))
-    }
 
     // MARK: One run, bounded
 
@@ -347,5 +300,15 @@ import Testing
         // By the time the run returns, its input was given up and the pipe closed: nothing left writing.
         #expect(handle.isInputClosed)
     }
-}
 
+    @Test func aPillInCodeIsTheCodesTextAndNeverTakenOut() throws {
+        // A project named "cache": the decorator of an indented or fenced method is the code's, pill or not.
+        for message in ["    @cache\n    def f(self):\n        return 1", "```\n@cache\ndef f(): pass\n```", "`@cache` it"] {
+            let at = pills(message, ["cache"])
+            #expect(!at.isEmpty)
+            #expect(try edit(message, pills: at) == message, "\(message)")
+        }
+        #expect(try edit("@cache\n    @cache\n    def f(): pass", pills: pills("@cache\n    @cache", ["cache"]))
+                == "\n    @cache\n    def f(): pass")
+    }
+}

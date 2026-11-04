@@ -76,7 +76,6 @@ For release window timings, run `scripts/morph-timings.sh --scenario routerCanva
 | Command | What it does |
 | --- | --- |
 | `--window` | The window alone, on demo data. |
-| `--window --flight-demo` | The Router's page types and sends four messages through the real dispatcher (Jev and the send stood in for, at their usual pace): one to a working session, one to a finished one, one that starts a session, one the Router asks about. Shows each fly to where it went. |
 | `--window-shots <dir> [name…]` | Renders the window's pages as PNGs, offscreen (`window-<name>.png`); given names, only shots containing one of them. |
 | `--playground` | The bar on a fake desktop, demo data, every edge. |
 | `--playground-shots <dir> [name…]` | Renders the bar's states as PNGs, offscreen: every edge, every demo scenario, Reduce Motion / Increase Contrast / Differentiate Without Color variants, and a 1280×720 screen. Shots are named `<edge>-<state>` (`right-open`, `top-rest-signed-out`…); given names, only shots containing one of them are rendered. |
@@ -86,6 +85,15 @@ For release window timings, run `scripts/morph-timings.sh --scenario routerCanva
 ```sh
 FJORD_THEME=dark .build/debug/Fjord --window
 ```
+
+### The Router's routing
+
+Every message goes to a claude.ai project or thread through the delivery engine (`CourierHost`), which starts at launch
+(never in `--demo`, the shots or tests). A reply armed on a card goes to that card's session; a tagged claude.ai project or
+thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Jev first at 0.7, else
+Sonnet through `claude -p`), whose stage shows on the message's pill. A project that fits nothing is proposed under the
+composer (`RouterProjectProposal`, revised by Sonnet). Each history entry keeps who decided (`decision.decider`) and a
+correction (Send elsewhere, a different pick on an ask, a proposal you changed) as its outcome, for measurement.
 
 ### Live data
 

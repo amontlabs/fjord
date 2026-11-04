@@ -289,7 +289,6 @@ private final class Count: @unchecked Sendable {
         #expect(s.projectFolders == ["/code/app", "/work/app", "/work/notes", "/work/other"])
         #expect(s.isProjectFolder("/code/app") && s.isProjectFolder("/work/notes") && s.isProjectFolder(""))
         #expect(!s.isProjectFolder("/elsewhere"))
-        #expect(s.routerDispatcher.eligible("new:/code/app", store: s) && !s.routerDispatcher.eligible("new:/elsewhere", store: s))
         // The bare repos found aren't clones to work in.
         s.codeFolders.scan = { _ in .init(repos: ["/code/app": ["o/app"], "/code/app.git": ["o/app"]], bare: ["/code/app.git"]) }
         s.codeFolders.refresh()
