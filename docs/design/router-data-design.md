@@ -338,6 +338,49 @@ inject.
 - Threshold: hand over when Fjord's renderer is about 400 MB over what its frames cost at the start (about 1.2 GB for 3
   projects), or after a run of frame reloads. A handover costs under 1 s and lost neither send.
 
+## Answering a thread's questions (2026-11-04)
+
+Two fjord-test-a threads were started by sends. One asked two multiple-choice questions, then asked in plain words for approval
+of a plan, then ran `date`. The other used its plan tools to present a plan, then ran `date`. They were watched from frames in
+Fjord's hidden tab: one on the overview and one on each thread's view.
+
+**The cards.** A multiple-choice question and the presented plan have the same structure:
+- In the thread side's transcript, a `[data-testid=transcript-row]` holds `div[data-testid=decision-card]`.
+- The card holds `ul[role=list]` > `button[type=button]` per option. The first option carries a `span[data-cds=Badge]`, and a
+  `span[data-cds=TextLink][role=button]` follows the options.
+- No `data-*` or test id tells a question from a plan. A pending card has no `data-state`; an answered one has
+  `data-state=answered` and no controls left.
+- content.js already flags such rows as `decision: true`. A frame on the thread's view sees the card. A frame on the overview
+  sees only the row.
+- The text-link control: clicking it changed nothing in the card. There is no free-text field in the card; the thread's composer
+  takes a typed answer instead (below).
+- The plain-words approval request had no card at all.
+- No tool permission prompt came: `date` ran without one in both threads, in the project's cloud environment. The page has a place
+  for prompts, `div[data-inline-approval-slot]` > `div[data-approval-cluster-host]` in `transcript-trailing`, and
+  `div[data-approval-dock]` in the composer dock. Both stayed empty, so that layout is unmeasured.
+
+**On the overview** (`overview-thread-row`):
+
+| What the thread waits on | Row |
+|---|---|
+| A multiple-choice card | `data-home-section=active`, `data-home-status-mark=dashed`, no `[data-home-status-line]`: the same as an idle thread, through about 3 min of waiting each time |
+| The plan card, or the approval asked in plain words | `data-home-section=needs`, mark `pie`, `a[data-home-status-line]` present, at 37.3 s and 15.2 s |
+| Working | `running`, `.animate-spin` |
+| Finished | the row leaves the active list |
+
+**Answering.**
+
+| How | Card | Thread |
+|---|---|---|
+| (a) Typing in the thread's composer (a Fjord send to the thread) | `data-state=answered` 4.5 s after the send | went on to its next step: the second question card came at 4.9 s. A typed approval of the plain-words request ran the next step and the thread finished in about 7 s |
+| (b) Clicking an option by structure (`[data-testid=decision-card]:not([data-state]) ul[role=list] button`) | the button got `aria-busy=true` and `aria-disabled=true`, the others `disabled`, at 0.2 to 0.8 s; `data-state=answered` and no controls at 0.5 to 1.1 s | running at 0.6 to 1.2 s. After the plan card's first option, the thread finished at 7.4 s |
+
+- Both work for both card types. The page's proof of an answer is the card's `data-state=answered`, then the row going to
+  `running`.
+- A click needs no composer and doesn't move Fjord's tab, but which option means what is only in the words, which Fjord doesn't
+  read. A typed answer works without that.
+- Caveats: one account; two threads; no permission prompt seen; no focus or tab-activation event in the whole run.
+
 ## Open
 
 - A real folder grant works: `~/code/spikes/fjord-e2e`, served by a terminal Remote Control, was granted live in 2.6 s (the folder
