@@ -311,61 +311,8 @@ extension Store {
 }
 
 extension RouterCard {
-    /// What the session went on without (`wentAhead`) that its final message doesn't ask again: not in its asks, once
-    /// read (its text, while they aren't).
-    var wentAheadWithout: [String] {
-        guard let wentAhead, !wentAhead.isEmpty else { return [] }
-        let against = (asks.map { $0.map(\.question) } ?? [text]).map { Set(RouterWords.tokens($0)) }
-        return wentAhead.filter { question in
-            let words = Set(RouterWords.tokens(question))
-            return !against.contains { asked in
-                words.isEmpty ? false : Double(words.intersection(asked).count) / Double(words.count) >= 0.6
-            }
-        }
-    }
-}
-
-/// The words of a text as they are compared: what a card asked against what its session went on without.
-enum RouterWords {
-    static let stop: Set<String> = Set(("the and for with this that these those from into onto you your please can could would should will what when " +
-        "where which who why how about then than them they have has had not are was were its our out all any some just " +
-        "also now new session project card does did but yes too there here let one get make use need want like ok okay thanks " +
-        "what when where which while will with would this those was were you your yes why who very want use using used way well " +
-        "too only more most much same other each both after before again still even being been because doing done don doesn " +
-        "didn isn it's i'm they their think know see look go going sure right good work works thing things " +
-        "les des une est pas que qui pour dans sur avec mais fait faire tout plus bien aussi comme cette ces son ses elle nous " +
-        "vous ils leur sont ont été etre être par donc alors oui non quoi").split(separator: " ").map(String.init))
-
-    /// Lowercased, accents off, runs of letters and digits of 3 or more, without common words and short numbers, their
-    /// plural and verb endings cut.
-    static func tokens(_ text: String) -> [String] {
-        let folded = text.lowercased().decomposedStringWithCanonicalMapping.unicodeScalars
-            .filter { $0.properties.generalCategory != .nonspacingMark }
-        var out: [String] = [], word = String.UnicodeScalarView()
-        func flush() {
-            let w = String(word)
-            word = String.UnicodeScalarView()
-            guard w.count >= 3, !stop.contains(w), !(w.allSatisfy(\.isNumber) && w.count < 4) else { return }
-            out.append(stem(w))
-        }
-        for scalar in folded {
-            if scalar.properties.isAlphabetic || scalar.properties.numericType != nil || scalar.properties.generalCategory == .decimalNumber {
-                word.append(scalar)
-            } else {
-                flush()
-            }
-        }
-        flush()
-        return out
-    }
-
-    static func stem(_ w: String) -> String {
-        for suffix in ["ations", "ation", "ings", "ing", "edly", "ies", "ied", "ers", "er", "ed", "ly", "es", "s"]
-        where w.hasSuffix(suffix) && w.count - suffix.count >= 4 {
-            var cut = String(w.dropLast(suffix.count))
-            if suffix == "ies" || suffix == "ied" { cut += "y" }
-            return cut
-        }
-        return w
-    }
+    /// What the session went on without (`wentAhead`), as the question was asked. No wording comparison decides whether this
+    /// turn asks it again (that was a word-overlap rule, blind to "Should I deploy?" against "Should I not deploy?"): it is said
+    /// either way, at the worst a repeat of what the card asks.
+    var wentAheadWithout: [String] { wentAhead ?? [] }
 }

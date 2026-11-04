@@ -136,6 +136,17 @@ struct RouterDecision: Identifiable, Equatable {
         var sessions: [String] = []
         var cards: [String] = []
         var changes: [UUID] = []
+        init(sessions: [String] = [], cards: [String] = [], changes: [UUID] = []) {
+            self.sessions = sessions
+            self.cards = cards
+            self.changes = changes
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            sessions = try c.decodeIfPresent([String].self, forKey: .sessions) ?? []
+            cards = try c.decodeIfPresent([String].self, forKey: .cards) ?? []
+            changes = try c.decodeIfPresent([UUID].self, forKey: .changes) ?? []
+        }
     }
 
     var id = UUID()
@@ -295,7 +306,7 @@ struct RouterDecision: Identifiable, Equatable {
 
 extension RouterDecision: Codable {
     private enum Key: String, CodingKey {
-        case id, at, trigger, decision, done, outcome, links, reply, note, delivered, mentions, fromAction
+        case id, at, trigger, decision, done, outcome, links, reply, note, delivered, mentions, fromAction, parts
     }
 
     func encode(to encoder: Encoder) throws {
@@ -322,13 +333,84 @@ extension RouterDecision: Codable {
         // A pill of a kind no longer made (a session's) leaves the entry without its pills, not without the entry.
         mentions = (try? c.decodeIfPresent([RouterMention].self, forKey: .mentions)) ?? nil
         fromAction = try c.decodeIfPresent(SessionOrigin.self, forKey: .fromAction)
-        decision = try c.decode(Decided.self, forKey: .decision)
-        done = try c.decode([Done].self, forKey: .done)
-        outcome = try c.decode(Outcome.self, forKey: .outcome)
-        links = try c.decode(Links.self, forKey: .links)
+        // Entries from before the Router sent to projects only: a message divided between places kept its words per part
+        // (`parts`), and the entry itself had no decision, done, outcome or links. The first part's decision and outcome stand for
+        // it, the others' sends and links join, so no saved message is lost on upgrade.
+        let parts = (try? c.decodeIfPresent([LegacyPart].self, forKey: .parts)) ?? nil
+        let first = parts?.first
+        var legacyNotes: [String] = []
+        func items(_ lossy: [LegacyDone]) -> [Done] {
+            lossy.compactMap { item in
+                if let done = item.done { return done }
+                if let started = item.started { return .sent(to: started.project ?? "a new session", text: "", original: nil) }
+                if let name = item.removed { legacyNotes.append("before: \(name)") }
+                return nil
+            }
+        }
+        decision = try c.decodeIfPresent(Decided.self, forKey: .decision) ?? first?.decision ?? Decided()
+        if let own = try c.decodeIfPresent([LegacyDone].self, forKey: .done) {
+            done = items(own)
+        } else {
+            done = items(parts?.flatMap(\.done) ?? [])
+        }
+        outcome = try c.decodeIfPresent(Outcome.self, forKey: .outcome) ?? first?.outcome ?? .done
+        var merged = try c.decodeIfPresent(Links.self, forKey: .links) ?? Links()
+        for part in parts ?? [] {
+            merged.sessions += part.links.sessions.filter { !merged.sessions.contains($0) }
+            merged.cards += part.links.cards.filter { !merged.cards.contains($0) }
+            merged.changes += part.links.changes.filter { !merged.changes.contains($0) }
+        }
+        links = merged
         reply = try c.decodeIfPresent(String.self, forKey: .reply)
         note = try c.decodeIfPresent(String.self, forKey: .note)
-        delivered = try c.decodeIfPresent(Delivered.self, forKey: .delivered)
+        delivered = try c.decodeIfPresent(Delivered.self, forKey: .delivered) ?? parts?.lazy.compactMap(\.delivered).first
+        var old = legacyNotes
+        if let parts, parts.count > 1 { old.append("divided between: " + parts.map(\.place).joined(separator: ", ")) }
+        if !old.isEmpty { note = ([note].compactMap { $0 } + [old.joined(separator: "; ")]).joined(separator: " · ") }
+    }
+
+    /// One place of a divided message, as an older file kept it.
+    private struct LegacyPart: Decodable {
+        var place = ""
+        var decision: Decided?
+        var done: [LegacyDone] = []
+        var outcome: Outcome?
+        var links = Links()
+        var delivered: Delivered?
+        private enum Key: String, CodingKey { case place, decision, done, outcome, links, delivered }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            place = (try? c.decodeIfPresent(String.self, forKey: .place)) ?? ""
+            decision = try? c.decodeIfPresent(Decided.self, forKey: .decision)
+            done = (try? c.decodeIfPresent([LegacyDone].self, forKey: .done)) ?? []
+            outcome = try? c.decodeIfPresent(Outcome.self, forKey: .outcome)
+            links = (try? c.decodeIfPresent(Links.self, forKey: .links)) ?? Links()
+            delivered = try? c.decodeIfPresent(Delivered.self, forKey: .delivered)
+        }
+    }
+
+    /// A done item of today, a session started (now a send to its project), or one of a kind no longer made (named, for the note).
+    private struct LegacyDone: Decodable {
+        var done: Done?
+        var started: (project: String?, session: String?)?
+        var removed: String?
+        private struct AnyKey: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+        init(from decoder: Decoder) throws {
+            if let ok = try? Done(from: decoder) { done = ok; return }
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            let name = c.allKeys.first?.stringValue ?? "unknown"
+            if name == "started", let inner = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey(stringValue: name)!) {
+                started = (try? inner.decodeIfPresent(String.self, forKey: AnyKey(stringValue: "project")!),
+                           try? inner.decodeIfPresent(String.self, forKey: AnyKey(stringValue: "session")!))
+            } else {
+                removed = name
+            }
+        }
     }
 }
 

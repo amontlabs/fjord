@@ -160,4 +160,25 @@ import Testing
         let old = try JSONDecoder().decode(RouterState.self, from: Data(#"{"enabled":true,"cards":[],"chat":[]}"#.utf8))
         #expect(old.decisions.isEmpty && old.enabled)
     }
+
+    /// Synthetic entries in the shapes older files kept: a divided message (`parts`, nothing of its own) and a removed done case.
+    @Test func entriesInOlderShapesStillDecode() throws {
+        let part = { (id: String, place: String, session: String) in
+            #"{"id":"\#(id)","place":"\#(place)","text":"words","decision":{"target":"\#(place)","intent":"i","confirmed":true},"done":[{"sent":{"to":"\#(place)","text":"words"}}],"outcome":{"done":{}},"links":{"changes":[],"cards":[],"sessions":["\#(session)"]}}"#
+        }
+        let split = #"{"id":"00000000-0000-0000-0000-000000000001","at":0,"trigger":{"you":{"_0":"words"}},"parts":["#
+            + part("00000000-0000-0000-0000-000000000011", "Alpha", "s1") + "," + part("00000000-0000-0000-0000-000000000012", "Beta", "s2") + "]}"
+        let started = #"{"id":"00000000-0000-0000-0000-000000000002","at":1,"trigger":{"system":{}},"decision":{},"outcome":{"done":{}},"links":{},"done":[{"started":{"project":"Alpha","session":"x"}},{"vanished":{"a":1}},{"failed":{"_0":"why"}}]}"#
+        let data = Data(#"{"enabled":true,"cards":[],"decisions":["#.utf8) + Data("\(split),\(started)]}".utf8)
+        for one in [split, started] {
+            do { _ = try JSONDecoder().decode(RouterDecision.self, from: Data(one.utf8)) } catch { Issue.record("\(error)") }
+        }
+        let state = try JSONDecoder().decode(RouterState.self, from: data)
+        #expect(state.decisions.count == 2)
+        let a = state.decisions[0]
+        #expect(a.decision.target == "Alpha" && a.outcome == .done && a.done.count == 2 && a.links.sessions == ["s1", "s2"])
+        #expect(a.note?.contains("Alpha, Beta") == true)
+        let b = state.decisions[1]
+        #expect(b.done.count == 2 && b.done.first?.sendsWords == true && b.note?.contains("vanished") == true)
+    }
 }

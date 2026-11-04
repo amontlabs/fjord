@@ -176,15 +176,17 @@ import Testing
         #expect(calls == 0 && s.router.cards[0].addressedBy == .router)
     }
 
-    @Test func whatItWentOnWithoutIsSaidUnlessItAsksItAgain() {
+    @Test func whatItWentOnWithoutIsSaid() {
         var next = card("a#t4", "a", kind: .done, text: "Shipped the fix.")
         next.wentAhead = ["Should I also tag the release?"]
         #expect(next.wentAheadWithout == ["Should I also tag the release?"])
+        // Said even when the turn asks something alike: no word comparison decides it asks the same.
         next.kind = .asks
         next.asks = [RouterAsk(question: "Tag the release now?")]
-        #expect(next.wentAheadWithout.isEmpty)
-        next.asks = [RouterAsk(question: "Which branch?")]
         #expect(next.wentAheadWithout == ["Should I also tag the release?"])
+        next.wentAhead = nil
+        #expect(next.wentAheadWithout.isEmpty)
+        next.wentAhead = ["Should I also tag the release?"]
         // Kept out of the history's quiet end: it is worth a look.
         var done = card("a#t5", "a", kind: .done, text: "Shipped.")
         done.triage = RouterTriage(state: .done)
