@@ -4,7 +4,7 @@ Design, 2026-11-04, revised after an Opus review of the code it touches. Builds 
 [router-data-design.md](router-data-design.md), the project-state proposal in [router-redesign.md](router-redesign.md), the engine
 in [router-swift-port.md](router-swift-port.md) and the page protocol in [poc/router/EVENTS.md](../../poc/router/EVENTS.md).
 
-Three rules carry over: only the page's own rows prove anything; a fact's key is the change, not the text; every wait is an event,
+Three rules carry over: only the page's own rows prove anything; an item's key is its own id, not its text; every wait is an event,
 except the engine's existing deadlines (`do.TIMEOUT` 20 s) and model calls. Where a fact was never measured, the text says what to
 measure and designs for both outcomes.
 
@@ -134,7 +134,7 @@ is read as `false` for the brief (3.2), so a finish never waits on a frame that 
   a frame's rows; frame rows go through `ingest` only. The one replacement a frame may make is a guarded whole `threads` read (2),
   through a new `replaceThreads(project, listed)` in the fold.
 - A frame's `notice` is kept in Seen and quoted only for that frame's own `answer` failures.
-- Thread states from frames fold with the trust table in 2; `watch` is folded from the frame's `health` and `settled`.
+- Thread statuses from frames are recorded as in 2; `watch` is folded from the frame's `health` and `settled`.
 
 ### 1.7 The tab handover
 
@@ -169,7 +169,7 @@ would, with `tabId` still on the old tab, make `onRemoved` ensure a third tab). 
    continues (step 2 waits for the port; `ensureTab` injects into `newTabId` if it has none); a `newTabId` that no longer exists clears it.
    Two tagged tabs after a crash: keep the one with the newest `commands`, close the rest (existing duplicate rule).
 
-A change inside the 1 to 3 s gap shows as state in the new frames' whole reads, which is enough: facts are keyed by change.
+A change inside the 1 to 3 s gap shows as state in the new frames' whole reads, which is enough: items are keyed by id.
 
 ### 1.8 Thread frames: seeing what a thread waits on
 
@@ -190,14 +190,14 @@ frame stays through card, answer, working, card), not ten; evictions add one loa
 |---|---|
 | Row new or goes to `working` for a cloud thread (no `session` on the Board), under the kept cap | Kept frame opened |
 | Same, over the cap | Evict the LRU card frame if any; else owed check queued |
-| Project frame's row is `paused` (settled) **and** the kept frame's settled read shows no pending card and empty slots | Confirmed idle: `finished` (2); frame removed. The thread side's `turning` is never the signal: `turningNow` is true only while the bottom assistant row streams and drops between a message and a tool step, so it would tell a false finish mid-run |
+| Project frame's row is `paused` (settled) **and** the kept frame's settled read shows no pending card and empty slots | Confirmed idle: status `done` (2); frame removed. The thread side's `turning` is never the signal: `turningNow` is true only while the bottom assistant row streams and drops between a message and a tool step, so it would tell a false finish mid-run |
 | Same, but the project frame is stale | Measured: a running tool shows only as the thread composer dock's `[data-testid=code-prompt-stop]` (with `code-prompt-send` disabled), no spinner and no `aria-busy`; a streaming reply is a row with `data-perf-row-streaming=true`, `data-busy`, `data-is-streaming`; idle is no `code-prompt-stop`. Confirmed idle from the thread side: a settled read with no `code-prompt-stop` in the thread's dock (the second `rail-composer-dock`), no streaming row, no pending card, empty slots. Caveat: `code-prompt-stop` lingered after a `needs` until the next load, so its presence never means working on its own: it only withholds the finish, and a lingering one is cleared by the frame's next load (every reload resets it) or by the project frame coming back live, whose row then decides. The thread frame reports `stop: bool` with its `rows` |
 | `.answer` needs a frame and the three kept slots are held by `working` threads | The answer frame takes the **check slot** (a check in flight is requeued first); an answer never waits for a slot. Once answered it stays as a kept card frame only if a slot is free, else it is removed after the proof |
 | Kept frame's read shows a pending card | `needs_you` (below); frame kept |
-| Row goes `needs` with no card (a plain-words request, 2) | The thread's frame, kept or check, is removed after its read; the entry's question comes from the asks call over the row's last reply read by that check (3.1). Under a stale project frame such a request stays invisible until the frame is live again (no row, no `needs`); the project's `as_of` says so, and that is accepted |
+| Row goes `needs` with no card (a plain-words request, 2) | The thread's frame, kept or check, is removed after its read; the project's model call writes the question from the reply that check read (3.3). Under a stale project frame such a request stays invisible until the frame is live again (no row, no `needs`); the project's `as_of` says so, and that is accepted |
 | Row leaves the active list (all three sections: `needs`, `running`, `active`), to `done` or gone | Frame removed |
 | **Owed check** queued for: a `working` thread over the cap once its row goes `paused`; every `paused` cloud thread with no thread-view read since its last `working`; after launch, a handover or any stale period of its project frame, every `paused` cloud thread whose row changed (structure or `time[datetime]`) since its last read, or never read; a thread with an open `needs_you` whose card isn't confirmed by a read | One entry per thread, needs-you first, then newest `time[datetime]`; served one at a time in the check slot: one settled read, then removed |
-| Pending `[data-testid=decision-card]:not([data-state])` | `needs_you` from source `thread` (trust 3) with the card row's key, kind (`plan` when the row says `needs`/`pie`, else `question`) and the options' texts as data |
+| Pending `[data-testid=decision-card]:not([data-state])` | status `needs you` from the thread view, with the card row's key, kind (`plan` when the row says `needs`/`pie`, else `question`) and the options' texts as data |
 | `data-approval-cluster-host` or `data-approval-dock` non-empty | `needs_you` with `needs: permission` (3.7) |
 
 Bounds: checks are loads, so they are in the budget (1.7); only threads touched within 24 h are checked unprompted (an older
@@ -206,172 +206,138 @@ Bounds: checks are loads, so they are in the budget (1.7); only threads touched 
 `router.db`, so a handover loses none; a check in flight when a handover is granted is requeued first.
 
 Local threads (the Claude app's sessions, which have a `session` on the Board) need no frame: `interruptedAwaitingPerson` in the
-session file gives `needs_you` at trust 4 at file change. Remote Control threads have no local file and are cloud threads here.
+session file gives `needs you` at file change. Remote Control threads have no local file and are cloud threads here.
 Thread frames are removed before a handover; the engine's first `frames` to the new document carries `base: true`, and the worker
 counts 0 for every frame in a base set (the kept frames of `working` threads are reopened in it). Measured: loading a thread in a
 frame does not clear the page's unread mark (unread: the row's title as `bdi.text-prose-semibold` plus a `span.sr-only`; read:
 `bdi.text-prose-medium`, no `sr-only`; cleared when the row goes back to `running`; no per-thread mark in the sidebar). One mixed
 case: a thread that went `needs` while its thread-view frame was open showed as read. Plainly: a kept frame on a `working` thread
 can make that thread's new question show as already read in the owner's own claude.ai view. Chosen: accept it. The brief is the
-owner's inbox for these (every `needs_you` is told there whatever the page's mark says), and the kept frame is what makes the
-question appear within 2 s; checks (one read, removed) never cost the mark. Fjord's own unread is Told, which that mark never
-touches, and the row's mark is reported as data (`unread: bool` on `threads` rows) and shown as the page's mark, never read for
-meaning. The brief states a `needs_you` whatever the page's mark says.
+owner's inbox for these (every `needs you` shows there whatever the page's mark says), and the kept frame is what makes the
+question appear within 2 s; checks (one read, removed) never cost the mark. Fjord's own read mark is separate and the page's mark never
+touches it; the row's mark is reported as data (`unread: bool` on `threads` rows) and shown as the page's mark, never read for
+meaning. The brief shows a `needs you` whatever the page's mark says.
 
-## 2. Facts: tell once across sources
+## 2. Facts: one log, every item stored once
 
-| Source | Trust | Gives |
+Seen is the one log. Every observed item is stored once, under its own id, and seeing it again with the same content adds nothing: a
+reload, a handover, a second frame reading the same page, a coordinator repeating itself. Nothing is ranked by source and nothing is
+merged by rule; the model that writes the brief (3) reads the items and decides what they add.
+
+| Item | Id | Seen from |
 |---|---|---|
-| Local files and processes (`CourierLocal`) | 4 | state, needs, result, alive, session, `interruptedAwaitingPerson` |
-| Thread-view read (thread frame) | 3 | pending card, options, answered, turning, approval slots |
-| Overview row (project frame or top frame) | 2 | `needs_you` (needs section), `working` (running section or spinner), `paused` (active + dashed), finished (done section or departure) |
-| Start row's card glyph in the project chat | 2 | `CheckCircle` = finished (structural, position-tied) |
-| Coordinator rows | 1 | claims, decision cards |
+| Project | `chan_…` | The projects list |
+| Thread | Root message id (`data-home-card`) | `threads` rows, the thread view |
+| Message row | `data-entry-key` | Rows of the project chat (the coordinator's included) and of a thread view |
+| Question card | Its row's key | A thread frame (1.8) |
+| Local session | Session id | `CourierLocal` (files, processes, `interruptedAwaitingPerson`) |
+| Thread status change | `(thread, status)` | Row sections and thread-view reads, below |
 
-**Row states.** content.js's `rowState` maps `active + dashed` to `idle`, which is in `CourierBoard.finished`, and the spinner to
-`unknown`; a waiting card is then a false `finished` that outranks nothing but overwrites a frame's `needs_you` at equal trust. Changed:
-`needs → needs_you`, `active + animate-spin → working`, `active + dashed → paused` (a turn ended; idle or waiting, undetermined), else
-`unknown`. `paused` is not in `CourierBoard.finished` (which stays `idle`, `resolved`). **A finish is the confirmed-idle end of an
-episode:** after `working`, a thread-view read finds no pending card and empty approval slots, so the thread folds to `idle`, and
-`CourierTell.change` gives `finished` keyed `(thread, finished, episode)`. Measured, the overview has more sections than the first
-census showed, and they are the second and third signals of the same fact:
+A row whose content changed (a card `answered`, a start row's glyph) is new content of the same id. A streaming row is stored when its
+turn settles, not at every growth; `turning` and a streaming row's text are page state, never items.
 
-| Row | State | Note |
-|---|---|---|
-| `data-home-section=needs` | `needs_you` | |
-| `section=running` (inside `section[data-home-group=running]`, which exists only while a thread runs), or the spinner | `working` | Steps the episode |
-| `section=active` + mark `dashed` | `paused` | A turn ended: idle or waiting a card; the thread-view read decides (above). Some finished threads end here rather than in `done`, so `paused` alone never tells a finish |
-| `section=done` (inside `section[data-home-group=done]`), mark `icon` | `idle` → `finished`, same episode | Told once with the confirmed-idle key |
-| Gone from `active`/`running`/`needs` with no `done` row seen | `idle` → `finished`, same episode | The `done` group is collapsed by default (one `button[aria-expanded=false]`); whether its rows are in the DOM while collapsed is unrecorded, so both cases fold the same way and Fjord never needs to read a `done` row |
-| Gone from `done` | Nothing | The group keeps 20; the oldest dropping out is no live thread's departure |
+**Status.** A thread is `working`, `needs you`, `paused` or `done`. content.js's `rowState` maps `active + dashed` to `idle` and the
+spinner to `unknown`, which made a waiting card look finished; it now says `needs → needs you`, `active + animate-spin → working`,
+`active + dashed → paused` (a turn ended: idle or waiting), else `unknown`. Measured, the overview rows are:
 
-Fjord never clicks the group's expand button: that is the owner's view state. The start row's card glyph (below, coordinator) is
-a fourth signal with the same key. A `paused` thread with a pending card is `needs_you` (trust 3 beats the row); `paused` with no
-read yet shows as "stopped, checking" until its owed check runs, and is never told finished before that read. A local thread's
-finish comes from its file (trust 4) with the same key.
+| Row | Status |
+|---|---|
+| `data-home-section=needs` | needs you |
+| `section=running` (inside `section[data-home-group=running]`, which exists only while a thread runs), or the spinner | working |
+| `section=active` + mark `dashed` | paused: idle or waiting on a card; the thread-view read decides. Some finished threads end here rather than in `done` |
+| `section=done` (inside `section[data-home-group=done]`), mark `icon` | done |
+| Gone from `active`/`running`/`needs` on a `listed` read (below), no `done` row seen | done |
+| Gone from `done` | Nothing: the group keeps 20, the oldest dropping out is no live thread's departure |
 
-**Departures.** `threads` is a delta, so today a thread leaving while others stay is never said (only an emptied list is). content.js
+A thread's status is recorded only when it differs from the last one recorded for that thread id, and that change is an item. A
+pending card in a thread-view read makes the thread `needs you` whatever its row says. A `paused` thread with no thread-view read
+shows as "stopped, checking" until its owed check (1.8) and is not recorded `done` before it; a read with no card, empty approval
+slots and (under a stale project frame) no `code-prompt-stop` or streaming row is confirmed idle, and records `done`. A local
+session's status comes from its file. Fjord never clicks the `done` group's expand button (that is the owner's view state); whether
+its rows are in the DOM while collapsed is unrecorded, and both cases give the same status.
+
+**Departures.** `threads` is a delta, so a thread leaving while others stay was never said (only an emptied list was). content.js
 now emits, in the same `threads` event, `{"thread": id, "gone": true}` for every id in `told.threads` missing from the rendered list,
 under the conditions the emptied case already requires (project composer mounted, no thread open, this visit's rows seen), and drops it
-from `told.threads`. The emptied list is the case where all leave. Across documents (a new frame, a handover): a **settled whole**
-`threads` read replaces the project's active list only under the same guards, carried on the event as `listed: true`: composer
-mounted, no thread open, this visit's `/timeline` fetch ended (the existing guard), and the overview **loaded by structure**
-(measured), judged on the **active sections only** (`needs`, `running`, `active`; the `done` group and its rows are ignored for
-this, so a `data-home-state=ready` that belongs to done rows can never pass a still-loading active list): loading shows only
-`[data-testid=overview-tab-strip]` and `[data-home-section=active]` with no rows and no empty line; loaded with active rows shows
-at least one row in `needs`, `running` or `active` inside a non-done group with `data-home-sort=priority][data-home-state=ready]`
-on that list; loaded with **no active threads** shows `[data-home-section=active]` carrying `section[data-testid=home-empty-band]`
-+ `div[data-home-empty-line=true]`, no row in any active section, and exactly one non-done `[data-home-group]`. The empty band
-alone is not enough: it also appears in the `needs` section of a loaded list that has active rows, and a `needs` band beside a
-still-loading `active` list (no empty line in `active`, no active row) makes no departures. The loaded state came 0.1 s to 6 s
-after the tab strip, which is why the structure, not a grace, decides. This is the one place a frame's whole read replaces Board
-state; rows never do (1.6). "Active list" means the `needs`, `running` and `active` sections; `done` rows, listed or hidden, are
-outside it (row states, above).
-
-**One key per fact.** The POC keys thread facts by `turn`, which files and the page count differently, and two sources would need
-an alias. Instead the Board keeps an **episode** per thread: a counter that steps when the thread goes `working` from any source and
-when a card goes `answered` in a thread-view read (a card answered inside the 12 s row lag never shows `working`). A card's
-`needs_you` is keyed by the card's row key, `(thread, needs_you, card)`, unique by construction; every other fact is
-`(thread, kind, episode)`. The coordinator's and a thread's finish, and a file's and a row's `needs_you`, land on one key. A row's
-`needs` section on a thread that holds an open card fact maps to that card's key (one entry, never two). Across a gap (a whole read
-after launch, a handover or a stale period) the episode steps only on **evidence of a new turn**: the row's `time[datetime]` moved
-past what the Board holds, or the row is in `running` or `needs`; never on a move into `done` or a departure alone, so a thread
-confirmed idle before the gap and moved to `done` during it is one finish, while a thread that ran a whole turn in the gap (its
-time moved) is a new episode and its finish its own fact. No `told.alias`. A local-only session keys on its session id; a thread
-with both a file and a row keys on the row's id.
+from `told.threads`. Across documents (a new frame, a handover) a **settled whole** `threads` read replaces the project's active list
+only under the same guards, carried on the event as `listed: true`: composer mounted, no thread open, this visit's `/timeline` fetch
+ended, and the overview **loaded by structure**, judged on the active sections only (`needs`, `running`, `active`; `done` rows are
+ignored, so a `data-home-state=ready` that belongs to done rows never passes a still-loading active list). Loading shows only
+`[data-testid=overview-tab-strip]` and `[data-home-section=active]` with no rows and no empty line. Loaded with active rows shows at
+least one row in `needs`, `running` or `active` inside a non-done group with `data-home-sort=priority][data-home-state=ready]` on that
+list. Loaded with **no active threads** shows `[data-home-section=active]` carrying `section[data-testid=home-empty-band]` +
+`div[data-home-empty-line=true]`, no row in any active section, and exactly one non-done `[data-home-group]`. The empty band alone is
+not enough: it also appears in the `needs` section of a loaded list with active rows, and a `needs` band beside a still-loading
+`active` list makes no departures. The loaded state came 0.1 s to 6 s after the tab strip, which is why structure, not a grace,
+decides. This is the one place a frame's whole read replaces Board state; rows never do (1.6). A Board-`working` thread absent from a
+`listed` read is a departure and records `done`; a non-`listed` read says nothing, so every listed read either shows the row or ends
+the thread's run.
 
 **Plain-words approval.** Measured: a request with no card goes `running` straight to `needs` (`svg.text-warning`,
 `a[data-home-status-line]`), 15 s after its last reply, never through `active + dashed`; the thread view shows no card and no slot
-content. So a frame's no-card read never sees such a thread idle, the row's `needs_you` is the one fact of the episode, and its
-question comes from the asks call (3.1). The thread's `code-prompt-stop` lingered after `needs`: for a thread the row says `needs`,
-the dock's stop is ignored.
+content, and the dock's `code-prompt-stop` lingers. So the row's `needs you` is the status, the dock's stop is ignored for a thread the
+row says `needs`, and the question is written by the project's model call from the reply the check read (3.3).
 
-**Threads a whole read doesn't list.** A `listed` read is the whole active list (above), so a Board-`working` thread absent from
-its active sections is a departure, folded to `idle` (2) with its episode: a finish, told once, with no thread-view read needed
-("no row in the active list" stands in for `paused` + confirmed idle). Only a non-`listed` read says nothing, and the thread keeps
-its state until a `listed` one or its own frame's read; so there is no stuck case: every listed read either shows the row or ends
-the episode.
-
-**Coordinator.** Measured: the coordinator's `channel-created-thread` card (`-box`, `-glyph`, `-title`; `-step` while the thread
-works, `-summary` when it waits or ends) carries only its own entry id, never the thread's. The link is the **opening row**: the
-thread's id (`data-home-card`) equals the `data-entry-key` of the project-chat human row that opened it (`data-perf-row=human`,
-carrying `working-activity-row`, `channel-overview-working-status` and `TurnStatusClayMark` while the thread starts, then
-`thread-step-text`). So a claim is tied to a thread like this: the Board keeps, per project, `opened_by: {entry key → thread id}`
-from each `threads` row whose id matches a project-chat row's key (the opening row's `data-entry-key`, `data-epitaxy-entry` and
-`data-take-back-entry` all equal the thread's `data-home-card`; both are in Seen). Measured: no key on any coordinator row equals
-the thread's id or the opening row's keys (`data-entry-key`, `data-turn-key`, `data-item-key` are the row's own). The only tie is
-**position**: the coordinator's **start row** is the next transcript entry after the opening row (`data-epitaxy-entry-index` one
-higher), and it carries the `channel-created-thread` card. So the Board ties exactly that row to T, and nothing else: a finish
-report later in the chat has only its own keys and stays untied (rule B, below). Text equality is never used. The start row's
-`channel-created-thread-glyph[data-glyph]` goes `working` → `CheckCircle` when the thread finishes (0.2 s after the row moved to
-`done`): content.js reports it as `card: {glyph}` on that row, and the Board takes an **in-document change** of T's start-row glyph
-to `CheckCircle` (a delta from the same document instance that earlier reported another glyph) as T folding to `idle` with its
-episode, the same `finished` key as the row signals (a structural signal at trust 2, not a claim). Its mere presence in a whole
-read says nothing: a resumed thread keeps `CheckCircle` on its start row, so a frame reload re-reading it must not fold the thread
-to idle. And the glyph change only counts once the row is in `done` or gone from the active list, or after a no-card thread-view
-read: a row in `running` or `needs`, a pending card fact, or a `paused` row with no thread-view read since its last `working`
-outranks it, so a thread whose card wait might show it (over the cap, no read yet) is never told finished before its owed read. The start row is the only tied coordinator row, and it is a signal, not a claim: there
-is no claim-merge rule. A coordinator finish report is an untied claim: told quietly when a `finished` of its project was told
-within the 120 s before it, and, arriving more than 120 s after the finish, told as its own entry (an accepted cost: a late repeat
-in the brief rather than a word rule to suppress it). An untied claim with a decision
-card is told at once as its own entry; an untied plain claim is told quietly (recorded in Told, shown on the project's expand, never
-in the lead) when a `finished` of its project was told within the 120 s before it, else as its own entry, and is **demoted** into a
-finish of that project that lands within 120 s after it (Told row marked quiet, its line folded under the finish on expand; a view
-change, no model call). A claim is never hidden by a finish it doesn't match, and coordinator silence hides nothing: thread facts
-come from thread states the coordinator never writes.
+**Coordinator.** Its rows (including `channel-created-thread` cards and their glyph, which goes `working` → `CheckCircle` when the
+thread finishes) are items like any other. Nothing ties a coordinator row to a thread and nothing depends on the coordinator
+reporting: thread statuses come from thread rows, and the model reads the coordinator's words next to them (3.3).
 
 ## 3. The per-project brief
 
 ### 3.1 Document
 
-One per project in `router.db` (`briefs`: project, version, at, fields, trigger facts, diff, `fact_cursor`).
+One per project in `router.db` (`briefs`: project, version, at, fields, diff, `cursor`).
 
 | Field | Written by | From |
 |---|---|---|
 | `purpose` | Model, only when the goal changed | Goal, instructions |
 | `watch` | Deterministic | Board (1.5) |
-| `threads[]`: id, title, state, needs, age, source, as_of, `for` | Deterministic; `for` by the model once per new thread | Board |
-| `needs_you[]`: thread, kind, question, options, since | Deterministic; for a **plain-words** request only, one Haiku asks call (`RouterAsk`) reads the question; cards carry their own words | Card read, row, file |
-| `now` (1 to 3 lines), `decisions[]`, `loose_ends[]` | Model | Old doc + facts since `fact_cursor` |
+| `threads[]`: id, title, status, age, source, as_of | Deterministic | Board |
+| `now` (1 to 3 lines), `needs_you[]` (thread, kind, question, options as data, since), `decisions[]`, `loose_ends[]` | Model | New items + the current brief |
 | `routing_notes` | Yours (Notes) | Unchanged |
 | `sent[]`: intent id, words, state | Deterministic | Intents |
 
+A card's options are copied from the card item as data, in the page's order and words; a plain-words request gets a question the model
+writes from the reply the check read.
+
 ### 3.2 Triggers
 
-The deterministic part is rebuilt on every Board change of the project (pure, instant). The model runs only on a told-able fact:
+The deterministic part (the thread list with status, `as_of` for a stale project, `sent[]`) is rebuilt on every Board change of the
+project, instantly, with no model. The model call runs when the project has new items past its `cursor`:
 
-| Fact | Deterministic | Model |
-|---|---|---|
-| `needs_you` (new episode, or a new ask) | Yes | At once |
-| `stranded`, `app_closed` | Yes | At once |
-| `finished`, claim with a decision card, coordinator-only claim | Yes | When the project's `turning` is false (stale projects count as false); at once if no coordinator turn runs |
-| New thread row | Yes | A `for` line with the next call, never alone |
-| `turning`, streaming rows, text of a streaming row | Yes | No |
-| Your send (intent states) | Yes | No |
-| Reload, handover, stale ↔ live, `paused` ↔ confirmed idle | Yes | No |
-| Goal or instructions changed | Yes | `purpose` only |
-| Time passing | No | No |
+| New item | Call |
+|---|---|
+| A thread's status → `needs you`, a card seen, a local session stranded or its app closed | At once |
+| Any other (messages, coordinator rows, other status changes, a new thread) | When the project's coordinator isn't mid-turn (`turning` false; a stale project counts as false), so its repeat lands in the same call; at once if no coordinator turn runs |
+| Goal or instructions changed | A call that writes `purpose` only |
+| `turning`, streaming text, your send, reload, handover, stale ↔ live, time passing | No call (not items, or already deterministic) |
 
-One model call per project at a time; facts during a call mark it dirty and one call follows on return, from the doc the first
-produced plus all facts since. A waiting `finished` is promoted by any at-once fact of the project. The call's input key is the
-deterministic fingerprint plus the fact keys since `fact_cursor`; the same key never runs twice.
+One call per project at a time. Items that arrive during a call wait for the next one: the project is marked dirty and one call
+follows on return, from the brief that call produced. Events decide, never timers.
 
 ### 3.3 The call, failures, persistence
 
-Haiku 5.5 (`claude-haiku-5-5`, the id the app's Haiku calls already use), about 1.5k tokens in and 150 out, about $0.002. Every new
-call (project doc, lead, asks) is built with `RouterStyle.prompt(rules, style:)`, so the owner's style setting (SettingsView) still
-shapes the words; `RouterStyle` moves out of `RouterBrief.swift` into `RouterStyle.swift` with its Settings binding. The answer
-is checked: thread ids must exist, `now` is cut at three lines, a decision names a thread or your send. On failure the previous prose
-stays with `prose_stale: true` ("being rewritten"). Persistence: `fact_cursor` is the last Seen row id the prose covers; it advances
-only on a landed answer. At launch every project whose cursor is behind the latest told-able fact runs; a quit mid-call is therefore
-rerun. After three failures in a row the project waits for the next fact of another kind, the next launch, or the end of the next
-general-brief batch (4), whichever comes first.
+Input: the project's new items since `cursor` and its current brief. Output: whether anything is worth telling, and the updated brief
+(`now`, `needs_you`, `decisions`, `loose_ends`), leaving out what the brief already covers. This is the whole answer to a coordinator
+repeating a thread's finish, a late report, or a coordinator that never reports: the model reads the brief, there are no rules for
+them.
+
+Haiku 5.5 (`claude-haiku-5-5`, the id the app's Haiku calls already use), about 1.5k tokens in and 150 out, about $0.002. Every call
+(project, lead, plain-words question) is built with `RouterStyle.prompt(rules, style:)`, so the owner's style setting (SettingsView)
+still shapes the words; `RouterStyle` moves out of `RouterBrief.swift` into `RouterStyle.swift` with its Settings binding. The answer
+is checked: thread ids must exist, a card entry's options equal the card item's, `now` is cut at three lines, a decision names a
+thread or your send. On failure the previous prose stays with `prose_stale: true` ("being rewritten"); the items are already stored.
+
+Persistence: `cursor` is the last log position the brief covers, stored per project; it advances only on a landed answer. At launch
+every project with items past its cursor runs, so a quit mid-call is rerun. After three failures in a row the project waits for its
+next new item, the next launch, or the end of the next general-brief batch (4), whichever comes first.
+
+Later, not in v1: Jev as a cheap filter in front of the call ("anything worth telling?"), measured on real data before it is added.
 
 ### 3.4 History and Revert
 
-Each version is a row with its trigger facts and prose diff; the view's history lists them. Revert applies to acts (archive, mark
-read, a goal change) as reversible intents with `before`; prose is never reverted.
-
+Each version is a row with its new items and prose diff; the view's history lists them. Revert applies to acts (archive, mark read, a
+goal change) as reversible intents with `before`; prose is never reverted.
 ### 3.5 Acting from it
 
 - A `needs_you` entry is the only place a thread's question shows: the question and, for a card, its options in the page's order
@@ -389,9 +355,9 @@ read, a goal change) as reversible intents with `before`; prose is never reverte
 - **Local threads** are entries too (5.0): their `needs_you` carries the plugin hook's `FormSnapshot`; picking an option or typing
   goes through `RouterFormReply` on the entry (the hook-based answer through the signed plugin, as today), with options as chips
   that fill the draft and Return.
-- **Leaving:** one rule for both briefs. A `needs_you` entry leaves when the thread's state leaves `needs_you` on proof (the row
-  `working` or gone, the card `answered`, the file no longer interrupted), or when you mark it read (Told; reversible). The general
-  brief's count is the untold ones.
+- **Leaving:** one rule for both briefs. A `needs_you` entry leaves when the thread's status leaves `needs you` on proof (the row
+  `working` or gone, the card `answered`, the file no longer interrupted), or when you mark it read (reversible). The general
+  brief's count is the entries not yet read.
 - Open: `chrome.tabs.create` active (you asked). Send elsewhere: the @-pill; the decision shows live; Return confirms. Archive and
   mark read: at once, Revert in history.
 
@@ -417,7 +383,7 @@ that port's `commands` replay says it neither ran nor waits (the per-frame repla
 | `threads` row `{thread, gone: true}`; `threads` event `listed: bool` | up | Departures (2) |
 | `rows` row `answered`, `options` (texts); `rows` event `stop: bool` (the thread dock's `code-prompt-stop`) | up | Thread-frame decision rows and the running-tool signal (1.8) |
 | `threads` row `section` (`needs`/`running`/`active`/`done`), `unread: bool` (`bdi.text-prose-semibold` + `span.sr-only`); `threads` event `listed: bool` (loaded by structure, 2) | up | Row states; the page's read mark as data; the whole-list guard |
-| `rows` row `index` (`data-epitaxy-entry-index`) and `card: {glyph}` for a project-chat row with a `channel-created-thread` card | up | The start-row tie and its finish signal (2) |
+| `rows` row `index` (`data-epitaxy-entry-index`) and `card: {glyph}` for a project-chat row with a `channel-created-thread` card | up | Row content, stored as an item (2) |
 | `answer {id, project, thread, card, option}` / its `done {ok, refused, error}` | down to thread frame / up | 3.5 |
 | `open {id, project: null, home: true}` / `done` | down to top / up | 1.3: sent as an `open`, so the page's same-kind collapse lets a run's `open` supersede it; the engine ties `home: true` to no run |
 | `frame_loaded {frame, frameId}`, `frame_blank {frame}`, `frame_gone {frame}` | worker → routerd | Worker-originated, always with `frame`; blank's deadline is the engine's (1.2) |
@@ -442,15 +408,17 @@ Return and the `refused` send rule is kept or dropped on evidence.
 
 ## 4. The general brief
 
+Built from the project briefs.
+
 | Part | Rule |
 |---|---|
-| Lead (2 to 4 lines) | Model, one Haiku call over every project's `now` and the untold facts. Trigger: a **fact** changed the set of untold needs-you, stranded or finished facts, and it runs **after the batch**: when no project call is in flight and the lead is dirty. Mark read, Revert, showing a section (view-caused Told changes) never trigger it; the view's counts are deterministic |
+| Lead (2 to 4 lines) | One Haiku call over every project's `now` and open needs-you entries. It runs after a batch of project calls changed what needs you or what finished, when no project call is in flight and the lead is dirty. Mark read, Revert and showing a section never trigger it; the view's counts are deterministic |
 | Order | Needs-you projects first (oldest need first), then stranded, finished-untold (newest first), working, quiet; local-only projects in the same order |
 | Size | 12 sections; the rest fold to one line of names |
 | Per section | `now`, the needs-you entries, threads touched in 24 h, `sent[]`; the rest on expand |
 | Staleness | "as of 12m ago" in a stale section's header |
 
-The told rule moves from `DigestPage` to `RouterBriefView` (`BriefTold`): a told fact leaves once its section was shown and settled.
+The told rule moves from `DigestPage` to `RouterBriefView` (`BriefTold`): an entry leaves once its section was shown and settled.
 
 ## 5. UI and the files
 
@@ -471,7 +439,7 @@ goes; every thread, local or cloud, is a Board thread, and what you act on is a 
 ```swift
 struct BriefEntry: Codable, Hashable {  // RouterBriefDoc.swift
     var project: String; var thread: String            // Board ids (a local-only session: its session id)
-    var kind: Kind                                     // question(card), plan(card), request(plain words), permission, stranded, finished, claim
+    var kind: Kind                                     // question(card), plan(card), request(plain words), permission, stranded
     var state: ThreadState; var since: Double; var source: Source; var asOf: Double?
     var question: String?; var options: [String]       // the card's words, or the asks call's reading
     var card: String?                                  // the decision row's key (cloud)
@@ -563,22 +531,26 @@ leaving while others stay; a new tab that waits for the old one's close.
 | Handover while the old tab is known: new port not stopped, adopted on its `commands`, old closed after, no third tab; failure keeps the old; worker restart mid-handover resumes | same | same |
 | Blank: `onErrorOccurred`, `onCompleted` with no port → inject once, then `frame_blank` | same | same |
 | Engine: a frame's `page`/`notice`/`signed_in` leave `pages`, `loaded`, `instance`, health and `notice` unchanged; a frame's rows pass `holds` but never `vanished`/`returned`; a frame's whole `rows` read replaces no rows, and only a `listed` whole `threads` read replaces the active list | fake_page grows frames with `frame` | conformance bridge, `poc/router/tests` |
-| Pending card + dashed row → `needs_you`, never `finished`; departure among others → `finished`; `paused` → confirmed idle after a no-card read; episode keys: two cards 1.6 s apart are two facts, file + row + coordinator one fact; a claim naming no thread always told | Seen fixtures through `fold`, `facts`, `plan` | `CourierBoard`, `CourierTell` tests |
+| Dedupe: re-reads of the same id with the same content (a reload, a handover, a second frame, a coordinator repeat) add nothing to Seen; changed content of an id is stored once | Seen fixtures through the log | `CourierBoard` tests |
+| Status: a change is recorded once per thread id; the same status re-read adds nothing; a pending card with a dashed row is `needs you`, never `done`; a departure among others and a row moving to `done` record `done`; `paused` becomes `done` only after a no-card read; a plain-words request (`running` straight to `needs`, stop lingering in the dock) is one `needs you` | fixtures | `CourierBoard` tests |
+| The model call gets the project's new items past `cursor` plus its current brief, nothing older | pure `BriefTriggers`, canned answers | `swift test --filter BriefTriggers` |
+| A coordinator repeat of a thread's finish adds no entry (canned model answer given the brief that already covers it); a late report and a coordinator that never reports behave the same way | canned answers | `swift test --filter BriefDoc` |
+| Triggers and coalescing: needs-you status or a card calls at once; other items wait for the coordinator's turn to end; items during a call mark it dirty and one call follows; one call per project at a time | pure `BriefTriggers` | `swift test --filter BriefTriggers` |
+| Cursor: a quit mid-call reruns the project at launch from its stored cursor; it advances only on a landed answer; three failures then retry on a new item, launch or batch end | canned answers | `swift test --filter BriefTriggers`, `BriefDoc` |
+| The lead runs after the batch and not on mark-read | canned answers | `swift test --filter GeneralBrief` |
 | Owed checks: a card already waiting at launch, one in the handover gap, one whose whole working phase passed under a stale frame, all found; three threads holding cards (kept) and a fourth thread's card is still found through the check slot; three `working` kept frames and an `.answer` takes the check slot at once; LRU card eviction when a working thread needs a slot; cap and queue order; a handover requeues the check in flight | fake overview + thread views | bridge |
-| Confirmed idle vs finished: a kept frame's no-card read after working tells `finished` once; the row leaving later tells nothing more; a card answered inside the 12 s lag then a second card gives two keys | fixtures | `CourierBoard`, `CourierTell` tests |
+| Confirmed idle: a kept frame's no-card read after `working` records `done` once; the row leaving later adds nothing; a card answered inside the 12 s lag then a second card are two card items | fixtures | `CourierBoard` tests |
 | `home`: issued only with no run left; a run submitted before it is issued skips it; one submitted after has its `open` supersede the home's and its proof holds; an always-failing project frame is reloaded three times across run ends, then only on a handover | bridge | `poc/router/tests/test_home.py` |
 | A project frame connecting after its own `?thread=` jump is identified by `window.name`, not its address; the engine's `frames` is the only source of the set (a worker-added frame doesn't exist by construction: the stub asserts the worker never calls the top frame but with the engine's `want`) | node stub + bridge | worker and bridge tests |
-| A frame's first partial whole `threads` read (no `listed`) makes no departures; a `listed` one does; a `working` thread missing from a `listed` read is a departure, told finished with no read | fake overview | bridge |
+| A frame's first partial whole `threads` read (no `listed`) makes no departures; a `listed` one does; a `working` thread missing from a `listed` read is a departure and records `done` with no read | fake overview | bridge |
 | `ensureTab`'s alive check when only a frame's script would answer: `{frameId: 0}` makes it inject the top frame | node stub | worker tests |
 | An `.answer` issued, then the budget reached: no `handover` until its `done`; one cut off by `frame_gone` is reissued once after the replay | bridge | `test_answer.py` |
-| A plan card found by a kept frame, then the row's `needs`: one key, one entry, one model call; a plain-words request (`running` straight to `needs`, stop lingering in the dock) is one `needs_you` and no finish | fixtures | `CourierTell`, `BriefTriggers` |
-| `listed` by structure: tab strip alone makes no departures; a `needs` band beside a still-loading `active` list makes none; `ready` on done rows only never passes; active rows or the empty line in `active` does; a project with only finished threads is listed right and a `working` thread absent from it is told finished; a row moving to `done`, a departure, the start row's glyph change and the confirmed-idle read all fold to one `finished`; the oldest `done` row dropping out tells nothing; a thread ending in `active + dashed` waits for its read; a resumed thread with `CheckCircle` re-read through a frame reload is not finished; a `running` row or a pending card outranks the glyph; confirmed idle then moved to `done` in a gap is one finish, a time that moved in the gap is a second episode; the start row (index + 1) is the only tied row and the finish report is not; an untied plain claim demoted by a finish within 120 s, told on its own past 120 s | fake overview and project chat | bridge, `CourierTell`, `CourierBoard` |
-| Confirmed idle under a stale project frame: no `code-prompt-stop`, no streaming row → finished; a lingering stop withholds it until the frame's next load or the row's `paused` | fake thread view | bridge |
-| A finish entirely in a gap: the whole read after it shows a changed row → a second episode → one `finished` | fixtures | `CourierBoard` |
+| A plan card found by a kept frame, then the row's `needs`: one status change, one entry, one model call | fixtures | `CourierBoard`, `BriefTriggers` |
+| `listed` by structure: tab strip alone makes no departures; a `needs` band beside a still-loading `active` list makes none; `ready` on done rows only never passes; active rows or the empty line in `active` does; a project with only finished threads is listed right and a `working` thread absent from it records `done`; the oldest `done` row dropping out records nothing; a thread ending in `active + dashed` waits for its read; a resumed thread with `CheckCircle` re-read through a frame reload adds nothing; a `running` row or a pending card outranks a `done` signal | fake overview and project chat | bridge, `CourierBoard` |
+| Confirmed idle under a stale project frame: no `code-prompt-stop`, no streaming row → `done`; a lingering stop withholds it until the frame's next load or the row's `paused` | fake thread view | bridge |
 | After a top-frame reload or sign-in return, the only `frames` the top frame receives is the engine's `base: true` set; the worker sends none of its own | node stub + bridge | worker and bridge tests |
 | Entries: a local thread's form entry answered through `RouterFormReply`; `RouterMCP.entry`/`answer`; the palette lists entries; `RouterProjectContext` builds its waiting context from the project's open `needs_you` entries | `swift test --filter BriefEntry` | app tests |
 | `.answer` with no open frame opens one, confirms the key, clicks once; retry once; refused when answered or gone | fake thread view | `poc/router/tests/test_answer.py` |
-| Triggers and coalescing; quit mid-call reruns from `fact_cursor`; three failures then retry on launch/batch end; lead runs after the batch and not on mark-read | pure `BriefTriggers`, canned answers | `swift test --filter BriefTriggers`, `BriefDoc`, `GeneralBrief` |
 | Keys: 1 to 9 by key code with an AZERTY layout, O/A/R inert while the composer holds text | `RouterKeys` tests | `swift test --filter RouterKeys` |
 | The view | `--window-shots .build/shots brief brief-needs-you brief-stale brief-quiet` | `AppWindowShots.swift` |
 
@@ -596,4 +568,4 @@ both outcomes of each are designed:
 | Measurement | Measured | Until then |
 |---|---|---|
 | A tool permission prompt under a non-auto Remote Control (3.7) | Approval becomes a Return-confirmed click by structure; the refused-send rule kept or dropped on evidence | The slot's words with Open only; sends to that thread refused until the slots empty |
-| Whether `done` rows are in the DOM while the group is collapsed (2, unrecorded by the check) | In the DOM: content.js reports them with `section: done`, which folds to idle with the thread's episode | Not in the DOM: the row is gone from the active list, which folds the same way; either way Fjord never expands the group. Accepted cost in this case only: a thread confirmed idle before a gap, resumed and finished entirely inside the gap, is never seen working (no row in the active list, no `done` time to compare), so that one finish isn't told; if `done` rows are in the DOM, their `time[datetime]` steps the episode and it is told |
+| Whether `done` rows are in the DOM while the group is collapsed (2, unrecorded by the check) | In the DOM: content.js reports them with `section: done`, which records `done` | Not in the DOM: the row is gone from the active list, which records `done` the same way; either way Fjord never expands the group. Accepted cost in this case only: a thread resumed and finished entirely inside a gap shows no status change, so nothing is recorded; if `done` rows are in the DOM their `time[datetime]` shows it |
