@@ -211,14 +211,6 @@ import type { EngineInterface, Register } from 'claude-code'
 // has no way to delete, and needs none. Presence files list `capabilities`, so Fjord knows how a
 // session can be reached.
 //
-// `settings-v1`: a v2 message carries the model and effort the session should use, inside the signed bytes:
-//   ⟦fjord v2 <target> <nonce> <ms> <model|-> <effort|-> <hex HMAC-SHA256>⟧\n<base64 body>
-// with the MAC over "v2\n<target>\n<nonce>\n<ms>\n<model|->\n<effort|->\n" and the body. A plugin without the capability
-// sees an unknown header (unsigned) and ignores it; Fjord only sends v2 to a plugin that advertises `settings-v1`.
-// From the inbox (never the peer channel, whose hook the turn waits on), the plugin sets the model, then the effort (a
-// model switch resets the effort), with `/model` and `/effort` run for this session only, and only then submits the
-// text, so the turn it starts uses them. The ack says what happened: "ok model=opus effort=high", or "model=error:why".
-//
 // `abort-v1`: Fjord can take back a delivery it made, with a control file in the same inbox, signed the same way:
 //   ⟦fjord abort v1 <target> <nonce> <ms> <nonce of the delivery> <hex HMAC-SHA256>⟧
 // with the MAC over "abort-v1\n<target>\n<nonce>\n<ms>\n<nonce of the delivery>\n" (no body). Its own nonce is claimed as a
@@ -236,31 +228,6 @@ import type { EngineInterface, Register } from 'claude-code'
 //   unknown       this copy never saw it, but one did (a reload since): it can't tell
 // Nothing an aborted turn already did is undone, and the words stay in the session's history: Claude Code has no way to
 // take a submitted prompt back out.
-//
-// `stop-v1`: Fjord can stop whatever turn the session is running, started by a delivery or not, with a control file in
-// the same inbox, signed the same way:
-//   ⟦fjord stop v1 <target> <nonce> <ms> <turn id|-> <hex HMAC-SHA256>⟧
-// with the MAC over "stop-v1\n<target>\n<nonce>\n<ms>\n<turn id|->\n". Its nonce is claimed as a delivery's is. With a turn
-// id, only that turn is stopped (a newer one is left alone): the ack is "ok not-running" when it isn't the running turn.
-// With `-`, whatever turn runs. No turn: "ok idle". Otherwise the tools the turn is running are answered at once, then
-// $.turn.abort, and a notice "Stopped from Fjord" is added to the session: "ok stopped <turn id>". Every main turn is
-// covered, not only a delivery's.
-//
-// `interrupt-v1`: a v3 message is a v2 one with a signed interrupt flag after the effort:
-//   ⟦fjord v3 <target> <nonce> <ms> <model|-> <effort|-> <0|1> <hex HMAC-SHA256>⟧\n<base64 body>
-// with the MAC over "v3\n<target>\n<nonce>\n<ms>\n<model|->\n<effort|->\n<0|1>\n" and the body.
-// `interrupt-turn-v1`: a v4 message adds the turn the interrupt was judged on after the flag:
-//   ⟦fjord v4 <target> <nonce> <ms> <model|-> <effort|-> <0|1> <turn id|-> <hex HMAC-SHA256>⟧\n<base64 body>
-// with the MAC over "v4\n<target>\n<nonce>\n<ms>\n<model|->\n<effort|->\n<0|1>\n<turn id|->\n" and the body. With a turn id
-// the interrupt is refused ("refused: turn changed", nothing submitted, the nonce not claimed) unless that turn is the one
-// running, checked before the nonce is claimed (so a retry of an unclaimed message is checked again) and again by the stop. From the inbox, with the flag
-// set, the turn under way (if any) is stopped as above, then the settings are applied and the words submitted as the
-// person's own, in one step: the ack is "ok interrupted <turn id>" or "ok idle" (then it only submits), followed by what
-// the settings did. Plain v1 and v2 messages keep queueing behind a running turn. Over the peer channel (whose hook a turn
-// waits on) a v3 message is not taken at all.
-//
-// An interrupt is refused ("refused: why", nothing submitted) when its words can't be submitted (empty, or a slash command:
-// checked before anything is stopped), when the running turn can't be stopped, or when the submit is rejected.
 //
 // A subagent belongs to the main turn that spawned it, found from the spawn's parent: a background agent of an older turn that
 // spawns another during a newer turn keeps it with the older one, so stopping the newer turn leaves it be.
@@ -283,22 +250,21 @@ import type { EngineInterface, Register } from 'claude-code'
 // escaping in the body only a "<" that opens a tag it knows (and "@" across machines): Fjord's signed text, a header line and
 // base64, has neither. Two ways in, one check (`accept`):
 //   - the target runs: the app hands the envelope to `session.receive` (the body may be followed by a notice that it came from
-//     another Claude). A valid message is consumed and its words submitted as the person's own, as an inbox file's are, with
-//     its settings applied first; an interrupt never comes this way.
+//     another Claude). A valid message is consumed and its words submitted as the person's own, as an inbox file's are.
 //   - the target sleeps: the app starts it with the envelope as its first prompt, after its own guidance (system-reminders).
 //     `prompt.submit` rewrites the prompt to the words alone, the guidance riding as `context`, so Claude reads the words as
-//     the person's own and the app shows an ordinary message of theirs. Settings are applied first, bounded.
+//     the person's own and the app shows an ordinary message of theirs.
 // Either way the plugin answers in the target's inbox folder, `<nonce>.ack` ("ok", or "refused: why" once the signature held),
 // which is how Fjord knows it went. Any other envelope passes on untouched as the peer message it is.
 //
 // Fjord writes this file; edits are overwritten.
 
-const HEADER = /(?:^|\n)⟦fjord (?:v1 (\S+) (\S+) (\d+)|v2 (\S+) (\S+) (\d+) (\S+) (\S+)|v3 (\S+) (\S+) (\d+) (\S+) (\S+) ([01])|v4 (\S+) (\S+) (\d+) (\S+) (\S+) ([01]) (\S+)) ([0-9a-f]{64})⟧\n/
+const HEADER = /(?:^|\n)⟦fjord v1 (\S+) (\S+) (\d+) ([0-9a-f]{64})⟧\n/
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
 const CLOSE = '</cross-session-message>'
 const WINDOW_MS = 10 * 60 * 1000
 const NONCE = 'nonce.'
-export const CAPABILITIES = ['inbox-v1', 'settings-v1', 'abort-v1', 'stop-v1', 'interrupt-v1', 'interrupt-turn-v1', 'carry-v1']
+export const CAPABILITIES = ['inbox-v1', 'abort-v1', 'carry-v1']
 const POLL_MS = 500
 const ACTIVATION = crypto.randomUUID()
 
@@ -373,45 +339,9 @@ export const unwrap = (text: string) => {
   return { wrapped: true, before: text.slice(0, open.index).trim(), body, after: text.slice(end + CLOSE.length).trim() }
 }
 
-const STOP = /^⟦fjord stop v1 (\S+) (\S+) (\d+) (\S+) ([0-9a-f]{64})⟧\n?/
-
-/** What a stop's MAC covers: its kind, the target, its nonce, its time and the turn it stops (`-`: whichever runs). */
-export const stopMacInput = (target: string, nonce: string, ts: string, turn: string) =>
-  enc.encode(`stop-v1\n${target}\n${nonce}\n${ts}\n${turn}\n`)
-
-/** A stop's fields; undefined for anything else. */
-export const parseStop = (text: string) => {
-  const m = STOP.exec(text)
-  return m ? { target: m[1], nonce: m[2], ts: m[3], turn: m[4], mac: m[5] } : undefined
-}
-
-/** The model and effort a v2 message asks for; `-` on the wire is none. */
-export type Settings = { model?: string; effort?: string }
-
-/** What the MAC covers: the version, the target, the nonce and the time, one per line (v2: also the model and the effort),
- * then the body's bytes. */
-export const macInput = (target: string, nonce: string, ts: string, body: Uint8Array, settings?: Settings, interrupt?: boolean, expectTurn?: string) =>
-  join(
-    enc.encode(
-      expectTurn !== undefined
-        ? `v4\n${target}\n${nonce}\n${ts}\n${settings?.model ?? '-'}\n${settings?.effort ?? '-'}\n${interrupt ? 1 : 0}\n${expectTurn}\n`
-        : interrupt !== undefined
-        ? `v3\n${target}\n${nonce}\n${ts}\n${settings?.model ?? '-'}\n${settings?.effort ?? '-'}\n${interrupt ? 1 : 0}\n`
-        : settings
-          ? `v2\n${target}\n${nonce}\n${ts}\n${settings.model ?? '-'}\n${settings.effort ?? '-'}\n`
-          : `v1\n${target}\n${nonce}\n${ts}\n`,
-    ),
-    body,
-  )
-
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-/** A model `/model` takes: an alias (with the 1M-context suffix), or a full id. */
-const MODEL = /^(?:(?:opus|sonnet|haiku|fable)|claude-[a-z0-9][a-z0-9.-]*)(?:\[1m\])?$/
-/** Why a settings request can't be applied (undefined: fine). */
-export const invalid = (s: Settings) =>
-  s.model !== undefined && !MODEL.test(s.model) ? `invalid model ${JSON.stringify(s.model.slice(0, 40))}`
-    : s.effort !== undefined && !EFFORTS.includes(s.effort) ? `invalid effort ${JSON.stringify(s.effort.slice(0, 40))}`
-      : undefined
+/** What the MAC covers: the version, the target, the nonce and the time, one per line, then the body's bytes. */
+export const macInput = (target: string, nonce: string, ts: string, body: Uint8Array) =>
+  join(enc.encode(`v1\n${target}\n${nonce}\n${ts}\n`), body)
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
@@ -439,20 +369,10 @@ export const parse = (text: string) => {
   const m = HEADER.exec(text)
   if (!m) return undefined
   const header = m[0]
-  const v2 = m[4] !== undefined
-  const v3 = m[9] !== undefined
-  const v4 = m[15] !== undefined
-  const [target, nonce, ts] = v4 ? [m[15], m[16], m[17]] : v3 ? [m[9], m[10], m[11]] : v2 ? [m[4], m[5], m[6]] : [m[1], m[2], m[3]]
-  const mac = m[22]
-  const [model, effort] = v4 ? [m[18], m[19]] : v3 ? [m[12], m[13]] : [m[7], m[8]]
-  const settings: Settings | undefined =
-    v2 || v3 || v4 ? { model: model === '-' ? undefined : model, effort: effort === '-' ? undefined : effort } : undefined
-  const interrupt = v4 ? m[20] === '1' : v3 ? m[14] === '1' : undefined
-  // v4: the turn the interrupt was judged on (`-`: none named), covered by the MAC.
-  const expectTurn = v4 ? m[21] : undefined
+  const [target, nonce, ts, mac] = [m[1], m[2], m[3], m[4]]
   const body = fromBase64(text.slice(m.index + header.length).trim())
   if (!body) return undefined
-  return { target, nonce, ts, mac, body, settings, interrupt, expectTurn }
+  return { target, nonce, ts, mac, body }
 }
 
 /** Compares two MACs in time that doesn't depend on where they differ. */
@@ -548,9 +468,6 @@ const claim = ($: EngineInterface, nonce: string, ts: number, now: number) =>
     return true
   })
 
-/** Whether a nonce was claimed already (nothing is claimed). */
-const claimed = ($: EngineInterface, nonce: string) => exclusive(async () => (await $.store.get(NONCE + nonce)) !== undefined)
-
 /** A delivery this copy submitted, by its nonce: its words and when, the turn it started once one did (and whether that
  * turn holds words of the person's own too, or is still starting), and whether that turn is over or was taken back before
  * it began. Kept for the window an abort is taken in, the latest few at most. */
@@ -585,7 +502,6 @@ export const forget = () => {
   running = undefined
   runningSince = 0
   inFlight.clear()
-  later.length = 0
   deliveries = Promise.resolve()
 }
 
@@ -686,47 +602,22 @@ export async function cancel($: EngineInterface, nonce: string, ts: number, now:
   return 'aborted'
 }
 
-/** Stops the main turn under way, whoever started it: its tools are answered at once and silenced, then the turn is aborted
- * and a notice left in the session. `turnId` given: only that turn (`not-running` when another runs, or none). */
-export async function stopRunning($: EngineInterface, now: number, turnId?: string, notice = 'Stopped from Fjord') {
-  if (turnId !== undefined && running !== turnId) return 'not-running'
-  const id = running
-  if (id === undefined) return 'idle'
-  // Kept alive across the abort: the turn may complete while it is awaited, and its tools are still to be cut.
-  const record = calls.get(id)
-  try {
-    await $.turn.abort({ turnId: id })
-  } catch {
-    return 'not-running'
-  }
-  silence(id, now, record)
-  for (const other of sent.values()) if (other.turnId === id) other.ended = true
-  await $.session.append({ message: { type: 'system', content: [{ type: 'text', text: notice }] } }).catch(() => undefined)
-  return `stopped ${id}`
-}
-
 /** Checks a control message the way a delivery is checked (its signature, its session, its time, its nonce never seen) and
- * acts on it, an abort of a delivery or a stop of the running turn: the ack's text. */
+ * acts on it, an abort of a delivery: the ack's text. */
 export async function control($: EngineInterface, text: string) {
-  const abort = parseAbort(text)
-  const stop = abort ? undefined : parseStop(text)
-  const signed = abort ?? stop
+  const signed = parseAbort(text)
   if (!signed) return 'refused: unsigned'
   const { keyPath } = await config($)
   if (!keyPath) return 'refused: no key configured'
   const key = (await $.fs.read(keyPath)).trim()
-  const expected = await hmac(
-    enc.encode(key),
-    abort ? abortMacInput(abort.target, abort.nonce, abort.ts, abort.cancels) : stopMacInput(stop!.target, stop!.nonce, stop!.ts, stop!.turn),
-  )
+  const expected = await hmac(enc.encode(key), abortMacInput(signed.target, signed.nonce, signed.ts, signed.cancels))
   const now = await $.clock.now()
   const ts = Number(signed.ts)
   if (!same(expected, signed.mac)) return 'refused: bad signature'
   if (signed.target !== (await $.session.id())) return 'refused: addressed to another session'
   if (!(Math.abs(now - ts) < WINDOW_MS)) return 'refused: stale'
   if (!(await claim($, signed.nonce, ts, now))) return 'refused: already delivered'
-  if (abort) return `ok ${await cancel($, abort.cancels, ts, now)}`
-  return `ok ${await stopRunning($, now, stop!.turn === '-' ? undefined : stop!.turn)}`
+  return `ok ${await cancel($, signed.cancels, ts, now)}`
 }
 
 /** A signed message that passed every check, its nonce claimed: what is left is to act on it. */
@@ -734,32 +625,25 @@ type Vetted = {
   nonce: string
   body: string
   now: number
-  settings?: Settings
-  interrupt: boolean
-  expectTurn?: string
 }
 type Refusal = { ok: false; reason: string; nonce?: string; signed?: boolean }
 
 /** Checks a signed text the way every way in must (its signature, its session, its time, its words, its nonce never seen) and
- * claims its nonce. `apply`: it comes from the inbox, where an interrupt may act. `signed` on a refusal: the signature held and
+ * claims its nonce. `signed` on a refusal: the signature held and
  * the message is this session's (so the refusal may be answered in the inbox folder, not by anyone else's forgery). */
-async function vet($: EngineInterface, text: string, apply: boolean): Promise<({ ok: true } & Vetted) | Refusal> {
+async function vet($: EngineInterface, text: string): Promise<({ ok: true } & Vetted) | Refusal> {
   const signed = parse(text)
   if (!signed) return { ok: false, reason: 'unsigned' }
   const { keyPath } = await config($)
   if (!keyPath) return { ok: false, reason: 'no key configured' }
   const key = (await $.fs.read(keyPath)).trim()
-  const expected = await hmac(enc.encode(key), macInput(signed.target, signed.nonce, signed.ts, signed.body, signed.settings, signed.interrupt, signed.expectTurn))
+  const expected = await hmac(enc.encode(key), macInput(signed.target, signed.nonce, signed.ts, signed.body))
   const now = await $.clock.now()
   const ts = Number(signed.ts)
   if (!same(expected, signed.mac)) return { ok: false, reason: 'bad signature' }
   if (signed.target !== (await $.session.id())) return { ok: false, reason: 'addressed to another session' }
   const refuse = (reason: string): Refusal => ({ ok: false, reason, nonce: signed.nonce, signed: true })
   if (!(Math.abs(now - ts) < WINDOW_MS)) return refuse('stale')
-  // An interrupt acts from the inbox only: never from inside a hook a turn waits on.
-  if (signed.interrupt && !apply) return { ok: false, reason: 'an interrupt is taken from the inbox only', nonce: signed.nonce }
-  const bad = signed.settings && invalid(signed.settings)
-  if (bad) return refuse(bad)
   // A leading byte-order mark is part of what was written: the decoder drops one, so exactly one is put back.
   let decoded: string
   try {
@@ -769,60 +653,18 @@ async function vet($: EngineInterface, text: string, apply: boolean): Promise<({
   }
   const bom = signed.body[0] === 0xef && signed.body[1] === 0xbb && signed.body[2] === 0xbf
   const body = bom ? `\uFEFF${decoded}` : decoded
-  // An interrupt's words are checked before anything is stopped: a turn is never aborted for text that can't be submitted.
-  const unfit = apply && signed.interrupt ? unsubmittable(body) : undefined
-  if (unfit) return refuse(`not submitted: ${unfit}`)
-  // An interrupt judged on a turn (v4) acts on that turn only: when another runs, or none, nothing is submitted and the nonce
-  // stays unclaimed, so a retry of the same message is refused the same way while that holds. A retry of one that was claimed
-  // already (delivered, its ack lost) is told so first: `turn changed` would read as never delivered.
-  const expectTurn = apply && signed.interrupt && signed.expectTurn !== undefined && signed.expectTurn !== '-' ? signed.expectTurn : undefined
-  if (expectTurn !== undefined && (await claimed($, signed.nonce))) return { ok: false, reason: 'already delivered', nonce: signed.nonce }
-  if (expectTurn !== undefined && running !== expectTurn) return refuse('turn changed')
   if (!(await claim($, signed.nonce, ts, now))) return { ok: false, reason: 'already delivered', nonce: signed.nonce }
-  return { ok: true, nonce: signed.nonce, body, now, settings: signed.settings, interrupt: signed.interrupt === true, expectTurn }
-}
-
-/** Sets the model, then the effort (a model resets it), for this session only, and says what each did. Each can fail on its
- * own; the person's words go either way. */
-async function applySettings($: EngineInterface, settings: Settings | undefined) {
-  const applied: string[] = []
-  if (!settings) return applied
-  for (const [command, args] of [['model', settings.model], ['effort', settings.effort]] as const) {
-    if (args === undefined) continue
-    try {
-      await $.command.run({ command, args })
-      applied.push(`${command}=${args}`)
-    } catch (error) {
-      const why = String((error as { message?: unknown })?.message ?? error).replace(/\s+/g, '_').slice(0, 80)
-      applied.push(`${command}=error:${why}`)
-    }
-  }
-  return applied
+  return { ok: true, nonce: signed.nonce, body, now }
 }
 
 /** `entered`: settles, undefined, once the engine took the words in; else why it did not (a hook dropped them, or the submit failed).
- * An interrupt's already has (it is awaited). The ack waits on it, never on the call that started it. */
-type Accepted = { ok: true; applied?: string; interrupted?: string; entered: Promise<string | undefined> }
+ * The ack waits on it, never on the call that started it. */
+type Accepted = { ok: true; entered: Promise<string | undefined> }
 
-/** Acts on a vetted message: an interrupt stops the turn under way first (the person's words then start the next one at
- * once), then the settings, so the turn the text starts uses them, then the words are submitted as the person's own. From the
- * inbox (`apply`) the settings and the interrupt act; the answer waits for the submit of an interrupt. */
-async function perform($: EngineInterface, v: Vetted, apply: boolean): Promise<Accepted | { ok: false; reason: string }> {
-  // When the stop fails and the turn still runs, the words would only queue behind it: refused, not delivered.
-  let interrupted = apply && v.interrupt ? await stopRunning($, v.now, v.expectTurn, 'Interrupted from Fjord') : undefined
-  if (interrupted === 'not-running' && v.expectTurn !== undefined) return { ok: false, reason: 'turn changed' }
-  if (interrupted === 'not-running') {
-    if (running !== undefined) return { ok: false, reason: 'the running turn could not be stopped' }
-    interrupted = 'idle'
-  }
-  const applied = apply ? await applySettings($, v.settings) : []
+/** Acts on a vetted message: its words are submitted as the person's own. */
+function perform($: EngineInterface, v: Vetted): Accepted {
   remember(v.nonce, v.body, v.now)
-  const sending = submit($, v.nonce, v.body)
-  if (apply && v.interrupt) {
-    const why = await sending
-    if (why !== undefined) return { ok: false, reason: notSubmitted(why) }
-  }
-  return { ok: true, entered: sending, ...(applied.length ? { applied: applied.join(' ') } : {}), ...(interrupted ? { interrupted } : {}) }
+  return { ok: true, entered: submit($, v.nonce, v.body) }
 }
 
 /** The ack's word for words the engine did not take in. */
@@ -837,9 +679,9 @@ async function receipt(outcome: Accepted | { ok: false; reason: string }, ok: (o
 
 /** Checks a signed text the way both ways in must, and submits it as the person's own words. `unsigned` means it isn't
  * Fjord's at all (the peer channel then passes it on); anything else is a refusal with its reason. */
-export async function accept($: EngineInterface, text: string, apply = false): Promise<Accepted | Refusal> {
-  const v = await vet($, text, apply)
-  return v.ok ? perform($, v, apply) : v
+export async function accept($: EngineInterface, text: string): Promise<Accepted | Refusal> {
+  const v = await vet($, text)
+  return v.ok ? perform($, v) : v
 }
 
 /** Where the answer for a message goes in this session's inbox folder (the file a message from the inbox is answered in). */
@@ -854,36 +696,18 @@ async function answer($: EngineInterface, nonce: string, text: string) {
   if (path) await $.fs.write(path, `${text}\n`).catch(() => undefined)
 }
 
-/** Messages whose words wait for the clock's next look: those with settings to set first. `command.run` is refused inside a
- * hook the turn waits on, so the settings are set (and the words submitted) from the look, apart from every hook. */
-const later: { v: Vetted; text: string }[] = []
-const hasSettings = (s?: Settings) => s !== undefined && (s.model !== undefined || s.effort !== undefined)
-
-/** Submits what a hook set aside, in order, and answers in the inbox folder. */
-function release($: EngineInterface) {
-  for (const { v, text } of later.splice(0)) {
-    deliveries = deliveries.then(async () => {
-      const outcome = await perform($, { ...v, body: text }, true).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
-      // The next one is submitted without waiting for this one's words to be taken in: the answer follows them.
-      void receipt(outcome, (o) => `ok${acked(o)}`).then((reply) => answer($, v.nonce, reply))
-    })
-  }
-}
-
 /** What the app hands a running session: Fjord's signed message in its envelope. A valid one is taken off the channel and its
- * words are submitted as the person's own apart from this hook (a turn waits on it), the settings first, from the next look. */
+ * words are submitted as the person's own apart from this hook (a turn waits on it). */
 async function received($: EngineInterface, text: string): Promise<boolean> {
-  const v = await vet($, unwrap(text).body, false)
+  const v = await vet($, unwrap(text).body)
   if (!v.ok) {
     if (v.signed && v.nonce) await answer($, v.nonce, `refused: ${v.reason}`)
     return false
   }
-  if (hasSettings(v.settings)) {
-    later.push({ v, text: v.body })
-    return true
-  }
   void (async () => {
-    const outcome = await perform($, v, false).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
+    const outcome = (() => {
+      try { return perform($, v) } catch (error) { return { ok: false as const, reason: String((error as { message?: unknown })?.message ?? error) } }
+    })()
     await answer($, v.nonce, await receipt(outcome, () => 'ok'))
   })()
   return true
@@ -891,13 +715,11 @@ async function received($: EngineInterface, text: string): Promise<boolean> {
 
 /** The first prompt of a session the app started with Fjord's message (its guidance, then the envelope): rewritten to the
  * person's words alone, the guidance as context. Undefined: not Fjord's, or refused: it goes on untouched as the peer
- * message it is. A slash command is dropped (it would run as one). A message with settings can't set them inside this hook:
- * the prompt is dropped (no turn) and its words submitted from the next look, once they are set, with the app's guidance
- * ahead of them in the text (a plugin's submit can't pass context). */
+ * message it is. A slash command is dropped (it would run as one). */
 async function started($: EngineInterface, e: { text: string; context?: readonly string[] }) {
   const u = unwrap(e.text)
   if (!u.wrapped || !parse(u.body)) return undefined
-  const v = await vet($, u.body, false)
+  const v = await vet($, u.body)
   if (!v.ok) {
     if (v.signed && v.nonce) await answer($, v.nonce, `refused: ${v.reason}`)
     return undefined
@@ -906,10 +728,6 @@ async function started($: EngineInterface, e: { text: string; context?: readonly
   if (unfit) {
     await answer($, v.nonce, `refused: not submitted: ${unfit}`)
     return { drop: `Fjord: ${unfit}` }
-  }
-  if (hasSettings(v.settings)) {
-    later.push({ v, text: u.before ? `${u.before}\n${v.body}` : v.body })
-    return { drop: 'Fjord: its model and effort are set first; the message follows' }
   }
   remember(v.nonce, v.body, v.now)
   return { text: v.body, context: u.before ? [u.before, ...(e.context ?? [])] : e.context, nonce: v.nonce }
@@ -973,21 +791,12 @@ const POLL_STUCK_MS = 5000
 const inFlight = new Set<string>()
 let deliveries: Promise<void> = Promise.resolve()
 
-/** What follows "ok" in a delivery's ack: how an interrupt went ("interrupted <turn id>", or "idle" when nothing ran), then what
- * the settings did. */
-const acked = (o: { applied?: string; interrupted?: string }) => {
-  const how = o.interrupted?.startsWith('stopped ') ? `interrupted ${o.interrupted.slice(8)}` : o.interrupted
-  const parts = [how, o.applied].filter((x) => x !== undefined)
-  return parts.length ? ` ${parts.join(' ')}` : ''
-}
-
 /** One look at this session's inbox: every message without an ack is checked, submitted or refused, and answered. */
 export async function poll($: EngineInterface) {
   const began = await $.clock.now()
   if (pollingSince && Math.abs(began - pollingSince) < POLL_STUCK_MS) return
   pollingSince = began
   try {
-    release($)
     const { inboxDir } = await config($)
     if (!inboxDir) return
     const dir = `${inboxDir}/${await $.session.id()}`
@@ -1013,19 +822,19 @@ export async function poll($: EngineInterface) {
         })()
         continue
       }
-      if (parseAbort(text) || parseStop(text)) {
+      if (parseAbort(text)) {
         const reply = await control($, text).catch((error) => `refused: ${String(error?.message ?? error)}`)
         await $.fs.write(`${dir}/${name.slice(0, -4)}.ack`, `${reply}\n`)
         continue
       }
-      // A delivery can take long (an interrupt waits for its words to be accepted): it runs apart from the look, one after
+      // A delivery can take long (its words wait to be accepted): it runs apart from the look, one after
       // another so the words keep their order, and its message is skipped by every look until its own ack is written.
       if (inFlight.has(name)) continue
       inFlight.add(name)
       const deliver = async () => {
         let outcome: Accepted | { ok: false; reason: string }
         try {
-          outcome = await accept($, text, true).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
+          outcome = await accept($, text).catch((error) => ({ ok: false as const, reason: String(error?.message ?? error) }))
         } catch {
           inFlight.delete(name)
           return
@@ -1033,7 +842,7 @@ export async function poll($: EngineInterface) {
         // The next delivery is submitted without waiting for this one's words to be taken in; the ack follows them.
         void (async () => {
           try {
-            await $.fs.write(`${dir}/${name.slice(0, -4)}.ack`, `${await receipt(outcome, (o) => `ok${acked(o)}`)}\n`)
+            await $.fs.write(`${dir}/${name.slice(0, -4)}.ack`, `${await receipt(outcome, () => 'ok')}\n`)
           } catch {
             // The ack couldn't be written: the next look takes the message again (its nonce is claimed, so it is refused as a replay).
           } finally {
@@ -1565,7 +1374,7 @@ extension ClaudePlugin {
 /// Delivery with no model, into one session's own inbox: the signed text is written to `relay/<session id>/<nonce>.msg` under
 /// Application Support, atomically, and the plugin in that session, which looks every half second, verifies it, submits it as
 /// the person's own words and answers with `<nonce>.ack` ("ok", or "refused: why"). Fjord reads the ack and removes both files
-/// (the plugin cannot delete). It is how a session is stopped, interrupted or taken back from, and how a message goes when no
+/// (the plugin cannot delete). It is how a delivery is taken back, and how a message goes when no
 /// other session can carry it (`RouterCarry`). A plugin that doesn't answer in time leaves the message withdrawn and its fate
 /// unsure: nothing else is tried, and if the plugin gets to it after all, a second copy is refused as a replay. The plugin also
 /// answers there, at the same name, for a message the app handed its session (`RouterCarry`), and `<nonce>.taken` marks a
@@ -1651,8 +1460,7 @@ struct RelayInbox: Sendable {
     }
 
     /// Writes `text` for `session` and waits for the plugin's answer. Throws `unanswered` when there's none within `timeout`
-    /// (the message is withdrawn first), `refused` when the plugin says no. Returns the plugin's answer: "ok", with what it
-    /// applied after it when the message carried settings ("ok model=opus effort=high").
+    /// (the message is withdrawn first), `refused` when the plugin says no. Returns the plugin's answer: "ok".
     /// `gate` says, on the main actor and right before the message is put in place (nothing awaited between the two), why it
     /// may no longer go: a reason refuses it, unwritten. The file is written aside off the main thread first (the folder, the
     /// write, its mode); only the gate and the rename that puts it where the plugin looks are on the main actor.
@@ -1716,9 +1524,6 @@ extension RouterPaths {
 }
 
 extension Store {
-    /// Whether `cli`'s plugin applies a model and an effort carried in a message (it says `settings-v1`, under the key held
-    /// now). An older plugin doesn't: nothing with settings is sent to it.
-
     /// Whether `cli`'s plugin takes back a delivery on a signed abort (it says `abort-v1`, under the key held now).
     func supportsAbort(_ cli: String) async -> Bool { await supports(ClaudePlugin.abortCapability, cli) }
 

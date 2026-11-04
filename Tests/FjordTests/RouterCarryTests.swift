@@ -518,7 +518,7 @@ import Testing
 
     private func running(_ cli: String, _ dir: TempDir, carries: Bool = true, entrypoint: String = "claude-desktop", status: String = "idle",
                          updated: Int64 = 100) {
-        var capabilities = ["inbox-v1", "settings-v1", "abort-v1", "stop-v1"]
+        var capabilities = ["inbox-v1", "abort-v1"]
         if carries { capabilities.append(ClaudePlugin.carryCapability) }
         PluginFixture.live(cli, support: dir.path("support"), claude: dir.path("claude"),
                            extra: ["capabilities": capabilities, "turn": NSNull()],
