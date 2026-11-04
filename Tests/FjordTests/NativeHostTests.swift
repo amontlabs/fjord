@@ -16,6 +16,29 @@ import Testing
         return url
     }
 
+    /// The engine's sockets are non-blocking: a line longer than the socket's buffer goes out whole once the reader drains it.
+    @Test func aLongLineReachesANonBlockingSocketWhole() throws {
+        var pair: [Int32] = [0, 0]
+        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
+        defer { close(pair[0]); close(pair[1]) }
+        _ = fcntl(pair[0], F_SETFL, fcntl(pair[0], F_GETFL) | O_NONBLOCK)
+        let data = Data(repeating: 0x61, count: 1 << 20)
+        var received = 0
+        let reader = Thread {
+            Thread.sleep(forTimeInterval: 0.2)  // the writer fills the buffer first
+            var buffer = [UInt8](repeating: 0, count: 65536)
+            while received < data.count {
+                let n = read(pair[1], &buffer, buffer.count)
+                if n <= 0 { break }
+                received += n
+            }
+        }
+        reader.start()
+        #expect(NativeHost.writeAll(pair[0], data))
+        while !reader.isFinished { Thread.sleep(forTimeInterval: 0.01) }
+        #expect(received == data.count)
+    }
+
     @Test func framingRoundTrips() {
         let body = Data(#"{"kind":"snapshot"}"#.utf8)
         let framed = NativeHost.frame(body)

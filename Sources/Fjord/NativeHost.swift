@@ -52,6 +52,12 @@ enum NativeHost {
             while sent < data.count {
                 let wrote = write(descriptor, bytes.baseAddress! + sent, data.count - sent)
                 if wrote < 0 && errno == EINTR { continue }
+                // A non-blocking socket (the engine's) whose buffer is full: wait until it drains, at most 5 s, so a long line isn't cut
+                if wrote < 0 && errno == EAGAIN {
+                    var ready = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
+                    if poll(&ready, 1, 5000) > 0 { continue }
+                    return false
+                }
                 if wrote <= 0 { return false }
                 sent += wrote
             }
