@@ -2,7 +2,7 @@
 import page
 
 TRUST = {"files": 3, "page": 2, "coordinator": 1}  # local process and files, then the thread on the page, then coordinator chat
-FINISHED = ("idle", "resolved")
+FINISHED = ("idle", "resolved", "done")  # done: the page's `section=done` row; idle and resolved: local files
 KEEP_ROWS = 100  # the page holds only the latest rows; so does the Board
 THREAD_FIELDS = ("active", "project", "title", "state", "needs", "detail", "text", "session", "alive", "result")
 

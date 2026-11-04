@@ -3,7 +3,7 @@
 Anything unreadable is "unknown" or None, never a guess. An event that can't be placed (no project in its path) gives no rows. A field of
 the wrong shape (a number for a list, a list for a key) is skipped, never raised on.
 """
-STATES = {"working", "needs_you", "idle", "resolved", "unknown"}
+STATES = {"working", "needs_you", "paused", "done", "idle", "resolved", "unknown"}  # the page sends the first four and unknown
 
 
 def row(kind, subject, **fields):

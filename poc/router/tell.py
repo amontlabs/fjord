@@ -29,7 +29,7 @@ def change(old, new):
 
 def standing(after):
     """Facts that still hold, so a told one can be updated quietly when its detail changes."""
-    kinds = {"needs_you": "needs_you", "stranded": "stranded", "idle": "finished", "resolved": "finished"}
+    kinds = {"needs_you": "needs_you", "stranded": "stranded", "idle": "finished", "resolved": "finished", "done": "finished"}
     return [fact(t, kinds[t["state"]]) for t in after["threads"].values() if t["state"] in kinds]
 
 

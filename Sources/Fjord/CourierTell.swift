@@ -52,7 +52,7 @@ enum CourierTell {
 
     /// Facts that still hold, so a told one can be updated quietly when its detail changes.
     static func standing(_ after: JSON) -> [JSON] {
-        let kinds = ["needs_you": "needs_you", "stranded": "stranded", "idle": "finished", "resolved": "finished"]
+        let kinds = ["needs_you": "needs_you", "stranded": "stranded", "idle": "finished", "resolved": "finished", "done": "finished"]
         return (after["threads"]?.asObject?.values ?? []).compactMap { t in t["state"]?.asString.flatMap { kinds[$0] }.map { fact(t, $0) } }
     }
 

@@ -28,7 +28,7 @@ final class CourierAcc {
 /// Boards, rows, proofs and places are JSON objects with the Python field names.
 enum CourierBoard {
     static let trust: [String: Int] = ["files": 3, "page": 2, "coordinator": 1]  // local process and files, then the thread on the page, then coordinator chat
-    static let finished: Set<String> = ["idle", "resolved"]
+    static let finished: Set<String> = ["idle", "resolved", "done"]  // done: the page's `section=done` row; idle and resolved: local files
     static let keepRows = 100  // the page holds only the latest rows; so does the Board
     static let threadFields = ["active", "project", "title", "state", "needs", "detail", "text", "session", "alive", "result"]
 

@@ -18,6 +18,12 @@ final class CourierStore {
     create table if not exists told (key text primary key, at real not null, project text, kind text, detail text, text text);
     create table if not exists notes (topic text primary key, text text not null, at real not null);
     create table if not exists intent_keys (key text primary key, intent integer not null);
+    create table if not exists items (seq integer primary key autoincrement, at real not null, project text, thread text,
+        kind text not null, item text not null, content text not null);
+    create index if not exists items_by_item on items (kind, item, seq);
+    create index if not exists items_by_project on items (project, seq);
+    create table if not exists checks (thread text primary key, project text not null, owed integer not null default 0, why text,
+        needs integer not null default 0, time real, read_at real, read_row text);
     """ + "\n"
 
     /// The columns a start's scans of every past intent read: not `proof`, which for a send holds its baseline's keys.

@@ -70,6 +70,7 @@ extension CourierCore {
             }
         }
         try backToWatched()
+        try afterWatch()
     }
 
     func deadline(_ run: Run) {
@@ -419,6 +420,7 @@ extension CourierCore {
     func finish(_ run: Run, _ status: String, _ cause: String? = nil, row: String? = nil, changes extra: [(String, JSON)] = []) throws {
         var changes = extra
         runs.pop(run.id)
+        runEnded()
         // A send still waiting in the page must not click later, whatever the outcome (a confirmed run's retry may wait too). A tool's
         // command is cut off only on a failure: a confirming read's own `done` closes its dialog.
         let waiting = !run.flag("tool") && inPage(run)

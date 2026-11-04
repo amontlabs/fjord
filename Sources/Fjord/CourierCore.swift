@@ -272,6 +272,8 @@ final class CourierCore {
     var claimed: [Place: Set<String>] = [:]
     var facts = OrderedMap<String, JSON>()
     var unproved = Set<Int>()  // acted, never proved: a later read can confirm
+    let watching = CourierFrames()  // the frames, their wanted set, checks, `home`, the handover and answers (CourierCoreFrames)
+    lazy var log = CourierLog(db)  // every item once by its id, and the threads' statuses (CourierFramesLog)
 
     /// `out(command)` sends one command down the socket. `wake()` says a deadline was added. `gone()` (set by the watcher) says the page
     /// went away: the watcher looks at Chrome again. `uptime()` is a clock that stands still while the Mac sleeps.
@@ -328,6 +330,8 @@ final class CourierCore {
                 }
             } else if ["pending", "paused"].contains(status) && CourierDo.tools.contains(tool) {  // a tool is never acted on twice: what was done is read, not done again
                 try sql.update(self.clock(), id, [("status", "failed"), ("cause", "routerd restarted before the change was proved")])
+            } else if ["pending", "paused"].contains(status) && tool == "answer" {  // a click is never sent twice across a restart
+                try sql.update(self.clock(), id, [("status", "failed"), ("cause", "routerd restarted before the answer was proved")])
             } else if status == "queued" {  // its earlier step's run is gone
                 try sql.update(self.clock(), id, [("status", "refused"), ("cause", "routerd restarted before the step before it was confirmed")])
             }
@@ -422,6 +426,8 @@ final class CourierCore {
     /// One event from the page.
     func handle(_ event: JSON) throws {
         jump(clock())
+        if try handleWatch(event) { return }  // a frame's event, `frames`, the handover's, `home`'s or an answer's `done`
+        let document = (self.loaded, self.instance)
         let type = event.get("type")?.asString
         let quiet = ["done", "notice", "wake_me"].contains(type ?? "\u{0}")
         if nopage && !(type == "page" || quiet) {
@@ -513,6 +519,7 @@ final class CourierCore {
             try reconcile(type!, project, complete: event.get("complete") == .bool(true))
         }
         if !watched.isEmpty && type == "rows", let project { try reconcileSends(Place(project, event.get("side") == "thread" ? thread : nil)) }
+        try watchTop(event, document: document)
     }
 
     /// A settled whole read of a place came: a watched send's going back there is over, used (`release_watch`), and a look there
@@ -718,6 +725,7 @@ final class CourierCore {
         if lastLocal != key {
             lastLocal = key
             try ingest(rows)
+            try logLocal()
             try advanceAll()
         }
     }
@@ -778,6 +786,7 @@ final class CourierCore {
                                   ("tool", .bool(CourierDo.tools.contains(intent.str("tool") ?? "")))]))
         if run.flag("tool") { goto(run, "start") }
         runs[id] = run
+        runAdded()
     }
 
     /// The run no longer needs the composer: a send the page took, or a tool whose act is done (it may still read to prove it).
@@ -1315,6 +1324,7 @@ extension CourierCore {
             command("cancel", [("target", .string(id))])
         }
         try unwatch()
+        try frameTick(now)
         if let w = watchOpen, w.holdUntil <= now {  // an open the page dropped, a tab that never arrived or settled
             releaseWatch(used: true)  // used: a place that never settles isn't opened again and again in one move
         }
@@ -1343,7 +1353,7 @@ extension CourierCore {
         if let w = watchOpen, w.holdUntil > clock() { holds.append(w.holdUntil) }
         holds += runs.values.filter { $0.flag("looking") && $0.num("looking")! > clock() }.map { $0.num("looking")! }  // a look's end frees the tab
         let all = runs.values.compactMap { $0.num("deadline") } + holds + runs.values.compactMap { $0.flag("fresh_at") ? $0.num("fresh_at") : nil }
-            + Array(wakes) + closing.values + watches
+            + Array(wakes) + closing.values + watches + frameDeadlines()
         return all.min()
     }
 

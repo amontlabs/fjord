@@ -14,6 +14,8 @@ enum CourierRequest {
     case tool(name: CourierTool, args: [String: JSON])
     case confirm(intentID: Int)
     case correct(intentID: Int, project: String)
+    /// Clicks option `option` (1-based, page order) of the pending card whose decision row's key is `card`, in that thread's frame.
+    case answer(project: String, thread: String, card: String, option: Int)
 }
 
 enum CourierTool: String {
@@ -513,6 +515,8 @@ actor CourierHost {
             case .correct(let intentID, let project):
                 id = intentID
                 try core.correct(intentID, project)
+            case .answer(let project, let thread, let card, let option):
+                try core.answer(project, thread, card: card, option: option, reply: noted)
             }
         }
         if let failure { log("routerd submit: \(failure)") }
@@ -539,6 +543,29 @@ actor CourierHost {
                                        + (project == nil ? "" : "and project = ? ") + "and at >= ? order by id desc limit 1",
                                        [.string(words)] + (project.map { [JSON.string($0)] } ?? []) + [.double(since.timeIntervalSince1970)])) ?? []
         return rows.first?["id"]?.asInt.map(CourierLookup.found) ?? .none
+    }
+
+    // MARK: The log, for the briefs (CourierFramesLog.swift's header has the shapes)
+
+    /// Every item of `project` (nil: all) past the cursor `after`, oldest first.
+    func items(project: String?, after cursor: Int) -> [CourierItem] {
+        (try? core?.db.items(project: project, after: cursor)) ?? []
+    }
+
+    /// The thread status changes of `project` (nil: all) past the cursor `after`.
+    func statusChanges(project: String?, after cursor: Int) -> [CourierItem] {
+        (try? core?.db.items(project: project, after: cursor, kind: "status")) ?? []
+    }
+
+    /// Each thread's latest recorded status.
+    func statuses(project: String?) -> [String: String] { core?.log.statuses(project: project) ?? [:] }
+
+    /// Each watched project's frame: live, stale since, or none.
+    func watch() -> [String: CourierWatch] {
+        guard let core else { return [:] }
+        var out: [String: CourierWatch] = [:]
+        for f in core.wanted() where f.thread == nil { out[f.project] = core.watch(f.project) }
+        return out
     }
 
     /// How many native hosts are linked.

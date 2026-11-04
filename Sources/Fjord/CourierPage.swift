@@ -5,7 +5,7 @@ import Foundation
 /// Anything unreadable is "unknown" or nil, never a guess. An event that can't be placed (no project in its path) gives no rows. A field of
 /// the wrong shape (a number for a list, a list for a key) is skipped, never raised on.
 enum CourierPage {
-    static let states: Set<String> = ["working", "needs_you", "idle", "resolved", "unknown"]
+    static let states: Set<String> = ["working", "needs_you", "paused", "done", "idle", "resolved", "unknown"]  // the page sends the first four and unknown
 
     static func row(_ kind: String, _ subject: String, _ fields: [(String, JSON)]) -> JSON {
         ["source": "page", "kind": .string(kind), "subject": .string(subject), "fields": .object(JSONObject(fields))]
@@ -161,8 +161,8 @@ enum CourierPage {
             if let list = event.get("threads")?.asArray, list.isEmpty {  // the project's list rendered with no rows: its threads are all finished
                 return [row("threadlist", project, [("ids", .array([]))])]
             }
-            return items(event.get("threads")).filter { t in
-                guard let id = t.get("thread")?.asString, !id.isEmpty else { return false }
+            return items(event.get("threads")).filter { t in  // a departure (`gone`) is no row: the core records it (`threadsSeen`)
+                guard let id = t.get("thread")?.asString, !id.isEmpty, t.get("gone") != .bool(true) else { return false }
                 return belongs(id, project)
             }.map { threadRow(project, $0) }
         }
