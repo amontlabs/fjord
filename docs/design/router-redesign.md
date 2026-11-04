@@ -150,6 +150,54 @@ Sonnet against shipped, paired: session +21 points (95% CI +11 to +34), project 
 - Limits: messages typed inside sessions, strict gold, one sample, written once and not tuned, and the shipped comparison
   covers under half of it.
 
+#### 2026-11-04: the app's Jev with projects as candidates, against Sonnet
+
+Project level (a project = the repo root of the true destination session), one sample per moment, strict gold. Sets: the same
+120 dev moments, plus 62 realB moments outside the sealed groups and the 120 (182 in all; 83 have a recorded shipped
+prediction). The runs: A is the shipped Router's recorded prediction (its full fusion, not Jev alone). B is one Jev call
+over the `swift` format's sessions and new sessions, with one `claude.ai project` option per project (6 latest session titles
+as threads, no purpose since the boards hold none), sent at 0.7. A′ is B without the project options (Jev alone, 0.7). C is
+Sonnet with rich context at 0.8 (the earlier 120 results reused; fresh calls for the 62). New-work = gold is a new session
+and the prediction is a new session in the right project (B can also pick a project, which hands the choice to its
+coordinator: counted separately as "lenient").
+
+| Set | Variant | n | Project top-1 | Sent without asking | Wrong of sent | New work right |
+|---|---|---|---|---|---|---|
+| 120 dev | A′ Jev, sessions | 120 | 52% | 22% | 3 of 26 | 1 of 12 |
+| 120 dev | B Jev + projects | 120 | 58% | 14% | 0 of 17 | 0 of 12 (lenient 2) |
+| 120 dev | C Sonnet rich | 120 | 92% | 52% | 2 of 62 | 4 of 12 |
+| 56 dev with shipped | A shipped | 56 | 79% | 30% | 0 of 17 | 0 of 3 |
+| 56 dev with shipped | B | 56 | 57% | 18% | 0 of 10 | 0 of 3 |
+| 56 dev with shipped | C | 56 | 95% | 62% | 0 of 35 | 2 of 3 |
+| 62 realB | A′ | 62 | 60% | 27% | 0 of 17 | 1 of 7 |
+| 62 realB | B | 62 | 61% | 19% | 0 of 12 | 1 of 7 |
+| 62 realB | C | 62 | 95% | 55% | 0 of 34 | 4 of 7 |
+| 83 with shipped (dev + realB) | A shipped | 83 | 83% | 31% | 0 of 26 | 0 of 5 |
+| 83 with shipped | B | 83 | 55% | 18% | 0 of 15 | 0 of 5 |
+| 83 with shipped | C | 83 | 94% | 65% | 0 of 54 | 2 of 5 |
+
+Paired differences in points, bootstrap 95% CI (4,000 resamples over moments):
+
+| Pair | Set | Project top-1 | Sent | Wrong sends per message |
+|---|---|---|---|---|
+| B − A′ | 120 dev | +7 (+2 to +12) | −8 (−12 to −2) | −2 (−6 to 0) |
+| C − B | 120 dev | +33 (+25 to +42) | +38 (+29 to +47) | +2 (0 to +4) |
+| C − B | 182 | +34 (+27 to +41) | +37 (+29 to +45) | +1 (0 to +3) |
+| C − A | 83 with shipped | +11 (+4 to +19) | +34 (+22 to +46) | 0 (0 to 0) |
+| B − A | 83 with shipped | −28 (−39 to −17) | −13 (−24 to −2) | 0 (0 to 0) |
+
+- Adding projects to Jev's candidates helps a little (+7 top-1) and makes it ask more, but it's still far under the shipped
+  Router and Sonnet. Jev alone sees only titles and the sessions' status lines; Sonnet reads summaries, its last answers
+  and what you last told it.
+- Wrong sends are rare at project level for every variant (a send to the right project in the wrong session isn't wrong here),
+  so the difference is in how many messages go through unasked: 14–31% for Jev and the shipped Router, 52–65% for Sonnet.
+- New work stays weak for all: Sonnet 8 of 19, the others 0 to 2 of 19.
+- Limits: B is Jev's choice alone at 0.7, not the app's full fusion and vetoes; the claude.ai project options are rebuilt from
+  the local boards (no purposes, thread titles are session titles); the shipped numbers cover 83 moments; one sample, no
+  tuning; the 120 dev moments were already used by the earlier run. Sonnet's number here is project-level, so it's higher
+  than the session-level figures above. A realB set limited to dev/calib groups (62 extra) is small. Raw answers (with message
+  text) stay in the scratchpad.
+
 ### The coordinator on new vs existing
 
 10 read-only messages sent to the real `lcu` project, expected outcomes written first
