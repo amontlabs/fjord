@@ -457,6 +457,14 @@ extension Sequence {
     }
 }
 
+extension Sequence {
+    /// A stable sort by a key compared with `orderedBy`.
+    func stableSorted<K>(by key: (Element) -> K, orderedBy less: (K, K) -> Bool) -> [Element] {
+        enumerated().map { ($0.offset, $0.element, key($0.element)) }
+            .sorted { less($0.2, $1.2) ? true : less($1.2, $0.2) ? false : $0.0 < $1.0 }.map(\.1)
+    }
+}
+
 /// `max(items, key=key)`: the first of the largest.
 func pyMaxBy<T>(_ items: [T], _ key: (T) -> Double) -> T? {
     var best: (T, Double)?
