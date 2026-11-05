@@ -127,6 +127,22 @@ import Testing
         #expect(doc.checked(answer, known: [], cards: [:], at: 1).needsYou.isEmpty)
     }
 
+    // MARK: The coordinator's own question
+
+    /// Live 2026-11-05: a coordinator with no question tool asked in its own reply; the brief said so but had no entry to answer.
+    @Test func theCoordinatorsQuestionIsAnEntryWhileTheModelKeepsIt() {
+        let ask = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"coordinator","kind":"request","question":"Which fruit?","options":[]}],"decisions":[],"loose_ends":[]}"#)
+        let doc = BriefDoc(project: "chan_p")
+        let prose = doc.checked(ask, known: [], cards: [:], at: 1)
+        #expect(prose.needsYou.map(\.thread) == ["coordinator"] && prose.needsYou.first?.question == "Which fruit?")
+        #expect(RouterBriefEngine.entries(model: prose.needsYou, board: BriefBoard()).count == 1)  // no board thread needed
+        let asQuestion = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"coordinator","kind":"question","question":"?","options":[]}],"decisions":[],"loose_ends":[]}"#)
+        #expect(doc.checked(asQuestion, known: [], cards: [:], at: 1).needsYou.isEmpty)  // only a request in words
+        #expect(BriefDoc(project: "local:p").checked(ask, known: [], cards: [:], at: 1).needsYou.isEmpty)  // a local project has none
+        let dropped = try! BriefDoc.parse(#"{"now":[],"needs_you":[],"decisions":[],"loose_ends":[]}"#)
+        #expect(doc.checked(dropped, known: [], cards: [:], at: 2).needsYou.isEmpty)
+    }
+
     // MARK: Purpose (P2-5)
 
     @Test func aSettingsReadWritesThePurposeAndACallUnderWayKeepsIt() async {

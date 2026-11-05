@@ -307,7 +307,8 @@ enum BriefKeys {
     }
 
     func title(_ t: BriefTarget) -> String {
-        docs[t.project]?.thread(t.thread)?.title.nonEmpty ?? "Untitled thread"
+        if t.thread == BriefDoc.coordinator { return "The project's coordinator" }
+        return docs[t.project]?.thread(t.thread)?.title.nonEmpty ?? "Untitled thread"
     }
 
     func entry(_ t: BriefTarget, store: Store) -> BriefEntry? {
@@ -388,7 +389,8 @@ enum BriefKeys {
         let shown = names[t.project]
         let entry = docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true
         begin(t) { [weak self] in
-            let id = await pills.send(text, to: .thread(project: t.project, thread: t.thread), shown: shown)
+            let to: RouterCourier.Target = t.thread == BriefDoc.coordinator ? .project(t.project) : .thread(project: t.project, thread: t.thread)
+            let id = await pills.send(text, to: to, shown: shown)
             await self?.follow(id, t, pills: pills, words: entry ? text : nil)
         }
         return true
@@ -468,7 +470,8 @@ enum BriefKeys {
             Claude.open(session)
             return true
         }
-        guard !t.project.hasPrefix("local:"), let url = URL(string: "https://claude.ai/code/project/\(t.project)?thread=\(t.thread)")
+        let page = "https://claude.ai/code/project/\(t.project)" + (t.thread == BriefDoc.coordinator ? "" : "?thread=\(t.thread)")
+        guard !t.project.hasPrefix("local:"), let url = URL(string: page)
         else { return false }
         guard !UnderTest.refuses("Chrome") else { return true }
         if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") {

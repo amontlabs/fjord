@@ -233,7 +233,9 @@ struct GeneralBrief: Equatable, Sendable {
     and the options the card gives, copied as they are), `decisions` (what the user decided or sent: a thread id, or "send" for \
     their own message) and `loose_ends`. Leave out what the current brief already covers: a coordinator that repeats a thread's \
     finish, or a late report, adds nothing. Drop an entry once its thread no longer waits on the user. For a request in plain \
-    words, write the question from the reply the item holds. Use only thread ids that appear in the brief or the items. Write \
+    words, write the question from the reply the item holds. A question the project's coordinator asks you in its own replies \
+    (a coordinator item, no thread) is one `needs_you` entry with the thread id "coordinator" and the kind "request"; drop it \
+    once you answered it or the coordinator moved on. Use only thread ids that appear in the brief or the items. Write \
     about the work, the way the user would say it: never mention the log, its items or their numbers, statuses or rows. A thread \
     pausing or resuming is news only with what it did or what it waits on; a bare status change adds nothing, and a missing \
     reason isn't a loose end. Loose ends are open work the user could forget, never gaps in what you were told. Rewrite or \
@@ -491,6 +493,8 @@ struct GeneralBrief: Equatable, Sendable {
         }
         let listed = Set(out.map(\.thread))
         for m in model where !listed.contains(m.thread) {
+            // The coordinator's own question stays while the model keeps it (it drops it once you answer or the coordinator moves on).
+            if m.thread == BriefDoc.coordinator { out.append(m); continue }
             let t = board.threads.first { $0.id == m.thread }
             // A stranded session stays until its thread works again.
             guard t?.status == .needsYou || (m.kind == .stranded && t?.status != .working) else { continue }

@@ -97,6 +97,8 @@ struct BriefDecision: Codable, Hashable, Sendable {
 
 struct BriefDoc: Codable, Equatable, Sendable {
     static let yourSend = "send"
+    /// The thread id of a question the project's coordinator asks in its own replies: you answer it in the project.
+    static let coordinator = "coordinator"
     static let maxNow = 3
     static let maxEntries = 20
     static let maxDecisions = 10
@@ -195,7 +197,8 @@ struct BriefDoc: Codable, Equatable, Sendable {
         out.now = Array(lines.prefix(Self.maxNow))
         var seen = Set<String>()
         out.needsYou = answer.needsYou.compactMap { raw in
-            guard exists.contains(raw.thread), let kind = BriefEntry.Kind(rawValue: raw.kind) else { return nil }
+            guard let kind = BriefEntry.Kind(rawValue: raw.kind) else { return nil }
+            guard exists.contains(raw.thread) || (raw.thread == Self.coordinator && kind == .request && !project.hasPrefix("local:")) else { return nil }
             let th = thread(raw.thread)
             // A thread working again waits on no one, stranded or not; a stranded session stays on past its done.
             if let th, th.status == .working || (kind != .stranded && th.status == .done) { return nil }
