@@ -15,8 +15,8 @@ measure and designs for both outcomes.
 One hidden, pinned, inactive tab (`#fjord`) runs Fjord's **top frame**, which does every delivery as today. Inside its document the
 top frame keeps hidden same-origin `<iframe>` nodes (appended to `document.documentElement`, outside the React root, 1200×900 off
 screen): a **project frame** per non-archived project on `/code/project/<id>`, and **thread frames** on `/code/project/<id>?thread=<key>`
-(1.8). Frames run the same content script in **watch mode**: they report, never type or click a composer, and run only `wake`,
-`overview` and, in a thread frame, `answer` (3.5). Every event from a frame carries `frame: {project, thread|null, frameId}`.
+(1.8). Frames run the same content script in **watch mode**: they report, never type or click a composer, and run only `wake`
+and, in a thread frame, `answer` (3.5). Every event from a frame carries `frame: {project, thread|null, frameId}`.
 
 | Who | Does | Reports |
 |---|---|---|
