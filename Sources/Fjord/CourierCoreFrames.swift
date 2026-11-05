@@ -313,6 +313,12 @@ extension CourierCore {
         if status == "paused" && prev == "done", let c = checks()[thread], c.readRow != nil, c.readRow == watching.rowSig[thread] {
             return  // a finished thread left in `active + dashed`: the row didn't change since its read
         }
+        // A finished thread left in `active + dashed` whose row shows nothing newer than its finish: every frame load reads it so
+        // (measured live 2026-11-05: paused, then done again, at each load), and that is no change.
+        // So is a thread waiting on a card (its row looks idle), read after a restart, before any thread view: its row only changes
+        // once it moves on.
+        if status == "paused" && (prev == "done" || prev == "needs you"), let time = watching.rowTime[thread], let at = log.statusAt[thread],
+           time <= at { return }
         if status == "done" { try log.setStatus(clock(), project: project, thread: thread, "done"); return dropThread(thread) }
         try log.setStatus(clock(), project: project, thread: thread, status)
         // A change moves its frames; so does a working thread with no frame yet (at launch, or after one was dropped).

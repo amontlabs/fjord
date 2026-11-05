@@ -184,6 +184,37 @@ import Testing
         #expect(w.statusItems("t1") == ["working", "paused", "done"])
     }
 
+    /// Measured live 2026-11-05: every frame load read finished threads, left in `active + dashed`, as paused, and they went done again.
+    @Test func aFinishedThreadsUnchangedDashedRowAtEachLoadAddsNothing() throws {
+        let w = try World()
+        try w.up()
+        let old = "2026-01-01T00:00:00Z"
+        try w.overview([Self.row("t1", "running", "working", time: old)])
+        try w.threadView("t1", [Self.msg("m1", 1)])
+        try w.core.handle(w.frame(["type": "threads", "threads": [Self.row("t1", "active", "paused", time: old)]]))
+        #expect(w.statusItems("t1") == ["working", "paused", "done"])
+        let w2 = try w.reopen()
+        try w2.up()
+        try w2.overview([Self.row("t1", "active", "paused", time: old)], listed: false)
+        #expect(w2.statusItems("t1") == ["working", "paused", "done"])  // the same row at the next load: no change
+        w2.box.t += 60
+        try w2.core.handle(w2.frame(["type": "threads", "threads": [Self.row("t1", "active", "paused", time: "2030-01-01T00:00:00Z")]]))
+        #expect(w2.status("t1") == "paused")  // the row moved on: it counts
+    }
+
+    @Test func aWaitingCardsIdleRowAfterARestartKeepsNeedsYou() throws {
+        let w = try World()
+        try w.up()
+        let old = "2026-01-01T00:00:00Z"
+        try w.overview([Self.row("t1", "running", "working", time: old)])
+        try w.threadView("t1", [Self.msg("m1", 1), Self.card("c1", 2)])
+        #expect(w.status("t1") == "needs you")
+        let w2 = try w.reopen()
+        try w2.up()
+        try w2.overview([Self.row("t1", "active", "paused", time: old)], listed: false)
+        #expect(w2.statusItems("t1") == ["working", "needs you"])
+    }
+
     @Test func aPlainWordsRequestIsOneNeedsYou() throws {
         let w = try World()
         try w.up()
