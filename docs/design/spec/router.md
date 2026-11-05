@@ -3,7 +3,7 @@
 Agreed with the user (2026-10-10). Replaces the single long-lived Claude Code session with a transcript.
 
 ## Principle
-Every trigger is a typed event that runs a short workflow. Deterministic rules first, Jev second, a Claude run (Haiku) only when judgment or tools are needed. Each run builds its own context; there is no transcript and no resume. Every run appends one entry to the decision log, which is the Router page's history.
+Every trigger is a typed event that runs a short workflow. Deterministic rules first, Jev second, a Claude run (Haiku) only when judgment or tools are needed. Each run builds its own context; there is no transcript and no resume. Every run appends one entry to the decision log, which is the history in the Router window's drawer.
 
 ## Surfaces
 - Router: your claude.ai projects and their threads, replies to a card's local session, and Fjord itself (app tools, changes shown as cards with Revert). Never GitHub. It starts no sessions and divides no message.

@@ -422,7 +422,7 @@ final class PaletteModel {
         var result: [PaletteSection] = []
         let needs = hits(needsYou)
         if !needs.isEmpty { result.append(PaletteSection(id: "needs", title: "Needs you", hits: needs)) }
-        // The whole history, newest first: picks that are gone (an addressed card) don't hide older ones that are not.
+        // The whole history, newest first: picks that are gone (an answered entry) don't hide older ones that are not.
         let recent = hits((usage?.recent(Int.max) ?? []).lazy.compactMap { self.byID[$0] }.filter { !seen.contains($0.id) }
             .prefix(Self.recents).map { $0 })
         if !recent.isEmpty { result.append(PaletteSection(id: "recents", title: "Recents", hits: Array(recent))) }

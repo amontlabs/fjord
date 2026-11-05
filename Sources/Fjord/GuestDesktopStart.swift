@@ -41,8 +41,7 @@ struct DesktopSSHSession: Equatable, Sendable {
 enum PendingDesktopStartMatcher {
     /// Returns a match only when the pending start and the Desktop SSH session both identify exactly one live guest
     /// presence. Repeated paths on different computers remain distinct through `SessionLocation`.
-    static func match(_ pending: PendingDesktopStart, desktop: [DesktopSSHSession], evidence: [GuestSessionEvidence],
-                      allowEditedPrompt: Bool = false) -> GuestSessionEvidence? {
+    static func match(_ pending: PendingDesktopStart, desktop: [DesktopSSHSession], evidence: [GuestSessionEvidence]) -> GuestSessionEvidence? {
         guard case .computer(let deviceId, let computerId) = pending.location else { return nil }
         let owners = desktop.filter { $0.alias == pending.alias && $0.folder == pending.folder }
         guard owners.count == 1 else { return nil }
@@ -50,7 +49,7 @@ enum PendingDesktopStartMatcher {
             && $0.hostSessionID == owners[0].id && ($0.capabilities.contains(ClaudePlugin.inboxCapability) || $0.formBacked)
             && $0.transcriptMessages.contains(where: { message in
                 guard let at = message.at, at >= pending.openedAt, message.cwd == pending.folder else { return false }
-                return pending.prompt.isEmpty || allowEditedPrompt || message.text.contains(pending.prompt)
+                return pending.prompt.isEmpty || message.text.contains(pending.prompt)
             }) }
         return candidates.count == 1 ? candidates[0] : nil
     }
@@ -60,8 +59,7 @@ extension Store {
     /// Called after a guest watcher update and a Desktop metadata refresh. The pair is persisted only after an
     /// unambiguous host-session id and a transcript message confirm this exact prepared start.
     @discardableResult
-    func reconcileDesktopStart(_ pendingID: UUID, desktop: [DesktopSSHSession], evidence: [GuestSessionEvidence],
-                               allowEditedPrompt: Bool = false) -> Bool {
+    func reconcileDesktopStart(_ pendingID: UUID, desktop: [DesktopSSHSession], evidence: [GuestSessionEvidence]) -> Bool {
         var state = router
         guard let index = state.pendingDesktopStarts.firstIndex(where: { $0.id == pendingID }),
               state.pendingDesktopStarts[index].state == .readyInClaude else { return false }
@@ -70,7 +68,7 @@ extension Store {
         })
         let available = desktop.filter { !claimed.contains($0.id) }
         guard let match = PendingDesktopStartMatcher.match(state.pendingDesktopStarts[index], desktop: available,
-                                                             evidence: evidence, allowEditedPrompt: allowEditedPrompt) else { return false }
+                                                             evidence: evidence) else { return false }
         state.pendingDesktopStarts[index].state = .matched
         state.pendingDesktopStarts[index].desktopSessionID = match.hostSessionID
         state.pendingDesktopStarts[index].guestSessionID = match.cliSessionID

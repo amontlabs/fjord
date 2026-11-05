@@ -82,6 +82,8 @@ struct RouterAskBack: Identifiable, Equatable {
         case send(String)
         /// Wholly for the Router ("@router what needs me?").
         case answer
+        /// A reply to a thread that can't be reached now: refused, never guessed elsewhere.
+        case unreachable(String)
         case decide
     }
 
@@ -447,6 +449,9 @@ struct RouterAskBack: Identifiable, Equatable {
             try await route(job, to: target)
         case .answer:
             try await think(job, .question)
+        case .unreachable(let why):
+            chosen(job)
+            throw RouterTools.Failure(why)
         case .decide:
             try await decideAndAct(job)
         }
@@ -468,8 +473,9 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Where a message goes without a model: the thread a reply is armed on (its session on this Mac, else its claude.ai thread), a Retry's confirmed place, or the one claude.ai
-    /// place tagged (and nothing else that says where). Words wholly for the Router are its own. Anything else is decided.
+    /// Where a message goes without a model: the thread a reply is armed on (its session on this Mac, else its claude.ai thread;
+    /// neither reachable, it is refused), a Retry's confirmed place, or the one claude.ai place tagged (and nothing else that
+    /// says where). Words wholly for the Router are its own. Anything else is decided.
     static func plan(text: String, context: RouterContext, store: Store) -> Plan {
         // An action's message is never the Router's own, nor a reply: it goes to a claude.ai place.
         let unattended = context.action != nil
@@ -480,6 +486,9 @@ struct RouterAskBack: Identifiable, Equatable {
             }
             let thread = RouterCourier.Target.thread(project: t.project, thread: t.thread)
             if !t.project.hasPrefix("local:"), RouterCourier.eligible(thread, store: store) { return .send(thread.targetID) }
+            // Your reply is for that thread alone: it doesn't go to another place a model would pick.
+            return .unreachable(t.project.hasPrefix("local:") ? "Not sent: that session isn't open in the Claude app"
+                                                               : "Not sent: that thread can't be reached on claude.ai now")
         }
         if !unattended, let target = context.target, let courier = RouterCourier.Target(target),
            RouterCourier.eligible(courier, store: store) {

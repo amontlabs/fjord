@@ -422,7 +422,7 @@ enum FormHook {
                 return .answered
             }
             if transcript.answered() { cleanUp(); return .answeredElsewhere }
-            // The call is known: the form says which it is, so Fjord puts it on that call's card only.
+            // The call is known: the form says which it is, so Fjord ties it to that call only.
             if let call = transcript.id, record["tool_use_id"] == nil {
                 record["tool_use_id"] = call
                 if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) {

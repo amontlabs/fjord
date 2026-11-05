@@ -476,7 +476,7 @@ enum PlaygroundShots {
         let briefs = store.routerBriefs
         if let kind = shot.focuses { briefs.focus(briefs.page().entries.first { $0.kind == kind }?.target) }
         if shot.composing, let local = briefs.page().entries.first(where: { $0.source == .local }) {
-            model.replyTo = local.target
+            briefs.focus(local.target)
             model.pointers = [.project("/Users/me/code/lookout")]
             model.draft = "yes, ask first; and tell \(MentionText.markString) about it"
         }

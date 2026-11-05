@@ -631,59 +631,7 @@ private struct AccountPausingGuestClient: GuestClient {
             transcriptMessages: [YourMessages.Message(uuid: "message-edited", parent: nil,
                 text: "The person edited the prefilled task", cwd: "/workspace/repo", at: opened.addingTimeInterval(10))])
         #expect(PendingDesktopStartMatcher.match(edited, desktop: [desktop], evidence: [editedEvidence]) == nil)
-        #expect(PendingDesktopStartMatcher.match(edited, desktop: [desktop], evidence: [editedEvidence],
-                                                 allowEditedPrompt: true) == editedEvidence)
     }
-
-    @MainActor @Test func personCanSelectTheActualDesktopSessionAfterEditingThePrefill() async throws {
-        defer { GuestRouterRuntime.shared.stopAll() }
-        let store = Store(engineClient: MockEngineClient())
-        store.persists = false
-        let opened = Date(timeIntervalSince1970: 1_800_000_000)
-        let desktopID = "local_edited_guest"
-        let cliID = "guest-cli-edited"
-        store.claudeSessions[desktopID] = ClaudeSession(id: desktopID, title: "Edited task", folder: "/workspace/repo",
-            lastActivity: opened.addingTimeInterval(10), running: false, cliID: cliID, sshHost: "ssh-computer-1")
-        let pending = PendingDesktopStart(projectID: UUID(),
-            location: .computer(deviceId: computer.deviceId, computerId: computer.computerId),
-            alias: "ssh-computer-1", folder: "/workspace/repo", prompt: "Original prefill", openedAt: opened)
-        var state = store.router
-        state.pendingDesktopStarts = [pending]
-        store.router = state
-
-        let guest = client()
-        let paths = try GuestRouterPaths(home: account.home)
-        let key = String(repeating: "cd", count: 32)
-        let start: Int64 = 1_800_000_000_000
-        _ = try await guest.filesWrite(.init(computer: computer, path: paths.key, data: Data(key.utf8), mode: 0o600))
-        let presence = try JSONSerialization.data(withJSONObject: [
-            "state": "live", "sessionId": cliID, "pid": 42, "startedAt": 123,
-            "keyId": ClaudePlugin.keyID(of: key), "renewedAt": start, "capabilities": [ClaudePlugin.inboxCapability],
-        ])
-        _ = try await guest.filesWrite(.init(computer: computer, path: GuestRouterPaths.join(paths.presence, cliID), data: presence, mode: 0o600))
-        let registry = try JSONSerialization.data(withJSONObject: [
-            "hostSessionId": desktopID, "sessionId": cliID, "pid": 42, "startedAt": 123,
-        ])
-        _ = try await guest.filesWrite(.init(computer: computer, path: GuestRouterPaths.join(paths.registry, "42.json"), data: registry, mode: 0o600))
-        let transcript = try JSONSerialization.data(withJSONObject: [
-            "type": "user", "uuid": "message-edited", "cwd": "/workspace/repo", "timestamp": "2027-01-15T08:00:10.000Z",
-            "message": ["role": "user", "content": "The person edited the prefilled task"],
-        ], options: [.sortedKeys]) + Data("\n".utf8)
-        _ = try await guest.filesWrite(.init(computer: computer,
-            path: GuestRouterPaths.join(GuestRouterPaths.join(paths.projects, "workspace-repo"), "\(cliID).jsonl"),
-            data: transcript, mode: 0o600))
-        let clockArgv = [account.nodeExecutable, "-e", "process.stdout.write(String(Date.now()))"]
-        await guest.setExecResult(GuestExecResult(exitCode: 0, stdout: Data(String(start + 1_000).utf8), stderr: Data()), argv: clockArgv)
-
-        try await GuestRouterRuntime.shared.startWatching(store: store, client: guest, computer: computer)
-
-        #expect(store.router.pendingDesktopStarts.first?.state == .readyInClaude)
-        #expect(GuestRouterRuntime.shared.selectableDesktopSessions(for: pending.id).map(\.id) == [desktopID])
-        #expect(GuestRouterRuntime.shared.selectDesktopSession(desktopID, for: pending.id))
-        #expect(store.router.pendingDesktopStarts.first?.state == .matched)
-        #expect(store.router.pendingDesktopStarts.first?.guestSessionID == cliID)
-    }
-
 
     @MainActor @Test func matchedSessionKeepsGuestIdentityWhenMappedBackToItsRouterProject() {
         let store = Store(engineClient: MockEngineClient())

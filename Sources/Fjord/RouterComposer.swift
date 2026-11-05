@@ -2,11 +2,10 @@ import AppKit
 import SwiftUI
 
 /// Where you write to the Router, drawn as the Claude Code tab's composer (docs/design/spec/composer-overlays.md): the
-/// context strip over the card (the thread the message replies to, with its ×; Backspace at the start takes it off) and the
-/// card (Return sends, ⇧Return starts a new line, see `RouterKeys`). Typing @ suggests projects, sessions, notifications and
-/// categories over the caret (↑↓, Return or Tab picks, Esc dismisses); a pick is a pill in the text where the @ was (see
-/// `MentionField`, `RouterPointer`). Once typing pauses, Jev's
-/// pick of where the message goes is a ghost chip in the strip: a click fixes it, Esc waves it off. Stop while the Router works. On macOS 26 it floats over the page (glass-plan
+/// context strip over the input box (the thread the message replies to, with its ×; Backspace at the start takes it off) and
+/// the input box (Return sends, ⇧Return starts a new line, see `RouterKeys`). Typing @ suggests projects, sessions,
+/// notifications and categories over the caret (↑↓, Return or Tab picks, Esc dismisses); a pick is a pill in the text where
+/// the @ was (see `MentionField`, `RouterPointer`). Stop while the Router works. On macOS 26 it floats over the page (glass-plan
 /// §5.4): the card and the strip are Regular glass (their field and chips as they are), or `s3` where the chrome is opaque.
 struct RouterComposer: View {
     let store: Store
@@ -60,7 +59,7 @@ struct RouterComposer: View {
                 RouterAskPill(store: store, ask: ask).padding(.bottom, C.dockGap).transition(.opacity)
             }
             // Who your words go to, as the Code tab's strip over its composer: the thread you reply to.
-            if model.replyTo != nil || store.routerBriefs.focused != nil {
+            if store.routerBriefs.focused != nil {
                 strip.padding(.bottom, C.dockGap)
             }
             card(on: on, working: working)
@@ -129,16 +128,11 @@ struct RouterComposer: View {
     /// The thread the message replies to, removable.
     private var strip: some View {
         FlowLayout(spacing: C.stripGap) {
-            // The brief entry focused: your words go to its thread.
+            // The thread your words go to.
             if let target = store.routerBriefs.focused {
                 let title = store.routerBriefs.title(target)
                 ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.warning,
                              removeLabel: "Stop replying to \(title)") { store.routerBriefs.focus(nil) }
-            }
-            if let target = model.replyTo {
-                let title = store.routerBriefs.title(target)
-                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.accent,
-                             removeLabel: "Stop replying to \(title)") { model.replyTo = nil }
             }
         }
         .padding(CDS.Density.compact.pad.md)
@@ -181,8 +175,7 @@ struct RouterComposer: View {
         // `min(24rem, 40svh)` less the card's padding, in 20 pt lines.
         let limit = min(C.maxHeight, windowHeight > 0 ? windowHeight * C.maxHeightShare : C.maxHeight)
         let lines = max(1, Int((limit - 2 * C.pad - (C.row - 20)) / 20))
-        let placeholder = store.routerBriefs.focused != nil ? "Reply to this thread"
-            : model.replyTo == nil ? "Tell the Router what to pass on, or ask" : "Reply, or tell the Router"
+        let placeholder = store.routerBriefs.focused != nil ? "Reply to this thread" : "Tell the Router what to pass on, or ask"
         // Told on every change of the text view's first responder, not on a change of `focused`: the kept composer given the
         // keyboard again after a close may still read focused, and the model must hear it has the keyboard again.
         return MentionField(store: store, model: model, maxHeight: CGFloat(lines) * 20, editable: on, focusTick: focusTick) { now in

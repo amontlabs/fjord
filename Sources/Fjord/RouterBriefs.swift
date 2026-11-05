@@ -48,7 +48,8 @@ struct BriefPage: Equatable {
     /// Entries not marked read, every project: the bar's mark.
     var needsYou = 0
 
-    static func entryKey(_ e: BriefEntry) -> String { "\(e.project)/\(e.thread)/\(Int(e.since))" }
+    /// What a read mark holds to: the entry's episode on the Board (its status change, or its card), else the model's `since`.
+    static func entryKey(_ e: BriefEntry) -> String { "\(e.project)/\(e.thread)/\(e.episode ?? String(Int(e.since)))" }
     static func finishKey(_ t: BriefThread) -> String { "\(t.id)@\(Int(t.age))" }
 
     static func staleSince(_ watch: String?) -> Double? {
@@ -100,17 +101,18 @@ struct BriefPage: Equatable {
 }
 
 /// The brief's keys, while an entry is focused and the composer is empty (else every key types): Return confirms or replies,
-/// 1 to 9 pick an option by the top row's physical key codes (the same keys on AZERTY, where the unshifted characters differ),
-/// O open, A archive, R mark read, Esc back.
+/// Esc steps back, ↑↓ walk the entries. With the keyboard on the brief (not in the composer) also 1 to 9, which pick an
+/// option by the top row's physical key codes (the same keys on AZERTY, where the unshifted characters differ), O open,
+/// A archive and R mark read: in the composer, letters and digits are always your words.
 enum BriefKeys {
     enum Action: Equatable { case pick(Int), confirm, open, archive, read, back, move(down: Bool) }
 
     /// `kVK_ANSI_1` … `kVK_ANSI_9`.
     static let digits: [Int] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
-    static func action(code: Int, characters: String?, flags: NSEvent.ModifierFlags, focused: Bool, composerEmpty: Bool) -> Action? {
+    static func action(code: Int, characters: String?, flags: NSEvent.ModifierFlags, focused: Bool, composerEmpty: Bool,
+                       inComposer: Bool = false) -> Action? {
         guard focused, composerEmpty, flags.intersection([.command, .control, .option]).isEmpty else { return nil }
-        if let i = digits.firstIndex(of: code) { return .pick(i + 1) }
         switch code {
         case 36, 76: return flags.contains(.shift) ? nil : .confirm
         case 53: return .back
@@ -118,6 +120,8 @@ enum BriefKeys {
         case 126: return .move(down: false)
         default: break
         }
+        guard !inComposer else { return nil }
+        if let i = digits.firstIndex(of: code) { return .pick(i + 1) }
         guard flags.subtracting(.shift).isEmpty else { return nil }
         switch characters?.lowercased() {
         case "o": return .open
@@ -129,9 +133,17 @@ enum BriefKeys {
 }
 
 @MainActor @Observable final class RouterBriefs {
+    /// Notification ids of brief entries: `brief:<project>/<thread>`.
+    nonisolated static let notificationPrefix = "brief:"
+    /// More new entries than this at once: one banner says how many.
+    static let notifyEach = 3
+
     private(set) var engine: RouterBriefEngine?
+    @ObservationIgnored weak var store: Store?
     /// A demo's or a shot's documents, when no engine runs.
-    var demoDocs: [String: BriefDoc] = [:]
+    var demoDocs: [String: BriefDoc] = [:] {
+        didSet { docsChanged() }
+    }
     var demoGeneral = GeneralBrief()
     var demoVersions: [String: [BriefVersion]] = [:]
     var names: [String: String] = [:]
@@ -139,6 +151,8 @@ enum BriefKeys {
     var sessions: [String: String] = [:]
     var clis: [String: String] = [:]
 
+    /// The one thread your words go to: the entry focused on the brief, or a thread you picked Reply on (the palette's).
+    /// The composer's chip shows it; Esc or Backspace at the composer's start takes it off.
     var focused: BriefTarget?
     /// Option N picked on an entry, shown live until Return sends it.
     var picked: [BriefTarget: Int] = [:]
@@ -149,6 +163,9 @@ enum BriefKeys {
     var trouble: [BriefTarget: String] = [:]
     /// Answers handed over, until the entry leaves on proof.
     var sending: [BriefTarget: Int] = [:]
+    /// Entries with an answer under way: no other pick or answer until it settles.
+    private(set) var answering: Set<BriefTarget> = []
+    @ObservationIgnored private var work: [BriefTarget: Task<Void, Never>] = [:]
     /// Entries marked read (`BriefPage.entryKey`), threads archived (`BriefTarget.key`), and finished threads told (their
     /// section was shown and then left), as briefs.db keeps them.
     private(set) var marks = BriefMarks()
@@ -157,6 +174,8 @@ enum BriefKeys {
     var told: Set<String> { marks.told }
     @ObservationIgnored var shownFinishes: Set<String> = []
     private(set) var answers: [BriefAnswer] = []
+    /// Entries not marked read, every project (the bar's mark): counted when the documents or the marks change.
+    private(set) var untoldNeedsYou = 0
     /// The page's clock (a shot pins it).
     @ObservationIgnored var clock: () -> Date = Date.init
 
@@ -170,19 +189,18 @@ enum BriefKeys {
                        now: clock().timeIntervalSince1970)
     }
 
-    var untoldNeedsYou: Int { page().needsYou }
-
     // MARK: Start
 
-    /// Starts the engine on the link's host: `briefs.db` next to router.db, the host's changes driving it.
+    /// Starts the engine on the link's host, with the Router on: `briefs.db` next to router.db, the host's changes driving it.
     func start(store: Store) {
-        guard engine == nil, let host = store.routerCourierLink.host else { return }
+        guard engine == nil, store.routerOn, let host = store.routerCourierLink.host else { return }
         let path = URL(fileURLWithPath: host.dbPath).deletingLastPathComponent().appendingPathComponent("briefs.db").path
         guard let db = try? SQLiteBriefStore(path: path) else { return }
         let engine = RouterBriefEngine(source: CourierBriefSource(host: host), store: db, model: RouterBriefer.haiku(store: store),
                                        style: { [weak store] in store?.routerStyle ?? RouterStyle.defaultText })
         self.engine = engine
         marks = engine.marks()
+        engine.onDocs = { [weak self] in self?.docsChanged() }
         link.onChange = { [weak self, weak store] change in
             guard let self else { return }
             if self.names != change.names { self.names = change.names }
@@ -194,6 +212,54 @@ enum BriefKeys {
             let facts = await host.allBriefFacts()
             self?.names = facts.mapValues(\.name)
             engine.start()
+        }
+    }
+
+    /// The Router switched on or off: the engine runs only while it is on (no model call with it off).
+    func switched(store: Store) {
+        if store.routerOn {
+            if let engine { engine.start() } else { start(store: store) }
+        } else {
+            engine?.stop()
+        }
+    }
+
+    // MARK: Count and banners
+
+    /// The documents or the marks changed: the count again, and a banner for each entry newly told (once per entry).
+    private func docsChanged() {
+        recount()
+        guard engine != nil, let store else { return }
+        announce(store: store)
+    }
+
+    private func recount() {
+        let count = page().needsYou
+        if untoldNeedsYou != count { untoldNeedsYou = count }
+    }
+
+    /// The entries no banner has told yet (not read, not archived), each told once, through the app's banners; more than
+    /// `notifyEach` at once, one banner says how many.
+    func announce(store: Store) {
+        var fresh: [(name: String, entry: BriefEntry)] = []
+        for (id, doc) in docs.sorted(by: { $0.key < $1.key }) {
+            for e in doc.needsYou where !marks.notified.contains(BriefPage.entryKey(e)) && !read.contains(BriefPage.entryKey(e))
+                && !archived.contains(e.target.key) {
+                fresh.append((names[id].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(id), e))
+            }
+        }
+        guard !fresh.isEmpty else { return }
+        for f in fresh { set(.notified, BriefPage.entryKey(f.entry), on: true) }
+        if fresh.count > Self.notifyEach {
+            let first = fresh.min { $0.entry.since < $1.entry.since }!.entry
+            store.notifyRouter(id: Self.notificationPrefix + first.target.key, title: "\(fresh.count) threads need you",
+                               subtitle: Set(fresh.map(\.name)).sorted().joined(separator: ", "), body: "")
+            return
+        }
+        for f in fresh {
+            let e = f.entry
+            store.notifyRouter(id: Self.notificationPrefix + e.target.key, title: "\(f.name) · needs you", subtitle: title(e.target),
+                               body: e.question ?? BriefEntryCard.kindLabel(e))
         }
     }
 
@@ -260,8 +326,9 @@ enum BriefKeys {
         focus(all[min(max(i + (down ? 1 : -1), 0), all.count - 1)])
     }
 
+    /// Picks option N, or takes it back when it is the one picked; nothing while an answer is under way.
     func pick(_ t: BriefTarget, _ option: Int, store: Store) {
-        guard let e = entry(t, store: store), option >= 1, option <= e.options.count else { return }
+        guard !answering.contains(t), let e = entry(t, store: store), option >= 1, option <= e.options.count else { return }
         focus(t)
         trouble[t] = nil
         picked[t] = picked[t] == option ? nil : option
@@ -269,66 +336,100 @@ enum BriefKeys {
 
     // MARK: Acts
 
-    /// Return on an entry with an option picked: the answer goes (an answer can't be unsent).
+    /// Option N answered at once, whatever you had picked (the MCP's `answer`): your pick isn't toggled.
+    @discardableResult
+    func answer(_ t: BriefTarget, option: Int, store: Store) -> Bool {
+        guard !answering.contains(t), let e = entry(t, store: store), option >= 1, option <= e.options.count else { return false }
+        trouble[t] = nil
+        picked[t] = option
+        return confirm(t, store: store)
+    }
+
+    /// Return on an entry with an option picked: the answer goes (an answer can't be unsent). One at a time: a second
+    /// Return while the first is under way does nothing.
     @discardableResult
     func confirm(_ t: BriefTarget, store: Store) -> Bool {
-        guard let n = picked[t], let e = entry(t, store: store), n <= e.options.count else { return false }
+        guard !answering.contains(t), let n = picked[t], let e = entry(t, store: store), n <= e.options.count else { return false }
         let label = e.options[n - 1]
-        picked[t] = nil
         if let form = form(e, store: store) {
+            picked[t] = nil
             answerForm(form, entry: e, option: n, words: nil, store: store)
-        } else if let card = e.card {
-            let pills = store.routerCourier
-            let shown = names[t.project]
-            Task { [weak self] in
-                let id = await pills.answer(project: t.project, thread: t.thread, card: card, option: n, label: label, shown: shown)
-                self?.follow(id, t, pills: pills)
-            }
-        } else {
-            return false
+            return true
         }
-        record(t, label)
+        guard let card = e.card else { return false }
+        picked[t] = nil
+        let pills = store.routerCourier
+        let shown = names[t.project]
+        begin(t) { [weak self] in
+            let id = await pills.answer(project: t.project, thread: t.thread, card: card, option: n, label: label, shown: shown)
+            await self?.follow(id, t, pills: pills, words: label)
+        }
         return true
     }
 
-    /// Your words to the entry's thread: explicit target, no model. A local form takes them through the hook.
+    /// Your words to the thread: explicit target, no model. A local form takes them through the hook; a local session with
+    /// none gets them as a reply through the Router's dispatcher, as the composer's reply did.
     @discardableResult
     func send(_ words: String, to t: BriefTarget, store: Store) -> Bool {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return false }
+        guard !text.isEmpty, !answering.contains(t) else { return false }
         if let e = entry(t, store: store), let form = form(e, store: store) {
             answerForm(form, entry: e, option: nil, words: text, store: store)
-            record(t, text)
             return true
         }
-        guard !t.project.hasPrefix("local:") else {
-            trouble[t] = "This session runs only on this Mac: answer it in the Claude app."
-            return false
+        if t.project.hasPrefix("local:") {
+            guard store.sendToRouter(text, context: RouterContext(replyTo: t)) else {
+                trouble[t] = "This session can't be reached from here: answer it in the Claude app."
+                return false
+            }
+            return true
         }
         let pills = store.routerCourier
         let shown = names[t.project]
-        Task { await pills.send(text, to: .thread(project: t.project, thread: t.thread), shown: shown) }
-        if docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true { record(t, text) }
+        let entry = docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true
+        begin(t) { [weak self] in
+            let id = await pills.send(text, to: .thread(project: t.project, thread: t.thread), shown: shown)
+            await self?.follow(id, t, pills: pills, words: entry ? text : nil)
+        }
         return true
     }
 
-    private func follow(_ id: Int, _ t: BriefTarget, pills: RouterCourierPills) {
+    /// Runs an answer, the entry held (`answering`) from now until it settles.
+    private func begin(_ t: BriefTarget, _ run: @escaping @MainActor () async -> Void) {
+        answering.insert(t)
+        work[t] = Task { [weak self] in
+            await run()
+            self?.answering.remove(t)
+            self?.work[t] = nil
+        }
+    }
+
+    /// Waits for every answer under way (tests).
+    func settled() async {
+        while let (_, task) = work.first { await task.value }
+    }
+
+    /// Follows an answer handed over until it is delivered or fails: delivered, its line goes in the drawer (`words`).
+    private func follow(_ id: Int, _ t: BriefTarget, pills: RouterCourierPills, words: String?) async {
         guard id > 0 else { trouble[t] = "The answer couldn't be handed over."; return }
         sending[t] = id
-        Task { [weak self] in
-            let done = await pills.next(id) { [.delivered, .deliveredLate, .failed, .refused].contains($0) }
-            guard let self, self.sending[t] == id else { return }
-            self.sending[t] = nil
-            if let done, done.state == .failed || done.state == .refused { self.trouble[t] = done.cause ?? "The answer didn't go." }
+        let done = await pills.next(id) { [.delivered, .deliveredLate, .failed, .refused].contains($0) }
+        guard sending[t] == id else { return }
+        sending[t] = nil
+        if let done, done.state == .failed || done.state == .refused {
+            trouble[t] = done.cause ?? "The answer didn't go."
+        } else if done != nil, let words {
+            record(t, words)
         }
     }
 
     /// A local form: an option picked (a plan's first approves), or your words read by Jev, written for the hook (on this Mac
-    /// or the remote computer that holds it).
+    /// or the remote computer that holds it). Its line goes in the drawer once written.
     private func answerForm(_ form: PendingForm, entry e: BriefEntry, option: Int?, words: String?, store: Store) {
         let t = e.target
         let snapshot = FormSnapshot(target: t, form: form)
-        Task { [weak self, weak store] in
+        let shown = option.map { e.options[$0 - 1] } ?? words ?? ""
+        begin(t) { [weak self, weak store] in
             guard let store else { return }
             let result: Result<Void, Error>
             if form.isPlan {
@@ -353,20 +454,23 @@ enum BriefKeys {
                 }
                 result = await store.answerForm(form, answers, target: t, snapshot: snapshot)
             }
-            if case .failure(let error) = result {
-                self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't written."
+            switch result {
+            case .success: self?.record(t, shown)
+            case .failure(let error): self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't written."
             }
         }
     }
 
-    /// Opens the thread: a cloud thread in a new active tab, a local one in the Claude app.
-    func open(_ t: BriefTarget, store: Store) {
+    /// Opens the thread: a cloud thread in a new active tab, a local one in the Claude app. Whether there was one to open.
+    @discardableResult
+    func open(_ t: BriefTarget, store: Store) -> Bool {
         if let session = desktopSession(t, store: store) {
             Claude.open(session)
-            return
+            return true
         }
-        guard !t.project.hasPrefix("local:"), !UnderTest.refuses("Chrome"),
-              let url = URL(string: "https://claude.ai/code/project/\(t.project)?thread=\(t.thread)") else { return }
+        guard !t.project.hasPrefix("local:"), let url = URL(string: "https://claude.ai/code/project/\(t.project)?thread=\(t.thread)")
+        else { return false }
+        guard !UnderTest.refuses("Chrome") else { return true }
         if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") {
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
@@ -374,19 +478,20 @@ enum BriefKeys {
         } else {
             NSWorkspace.shared.open(url)
         }
+        return true
     }
 
     /// Marks the entry read: a change of Fjord's, with its Revert in the drawer.
     func markRead(_ t: BriefTarget, store: Store) {
         guard let e = docs[t.project]?.needsYou.first(where: { $0.target == t }) else { return }
         store.briefAct(.read, on: t, mark: BriefPage.entryKey(e), title: title(t))
-        advanceFocus(from: t)
+        leave(t)
     }
 
     /// Archives the thread: it leaves the brief until Revert.
     func archive(_ t: BriefTarget, store: Store) {
         store.briefAct(.archive, on: t, mark: t.key, title: title(t))
-        advanceFocus(from: t)
+        leave(t)
     }
 
     /// Sets or clears a mark, and keeps it in briefs.db.
@@ -399,11 +504,13 @@ enum BriefKeys {
         guard marks[kind].contains(key) != on else { return }
         if on { marks[kind].insert(key) } else { marks[kind].remove(key) }
         engine?.setMark(kind, key, on: on)
+        if kind == .read || kind == .archived { recount() }
     }
 
-    private func advanceFocus(from t: BriefTarget) {
-        guard focused == t else { return }
-        focus(page().entries.first?.target)
+    /// The entry your words went to left the brief: they go nowhere now (never on to another entry unasked).
+    private func leave(_ t: BriefTarget) {
+        picked[t] = nil
+        if focused == t { focus(nil) }
     }
 
     func record(_ t: BriefTarget, _ words: String) {
@@ -424,25 +531,35 @@ enum BriefKeys {
 
     // MARK: Keys
 
-    /// A key of the brief's, while an entry is focused and the composer is empty.
+    /// A key of the brief's, while an entry is focused and the composer is empty. Whether it did something: a key that
+    /// does nothing here is left to what comes next.
     func key(_ action: BriefKeys.Action, model: RouterModel, store: Store) -> Bool {
-        switch action {
-        case .move(let down):
+        if case .move(let down) = action {
             move(down: down)
+            return true
+        }
+        guard let f = focused else { return false }
+        switch action {
+        case .move:
+            return true
         case .back:
-            if picked[focused!] != nil { picked[focused!] = nil } else { focus(nil) }
+            if picked[f] != nil { picked[f] = nil } else { focus(nil) }
         case .pick(let n):
-            guard let f = focused, let e = entry(f, store: store), n <= e.options.count else { return false }
+            guard !answering.contains(f), let e = entry(f, store: store), n <= e.options.count else { return false }
             pick(f, n, store: store)
         case .confirm:
-            guard let f = focused else { return false }
-            if picked[f] != nil { confirm(f, store: store) } else { model.reply() }
+            if picked[f] != nil {
+                if !confirm(f, store: store), !answering.contains(f) { trouble[f] = "That answer can't go from here: answer it in the thread." }
+            } else {
+                model.reply()
+            }
         case .open:
-            open(focused!, store: store)
+            return open(f, store: store)
         case .archive:
-            archive(focused!, store: store)
+            archive(f, store: store)
         case .read:
-            markRead(focused!, store: store)
+            guard docs[f.project]?.needsYou.contains(where: { $0.target == f }) == true else { return false }
+            markRead(f, store: store)
         }
         return true
     }

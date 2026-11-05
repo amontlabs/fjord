@@ -51,7 +51,7 @@ struct FjordChange: Codable, Hashable, Identifiable {
     var isReverted: Bool { revertedAt != nil }
     /// An act on a brief entry, not a change the Router made.
     var isBriefAction: Bool { if case .briefAction = patch { true } else { false } }
-    /// Why the last Apply or Revert didn't go through, for a card still active or waiting (a reverted or discarded one
+    /// Why the last Apply or Revert didn't go through, for a change still active or waiting (a reverted or discarded one
     /// shows its note as it is). Cleared by the next success.
     var failureNote: String? { isReverted ? nil : revertNote }
 

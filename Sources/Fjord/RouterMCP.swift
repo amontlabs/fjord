@@ -596,12 +596,11 @@ final class RouterMCPServer: @unchecked Sendable {
 
     private static let answerSpec: [String: Any] = [
         "name": "answer",
-        "description": "Answers one of the board's entries for the user, as the brief's own buttons do: `option` (1-based, of the entry's options) clicks that option; `words` is the user's answer in words, sent to the thread (a local form reads it). Only when the user's message says the answer.",
+        "description": "Answers one of the board's entries for the user, as the brief's own buttons do: `option` (1-based, of the entry's options) clicks that option. Only when the user's message picks that option; an answer in words is the user's to send.",
         "inputSchema": ["type": "object", "properties": [
             "thread": ["type": "string", "description": "The entry's `thread` from the board"],
             "option": ["type": "integer", "minimum": 1],
-            "words": ["type": "string"],
-        ] as [String: Any], "required": ["thread"], "additionalProperties": false],
+        ] as [String: Any], "required": ["thread", "option"], "additionalProperties": false],
     ]
 
     /// Runs a tool; nil when there is no tool by that name. `ticket`: the request's (a batch shares one); now's by default.
@@ -779,24 +778,20 @@ final class RouterMCPServer: @unchecked Sendable {
         return e
     }
 
-    /// An entry answered as the brief's buttons answer it: an option clicked, or the user's words sent to the thread.
+    /// An entry answered as the brief's buttons answer it: an option clicked. Never words: what goes to a thread as the user's
+    /// is the user's own, and a model's words aren't.
     func answer(_ store: Store, _ args: [String: Any], ticket: Ticket) throws -> String {
         let e = try entry(store, Self.string(args, "thread"))
         let briefs = store.routerBriefs
         let title = briefs.title(e.target)
         try live(ticket)
-        if let option = (args["option"] as? NSNumber)?.intValue {
-            guard option >= 1, option <= e.options.count else { throw Failure("“\(title)” has \(e.options.count) options") }
-            briefs.pick(e.target, option, store: store)
-            guard briefs.confirm(e.target, store: store) else { throw Failure("“\(title)” can't be answered from here") }
-            return "Answered “\(title)”: \(e.options[option - 1])"
-        }
-        let words = (args["words"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !words.isEmpty else { throw Failure("Give `option` or `words`") }
-        guard briefs.send(words, to: e.target, store: store) else {
+        guard args["words"] == nil else { throw Failure("Only `option`: an answer in words is the user's to send") }
+        guard let option = (args["option"] as? NSNumber)?.intValue else { throw Failure("Give `option`") }
+        guard option >= 1, option <= e.options.count else { throw Failure("“\(title)” has \(e.options.count) options") }
+        guard briefs.answer(e.target, option: option, store: store) else {
             throw Failure(briefs.trouble[e.target] ?? "“\(title)” can't be answered from here")
         }
-        return "Answered “\(title)”: \(words)"
+        return "Answered “\(title)”: \(e.options[option - 1])"
     }
 
     /// Whether `text` holds an aside for the Router (`Addressing.asides`): `(@router …)`, `[@router …]` or a line starting

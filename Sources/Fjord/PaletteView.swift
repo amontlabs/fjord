@@ -115,7 +115,7 @@ struct PaletteView: View {
         }
         .ignoresSafeArea()
         .accessibilityAddTraits(.isModal)
-        // The data under the open palette moved (an item arrived, a card was archived): the rows follow it.
+        // The data under the open palette moved (an item arrived, an entry was archived): the rows follow it.
         .onChange(of: palette.sourceStamp) { palette.reloadSoon() }
         // The window went elsewhere without the palette (a shortcut, a notification), or the quit dialog came up: out of the way.
         .onChange(of: palette.navigationSelection) { palette.close(restoringFocus: false) }

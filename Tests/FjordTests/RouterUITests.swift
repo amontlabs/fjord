@@ -119,16 +119,16 @@ import UserNotifications
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)
         model.composerFocused = true
-        model.replyTo = store.routerBriefs.page().entries[0].target
+        store.routerBriefs.focus(store.routerBriefs.page().entries[0].target)
         let editor = editor(model, "tell @mi")
         #expect(!model.suggestions(store).isEmpty)
         #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(model.suggestions(store).isEmpty && model.replyTo != nil)
+        #expect(model.suggestions(store).isEmpty && store.routerBriefs.focused != nil)
         #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(model.replyTo == nil)
+        #expect(store.routerBriefs.focused == nil)
         // Nothing left to step out of: the field keeps it, and the window stays.
         #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(model.replyTo == nil && model.suggestions(store).isEmpty)
+        #expect(store.routerBriefs.focused == nil && model.suggestions(store).isEmpty)
     }
 
     @Test func atSuggestsProjectsAndReturnOrTabPicksOne() throws {
@@ -317,15 +317,15 @@ import UserNotifications
         let keys = RouterKeys(store: store, model: model)
         let editor = NSTextView()
         model.composerFocused = true
-        model.replyTo = store.routerBriefs.page().entries[0].target
+        store.routerBriefs.focus(store.routerBriefs.page().entries[0].target)
         #expect(keys.key(key(kVK_Delete), responder: editor))
-        #expect(model.replyTo == nil)
+        #expect(store.routerBriefs.focused == nil)
         // Nothing left: the key is the field's. Not at the start: the field's.
         #expect(!keys.key(key(kVK_Delete), responder: editor))
-        model.replyTo = store.routerBriefs.page().entries[0].target
+        store.routerBriefs.focus(store.routerBriefs.page().entries[0].target)
         editor.string = "abc"
         editor.setSelectedRange(NSRange(location: 3, length: 0))
-        #expect(!keys.key(key(kVK_Delete), responder: editor) && model.replyTo != nil)
+        #expect(!keys.key(key(kVK_Delete), responder: editor) && store.routerBriefs.focused != nil)
     }
 
     @Test func aFailedRemovalStaysInSightWithTheRouterOffAndCanBeTriedAgain() async throws {
@@ -386,6 +386,8 @@ import UserNotifications
         briefs.pick(t, 2, store: store)
         #expect(briefs.confirm(t, store: store))
         await waitUntil { FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: dir).path) }
+        // Its line in the drawer once the answer is written.
+        await briefs.settled()
         #expect(briefs.trouble[t] == nil && briefs.answers.first?.words == "Ask first")
     }
 

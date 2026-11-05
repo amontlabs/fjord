@@ -227,7 +227,8 @@ enum RouterText {
 
 // MARK: - Window model
 
-/// What the window remembers while it is closed (the draft, its chips, the thread it replies to), and what the keys act on.
+/// What the window remembers while it is closed (the draft and its chips), and what the keys act on. The thread it replies to
+/// is the brief's (`RouterBriefs.focused`): one target, whoever set it.
 @Observable
 @MainActor
 final class RouterModel {
@@ -237,8 +238,6 @@ final class RouterModel {
     /// Why the draft wasn't sent (it stays in the composer), until it changes.
     var sendRefused: String?
     static let goneTarget = "Not sent: what you named is gone since. Pick where it goes on the ask, or say more."
-    /// The thread your next message answers: it goes to that thread ("Replying to …" over the composer).
-    var replyTo: BriefTarget?
     /// What the pills in the draft point to, one for each `MentionText.mark` in it, in order.
     var pointers: [RouterPointer] = []
     /// Local projects tagged with @ (their folders), in the order they stand in the draft: context for the Router.
@@ -309,7 +308,7 @@ final class RouterModel {
     func send(store: Store) {
         // A proposed project takes the words (and an empty composer creates it).
         if answerProposal(store: store) { return }
-        // A brief entry focused: your words go to its thread, no model.
+        // A thread to reply to: your words go to it, no model.
         if let target = store.routerBriefs.focused, pointers.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if store.routerBriefs.send(draft, to: target, store: store) {
                 caret = nil
@@ -327,25 +326,20 @@ final class RouterModel {
         caret = nil
         pointers = []
         draft = ""
-        replyTo = nil
+        store.routerBriefs.focus(nil)
     }
 
     /// The composer takes the keyboard (typing anywhere in the window lands there).
     func reply() { focusRequest &+= 1 }
 
-    /// Reply: a "Replying to" chip for that thread over the composer, which takes the keyboard. Your words are yours to write.
-    func reply(to target: BriefTarget) {
-        replyTo = target
-        focusRequest &+= 1
-    }
-
     // MARK: Chips and @
 
     /// Backspace at the start of the composer: the reply chip goes.
     @discardableResult
-    func removeLastChip() -> Bool {
-        if replyTo != nil { replyTo = nil; return true }
-        return false
+    func removeLastChip(store: Store) -> Bool {
+        guard store.routerBriefs.focused != nil else { return false }
+        store.routerBriefs.focus(nil)
+        return true
     }
 
     /// The @ word being typed at the end of the draft, if any ("…@look" → "look").

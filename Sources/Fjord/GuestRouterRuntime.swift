@@ -333,30 +333,6 @@ import Foundation
         }
     }
 
-    func selectableDesktopSessions(for pendingID: UUID) -> [ClaudeSession] {
-        guard let store, let pending = store.router.pendingDesktopStarts.first(where: {
-            $0.id == pendingID && $0.state == .readyInClaude
-        }) else { return [] }
-        let claimed = Set(store.router.pendingDesktopStarts.compactMap { start in
-            start.state == .matched ? start.desktopSessionID : nil
-        })
-        return store.claudeSessions.values.filter { session in
-            !session.isArchived && !claimed.contains(session.id) && session.sshHost == pending.alias
-                && session.folder == pending.folder && session.lastActivity >= pending.openedAt
-        }.sorted { $0.lastActivity > $1.lastActivity }
-    }
-
-    @discardableResult
-    func selectDesktopSession(_ desktopSessionID: String, for pendingID: UUID) -> Bool {
-        guard let store, let pending = store.router.pendingDesktopStarts.first(where: {
-            $0.id == pendingID && $0.state == .readyInClaude
-        }), let session = selectableDesktopSessions(for: pendingID).first(where: { $0.id == desktopSessionID }),
-              let alias = session.sshHost, let folder = session.folder else { return false }
-        let desktop = DesktopSSHSession(id: session.id, alias: alias, folder: folder)
-        return store.reconcileDesktopStart(pending.id, desktop: [desktop],
-            evidence: evidence[pending.location.key] ?? [], allowEditedPrompt: true)
-    }
-
     func answer(_ guestForm: GuestPendingForm, answers: [String: String], target: BriefTarget, snapshot: FormSnapshot? = nil) async throws {
         guard let store, let client = clients[guestForm.computer.key] else { throw FormWriter.Cancelled() }
         let generation = store.routerGeneration

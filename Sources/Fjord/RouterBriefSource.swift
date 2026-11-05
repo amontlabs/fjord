@@ -50,6 +50,8 @@ struct CourierBriefFacts: Sendable, Equatable {
     var turning = false
     var cardItems: [String: Card] = [:]
     var sent: [SentLine] = []
+    /// The goal and instructions its settings showed when last read (nil before any read).
+    var goal: String?
 }
 
 extension CourierHost {
@@ -59,22 +61,23 @@ extension CourierHost {
         return (core.board()["projects"]?.asObject?.keys).map { Array($0).sorted() } ?? []
     }
 
+    /// One project's facts: only that project's threads and sends are read.
     func briefFacts(project: String) -> CourierBriefFacts {
-        allBriefFacts()[project] ?? CourierBriefFacts(project: project)
+        allBriefFacts(only: project)[project] ?? CourierBriefFacts(project: project)
     }
 
-    /// Every project's facts, from one read of the Board, the statuses and the latest sends.
-    func allBriefFacts() -> [String: CourierBriefFacts] {
+    /// Every project's facts (or `only` one's), from one read of the Board, the statuses and the latest sends.
+    func allBriefFacts(only: String? = nil) -> [String: CourierBriefFacts] {
         guard let core else { return [:] }
         let board = core.board()
         let watch = self.watch()
         var out: [String: CourierBriefFacts] = [:]
-        for (id, p) in board["projects"]?.asObject ?? JSONObject() {
+        for (id, p) in board["projects"]?.asObject ?? JSONObject() where only == nil || only == id {
             let w = watch[id] ?? .none
             var stale = false
             if case .stale = w { stale = true }
             out[id] = CourierBriefFacts(project: id, name: p.get("name")?.asString ?? "", watch: w,
-                                        turning: !stale && p.get("turning") == .bool(true))
+                                        turning: !stale && p.get("turning") == .bool(true), goal: Self.goal(p.get("settings")))
         }
         for (id, t) in board["threads"]?.asObject ?? JSONObject() {
             guard let project = t.get("project")?.asString, out[project] != nil else { continue }
@@ -100,6 +103,14 @@ extension CourierHost {
         }
         for k in out.keys { out[k]!.threads.sort { ($0.touched, $0.id) > ($1.touched, $1.id) }; out[k]!.sent.reverse() }
         return out
+    }
+
+    /// A settings read's goal and instructions, as one text the purpose is written from; nil before any read.
+    nonisolated static func goal(_ settings: JSON?) -> String? {
+        guard let settings, case .object = settings else { return nil }
+        let goal = settings.get("goal")?.asString ?? "", instructions = settings.get("instructions")?.asString ?? ""
+        return [goal.isEmpty ? nil : "Goal: " + goal, instructions.isEmpty ? nil : "Instructions: " + instructions]
+            .compactMap { $0 }.joined(separator: "\n")
     }
 
     /// After each input: the projects with new items, the ones whose Board part changed, and the coordinator turns that ended.
@@ -217,7 +228,7 @@ struct CourierBriefSource: BriefSource {
         case .stale(let since): "stale:\(since)"
         case .none: nil
         }
-        var out = BriefBoard(sent: f.sent, watch: watch, coordinatorTurning: f.turning && staleSince == nil)
+        var out = BriefBoard(sent: f.sent, watch: watch, coordinatorTurning: f.turning && staleSince == nil, goal: f.goal)
         for t in f.threads {
             let local = t.session != nil
             let state = status(t.status) ?? status(board: t.state)
@@ -227,6 +238,8 @@ struct CourierBriefSource: BriefSource {
             guard state == .needsYou else { continue }
             var e = BriefEntry(project: f.project, thread: t.id, kind: .request, state: .needsYou, since: t.statusAt ?? t.touched,
                                source: local ? .local : .cloud, asOf: asOf)
+            // What a read mark holds to: the status change, else the card; never `touched`, which moves on every touch.
+            e.episode = t.statusAt.map { String(Int($0)) } ?? f.cardItems[t.id]?.key ?? "-"
             if t.needs == "permission" {
                 e.kind = .permission
             } else if let card = f.cardItems[t.id] {
@@ -245,7 +258,7 @@ struct CourierBriefSource: BriefSource {
 
     /// What the Board part of a project is now, to tell a change from a repeat.
     static func signature(_ f: CourierBriefFacts) -> String {
-        var parts = [f.name, "\(f.watch)", "\(f.turning)"]
+        var parts = [f.name, "\(f.watch)", "\(f.turning)", f.goal ?? ""]
         parts += f.threads.map { "\($0.id)|\($0.title)|\($0.state)|\($0.status ?? "")|\($0.needs ?? "")|\($0.touched)" }
         parts += f.cardItems.keys.sorted().map { "card \($0)=\(f.cardItems[$0]!.key)/\(f.cardItems[$0]!.options.count)" }
         parts += f.sent.map { "sent \($0.intent)=\($0.state)" }

@@ -1951,6 +1951,9 @@ extension Store {
         baselines = baselines.filter { id, _ in categories.contains { $0.id == id } }
         if baselines != categoryBaselines { categoryBaselines = baselines }
         if updated != marks { marks = updated }
+        // Away, only what can't wait comes; the rest is told in one summary once you're back.
+        posts = posts.filter { away.admitInbox($0.entry.importance) }
+        backFromAway()
         guard !posts.isEmpty else { return }
         if posts.count > 4 {
             let names = Set(posts.map(\.category.title)).sorted()

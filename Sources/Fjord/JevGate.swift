@@ -2,7 +2,7 @@ import Foundation
 
 // Every call to Jev goes through one gate: a key TypeSafe rejected isn't used again until a new key is saved, a busy
 // TypeSafe is left alone for as long as it says (Retry-After), and other failures back off, longer each time in a row. Each
-// use (routing, triage, cards, icons, the inbox, actions) also needs its switch on, and the key it started with, both when
+// use (routing, triage, forms, icons, the inbox, actions) also needs its switch on, and the key it started with, both when
 // it asks and when the answer comes back: a key removed or a switch turned off meanwhile sends nothing more, and what comes
 // back is dropped.
 

@@ -54,17 +54,20 @@ struct BriefEntry: Codable, Hashable, Sendable {
     /// The plugin hook's form (local); live state, never stored.
     var form: FormSnapshot?
     var sent: [SentLine] = []
+    /// What a read mark holds to (`BriefPage.entryKey`): the Board's status change or card; nil for the model's own entries,
+    /// whose `since` stays as first written.
+    var episode: String?
 
     var target: BriefTarget { BriefTarget(project: project, thread: thread) }
 
     private enum CodingKeys: String, CodingKey {
-        case project, thread, kind, state, since, source, asOf = "as_of", question, options, card, sent
+        case project, thread, kind, state, since, source, asOf = "as_of", question, options, card, sent, episode
     }
 
     static func == (a: BriefEntry, b: BriefEntry) -> Bool {
         a.project == b.project && a.thread == b.thread && a.kind == b.kind && a.state == b.state && a.since == b.since
             && a.source == b.source && a.asOf == b.asOf && a.question == b.question && a.options == b.options && a.card == b.card
-            && a.form == b.form && a.sent == b.sent
+            && a.form == b.form && a.sent == b.sent && a.episode == b.episode
     }
 
     func hash(into h: inout Hasher) {
@@ -109,14 +112,13 @@ struct BriefDoc: Codable, Equatable, Sendable {
     var needsYou: [BriefEntry] = []
     var decisions: [BriefDecision] = []
     var looseEnds: [String] = []
-    var routingNotes: String?
     var sent: [SentLine] = []
     /// The last call failed: the prose below is being rewritten.
     var proseStale = false
 
     private enum CodingKeys: String, CodingKey {
         case project, version, at, purpose, watch, threads, now, needsYou = "needs_you", decisions, looseEnds = "loose_ends"
-        case routingNotes = "routing_notes", sent, proseStale = "prose_stale"
+        case sent, proseStale = "prose_stale"
     }
 
     /// The model-written fields, as stored in a version row (the deterministic ones are rebuilt, never stored).
@@ -195,7 +197,8 @@ struct BriefDoc: Codable, Equatable, Sendable {
         out.needsYou = answer.needsYou.compactMap { raw in
             guard exists.contains(raw.thread), let kind = BriefEntry.Kind(rawValue: raw.kind) else { return nil }
             let th = thread(raw.thread)
-            if kind != .stranded, let th, th.status == .done || th.status == .working { return nil }
+            // A thread working again waits on no one, stranded or not; a stranded session stays on past its done.
+            if let th, th.status == .working || (kind != .stranded && th.status == .done) { return nil }
             guard seen.insert(raw.thread + "/" + raw.kind).inserted else { return nil }
             let old = needsYou.first { $0.thread == raw.thread && $0.kind == kind }
             let options = cards[raw.thread] ?? raw.options ?? []

@@ -33,6 +33,8 @@ struct BriefBoard: Sendable {
     var watch: String?
     /// The project's coordinator is mid-turn (false for a stale project).
     var coordinatorTurning = false
+    /// The project's goal and instructions as its settings were last read (nil before any read).
+    var goal: String?
     /// The threads that wait on you, as the Board knows them: a card's key and options as data, a permission, a stranded
     /// session, or a plain-words request whose question the model writes.
     var entries: [BriefEntry] = []
@@ -57,14 +59,19 @@ protocol BriefStore: AnyObject {
     /// Your marks on the brief, by kind (`BriefMarks.Kind`): kept across launches.
     func marks() -> BriefMarks
     func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool)
+    /// The general brief's lead, as last written.
+    func lead() -> GeneralBrief?
+    func setLead(_ lead: GeneralBrief)
 }
 
 /// What you marked on the brief: entries read, threads archived, finished threads told.
 struct BriefMarks: Equatable, Sendable {
-    enum Kind: String, CaseIterable, Sendable { case read, archived, told }
+    enum Kind: String, CaseIterable, Sendable { case read, archived, told, notified }
     var read: Set<String> = []
     var archived: Set<String> = []
     var told: Set<String> = []
+    /// Entries a notification was posted for (`BriefPage.entryKey`).
+    var notified: Set<String> = []
 
     subscript(_ kind: Kind) -> Set<String> {
         get {
@@ -72,6 +79,7 @@ struct BriefMarks: Equatable, Sendable {
             case .read: read
             case .archived: archived
             case .told: told
+            case .notified: notified
             }
         }
         set {
@@ -79,6 +87,7 @@ struct BriefMarks: Equatable, Sendable {
             case .read: read = newValue
             case .archived: archived = newValue
             case .told: told = newValue
+            case .notified: notified = newValue
             }
         }
     }
@@ -93,6 +102,9 @@ final class MemoryBriefStore: BriefStore {
     func cursor(_ project: String) -> Int { cursors[project] ?? 0 }
     func setCursor(_ project: String, _ cursor: Int) { cursors[project] = cursor }
     private var kept = BriefMarks()
+    private var keptLead: GeneralBrief?
+    func lead() -> GeneralBrief? { keptLead }
+    func setLead(_ lead: GeneralBrief) { keptLead = lead }
     func marks() -> BriefMarks { kept }
     func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
         if on { kept[kind].insert(key) } else { kept[kind].remove(key) }
@@ -114,6 +126,7 @@ final class SQLiteBriefStore: BriefStore {
             diff text not null, items text not null, cursor integer not null, primary key (project, version));
         create table if not exists brief_cursors (project text primary key, cursor integer not null);
         create table if not exists brief_marks (kind text not null, key text not null, primary key (kind, key));
+        create table if not exists brief_lead (id integer primary key check (id = 1), at real not null, lead text not null);
         """)
     }
 
@@ -179,6 +192,17 @@ final class SQLiteBriefStore: BriefStore {
         return out
     }
 
+    func lead() -> GeneralBrief? {
+        select("select at, lead from brief_lead where id = 1", []) { s in
+            GeneralBrief(lead: (try? JSONDecoder().decode([String].self, from: Data(Self.text(s, 1).utf8))) ?? [], at: sqlite3_column_double(s, 0))
+        }.first
+    }
+
+    func setLead(_ lead: GeneralBrief) {
+        let text = (try? JSONEncoder().encode(lead.lead)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
+        exec("insert or replace into brief_lead (id, at, lead) values (1, \(lead.at), ?)", [text])
+    }
+
     func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
         exec(on ? "insert or ignore into brief_marks (kind, key) values (?, ?)" : "delete from brief_marks where kind = ? and key = ?",
              [kind.rawValue, key])
@@ -221,7 +245,9 @@ struct GeneralBrief: Equatable, Sendable {
 
     static let leadSchema = #"{"type":"object","properties":{"lead":{"type":"array","items":{"type":"string"}}},"required":["lead"],"additionalProperties":false}"#
 
-    private(set) var docs: [String: BriefDoc] = [:]
+    private(set) var docs: [String: BriefDoc] = [:] {
+        didSet { onDocs() }
+    }
     private(set) var general = GeneralBrief()
 
     @ObservationIgnored private let source: BriefSource
@@ -243,8 +269,12 @@ struct GeneralBrief: Equatable, Sendable {
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var leadDirty = false
     @ObservationIgnored private var leadRunning = false
-    /// Calls made, per project (tests read it).
-    @ObservationIgnored private(set) var calls: [String: Int] = [:]
+    /// The goal and instructions each project's purpose was last written from (settings read, or set by a tool).
+    @ObservationIgnored private var goals: [String: String] = [:]
+    /// Off with the Router: no event runs anything, and what ran is cancelled.
+    @ObservationIgnored private(set) var active = true
+    /// A project's document changed (the app recounts and announces its entries).
+    @ObservationIgnored var onDocs: () -> Void = {}
 
     init(source: BriefSource, store: BriefStore, model: @escaping Model, style: @escaping () -> String = { RouterStyle.defaultText },
          clock: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
@@ -257,8 +287,11 @@ struct GeneralBrief: Equatable, Sendable {
 
     // MARK: events
 
-    /// Launch: every project with items past its cursor runs (a quit mid-call is rerun), whatever its coordinator does.
+    /// Launch, or the Router switched on: every project with items past its cursor runs (a quit mid-call is rerun), whatever
+    /// its coordinator does. The lead stored last shows until the next batch writes another.
     func start() {
+        active = true
+        if general.lead.isEmpty, let kept = store.lead() { general = kept }
         spawn { [self] in
             for p in await source.projects() {
                 spawn { [self] in
@@ -276,11 +309,22 @@ struct GeneralBrief: Equatable, Sendable {
     /// The Board changed with no new item: the deterministic part only, no model.
     func boardChanged(_ project: String) { spawn { [self] in await refresh(project) } }
 
-    /// Goal or instructions changed: a call that writes `purpose` only.
+    /// The Router switched off: nothing runs until `start`; calls under way are cancelled and their answers dropped.
+    func stop() {
+        active = false
+        for t in tasks.values { t.cancel() }
+        tasks = [:]
+        for k in projects.keys { projects[k]?.running = false; projects[k]?.dirty = false }
+        leadRunning = false
+    }
+
+    /// Goal or instructions changed (a settings read showed others, or set_goal / set_instructions landed): a call that
+    /// writes `purpose` only.
     func goalChanged(_ project: String, goal: String) {
+        goals[project] = goal
         spawn { [self] in
             load(project)
-            guard let answer = try? await purposeCall(project, goal: goal) else { return }
+            guard let answer = try? await purposeCall(project, goal: goal), active, goals[project] == goal else { return }
             var doc = docs[project] ?? BriefDoc(project: project)
             guard doc.purpose != answer else { return }
             let old = doc.prose
@@ -302,6 +346,7 @@ struct GeneralBrief: Equatable, Sendable {
     }
 
     private func spawn(_ work: @escaping @MainActor () async -> Void) {
+        guard active else { return }
         let id = UUID()
         tasks[id] = Task { [weak self] in
             await work()
@@ -321,10 +366,15 @@ struct GeneralBrief: Equatable, Sendable {
     /// The deterministic part, rebuilt from the Board: instantly, with no model.
     private func refresh(_ project: String) async {
         let board = await source.board(project: project)
+        guard active else { return }
         load(project)
         var doc = docs[project] ?? BriefDoc(project: project)
         Self.apply(board, to: &doc)
         if docs[project] != doc { docs[project] = doc }
+        // Settings read with another goal or instructions: the purpose is written again (at launch, only when none is).
+        if let goal = board.goal, !goal.isEmpty, goals[project] != goal {
+            if goals[project] == nil, doc.purpose != nil { goals[project] = goal } else { goalChanged(project, goal: goal) }
+        }
     }
 
     // MARK: triggers
@@ -362,11 +412,13 @@ struct GeneralBrief: Equatable, Sendable {
         var doc = docs[project] ?? BriefDoc(project: project)
         Self.apply(board, to: &doc)
         let before = leadSignature()
-        calls[project, default: 0] += 1
         let cursor = items.last?.seq ?? store.cursor(project)
         do {
             let out = try await model(RouterStyle.prompt(Self.rules, style: style()), Self.context(doc, items), BriefDoc.schema)
             let answer = try BriefDoc.parse(out)
+            guard active else { return }
+            // What changed while the call ran stays: a purpose written meanwhile is the goal's, not this call's.
+            if let current = docs[project] { doc.purpose = current.purpose }
             var cards: [String: [String]] = [:]
             for i in items where i.kind == .card { if let t = i.thread { cards[t] = i.options } }
             let known = Set(items.compactMap(\.thread))
@@ -376,6 +428,7 @@ struct GeneralBrief: Equatable, Sendable {
             await commit(project, doc: doc, old: old, items: items.map(\.seq), cursor: cursor, changed: doc.prose != old)
             var p = projects[project] ?? Project(); p.failures = 0; projects[project] = p
         } catch {
+            guard active else { return }
             var p = projects[project] ?? Project()
             p.failures += 1
             if p.failures >= Self.failuresBeforePark { p.parkedAt = p.lastSeq }
@@ -434,7 +487,8 @@ struct GeneralBrief: Equatable, Sendable {
         let listed = Set(out.map(\.thread))
         for m in model where !listed.contains(m.thread) {
             let t = board.threads.first { $0.id == m.thread }
-            guard m.kind == .stranded || t?.status == .needsYou else { continue }
+            // A stranded session stays until its thread works again.
+            guard t?.status == .needsYou || (m.kind == .stranded && t?.status != .working) else { continue }
             var e = m
             if let t { e.state = t.status; e.asOf = t.asOf }
             out.append(e)
@@ -504,7 +558,9 @@ struct GeneralBrief: Equatable, Sendable {
             struct Lead: Decodable { var lead: [String] }
             let a = text.firstIndex(of: "{"), b = text.lastIndex(of: "}")
             guard let a, let b, a < b, let lead = try? JSONDecoder().decode(Lead.self, from: Data(text[a...b].utf8)) else { throw BriefDoc.Rejected(description: "not the lead's JSON") }
+            guard active else { return }
             general = GeneralBrief(lead: Array(lead.lead.filter { !$0.isEmpty }.prefix(Self.maxLead)), at: clock())
+            store.setLead(general)
             // A real batch ended: parked projects may be called again on their next item.
             for k in projects.keys where projects[k]?.parkedAt != nil { projects[k]?.failures = 0; projects[k]?.parkedAt = nil }
         } catch {

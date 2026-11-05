@@ -286,7 +286,7 @@ struct BriefEntryCard: View {
             if let trouble = briefs.trouble[t] {
                 Text(trouble).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.danger)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if briefs.sending[t] != nil {
+            } else if briefs.answering.contains(t) || briefs.sending[t] != nil {
                 Text("Answering…").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
             } else {
                 Text(Self.hint(entry, picked: picked)).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted).lineLimit(1)
@@ -298,8 +298,8 @@ struct BriefEntryCard: View {
                 .help(entry.source == .local ? "Open the session in the Claude app (O)" : "Open the thread on claude.ai (O)")
             if !entry.options.isEmpty {
                 ClaudeButton(picked.map { "Answer \($0)" } ?? "Answer", variant: .primary, size: .sm, shortcut: ["enter"],
-                             busy: briefs.sending[t] != nil) { briefs.confirm(t, store: store) }
-                    .disabled(picked == nil)
+                             busy: briefs.answering.contains(t)) { briefs.confirm(t, store: store) }
+                    .disabled(picked == nil || briefs.answering.contains(t))
             }
         }
     }

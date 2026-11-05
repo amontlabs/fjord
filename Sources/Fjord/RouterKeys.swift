@@ -3,7 +3,8 @@ import Carbon
 import Foundation
 
 /// The Router's keys in the app window. The brief's own (`BriefKeys`), while an entry is focused and the composer is empty:
-/// Return, 1–9, O, A, R and Esc; ↑↓ walk its entries. In the composer: Return sends, ⇧Return starts a new line; with @
+/// Return and Esc; ↑↓ walk its entries and put the keyboard on the brief, where 1–9, O, A and R are its keys too (in the
+/// composer, letters and digits are your words). In the composer: Return sends, ⇧Return starts a new line; with @
 /// suggestions showing, ↑↓ walk them and Return or Tab picks one; Backspace at the very start takes the reply chip off.
 /// ⌘1–⌘4 pick a place on "Where should this go?". Esc dismisses the suggestions, then drops a proposed project, then the reply
 /// chip; it never closes the window: with nothing left to step out of, it goes on to what has the keyboard. ⌘F opens the
@@ -39,15 +40,25 @@ final class RouterKeys {
             store.routerDispatcher.pick(ask.id, target: options[index].target)
             return true
         }
-        // The brief (RouterBriefs.swift): with an entry focused and the composer empty, Return, 1–9 (by key position), O, A, R
-        // and Esc are its own; ↑↓ walk its entries. A field other than the composer keeps its keys.
+        // The brief (RouterBriefs.swift): with an entry focused and the composer empty, Return and Esc are its own; ↑↓ walk
+        // its entries, the keyboard leaving the composer for the brief. Only there are 1–9 (by key position), O, A and R its
+        // keys: in the composer they are your words. A field other than the composer keeps its keys.
         let briefs = store.routerBriefs
+        let inComposer = responder is NSText && model.composerFocused
         let fieldOtherThanComposer = responder is NSText && !model.composerFocused
         if !fieldOtherThanComposer, !(responder is NSControl), model.draft.isEmpty, store.routerProposal == nil || code != kVK_Escape {
+            let walk = flags.isEmpty && (code == kVK_UpArrow || code == kVK_DownArrow) && !briefs.page().entries.isEmpty
+            if walk, inComposer, model.suggestions(store).isEmpty {
+                // Walking the brief: the keyboard is on it now, its letter keys with it.
+                (responder as? NSView)?.window?.makeFirstResponder(nil)
+                model.composerFocused = false
+                briefs.move(down: code == kVK_DownArrow)
+                return true
+            }
             if let action = BriefKeys.action(code: code, characters: event.charactersIgnoringModifiers, flags: flags,
-                                             focused: briefs.focused != nil, composerEmpty: true),
+                                             focused: briefs.focused != nil, composerEmpty: true, inComposer: inComposer),
                briefs.key(action, model: model, store: store) { return true }
-            if briefs.focused == nil, flags.isEmpty, code == kVK_UpArrow || code == kVK_DownArrow, !briefs.page().entries.isEmpty {
+            if briefs.focused == nil, walk, !inComposer {
                 briefs.move(down: code == kVK_DownArrow)
                 return true
             }
@@ -62,7 +73,7 @@ final class RouterKeys {
             if !model.suggestions(store).isEmpty { model.dismissMention() }
             // A proposed project is dropped and its message is yours again.
             else if model.dropProposal(store: store) {}
-            else if model.replyTo != nil { model.replyTo = nil }
+            else if briefs.focused != nil { briefs.focus(nil) }
             // Nothing to step out of: a field keeps it (an NSTextView's own Esc would offer completions), anything else
             // gets it.
             else { return responder is NSText }
@@ -83,7 +94,7 @@ final class RouterKeys {
                 }
             }
             if code == kVK_Delete, flags.isEmpty, (responder as? NSTextView)?.selectedRange() == NSRange(location: 0, length: 0) {
-                return model.removeLastChip()
+                return model.removeLastChip(store: store)
             }
             if isReturn, flags == .shift {
                 (responder as? NSTextView)?.insertNewlineIgnoringFieldEditor(nil)

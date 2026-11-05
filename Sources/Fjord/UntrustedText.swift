@@ -2,7 +2,7 @@ import Foundation
 
 // Text that others wrote (on GitHub, or in a session), made ready for a model to read as data: cleaned (no control or
 // direction characters, bounded), and fenced in a block it can't close or reopen. Sessions' text goes through `SessionFence`
-// (RouterTriage.swift); GitHub's through `UntrustedFence.github`; both break up their tags the same way.
+// (SessionFence.swift); GitHub's through `UntrustedFence.github`; both break up their tags the same way.
 
 enum UntrustedText {
     /// The text without control characters (newlines and tabs kept unless `oneLine`) or the invisible ones that reorder or

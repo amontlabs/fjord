@@ -665,6 +665,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showWindow(category.map { .category($0) } ?? AppDestination(self.store.tabNeedingYou))
             }
         }
+        // A brief entry's banner: the Router, on that entry.
+        store.onOpenBrief = { [weak self] t in self?.showWindow(.router, entry: t) }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         let globals = GlobalShortcuts(store: store, hotKeys: hotKeys) { [weak self] action in
             switch action {

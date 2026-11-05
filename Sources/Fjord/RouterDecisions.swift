@@ -411,7 +411,11 @@ extension RouterDecision: Codable {
             if let ok = try? Done(from: decoder) { done = ok; return }
             let c = try decoder.container(keyedBy: AnyKey.self)
             let name = c.allKeys.first?.stringValue ?? "unknown"
-            if name == "started", let inner = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey(stringValue: name)!) {
+            // A card answered, from before the briefs: its title is the thread's.
+            if name == "answered", let inner = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey(stringValue: name)!),
+               let title = try? inner.decode(String.self, forKey: AnyKey(stringValue: "card")!) {
+                done = .answered(thread: title)
+            } else if name == "started", let inner = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey(stringValue: name)!) {
                 started = (try? inner.decodeIfPresent(String.self, forKey: AnyKey(stringValue: "project")!),
                            try? inner.decodeIfPresent(String.self, forKey: AnyKey(stringValue: "session")!))
             } else {

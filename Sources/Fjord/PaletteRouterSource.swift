@@ -77,7 +77,8 @@ extension PaletteRouterSource {
                 briefs.open(t, store: store)
             },
             PaletteAction(id: "reply", title: "Reply", symbol: "arrowshape.turn.up.left") {
-                context.routerModel.reply(to: t)
+                briefs.focus(t)
+                context.routerModel.reply()
                 context.go(.router)
             },
         ]

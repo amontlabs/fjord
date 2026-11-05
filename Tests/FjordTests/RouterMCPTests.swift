@@ -262,9 +262,22 @@ import Testing
         let s = await store(dir)
         let out = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "option": 2]))
         #expect(!out.isError && out.text.contains("SQLite"), "\(out.text)")
+        await s.routerBriefs.settled()
         #expect(s.routerBriefs.answers.first?.words == "SQLite")
         let bad = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "option": 3]))
         #expect(bad.isError)
+    }
+
+    /// The model's words never go to a thread as yours: `answer` takes an option only.
+    @Test func theAnswerToolNeverSendsTheModelsWords() async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        let out = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "words": "use SQLite"]))
+        #expect(out.isError)
+        let both = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "option": 2, "words": "SQLite"]))
+        #expect(both.isError)
+        await s.routerBriefs.settled()
+        #expect(s.routerBriefs.answers.isEmpty && s.pendingForms["cli-local_a"] != nil)
     }
 
     @Test func theFormWriterChecksRightBeforeWriting() async throws {

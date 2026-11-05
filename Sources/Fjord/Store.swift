@@ -296,7 +296,10 @@ final class Store {
     private(set) var routerOn = false
     @ObservationIgnored var routerGeneration: UInt64 = 0
     private func updateRouterOn() {
-        if (router.enabled && agents.enabled) != routerOn { routerOn = router.enabled && agents.enabled }
+        guard (router.enabled && agents.enabled) != routerOn else { return }
+        routerOn = router.enabled && agents.enabled
+        // The briefs' model calls run only with the Router on.
+        routerBriefs.switched(store: self)
     }
 
     /// Claude sessions extension (see Agents.swift).
@@ -481,6 +484,10 @@ final class Store {
     @ObservationIgnored var onRecordingShortcutChange: ((Bool) -> Void)?
     /// Shows the inbox: on a category with a thing selected (a banner for it), or on the first category (a summary's).
     @ObservationIgnored var onOpenInbox: ((_ category: UUID?, _ thing: String?) -> Void)?
+    /// Shows the Router on a brief entry (its banner's click).
+    @ObservationIgnored var onOpenBrief: ((BriefTarget) -> Void)?
+    /// Whether you're away, for the inbox's banners (`AwayGate`).
+    @ObservationIgnored lazy var away = AwayGate()
     /// Registers a global shortcut system-wide; `false` when the system refuses it.
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Bool)?
     /// The system-wide shortcuts the system last refused to register (another app holds the key), by the key it refused:
@@ -520,7 +527,11 @@ final class Store {
     /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
-    @ObservationIgnored lazy var routerBriefs = RouterBriefs()
+    @ObservationIgnored lazy var routerBriefs: RouterBriefs = {
+        let briefs = RouterBriefs()
+        briefs.store = self
+        return briefs
+    }()
     /// The entries of the ask-back cards still up: kept when the history is pruned.
     @ObservationIgnored var decisionsInUse: () -> Set<UUID> = { [] }
     /// A Router run's change was taken back with Revert (the run's entry): the dispatcher traces it as the outcome of the action.
@@ -854,18 +865,25 @@ final class Store {
         let center = NSWorkspace.shared.notificationCenter
         sleepObservers = [
             center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.systemAsleep = true }
+                MainActor.assumeIsolated { self?.systemAsleep = true; self?.away.asleep = true }
             },
             center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.systemAsleep = false
+                    self.away.asleep = false
                     self.pollNow = true
                     self.sleeper?.cancel()
                 }
             },
             NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.appBecameActive() }
+                MainActor.assumeIsolated { self?.appBecameActive(); self?.backFromAway() }
+            },
+            DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.away.locked = true }
+            },
+            DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.away.locked = false; self?.backFromAway() }
             },
         ]
     }
@@ -1230,6 +1248,9 @@ final class Store {
             }
         } else if id.hasPrefix(Notifier.summaryPrefix) {
             onOpenInbox?(nil, nil)
+            return
+        } else if id.hasPrefix(RouterBriefs.notificationPrefix), let t = BriefTarget(key: String(id.dropFirst(RouterBriefs.notificationPrefix.count))) {
+            onOpenBrief?(t)
             return
         }
         if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {
@@ -1647,9 +1668,55 @@ final class Store {
         notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet, url: url)
     }
 
+    /// A Router banner (a brief entry that needs you): with the Router on and notifications allowed, whatever Triage does.
+    func notifyRouter(id: String, title: String, subtitle: String, body: String) {
+        guard routerOn, settings.notifications, !isSnoozed else { return }
+        notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: false)
+    }
+
+    /// Back at the Mac (unlocked, Fjord in front, or the next inbox banners): what the away gate held is told in one banner.
+    func backFromAway() {
+        guard !away.isAway else { return }
+        let held = away.back()
+        guard held > 0 else { return }
+        notify(id: Notifier.summaryPrefix + UUID().uuidString, title: held == 1 ? "1 in your inbox" : "\(held) in your inbox",
+               subtitle: "While you were away", body: "", quiet: true)
+    }
+
     // MARK: Helpers
 
     private func repoName(from url: URL) -> String {
         url.pathComponents.suffix(2).joined(separator: "/")
+    }
+}
+
+/// Whether you're away from the Mac (its screen locked, asleep, or no input for `awayAfter`), for the inbox's banners: away, only
+/// what can't wait comes (Jev rated what it asks of you high or urgent); the rest is held and told in one summary when you're
+/// back (`Store.backFromAway`).
+@MainActor final class AwayGate {
+    static let awayAfter: TimeInterval = 5 * 60
+    /// Seconds since the last key, click or pointer move (none under test: a test run is never away unless it says so).
+    var idleSeconds: () -> TimeInterval = {
+        guard !UnderTest.isRunning, let any = CGEventType(rawValue: ~0) else { return 0 }
+        return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: any)
+    }
+    var locked = false
+    var asleep = false
+    private(set) var heldInbox = 0
+
+    var isAway: Bool { locked || asleep || idleSeconds() >= Self.awayAfter }
+
+    /// Whether an inbox banner of this importance shows now; one that doesn't is held for the summary.
+    func admitInbox(_ importance: Importance?) -> Bool {
+        guard isAway else { return true }
+        if let importance, importance >= .high { return true }
+        heldInbox += 1
+        return false
+    }
+
+    /// How many were held, once.
+    func back() -> Int {
+        defer { heldInbox = 0 }
+        return heldInbox
     }
 }

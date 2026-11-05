@@ -42,7 +42,7 @@ struct ClaudeActivity: Hashable {
     var waitsForYou = false
     /// The tool it waits on you with (`AskUserQuestion`, `ExitPlanMode`): tells a question from a plan.
     var tool: String? = nil
-    /// That call's id in the transcript: what ties a card to the form Fjord's hook holds for the same call.
+    /// That call's id in the transcript: what ties the session's question to the form Fjord's hook holds for the same call.
     var toolUseID: String? = nil
     /// The session's task list as its last TodoWrite left it.
     var todo: Todo? = nil
@@ -1262,7 +1262,7 @@ final class ClaudeFeed: @unchecked Sendable {
     }
 
     /// Reads that came while the window's morph played (`MotionGate`), on the main thread: taken in once the motion is
-    /// over, in the order read (what they make of the sessions, the dots and the Router's cards goes by each step), a slice
+    /// over, in the order read (what they make of the sessions, the dots and the brief's local entries goes by each step), a slice
     /// of them per turn of the main run loop (`sliceBudget`), so a backlog never holds the main thread just as the window wants its frames.
     /// Reads that come while some still wait queue behind them. None is folded into another: even an activity-only read
     /// can say a session stopped on a question, which the next may already have moved past.
