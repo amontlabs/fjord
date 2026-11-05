@@ -199,6 +199,8 @@ struct CourierBriefSource: BriefSource {
             let from = c.get("from")?.asString ?? "unknown"
             return BriefItem(seq: i.seq, id: i.id, at: i.at, kind: i.thread == nil ? .coordinator : .message, thread: i.thread,
                              text: "\(from): \(text)", options: c.get("options")?.asArray?.compactMap(\.asString) ?? [])
+        case "answer":  // your answer through Fjord, once the page proved it
+            return BriefItem(seq: i.seq, id: i.id, at: i.at, kind: .message, thread: i.thread, text: "you answered: \(text)")
         case "card":
             let answered = c.get("answered") == .bool(true)
             return BriefItem(seq: i.seq, id: i.id, at: i.at, kind: .card, thread: i.thread,

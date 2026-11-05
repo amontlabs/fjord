@@ -413,6 +413,8 @@ import Testing
         #expect(finished == nil && w.status("t1") == "needs you")
         try w.core.handle(w.frame(["type": "threads", "threads": [Self.running("t1")]]))
         #expect(finished?["status"] == "confirmed" && w.status("t1") == "working")
+        let logged = try w.core.db.items(project: "chan_a", after: 0, kind: "answer")  // the briefs read your answer from the log
+        #expect(logged.count == 1 && logged[0].thread == "t1" && logged[0].content["text"] == "A" && logged[0].content["option"] == 1)
     }
 
     @Test func anAnswerRetriesOnceThenFailsAndARefusalEndsIt() throws {

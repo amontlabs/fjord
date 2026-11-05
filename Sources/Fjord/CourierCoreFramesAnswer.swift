@@ -111,6 +111,12 @@ extension CourierCore {
         watching.answers.removeValue(forKey: a.id)
         if status != "confirmed", let t = a.frame.thread { watching.expectWork.remove(t) }
         if let c = a.command, status != "confirmed" { command("cancel", [("target", .string(c))]) }
+        if status == "confirmed", let thread = a.frame.thread {  // the briefs read the log: your answer is in it, as the option you picked
+            let options = log.latest(kind: "card", id: a.card)?.get("options")?.asArray?.compactMap(\.asString) ?? []
+            let picked = a.option >= 1 && a.option <= options.count ? options[a.option - 1] : "option \(a.option)"
+            try log.record(clock(), project: a.frame.project, thread: thread, kind: "answer", id: "answer:\(a.id)",
+                           content: ["card": .string(a.card), "option": .int(a.option), "text": .string(picked)])
+        }
         let updated = try sql.update(clock(), a.id, [("status", .string(status)), ("cause", JSON(cause)),
                                                      ("result", ["attempts": .int(a.attempts), "clicked": .bool(a.clicked), "answered": .bool(a.answered)])])
         if watching.check == a.frame && watching.checkAnswer {  // it stays as a kept card frame only if a slot is free

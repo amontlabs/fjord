@@ -18,6 +18,7 @@ import Foundation
 //   "card"     id the decision row's key        {kind: "plan"|"question", options: [String], answered: Bool}; `thread` set
 //   "session"  id the local session id          {state, title, needs, detail}; `thread` the Board's thread id
 //   "status"   id the thread's id               {status: "working"|"needs you"|"paused"|"done", needs?: "permission"}; `thread` set
+//   "answer"   id answer:<intent id>            {card, option, text}: your answer through Fjord, once proved; `thread` set
 // An item is appended only when its content differs from the last one stored for (kind, id): a reload, a handover, a second frame
 // or a coordinator repeat adds nothing. Volatile fields (`CourierLog.volatile`: a row's `index`, a thread row's `text`, its innerText
 // with relative times) are stored but never compared, so a renumbering or a clock tick adds nothing either. A streaming row is stored once settled; `turning` and streaming text are never items.

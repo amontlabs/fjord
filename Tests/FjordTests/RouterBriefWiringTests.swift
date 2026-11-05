@@ -47,6 +47,8 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         }
         #expect(CourierBriefSource.item(ci("row", thread: nil, ["from": "claude", "text": "done"]))?.kind == .coordinator)
         #expect(CourierBriefSource.item(ci("row", thread: "t", ["from": "claude", "text": "hi"]))?.kind == .message)
+        let answered = CourierBriefSource.item(ci("answer", thread: "t", ["card": "c", "option": 2, "text": "Blue — replies Blue"]))
+        #expect(answered?.kind == .message && answered?.text == "you answered: Blue — replies Blue" && answered?.thread == "t")
         let card = CourierBriefSource.item(ci("card", thread: "t", ["kind": "plan", "options": ["Yes", "No"], "answered": false]))
         #expect(card?.kind == .card && card?.options == ["Yes", "No"] && card?.urgent == true)
         let status = CourierBriefSource.item(ci("status", thread: "t", ["status": "needs you"]))
