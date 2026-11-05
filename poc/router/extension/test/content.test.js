@@ -147,6 +147,22 @@ const cases = {
     eq(delta.map((e) => [e.threads, e.listed]), [[[{ thread: "cmsg_2", gone: true }], false]], "a departure among others; a done row dropping out says nothing");
   },
 
+  async project_with_no_thread_is_on_its_overview() {
+    // Measured live 2026-11-05: a project that never had a thread shows `threads-empty-explainer` and no `data-home-section`.
+    const env = page({ url: "https://claude.ai/code/project/chan_A", name: "fjord:chan_A:-", frame: true, build: (h) => [
+      h("div", { "data-testid": "transcript-sizer" }), h("div", { "data-testid": "code-prompt-input" }),
+      h("div", { "data-testid": "overview-tab-strip" }), h("div", { "data-testid": "threads-empty-explainer" })] });
+    env.say({ kind: "snapshot" });
+    for (let i = 0; i < 4; i++) env.wake(1600);
+    eq(env.events("frame_stuck").length, 0, "never stuck");
+    eq(env.pushed, [], "never moved");
+    eq(env.events("threads").filter((e) => e.listed).length, 0, "not listed before this visit's /timeline fetch ended");
+    env.clock.t += 50;
+    env.timeline("chan_A");
+    const listed = env.events("threads").filter((e) => e.listed);
+    eq(listed.map((e) => e.threads), [[]], "then listed, with no thread");
+  },
+
   async listed_by_structure_only() {
     // Loading: the tab strip and an empty active section, no rows, no empty line.
     const loading = page({ url: "https://claude.ai/code/project/chan_A", name: "fjord:chan_A:-", frame: true, build: (h) => overview(h, [], { ready: false }) });

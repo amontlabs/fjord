@@ -448,6 +448,10 @@ Observed from frames in Fjord's hidden tab, Fjord's own top-frame sidebar, and o
      0.1 s after the tab strip on test-a and 6 s on test-b.
    - A project with no active threads (test-b, earlier census): `home-empty-band`, `data-home-empty-line`, two
      `data-home-section` and one `data-home-group`, with no `data-home-state`.
+   - A project that never had a thread (live, 2026-11-05: fjord-measure-temp, surplace.live, and test-a and test-b after their
+     threads were gone): `[data-testid=threads-empty-explainer]` after the tab strip, and no `data-home-section` at all. Frames
+     that waited for a section there reported `frame_stuck`, were reloaded, and used up the load budget in about a minute, so the
+     tab was handed over again and again and every send paused on "the page can't be read".
 4. **Coordinator rows and threads.**
    - The coordinator's report row carries a `channel-created-thread` card: `-box`, `-glyph`, `-title`, with `data-glyph` and
      `data-display` attributes. While the thread works it adds `channel-created-thread-step`; when the thread waits or ends it has

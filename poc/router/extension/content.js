@@ -116,8 +116,11 @@ function readThreads() {
 // a `data-home-state=ready` that belongs to done rows never passes a still-loading active list. Loaded with rows: a row in `needs`,
 // `running` or `active` outside the done group, with a `[data-home-sort=priority][data-home-state=ready]` over it or in its group. Loaded
 // empty: `[data-home-section=active]` holding `section[data-testid=home-empty-band]` and `div[data-home-empty-line=true]`, no active row,
-// and exactly one non-done `[data-home-group]`. Also needed: the project's composer, no thread open, and this visit's `/timeline` fetch
+// and exactly one non-done `[data-home-group]`. Loaded with no thread ever (live 2026-11-05): `[data-testid=threads-empty-explainer]` in place
+// of every `data-home-section`, and no row. Also needed: the project's composer, no thread open, and this visit's `/timeline` fetch
 // ended. Only then may a whole `threads` read replace the project's active list (`listed: true`).
+// A project that never had a thread shows `threads-empty-explainer` and no `data-home-section` at all (measured live 2026-11-05).
+const noThreads = () => !!all("threads-empty-explainer")[0];
 function overviewListed() {
   if (threadParam() !== null || !box("project")) return false;
   const project = shownProject();
@@ -127,6 +130,7 @@ function overviewListed() {
     const ready = [...document.querySelectorAll('[data-home-sort="priority"][data-home-state="ready"]')];
     return ready.some((node) => active.some((row) => node.contains(row) || !!row.closest("[data-home-group]")?.contains(node)));
   }
+  if (noThreads()) return !all("overview-thread-row").length;
   const section = document.querySelector('[data-home-section="active"]');
   if (!section?.querySelector('section[data-testid="home-empty-band"]') || !section.querySelector('[data-home-empty-line="true"]')) return false;
   return [...document.querySelectorAll("[data-home-group]")].filter((group) => group.getAttribute("data-home-group") !== "done").length === 1;
@@ -1469,12 +1473,12 @@ function reloadFrame(frame) {
 // ---- A frame's place (1.4). A project frame stays on its overview: whenever it is elsewhere (it lands on `?thread=`, the thread last
 // shown for that project in this browser, at each load and 1.5 to 2.2 s after) it moves itself the way the page's links do
 // (`history.pushState` to `/code/project/<id>`, then `popstate`; measured to take and to hold). Once the page shows its project side and the
-// overview container (`[data-home-section]`) is still missing MOVE_GRACE after the move, it clicks `overview-thread-crumb-back` by test id,
+// overview container (`[data-home-section]`, or `threads-empty-explainer` for a project with no thread) is still missing MOVE_GRACE after the move, it clicks `overview-thread-crumb-back` by test id,
 // once; still none MOVE_GRACE later, or a move that keeps being undone (MOVES_MAX), and it reports `frame_stuck`, once per document: the
 // engine reloads it (`reload`) or marks it stale. A thread frame never moves: one off its thread for MOVE_GRACE reports `frame_stuck` too.
 const MOVE_GRACE = 1500, MOVES_MAX = 6;
 const place = { phase: null, at: 0, moves: 0, stuck: false, off: null };
-const onOverview = () => !!document.querySelector("[data-home-section]");
+const onOverview = () => !!document.querySelector("[data-home-section]") || noThreads();
 function moveToOverview() {
   place.phase = "moved"; place.at = performance.now(); place.moves++;
   history.pushState(history.state, "", `/code/project/${NAME.project}`);
@@ -1484,7 +1488,11 @@ function moveToOverview() {
 function stuck() {
   if (place.stuck) return;
   place.stuck = true; place.phase = "stuck";
-  emit({ type: "frame_stuck" });
+  // `shown`: what the frame showed when it gave up, for diagnosis only (the engine reads none of it).
+  const ids = [...new Set([...document.querySelectorAll("[data-testid]")].map((node) => node.getAttribute("data-testid")))].filter((id) => !id.startsWith("sidebar"));
+  const shown = { path: location.pathname + location.search, moves: place.moves, sections: [...document.querySelectorAll("[data-home-section]")].map((node) => node.getAttribute("data-home-section")),
+    ids: ids.slice(0, 40) };
+  emit({ type: "frame_stuck", shown });
 }
 function watchPlace() {
   if (!FRAME || place.stuck) return;
