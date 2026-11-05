@@ -143,6 +143,27 @@ import Testing
         #expect(doc.checked(dropped, known: [], cards: [:], at: 2).needsYou.isEmpty)
     }
 
+    /// Picking an option of the coordinator's question sends the option's words to the project, not to a thread.
+    @Test func aPickedOptionOfTheCoordinatorsQuestionIsSentToTheProject() async {
+        let store = demo()
+        var sent: [CourierRequest] = []
+        let (updates, _) = AsyncStream<CourierUpdate>.makeStream()
+        store.routerCourier.attach(RouterCourierSource(submit: { sent.append($0); return 9 }, updates: updates))
+        let briefs = store.routerBriefs
+        let project = briefs.demoDocs.keys.sorted().first!
+        var doc = briefs.demoDocs[project]!
+        doc.needsYou.append(BriefEntry(project: project, thread: BriefDoc.coordinator, kind: .request, state: .needsYou, since: 1,
+                                       source: .cloud, question: "Which number?", options: ["1", "2", "3"]))
+        briefs.demoDocs[project] = doc
+        let t = BriefTarget(project: project, thread: BriefDoc.coordinator)
+        briefs.pick(t, 2, store: store)
+        #expect(briefs.confirm(t, store: store))
+        for _ in 0..<50 where sent.isEmpty { await Task.yield() }
+        guard case .send(let words, let to, let thread, _, _)? = sent.first else { Issue.record("\(sent)"); return }
+        #expect(words == "2" && to == project && thread == nil)
+        #expect(briefs.title(t) == "The project's coordinator")
+    }
+
     // MARK: Purpose (P2-5)
 
     @Test func aSettingsReadWritesThePurposeAndACallUnderWayKeepsIt() async {

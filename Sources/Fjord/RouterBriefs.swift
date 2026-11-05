@@ -357,7 +357,10 @@ enum BriefKeys {
             answerForm(form, entry: e, option: n, words: nil, store: store)
             return true
         }
-        guard let card = e.card else { return false }
+        guard let card = e.card else {  // a question asked in words: the option's words are your reply
+            picked[t] = nil
+            return send(label, to: t, store: store)
+        }
         picked[t] = nil
         let pills = store.routerCourier
         let shown = names[t.project]
