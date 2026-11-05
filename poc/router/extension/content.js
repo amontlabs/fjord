@@ -281,7 +281,16 @@ function ownRow(row) {
 //   one's badge left out), passed on as written, never read;
 // - the coordinator's thread card (`channel-created-thread`): `card: {glyph}`, its glyph's `data-glyph` (`working`, then `CheckCircle`);
 // - `entry_index`: the row's `data-epitaxy-entry-index`, where it has one (the coordinator's start row is the opening row's + 1).
+// An option's words, by the button's own references (measured live 2026-11-05): `aria-labelledby` names its letter (the button's first
+// child, left out: options go by position) and its label; `aria-describedby` names its badge (left out) and its consequence line. Told as
+// "label — consequence". A button without those references: its whole text, badge and hidden parts left out.
 const optionWords = (button) => {
+  const refs = (attribute) => (button.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean).map((id) => button.ownerDocument.getElementById(id)).filter(Boolean);
+  const label = refs("aria-labelledby").filter((node) => node !== button.firstElementChild).map((node) => squash(node.textContent)).filter(Boolean).join(" ");
+  if (label) {
+    const consequence = refs("aria-describedby").filter((node) => !node.matches('[data-cds="Badge"]')).map((node) => squash(node.textContent)).filter(Boolean).join(" ");
+    return consequence ? `${label} — ${consequence}` : label;
+  }
   const copy = button.cloneNode(true);
   copy.querySelectorAll('[data-cds="Badge"], .sr-only, svg, [aria-hidden="true"]').forEach((node) => node.remove());
   return squash(copy.textContent.replace(/[-]/g, ""));

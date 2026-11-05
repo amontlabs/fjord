@@ -84,9 +84,17 @@ function row(h, { id, mark = "dashed", spin = false, unread = false }) {
 }
 
 // A thread view: the project's pane, then the thread's pane with its rows, composer and dock.
-function threadView(h, { card = "cmsg_K", state = null, busy = false, stop = false, options = ["Yes", "No"] } = {}) {
-  const buttons = options.map((text, i) => h("li", {}, h("button", { type: "button", ...(busy && i === 0 ? { "aria-busy": "true", "aria-disabled": "true" } : {}) },
-    i === 0 ? h("span", { "data-cds": "Badge" }, "Recommended") : null, text)));
+// `measured`: the buttons as the page draws them (live, 2026-11-05): a letter, a label and a badge, a consequence line, named by
+// `aria-labelledby` and `aria-describedby`; `options` then holds [label, consequence] pairs.
+function threadView(h, { card = "cmsg_K", state = null, busy = false, stop = false, options = ["Yes", "No"], measured = false } = {}) {
+  const buttons = options.map((text, i) => h("li", {}, measured
+    ? h("button", { type: "button", "aria-labelledby": `r-cap-${i} r-label-${i}`, "aria-describedby": `r-badge-${i} r-consequence-${i}` },
+      h("span", { id: `r-cap-${i}` }, "AB"[i]),
+      h("span", {}, h("span", {}, h("span", { id: `r-label-${i}` }, h("bdi", {}, text[0])), i === 0 ? h("span", { "data-cds": "Badge", id: `r-badge-${i}` }, h("span", {}, "Recommandé")) : null),
+        h("span", { id: `r-consequence-${i}` }, h("bdi", {}, text[1]))),
+      h("span", {}, h("span", { "data-cds": "Icon", "aria-hidden": "true" }, "")))
+    : h("button", { type: "button", ...(busy && i === 0 ? { "aria-busy": "true", "aria-disabled": "true" } : {}) },
+      i === 0 ? h("span", { "data-cds": "Badge" }, "Recommended") : null, text)));
   const decision = h("div", { "data-testid": "decision-card", ...(state ? { "data-state": state } : {}) }, h("ul", { role: "list" }, ...buttons));
   return [
     h("div", { id: "project-pane" }, h("div", { "data-testid": "transcript-sizer" }), h("div", { "data-testid": "rail-composer-dock" }, h("div", { "data-testid": "code-prompt-input" }))),
@@ -199,6 +207,14 @@ const cases = {
     env.flush(cardOf(env));
     const after = env.events("rows").at(-1).rows.find((r) => r.key === "cmsg_K");
     eq([after.answered, after.options], [true, []], "answered, no controls left");
+  },
+
+  async card_options_by_their_references() {
+    const env = page({ url: "https://claude.ai/code/project/chan_A?thread=cmsg_T", name: "fjord:chan_A:cmsg_T", frame: true,
+      build: (h) => threadView(h, { measured: true, options: [["Red", "This thread replies with exactly Red and stops."], ["Blue", "This thread replies with exactly Blue."]] }) });
+    env.say({ kind: "snapshot" });
+    const card = env.events("rows")[0].rows.find((r) => r.key === "cmsg_K");
+    eq(card.options, ["Red — This thread replies with exactly Red and stops.", "Blue — This thread replies with exactly Blue."], "label — consequence, no letter, no badge");
   },
 
   async answer_clicks_the_nth_option() {

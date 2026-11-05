@@ -16,6 +16,7 @@ class Element {
     this.nodeType = 1; this.clicks = 0; this.srcSets = 0;
   }
   get children() { return this.childNodes.filter((n) => n.nodeType === 1); }
+  get firstElementChild() { return this.children[0] ?? null; }
   get parentElement() { return this.parentNode?.nodeType === 1 ? this.parentNode : null; }
   getAttribute(name) { return this.attrs.has(name) ? this.attrs.get(name) : null; }
   setAttribute(name, value) { this.attrs.set(name, String(value)); }
@@ -134,6 +135,7 @@ class Document extends Element {
   }
   get isConnected() { return true; }
   createElement(tag) { return new Element(tag, this); }
+  getElementById(id) { return this.querySelectorAll("*").find((el) => el.getAttribute("id") === id) ?? null; }
   execCommand() { return false; }
   querySelectorAll(selector) { const test = compile(selector); return [this.documentElement, ...this.documentElement._descendants()].filter(test); }
 }
