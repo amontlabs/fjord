@@ -99,7 +99,7 @@ extension CourierStore {
 final class CourierLog {
     let db: CourierStore
     /// Fields stored but left out of the comparison, by kind: they change with no change to the item.
-    static let volatile: [String: Set<String>] = ["row": ["index"], "thread": ["text"]]
+    static let volatile: [String: Set<String>] = ["row": ["index", "entry_index"], "thread": ["text"]]  // a transcript renumbers its rows (live 2026-11-05)
     private var last: [String: String]
     private var stable: [String: String] = [:]  // (kind, id) -> the newest content without its volatile fields
     private(set) var status: [String: String] = [:]  // thread -> the latest recorded status

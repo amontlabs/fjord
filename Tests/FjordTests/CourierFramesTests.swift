@@ -607,7 +607,11 @@ import Testing
         try w.up()
         try w.core.handle(w.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [Self.msg("k1", 1)]]))
         try w.core.handle(w.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [Self.msg("k1", 7)]]))
-        #expect(try w.core.db.items(project: "chan_a", after: 0, kind: "row").count == 1)
+        var renumbered = Self.msg("k1", 8); renumbered["entry_index"] = 206
+        try w.core.handle(w.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [renumbered]]))
+        renumbered["entry_index"] = 199
+        try w.core.handle(w.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [renumbered]]))
+        #expect(try w.core.db.items(project: "chan_a", after: 0, kind: "row").count == 1)  // nor does a new entry index
         var r = Self.running("t1"); r["text"] = "T t1 now"
         try w.overview([r])
         r["text"] = "T t1 1m"

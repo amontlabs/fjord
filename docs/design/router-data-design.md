@@ -493,6 +493,10 @@ went through (confirmed).
    - The opening row (`data-perf-row=human`) has `data-entry-key`, `data-epitaxy-entry` and `data-take-back-entry`, all equal to
      the thread's `data-home-card`, plus `data-thread-rename-anchor`. It has no `data-turn-key`.
    - The coordinator's thread-start row is the next transcript entry: `data-epitaxy-entry-index` one more than the opening row's.
+   - Entry indexes aren't stable across loads (live, 2026-11-05: the same rows read 184 to 195 after a reload, 206 to 209 before),
+     so they only relate rows read in one document. The log ignores them when it compares a row with the one it stored.
+   - A decision card's option button names its parts: `aria-labelledby` the letter (its first child) and the label,
+     `aria-describedby` the badge and the consequence line. Its plain text runs them together ("ARedThis thread replies…").
      Its `data-entry-key`, `data-epitaxy-entry`, `data-turn-key` and `data-item-key` (`<own id>:t1`) are all its own id. Its
      `channel-created-thread` card has `channel-created-thread-box[data-display=single]` and
      `channel-created-thread-glyph[data-glyph]`, which goes `working` to `CheckCircle` when the thread finishes (17.0 s, 0.2 s
