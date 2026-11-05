@@ -51,22 +51,22 @@ import Testing
 
     @Test func theEmptyPaletteListsWhatNeedsYouThenRecentsWithoutRepeats() {
         let (usage, _) = usage()
-        let a = item("card:a", "Which branch?", kind: .card), b = item("card:b", "Approve the plan", kind: .card)
+        let a = item("thread:p/a", "Which branch?", kind: .thread), b = item("thread:p/b", "Approve the plan", kind: .thread)
         let c = item("entry:c", "Fix flaky test"), d = item("entry:d", "Bump the client")
         let model = make(.fixed([a, b, c, d], needsYou: [a, b]), usage: usage)
         usage.record("entry:c", query: "")
-        usage.record("card:a", query: "")
+        usage.record("thread:p/a", query: "")
         usage.record("entry:gone", query: "")
         model.open()
         #expect(model.sections.map(\.title) == ["Needs you", "Recents"])
-        #expect(model.sections[0].hits.map(\.id) == ["card:a", "card:b"])
+        #expect(model.sections[0].hits.map(\.id) == ["thread:p/a", "thread:p/b"])
         // The last pick that is still known, not repeating what already needs you.
         #expect(model.sections[1].hits.map(\.id) == ["entry:c"])
-        #expect(model.selection == "card:a")
+        #expect(model.selection == "thread:p/a")
     }
 
-    @Test func triageItemsInNeedsYouAreCappedAtFiveAfterTheRouterCards() {
-        let router = [item("card:1", "Question", kind: .card)]
+    @Test func triageItemsInNeedsYouAreCappedAtFiveAfterTheRoutersEntries() {
+        let router = [item("thread:p/1", "Question", kind: .thread)]
         let triage = (1...8).map { item("entry:\($0)", "Item \($0)") }
         var sources = PaletteSources.fixed([])
         sources.router = { _ in PaletteSourceOutput(needsYou: router, items: router) }
@@ -74,7 +74,7 @@ import Testing
         let model = make(sources)
         model.open()
         #expect(model.sections.count == 1 && model.sections[0].title == "Needs you")
-        #expect(model.sections[0].hits.map(\.id) == ["card:1", "entry:1", "entry:2", "entry:3", "entry:4", "entry:5"])
+        #expect(model.sections[0].hits.map(\.id) == ["thread:p/1", "entry:1", "entry:2", "entry:3", "entry:4", "entry:5"])
     }
 
     @Test func withNothingToShowItFallsBackToThePages() {
@@ -412,14 +412,16 @@ import Testing
         store.categories[0].name = "Renamed"
         let renamed = model.sourceStamp
         #expect(renamed != withSnippet)
-        // A card reclassified (same id, title and addressed state), a session, the action runs, the Router's switch.
-        var card = RouterCard(id: "s#t1", sessionID: "s", kind: .question, title: "Same", folder: "/code/web", text: "?",
-                              createdAt: Date())
-        store.router.cards = [card]
+        // A brief entry, the same entry of another kind, a session, the action runs, the Router's switch.
+        var doc = BriefDoc(project: "p")
+        var entry = BriefEntry(project: "p", thread: "t", kind: .question, state: .needsYou, since: 1, source: .cloud, question: "?")
+        doc.needsYou = [entry]
+        store.routerBriefs.demoDocs = ["p": doc]
         let carded = model.sourceStamp
         #expect(carded != renamed)
-        card.kind = .stuck
-        store.router.cards = [card]
+        entry.kind = .plan
+        doc.needsYou = [entry]
+        store.routerBriefs.demoDocs = ["p": doc]
         #expect(model.sourceStamp != carded)
         let sessioned = model.sourceStamp
         store.claudeSessions["x"] = ClaudeSession(id: "x", title: "T", folder: "/code/web", lastActivity: Date())
@@ -437,8 +439,8 @@ import Testing
         let kept = item("setting:a", "A setting", kind: .setting)
         let model = make(.fixed([kept, item("entry:b", "Other")]), usage: usage)
         usage.record("setting:a", query: "")
-        // Thirty picks since, none of them listed any more (cards that were addressed).
-        for n in 1...30 { usage.record("card:gone\(n)", query: "") }
+        // Thirty picks since, none of them listed any more (threads that were archived).
+        for n in 1...30 { usage.record("thread:p/gone\(n)", query: "") }
         model.open()
         #expect(model.sections.map(\.title) == ["Recents"] && ids(model) == ["setting:a"])
     }

@@ -103,7 +103,7 @@ struct AppSettings: Codable {
 struct PersistedState: Codable {
     var settings: AppSettings
     var agents: AgentsState?
-    var router: RouterState?
+    var router: RouterSaved?
     var categories: [InboxCategory]? = nil
     var groups: [InboxGroup]? = nil
     /// The bar's sections; nil (a file from before them) is GitHub's alone.
@@ -128,7 +128,7 @@ struct PersistedState: Codable {
     /// The project proposals up or waiting when the app quit (RouterProjectProposal.swift); nil: none.
     var routerProposals: [RouterProjectProposal.Saved]? = nil
 
-    init(settings: AppSettings, agents: AgentsState? = nil, router: RouterState? = nil, categories: [InboxCategory]? = nil,
+    init(settings: AppSettings, agents: AgentsState? = nil, router: RouterSaved? = nil, categories: [InboxCategory]? = nil,
          groups: [InboxGroup]? = nil, categorySections: [CategorySection]? = nil, things: [String: Thing]? = nil,
          marks: [String: EntryMarks]? = nil,
          categoryBaselines: [UUID: Set<UUID>]? = nil, ownedRepos: Set<String>? = nil, contributedRepos: Set<String>? = nil,

@@ -3,7 +3,7 @@ import Foundation
 // What the Router changed in Fjord itself, kept so the user can see it in the history and take it back. A
 // record holds the before and after of exactly the one thing it touched (a category, a group, the categories' order, a
 // setting, the marks of some entries), nothing around it. The records live in the Router's state
-// (`RouterState.changes`) and are saved with it.
+// (`RouterSaved.changes`) and are saved with it; so are your acts on the brief (archive, mark read), with their Revert.
 
 /// A setting's value, whichever kind it is.
 enum SettingValue: Codable, Hashable {
@@ -43,11 +43,14 @@ struct FjordChange: Codable, Hashable, Identifiable {
         case order(before: [UUID], after: [UUID])
         case setting(key: String, before: SettingValue, after: SettingValue)
         case marks(state: String, [EntryChange])
-        /// An action on the Router page (archive, reopen, mute), done at once and taken back by Revert.
-        case cardAction(CardAction)
+        /// An act on a brief entry (archive, mark read), done at once and taken back by Revert. `mark`: the brief's own key
+        /// for what it set (`RouterBriefs.marks`).
+        case briefAction(project: String, thread: String, act: BriefAction, mark: String)
     }
 
     var isReverted: Bool { revertedAt != nil }
+    /// An act on a brief entry, not a change the Router made.
+    var isBriefAction: Bool { if case .briefAction = patch { true } else { false } }
     /// Why the last Apply or Revert didn't go through, for a card still active or waiting (a reverted or discarded one
     /// shows its note as it is). Cleared by the next success.
     var failureNote: String? { isReverted ? nil : revertNote }
@@ -66,7 +69,7 @@ struct FjordChange: Codable, Hashable, Identifiable {
         case .order: "arrow.up.arrow.down"
         case .setting: "gearshape"
         case .marks: "checkmark.circle"
-        case .cardAction(let action): action.symbol
+        case .briefAction(_, _, let act, _): act.symbol
         }
     }
 
@@ -215,8 +218,8 @@ extension FjordChange {
             }
             return ChangePayload(before: changes.map { "\(name($0.thing)): \(Self.describe($0.before))" },
                                  after: changes.map { "\(name($0.thing)): \(Self.describe($0.after))" })
-        case .cardAction(let action):
-            return ChangePayload(before: [action.before], after: [action.after])
+        case .briefAction(_, _, let act, _):
+            return ChangePayload(before: ["Needs you"], after: [act.label])
         }
     }
 
@@ -416,12 +419,8 @@ extension Store {
                 if marks[item.thing] != item.after { edited = true }
                 marks[item.thing] = item.before
             }
-        case .cardAction(let action):
-            do { try revertCardAction(action) } catch {
-                change.revertNote = "Couldn't put it back: \(error.localizedDescription)"
-                router.changes[message] = change
-                return change
-            }
+        case .briefAction(_, _, let act, let mark):
+            routerBriefs.setMark(act, mark, on: false)
         }
         change.revertedAt = now
         change.revertNote = edited ? "Reverted (later edits to it were undone too)" : "Reverted"
@@ -452,8 +451,6 @@ enum FjordTarget: Equatable {
     case settings(section: String)
     /// The Router page.
     case router
-    /// The Router page, on this session (a stop names the exact one).
-    case session(String)
     /// A thing in its list (its category, or the archive), picked and scrolled to.
     case entry(thing: String, category: UUID?, done: Bool)
 }
@@ -462,7 +459,7 @@ extension FjordChange {
     /// It changed Triage (its categories, groups or inbox), not the app's settings.
     var touchesTriage: Bool {
         switch patch {
-        case .setting, .cardAction: false
+        case .setting, .briefAction: false
         default: true
         }
     }
@@ -484,8 +481,8 @@ extension FjordChange {
         case .marks(_, let changes):
             guard let first = changes.first?.thing, let entry = store.entries.first(where: { $0.id == first }) else { return .categories }
             return .entry(thing: first, category: entry.categoryID, done: entry.isDone)
-        case .cardAction(let action):
-            return action.isMute ? .settings(section: SettingsView.routerID) : .router
+        case .briefAction:
+            return .router
         }
     }
 }

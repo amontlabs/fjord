@@ -31,7 +31,7 @@ struct RouterProjectProposalPill: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: 560, alignment: .leading)
-        .flightPillGround()
+        .pillGround()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Self.label(proposal))
         .motion(.fade, value: "\(proposal.fields)\(proposal.phase)\(proposal.reviseNote ?? "")")

@@ -571,12 +571,6 @@ struct Thing: Codable, Hashable, Identifiable {
     var ciRunning = false
     /// Workflows: the run (or an external check) was cancelled; `checks` then says failing, never passing.
     var ciCancelled = false
-    /// When its CI (state, run, whether it still runs) was last seen to change; nil until it is seen changing. A PR's
-    /// `updatedAt` doesn't move when its checks finish.
-    var ciChangedAt: Date?
-    /// When its CI last finished, as GitHub says (its checks' completion, its statuses' posting, a workflow's run): what a
-    /// thing first seen is stamped with (`ciChangedAt`), as CI that finished before it was found may still be news.
-    var ciFinishedAt: Date?
     /// When each current review request was made (the latest `ReviewRequestedEvent` per reviewer).
     var reviewRequests: [ThingReviewRequest] = []
     var greptileScore: Int?
@@ -640,8 +634,6 @@ extension Thing {
         ciRun = try c.decodeIfPresent(String.self, forKey: .ciRun)
         ciRunning = try c.decodeIfPresent(Bool.self, forKey: .ciRunning) ?? false
         ciCancelled = try c.decodeIfPresent(Bool.self, forKey: .ciCancelled) ?? false
-        ciChangedAt = try c.decodeIfPresent(Date.self, forKey: .ciChangedAt)
-        ciFinishedAt = try c.decodeIfPresent(Date.self, forKey: .ciFinishedAt)
         reviewRequests = try c.decodeIfPresent([ThingReviewRequest].self, forKey: .reviewRequests) ?? []
         greptileScore = try c.decodeIfPresent(Int.self, forKey: .greptileScore)
         workflowName = try c.decodeIfPresent(String.self, forKey: .workflowName)

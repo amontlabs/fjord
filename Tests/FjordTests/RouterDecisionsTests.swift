@@ -47,28 +47,28 @@ import Testing
         #expect(s.router.decisions[0].summary == "reverted")
     }
 
-    @Test func answersFromThePageAreLogged() {
+    @Test func answersFromTheBriefAreLogged() {
         let s = store()
-        s.router.cards = [RouterCard(id: "local_a#w1", sessionID: "local_a", kind: .question, title: "Fix the login bug",
-                                     folder: nil, text: "Which?", createdAt: Date())]
-        s.logCardAction("Archived", card: "local_a#w1")
+        var doc = BriefDoc(project: "local:app")
+        doc.threads = [BriefThread(id: "local_a", title: "Fix the login bug", status: .needsYou, age: 0, source: .local)]
+        s.routerBriefs.demoDocs = ["local:app": doc]
+        s.logEntryAction("Answered the form", target: BriefTarget(project: "local:app", thread: "local_a"))
         let d = s.router.decisions[0]
-        #expect(d.trigger == .you("Archived") && d.outcome == .done)
-        #expect(d.done == [.answered(card: "Fix the login bug")] && d.links.cards == ["local_a#w1"] && d.links.sessions == ["local_a"])
+        #expect(d.trigger == .you("Answered the form") && d.outcome == .done)
+        #expect(d.done == [.answered(thread: "Fix the login bug")] && d.links.threads == ["local:app/local_a"])
     }
 
     // MARK: Persistence
 
-
     @Test func theOldestAreDroppedPastTheCap() {
-        var state = RouterState()
+        var state = RouterSaved()
         for i in 0..<(RouterDecision.maxKept + 5) { state.log(RouterDecision(trigger: .you("m\(i)"))) }
         #expect(state.decisions.count == RouterDecision.maxKept)
         #expect(state.decisions.first?.trigger == .you("m5"))
     }
 
     @Test func anEntryWhoseAskBackCardIsStillUpOutlivesTheCap() {
-        var state = RouterState()
+        var state = RouterSaved()
         let asking = RouterDecision(trigger: .you("which one?"))
         state.log(asking, inUse: [asking.id])
         for i in 0..<(RouterDecision.maxKept + 5) { state.log(RouterDecision(trigger: .you("m\(i)")), inUse: [asking.id]) }
@@ -77,7 +77,7 @@ import Testing
     }
 
     @Test func theEntryOfAChangeWaitingForYourApplyOutlivesTheCap() {
-        var state = RouterState()
+        var state = RouterSaved()
         var change = FjordChange(title: "waiting", patch: .setting(key: "snooze", before: .date(nil), after: .date(nil)))
         change.pending = "asks first"
         state.changes = [change]
@@ -113,51 +113,18 @@ import Testing
         #expect(Store().recentDecisions().isEmpty)
     }
 
-    @Test func aDoneTurnWaitsInWorkingWhileItsSessionStillHasWorkRunning() {
-        let now = Date()
-        let done = RouterCard(id: "s#t1", sessionID: "s", kind: .done, title: "T", folder: nil, text: "x", createdAt: now)
-        let question = RouterCard(id: "s#w1", sessionID: "s", kind: .question, title: "T", folder: nil, text: "x", createdAt: now)
-        var row = AgentRow(session: ClaudeSession(id: "s", title: "T", lastActivity: now), entry: AgentEntry(id: "s"), label: "T")
-        row.tasks = [ClaudeTask(id: "a1", kind: .agent, title: "Explore", since: now)]
-        let busy = RouterPage.make(cards: [done, question], working: [row])
-        #expect(busy.needs.map(\.id) == ["s#w1"] && busy.notes.isEmpty)
-        row.tasks = []
-        let idle = RouterPage.make(cards: [done, question], working: [row])
-        #expect(idle.needs.map(\.id) == ["s#w1"] && idle.notes.map(\.id) == ["s#t1"])
-    }
-
     // MARK: History
 
-    @Test func theHistoryInterleavesDecisionsAndAddressedCardsByTime() {
-        let now = Date()
-        var card = RouterCard(id: "s#t1", sessionID: "s", kind: .done, title: "T", folder: nil, text: "x", createdAt: now.addingTimeInterval(-500))
-        card.addressedAt = now.addingTimeInterval(-100)
-        card.addressedBy = .you
-        let open = RouterCard(id: "s#t2", sessionID: "s", kind: .question, title: "Q", folder: nil, text: "x", createdAt: now)
-        let late = RouterDecision(at: now.addingTimeInterval(-10), trigger: .you("late"))
-        let early = RouterDecision(at: now.addingTimeInterval(-300), trigger: .you("early"))
-        let page = RouterPage.make(cards: [open, card], working: [], decisions: [late, early])
-        #expect(page.history.map(\.id) == [early.id.uuidString, "s#t1", late.id.uuidString])
-        #expect(page.needs.map(\.id) == ["s#t2"])
-    }
-
-    @Test func theStoresPageShowsTheLog() {
-        let s = store()
-        let d = s.logDecision(RouterDecision(trigger: .you("hi")))
-        let ids = s.routerPage.history.map(\.id)
-        #expect(ids == [d.uuidString])
-    }
-
     @Test func theLogSurvivesEncodingAndOldStateHasNone() throws {
-        var state = RouterState()
+        var state = RouterSaved()
         var d = RouterDecision(trigger: .action(category: "C", thing: "t", actionID: "a", runID: "r"),
                                decision: .init(target: "Docs", intent: "reply", label: "x", confidence: 0.8), outcome: .corrected(from: "A", to: "B"))
         d.add(.sent(to: "p", text: "hi", original: nil), session: "s")
         d.add(.asked(["a", "b"]))
         state.log(d)
-        let back = try JSONDecoder().decode(RouterState.self, from: JSONEncoder().encode(state))
+        let back = try JSONDecoder().decode(RouterSaved.self, from: JSONEncoder().encode(state))
         #expect(back.decisions == [d])
-        let old = try JSONDecoder().decode(RouterState.self, from: Data(#"{"enabled":true,"cards":[],"chat":[]}"#.utf8))
+        let old = try JSONDecoder().decode(RouterSaved.self, from: Data(#"{"enabled":true,"cards":[],"chat":[]}"#.utf8))
         #expect(old.decisions.isEmpty && old.enabled)
     }
 
@@ -173,7 +140,7 @@ import Testing
         for one in [split, started] {
             do { _ = try JSONDecoder().decode(RouterDecision.self, from: Data(one.utf8)) } catch { Issue.record("\(error)") }
         }
-        let state = try JSONDecoder().decode(RouterState.self, from: data)
+        let state = try JSONDecoder().decode(RouterSaved.self, from: data)
         #expect(state.decisions.count == 2)
         let a = state.decisions[0]
         #expect(a.decision.target == "Alpha" && a.outcome == .done && a.done.count == 2 && a.links.sessions == ["s1", "s2"])

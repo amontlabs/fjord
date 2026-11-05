@@ -1056,9 +1056,6 @@ struct ClaudeSnapshot {
     var frontmost = false
     var activity: [String: ClaudeActivity]?
     var tasks: [String: [ClaudeTask]]?
-    /// The sessions `tasks` speaks for: those not running in this read, whose background work was looked at (none found is
-    /// an answer too).
-    var taskInventory: Set<String>?
     /// What the store looked like when the read was asked for (see `Store.applyClaude`).
     var stamp = ClaudeStamp()
 }
@@ -1266,15 +1263,12 @@ final class ClaudeFeed: @unchecked Sendable {
 
     /// Reads that came while the window's morph played (`MotionGate`), on the main thread: taken in once the motion is
     /// over, in the order read (what they make of the sessions, the dots and the Router's cards goes by each step), a slice
-    /// of them per turn of the main run loop (`sliceBudget`), each slice inside `batched` (the store makes the work that
-    /// follows from them once, at its end), so a backlog never holds the main thread just as the window wants its frames.
+    /// of them per turn of the main run loop (`sliceBudget`), so a backlog never holds the main thread just as the window wants its frames.
     /// Reads that come while some still wait queue behind them. None is folded into another: even an activity-only read
     /// can say a session stopped on a question, which the next may already have moved past.
     private var held: [(read: ClaudeSnapshot, apply: @MainActor (ClaudeSnapshot) -> Void)] = []
     /// A slice is asked for (after the motion) or under way.
     private var draining = false
-    /// Runs a slice of held reads as one (the store's `batchingClaudeReads`); nil runs them as they are.
-    @MainActor var batched: ((() -> Void) -> Void)?
     /// How long a slice of held reads may take before the rest waits for the next turn (at least one read a slice).
     @MainActor var sliceBudget: TimeInterval = 0.006
     /// The gate reads wait at (the store's `motionGate`).
@@ -1298,7 +1292,7 @@ final class ClaudeFeed: @unchecked Sendable {
                 apply(read)
             } while !held.isEmpty && DispatchTime.now().uptimeNanoseconds - start < budget
         }
-        if let batched { batched(slice) } else { slice() }
+        slice()
         guard !held.isEmpty else { draining = false; return }
         // The rest on the next turn, after any motion begun meanwhile.
         DispatchQueue.main.async { [self] in MainActor.assumeIsolated { gate.whenStill { [self] in drain(gate) } } }
@@ -1365,7 +1359,6 @@ final class ClaudeFeed: @unchecked Sendable {
         lock.unlock()
         snapshot.activity = activity
         snapshot.tasks = found.tasks
-        snapshot.taskInventory = found.inventory
         return snapshot
     }
 

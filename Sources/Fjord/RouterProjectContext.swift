@@ -198,12 +198,18 @@ extension RouterProjectContext {
     }
 
     /// The app's context: the Board as the engine last folded it, the local sessions as the engine's `local` input
-    /// (`CourierLocal.read()`, for bridge ids), the app's sessions, activity, cards and what you told them, and your last
+    /// (`CourierLocal.read()`, for bridge ids), the app's sessions, activity, what waits on you in each (the brief's needs-you
+    /// entries) and what you told them, and your last
     /// routings from the history.
     @MainActor static func gather(board: JSON, local: JSON? = nil, store: Store, now: Date = Date(), excluding: UUID? = nil,
                                   statuses: [Int: CourierIntentStatus] = [:]) -> RouterProjectContext {
         let told = store.lastTold()
-        let cards = store.routerShownOpenCards
+        // Each local session's open needs-you entries (a question, a plan, a request or a permission), oldest first.
+        let briefs = store.routerBriefs
+        var waiting: [String: [BriefEntry]] = [:]
+        for e in briefs.docs.values.flatMap(\.needsYou) where RouterTools.waitsOnYou.contains(e.kind) {
+            if let cli = briefs.cli(e.target, store: store) { waiting[cli, default: []].append(e) }
+        }
         let byCLI = Dictionary(store.claudeSessions.values.compactMap { s in s.cliID.map { ($0, s) } }, uniquingKeysWith: { a, b in
             a.lastActivity >= b.lastActivity ? a : b
         })
@@ -212,9 +218,8 @@ extension RouterProjectContext {
             var f = LocalFacts(summary: s.summary?.detail ?? "")
             if s.running { f.doing = store.claudeActivity[s.id]?.text ?? "" }
             if let t = told[s.id] { f.told = Told(text: t.text, minutesAgo: max(0, Int(now.timeIntervalSince(t.at) / 60))) }
-            f.waiting = cards.filter { $0.sessionID == s.id && RouterTools.waitsOnYou.contains($0.kind) }
-                .sorted { $0.createdAt < $1.createdAt }
-                .map { Waiting(kind: $0.kind.modelName, text: $0.text) }
+            f.waiting = (waiting[cli] ?? []).sorted { $0.since < $1.since }
+                .map { Waiting(kind: $0.kind.rawValue, text: $0.question ?? "") }
             return f
         }
     }

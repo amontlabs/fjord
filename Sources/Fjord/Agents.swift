@@ -132,14 +132,6 @@ struct AgentRow: Identifiable, Hashable {
         return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
-    /// `shortAgo` and `duration` in words, counted the same way.
-    static func spokenAge(_ t: TimeInterval) -> String {
-        let s = max(0, Int(t))
-        if s < 60 { return "just now" }
-        let (n, unit) = s < 3600 ? (s / 60, "minute") : s < 86400 ? (s / 3600, "hour") : (s / 86400, "day")
-        return plural(n, unit)
-    }
-
     /// "3 running": what's left in the background, after the status.
     var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
 }
@@ -261,88 +253,13 @@ extension Store {
         makeRow(session, entry ?? cache.entries[session.id], label: label)
     }
 
-    /// A session's row as `sessionRow` gives it: `row(session)`, its entry looked up without the listed rows being made.
-    func makeSessionRow(_ id: String) -> AgentRow? {
+    /// A session's row, listed or not: `row(session)`, its entry looked up without the listed rows being made.
+    func sessionRow(_ id: String) -> AgentRow? {
         guard let session = claudeSessions[id] else { return nil }
         if agentEntryIndex == nil {
             agentEntryIndex = Dictionary(agents.entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         }
         return makeRow(session, agentEntryIndex?[id], label: nil)
-    }
-
-    /// Makes again the rows `sessionRow` keeps of `ids`, writing a box only when its row changed. While a read of Claude
-    /// is taken in (`batchingSessionRows`), the ids are gathered and the rows made once, at its end.
-    func refreshSessionRows<Ids: Sequence<String>>(_ ids: Ids) {
-        guard !sessionRowBoxes.isEmpty else { return }
-        if sessionRowsPending != nil {
-            sessionRowsPending?.formUnion(ids.filter { sessionRowBoxes[$0] != nil })
-            return
-        }
-        for id in ids {
-            guard let box = sessionRowBoxes[id] else { continue }
-            let row = makeSessionRow(id)
-            if row != box.row { box.row = row }
-        }
-    }
-
-    /// Runs `body` with the rows' refreshes gathered, then makes each row it touched once.
-    func batchingSessionRows(_ body: () -> Void) {
-        guard sessionRowsPending == nil else { return body() }
-        sessionRowsPending = []
-        body()
-        let ids = sessionRowsPending ?? []
-        sessionRowsPending = nil
-        refreshSessionRows(ids)
-    }
-
-    /// Runs `body` (held Claude reads taken in one after the other) with what follows from them made once, at its end: the
-    /// kept session rows and the Router's history.
-    func batchingClaudeReads(_ body: () -> Void) {
-        batchingSessionRows {
-            guard !routerHistoryDeferred else { return body() }
-            routerHistoryDeferred = true
-            body()
-            routerHistoryDeferred = false
-            if routerHistoryStale {
-                routerHistoryStale = false
-                rebuildRouterHistory()
-            }
-        }
-    }
-
-    /// The ids, among the kept rows', whose value differs between two maps.
-    func sessionRowsChanged<Value: Equatable>(_ old: [String: Value], _ new: [String: Value]) -> [String] {
-        sessionRowBoxes.keys.filter { old[$0] != new[$0] }
-    }
-
-    /// The kept rows an agents change touches: those whose entry changed, or whose project's colour did.
-    func sessionRowsChanged(from old: AgentsState) -> [String] {
-        let colors = Set(Set(old.folderColors.keys).union(agents.folderColors.keys).filter { old.folderColors[$0] != agents.folderColors[$0] })
-        var entries = Set<String>()
-        if old.entries != agents.entries {
-            let before = Dictionary(old.entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            let after = Dictionary(agents.entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            entries = Set(sessionRowBoxes.keys.filter { before[$0] != after[$0] })
-        }
-        guard !colors.isEmpty else { return Array(entries) }
-        return sessionRowBoxes.keys.filter { id in
-            entries.contains(id) || claudeSessions[id].map { colors.contains($0.folderKey) } == true
-        }
-    }
-
-    /// The kept rows a change of the folders' names touches.
-    func sessionRowsChanged(names old: [String: String]) -> [String] {
-        sessionRowBoxes.keys.filter { id in
-            claudeSessions[id].map { old[$0.folderKey] != folderNames[$0.folderKey] } ?? false
-        }
-    }
-
-    /// Lets go of the rows of sessions that are gone and that no card names: nothing draws them any more.
-    func pruneSessionRows() {
-        let gone = sessionRowBoxes.keys.filter { claudeSessions[$0] == nil }
-        guard !gone.isEmpty else { return }
-        let carded = Set(router.cards.map(\.sessionID))
-        for id in gone where !carded.contains(id) { sessionRowBoxes[id] = nil }
     }
 
     private func makeRow(_ session: ClaudeSession, _ entry: AgentEntry?, label: String?) -> AgentRow {
@@ -359,10 +276,6 @@ extension Store {
         return Theme.projectColors[i % Theme.projectColors.count]
     }
 
-    func setProjectColor(_ folder: String, _ index: Int) {
-        agents.folderColors[folder] = index
-    }
-
     var allAgentRows: [AgentRow] { cache.all }
 
     /// Every folder a name can be asked for: the ones sessions are in, the ones muted and the clones in your code folders.
@@ -377,7 +290,7 @@ extension Store {
     func folderName(_ folder: String) -> String {
         if folder.isEmpty { return "Scratch" }
         if let name = folderNames[folder] { return name }
-        // One no session is in (an old card's): named among the folders `folderNames` was worked out for, once per set.
+        // One no session is in (an old session's): named among the folders `folderNames` was worked out for, once per set.
         if let name = folderNameMisses[folder] { return name }
         let name = FolderNames.name(folder, among: Array(namedFoldersSeen ?? namedFolders))
         if namedFoldersSeen != nil { folderNameMisses[folder] = name }
@@ -448,8 +361,7 @@ extension Store {
             refreshClaude()
             return
         }
-        // The kept session rows are made again once for the read, not at each part of it.
-        batchingSessionRows { applyClaudeRead(snapshot) }
+        applyClaudeRead(snapshot)
     }
 
     private func applyClaudeRead(_ snapshot: ClaudeSnapshot) {
@@ -458,8 +370,6 @@ extension Store {
             ingesting = true
             ingest(sessions, appUnread: snapshot.appUnread, claudeFrontmost: snapshot.frontmost)
             ingesting = false
-            // The first listing may change nothing observed (no session, nothing seeded to differ), yet the writer waits for it.
-            routerDigester.markDirty(store: self)
         }
         // A read that found the sessions, or found them missing or unreadable (no Claude app): either way, what routing will
         // know of them is known, and the actions waiting for it go.
@@ -485,8 +395,6 @@ extension Store {
             }
             if merged != claudeTasks { claudeTasks = merged }
         }
-        if let inventory = snapshot.taskInventory { claudeTaskInventory = inventory }
-        if snapshot.sessions != nil || snapshot.activity != nil || snapshot.tasks != nil { feedRouter() }
         if snapshot.sessions != nil { pickIcons() }
         scheduleClaudeTick()
     }
@@ -572,7 +480,6 @@ extension Store {
         }
         // Only on change: the views observing these redraw on every assignment.
         if claudeSessions != byID { claudeSessions = byID }
-        claudeSessionsListed = Dictionary(sessions.map { ($0.id, $0.lastActivity) }, uniquingKeysWith: { a, b in max(a, b) })
     }
 
     // MARK: Actions
@@ -734,14 +641,9 @@ extension Store {
         jevGate.keyChanged()
         // What is under way with the old key stops (the icon's pick starts again with the new one once it has).
         iconTask?.cancel()
-        routerTriager.cancelAll()
-        // The triage's retry was timed to the old key's pause: a pause with the new one times its own (`triageTurns`).
-        routerTriager.retry?.cancel()
-        routerTriager.retry = nil
         iconError = nil
         iconsPausedUntil = .distantPast
         pickIcons()
-        typesafeKeyArrived()
         return true
     }
 
@@ -752,7 +654,12 @@ extension Store {
         pickIcons()
     }
 
-    func isFolderMuted(_ folder: String) -> Bool { agents.mutedFolders.contains(folder) }
+    /// The sessions of muted projects: a guest session goes by its project's key (`routerProjectGroupKey`).
+    func mutedSessionIDs(_ muted: [String], among sessions: [ClaudeSession]) -> Set<String> {
+        guard !muted.isEmpty else { return [] }
+        let set = Set(muted)
+        return Set(sessions.filter { set.contains(routerProjectGroupKey(sessionID: $0.id, folder: $0.folderKey)) }.map(\.id))
+    }
 
     func setFolderMuted(_ folder: String, _ muted: Bool) {
         agents.mutedFolders.removeAll { $0 == folder }

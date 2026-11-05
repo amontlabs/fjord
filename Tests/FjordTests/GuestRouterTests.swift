@@ -421,16 +421,18 @@ private struct AccountPausingGuestClient: GuestClient {
             alias: "ssh-guest-1", folder: "/workspace/repo", prompt: "Start", state: .matched,
             desktopSessionID: desktopID, guestSessionID: form.cliSessionID)]
         state.guestPendingForms = [guestForm]
-        state.cards = [RouterCard(id: "\(desktopID)#w1", sessionID: desktopID, kind: .question, title: "Ship?",
-            folder: "/workspace/repo", text: "Ship?", createdAt: Date(), toolUseID: form.toolUseID)]
         store.router = state
+        // The thread the brief's entry names: its Desktop session, matched to the guest's.
+        store.claudeSessions[desktopID] = ClaudeSession(id: desktopID, title: "Ship?", folder: "/workspace/repo", lastActivity: Date())
+        let target = BriefTarget(project: "local:repo", thread: desktopID)
+        #expect(store.guestPendingForm(for: target)?.form.id == form.id)
 
         let base = client()
         let barrier = GuestAccountBarrier()
         let guest = AccountPausingGuestClient(base: base, barrier: barrier)
         GuestRouterRuntime.shared.registerInstallationTarget(store: store, client: guest, computer: computer)
         let answer = Task {
-            try await GuestRouterRuntime.shared.answer(guestForm, answers: ["Ship?": "Yes"], cardID: "\(desktopID)#w1")
+            try await GuestRouterRuntime.shared.answer(guestForm, answers: ["Ship?": "Yes"], target: target)
         }
         await barrier.waitUntilEntered()
         store.setRouterEnabled(false)
@@ -611,7 +613,7 @@ private struct AccountPausingGuestClient: GuestClient {
             folder: desktop.folder, prompt: "Fix", openedAt: opened)
         let second = PendingDesktopStart(projectID: UUID(), location: location, alias: desktop.alias,
             folder: desktop.folder, prompt: "Fix", openedAt: opened)
-        var state = RouterState()
+        var state = RouterSaved()
         state.pendingDesktopStarts = [first, second]
         let store = Store(engineClient: MockEngineClient())
         store.persists = false
@@ -693,7 +695,7 @@ private struct AccountPausingGuestClient: GuestClient {
             location: .computer(deviceId: computer.deviceId, computerId: computer.computerId),
             alias: "ssh-computer-1", folder: "/workspace/repo", prompt: "Fix it", state: .matched,
             desktopSessionID: "local_desktop-1", guestSessionID: "cli-1")
-        var state = RouterState()
+        var state = RouterSaved()
         state.runsOnProjects = [project]
         state.pendingDesktopStarts = [pending]
         store.router = state
@@ -893,8 +895,6 @@ private struct AccountPausingGuestClient: GuestClient {
         #expect(store.claudeActivity[desktopID]?.text == "Writing")
         #expect(store.guestExecutionStates[desktopID]?.availability == .live)
         #expect(store.guestExecutionStates[desktopID]?.isRunning == false)
-        let matchedSession = try #require(store.claudeSessions[desktopID])
-        #expect(await store.finalMessage(matchedSession) == "Done")
 
         var mirror = ClaudeSession(id: desktopID, title: "Widget", folder: "/workspace/repo", lastActivity: opened,
                                   running: true, cliID: "mirror-cli")
@@ -1174,19 +1174,19 @@ private struct AccountPausingGuestClient: GuestClient {
         #expect(await guest.writeRecords().filter { $0.path == messagePath }.count == 1)
     }
 
-    @Test func RouterStatePersistsGuestFormsAndRelayReceipts() throws {
+    @Test func routerSavedPersistsGuestFormsAndRelayReceipts() throws {
         let form = PendingForm(id: "cli-1-100-42", cliSessionID: "cli-1", transcriptPath: "/guest/transcript.jsonl",
             questions: [.init(question: "Deploy?", header: "Ship", multiSelect: false, options: [.init(label: "Yes", description: "")])],
             createdAt: Date(timeIntervalSince1970: 100), pid: 42, toolUseID: "tool-1")
         let pending = GuestPendingForm(computer: computer,
             location: .computer(deviceId: computer.deviceId, computerId: computer.computerId), form: form)
         let receipt = GuestRelayRecord(location: pending.location, sessionID: "cli-1", nonce: "nonce", state: .unconfirmed)
-        var state = RouterState()
+        var state = RouterSaved()
         state.guestPendingForms = [pending]
         state.pendingGuestDisables = [pending.location]
         state.pendingGuestRemovals = [pending.location]
         GuestRelayLedger.upsert(receipt, into: &state.guestRelayDeliveries)
-        let decoded = try JSONDecoder().decode(RouterState.self, from: JSONEncoder().encode(state))
+        let decoded = try JSONDecoder().decode(RouterSaved.self, from: JSONEncoder().encode(state))
 
         #expect(decoded.guestPendingForms == [pending])
         #expect(decoded.guestRelayDeliveries == [receipt])

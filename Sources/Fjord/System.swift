@@ -622,10 +622,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !demo && !UnderTest.isRunning { startCourier() }
         let window = AppWindowController(store: store)
         appWindow = window
-        if CommandLine.arguments.contains("routerCanvas") {
-            window.routerModel.pickCanvas()
-            window.navigator.go(.router)
-        }
         let hub = HubController(store: store, demo: demo)
         self.hub = hub
         // The window is the bar's other mode: while it is in front the bar is away, and closing it (or leaving it behind) puts the bar back.
@@ -648,16 +644,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.appWindow?.showUpdates()
             self?.hub?.setWindowOpen(true)
         }
-        hub.pickRouterCard = { [weak window] id in window?.pick(card: id) }
+        hub.pickBriefEntry = { [weak window] t in window?.pick(entry: t) }
         hub.pickRouterMessage = { [weak window] id in window?.pick(message: id) }
         hub.prefillRouter = { [weak window] thing in window?.prefillRouter(thing: thing) }
         hub.windowPlace = { [weak window] in window?.navigator.selection }
-        // Banners for new cards that need you; a demo posts none.
-        if !demo {
-            RouterBanners.attach(store: store, windowIsKey: { [weak window] in window?.isKey == true && window?.navigator.selection == .router }) {
-                [weak self] card in self?.showWindow(.router, card: card)
-            }
-        }
         // Demo: the window's key on right ⌘ (not saved), to try tap and double-tap.
         if demo {
             store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
@@ -767,9 +757,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Opens the app window on `destination` (the bar leaves the edge), or on a Router card.
-    private func showWindow(_ destination: AppDestination?, card: String? = nil) {
-        appWindow?.show(destination, card: card)
+    /// Opens the app window on `destination` (the bar leaves the edge), or on a brief entry.
+    private func showWindow(_ destination: AppDestination?, entry: BriefTarget? = nil) {
+        appWindow?.show(destination, entry: entry)
         hub?.setWindowOpen(true)
     }
 

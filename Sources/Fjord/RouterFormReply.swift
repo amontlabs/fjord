@@ -1,6 +1,6 @@
 import Foundation
 
-// A message that goes to a card holding a form or a plan has to act on it, not just be sent as text the session is
+// A message that goes to a thread holding a form or a plan has to act on it, not just be sent as text the session is
 // stopped under. A plan: approved by Jev's yes/no, else sent back with the message as its note
 // (never both). A form: the exact option fast path (`RouterDispatcher.formAnswers`), else one typed choice of Jev per
 // question; the form takes all its answers or none, so one unclear question leaves the whole form to you.
@@ -101,26 +101,23 @@ extension RouterDispatcher {
     }
 }
 
-/// The form a message was judged against: the card, the form's id and the call it answers. A judgment is applied only while
-/// the card is open and still holds that very form, when it is made and at the write. It binds to what identifies the
-/// question, not to the card's change counter (which moves with its title, triage state or text as well): a card that is
-/// retold (its brief, unread) or retitled still holds the form, and one that closed, or moved on to another, doesn't.
+/// The form a message was judged against: the thread, the form's id and the call it answers. A judgment is applied only while
+/// the thread still holds that very form, when it is made and at the write: one that moved on to another form doesn't.
 struct FormSnapshot: Equatable {
-    var card: String
+    var target: BriefTarget
     var formID: String
     var toolUseID: String?
 
     static let changedWords = "The question changed while your answer was being read, so nothing was answered."
 
-    @MainActor init(card: RouterCard, form: PendingForm, store: Store) {
-        self.card = card.id
+    init(target: BriefTarget, form: PendingForm) {
+        self.target = target
         formID = form.id
         toolUseID = form.toolUseID
     }
 
     @MainActor func holds(_ store: Store) -> Bool {
-        guard let c = store.router.cards.first(where: { $0.id == card }), c.isOpen,
-              let form = store.guestPendingForm(for: c)?.form ?? store.pendingForm(for: c) else { return false }
+        guard let form = store.heldForm(target) else { return false }
         return form.id == formID && form.toolUseID == toolUseID
     }
 }

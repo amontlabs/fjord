@@ -115,13 +115,11 @@ import Testing
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
         s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.interceptOpen = { _ in }
-        s.claudeIsFrontmost = { false }
         s.claudeLink = .ok
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-7200)
         s.ingest(sessions, appUnread: dots, claudeFrontmost: false)
         s.setRouterEnabled(true)
-        s.feedRouter()
         return s
     }
 
@@ -157,21 +155,15 @@ import Testing
         #expect(applied == 0, sourceLocation: sourceLocation)
         gate.ended()
         for _ in 0..<3000 where applied < reads.count { try? await Task.sleep(for: .milliseconds(5)) }
-        func cards(_ s: Store) -> [String] { s.router.cards.map { "\($0.id) \($0.isOpen) \(String(describing: $0.addressedBy))" } }
-        #expect(cards(held) == cards(inTurn), sourceLocation: sourceLocation)
         #expect(held.agents.entries.map(\.unread) == inTurn.agents.entries.map(\.unread), sourceLocation: sourceLocation)
-        #expect(held.routerHistory.map(\.id) == inTurn.routerHistory.map(\.id), sourceLocation: sourceLocation)
     }
 
     @Test func aBacklogGoesASliceATurnInOrderEveryReadItsOwn() async {
         let gate = MotionGate.Gate(longest: 600)
         let feed = ClaudeFeed(activityReader: Claude.ActivityReader())
         feed.sliceBudget = 0.004
-        var batches = 0, open = 0
-        feed.batched = { body in batches += 1; open += 1; body(); open -= 1 }
-        var applied: [String] = [], inBatch: [Bool] = []
+        var applied: [String] = []
         let apply: @MainActor (ClaudeSnapshot) -> Void = { read in
-            inBatch.append(open == 1)
             applied.append(read.activity?.keys.first ?? "full")
             Thread.sleep(forTimeInterval: 0.003)
         }
@@ -197,41 +189,10 @@ import Testing
         feed.deliver(activity("g"), apply, gate: gate)
         for _ in 0..<3000 where applied.last != "g" { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(applied == ["a", "b", "full", "c", "full", "d", "e", "full", "f", "g"])
-        #expect(batches > 1 && open == 0 && inBatch.allSatisfy { $0 })
         // Nothing held: taken in at once.
         let before = applied.count
         feed.deliver(full, apply, gate: gate)
         #expect(applied.count == before + 1)
-    }
-
-    @Test func aTurnThatEndedThenANewMessageStillMakesItsCard() async {
-        await expectHeldAsInTurn([session("local_a", turns: 1)], [
-            read([session("local_a", turns: 2)]),
-            read([session("local_a", turns: 2, message: -1)]),
-        ])
-    }
-
-    @Test func aSessionArchivedThenBackLeavesItsCardGone() async {
-        await expectHeldAsInTurn([session("local_a", turns: 1)], setUp: { s in
-            s.ingest([self.session("local_a", turns: 2)], appUnread: [], claudeFrontmost: false)
-            s.feedRouter()
-        }, [
-            read([session("local_a", turns: 2, archived: true)]),
-            read([session("local_a", turns: 2)]),
-        ])
-    }
-
-    @Test func twoQuestionsAskedInOneHoldAreTwoCards() async {
-        var running = session("local_a", turns: 1, message: -30)
-        running.running = true
-        func asks(_ text: String, _ secondsAgo: Double) -> ClaudeSnapshot {
-            var read = ClaudeSnapshot()
-            read.activity = ["local_a": ClaudeActivity(text: text, since: now.addingTimeInterval(-secondsAgo), waitsForYou: true,
-                                                       tool: "AskUserQuestion", toolUseID: text)]
-            read.tasks = [:]
-            return read
-        }
-        await expectHeldAsInTurn([running], [asks("Which branch?", 20), asks("Squash or merge?", 10)])
     }
 
     @Test func aDotClearedThenBackLeavesTheSessionUnread() async {

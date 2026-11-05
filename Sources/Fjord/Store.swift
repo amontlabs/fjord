@@ -143,42 +143,17 @@ final class Store {
     var things: [String: Thing] = [:] {
         didSet {
             inboxRevision &+= 1; persistedRevision &+= 1
-            // Only when CI was seen to change was set below: nothing else changed.
-            guard !stampingCI else { return }
-            if !loading {
-                let now = Date()
-                let ci = Self.stampingCIChanges(things, before: oldValue, now: now)
-                if let stamped = Self.stampingCommitArrivals(ci ?? things, before: oldValue, now: now) ?? ci {
-                    stampingCI = true
-                    things = stamped
-                    stampingCI = false
-                }
+            // Only when commits were stamped below: nothing else changed.
+            guard !stampingCommits else { return }
+            if !loading, let stamped = Self.stampingCommitArrivals(things, before: oldValue, now: Date()) {
+                stampingCommits = true
+                things = stamped
+                stampingCommits = false
             }
-            resolveWaits(); if !loading { carryAssignmentStamps(seenBefore: oldValue) }
+            if !loading { carryAssignmentStamps(seenBefore: oldValue) }
         }
     }
-    @ObservationIgnored private var stampingCI = false
-
-    /// The things with when their CI was last seen to change (`Thing.ciChangedAt`): kept from before while it is the same
-    /// (a refresh makes the thing anew), `now` once its state, its run or whether it still runs changed; nil when none moved.
-    /// One first seen with CI is stamped when that CI finished, as GitHub says (`ciFinishedAt`), else now: CI that finished
-    /// before it was found, after a turn that waits on it ended, is still CI that changed since.
-    nonisolated static func stampingCIChanges(_ things: [String: Thing], before: [String: Thing], now: Date) -> [String: Thing]? {
-        var stamped = things
-        var moved = false
-        for (id, thing) in things where thing.kind == .pr || thing.kind == .workflow {
-            guard let old = before[id] else {
-                if thing.ciChangedAt == nil, thing.checks != nil { stamped[id]?.ciChangedAt = thing.ciFinishedAt ?? now; moved = true }
-                continue
-            }
-            let same = thing.checks == old.checks && thing.ciRunning == old.ciRunning && thing.ciCancelled == old.ciCancelled
-                && (old.ciRun == nil || thing.ciRun == old.ciRun)
-            let at = same ? thing.ciChangedAt ?? old.ciChangedAt
-                : thing.ciChangedAt == nil || thing.ciChangedAt == old.ciChangedAt ? now : thing.ciChangedAt
-            if at != thing.ciChangedAt { stamped[id]?.ciChangedAt = at; moved = true }
-        }
-        return moved ? stamped : nil
-    }
+    @ObservationIgnored private var stampingCommits = false
 
     /// The things with when each commit came to its PR (`ThingCommit.seenAt`): kept from before for one it had, `now` for
     /// one first seen on a PR read before (pushed since, though committed earlier); nil when none moved. What a PR has when
@@ -335,56 +310,18 @@ final class Store {
             corpusRevision &+= 1
             if !ingesting { claudeStamp.revision += 1 }
             refreshFolderNames()
-            refreshSessionRows(sessionRowsChanged(from: oldValue))
-            routerDigester.markDirty(store: self)
         }
     }
-    /// The Router (see Router.swift): its cards, its decision log and the changes it made.
-    var router = RouterState() {
+    /// The Router (see Router.swift): its switch, its decision log and the changes it made.
+    var router = RouterSaved() {
         didSet {
             updateRouterOn()
             routerRevision &+= 1
             persistedRevision &+= 1
-            if oldValue.cards != router.cards { countCardChanges(from: oldValue.cards) }
-            // What it means for the Brief: a card in or handled, a message of yours (RouterDigestWriter.swift).
-            if oldValue.cards != router.cards || oldValue.decisions != router.decisions || oldValue.enabled != router.enabled
-                || (router.digest == nil && router.enabled) {
-                routerDigester.observe(from: oldValue, to: router, store: self)
-            } else if oldValue.pendingDesktopStarts != router.pendingDesktopStarts || oldValue.runsOnProjects != router.runsOnProjects
-                        || oldValue.lives != router.lives {
-                // What decides a session's project, and what each session's lines say.
-                routerDigester.markDirty(store: self)
-            }
-            // Worked out again only if what it is made of changed: a session's stamps or an open card changing leave it (and
-            // what draws it) alone.
-            if oldValue.decisions != router.decisions || oldValue.summaries != router.summaries || oldValue.cards != router.cards {
-                // Held Claude reads taken in together (`batchingClaudeReads`): worked out once, at their end.
-                if routerHistoryDeferred { routerHistoryStale = true } else { rebuildRouterHistory() }
-            }
         }
     }
-    @ObservationIgnored var routerHistoryDeferred = false
-    @ObservationIgnored var routerHistoryStale = false
-
-    func rebuildRouterHistory() {
-        let next = RouterPage.history(cards: router.cards, decisions: router.decisions, summaries: router.summaries)
-        if next != routerHistory { routerHistory = next }
-    }
-    /// The Router page's history (see `RouterPage.history`), worked out when the router changes and only then: the page
-    /// reads it on every redraw.
-    private(set) var routerHistory: [RouterPage.Entry] = [] {
-        didSet { routerSearchRevision &+= 1 }
-    }
-    /// Bumped when what the history is searched by changes (its lines, the projects' names): what the Router's search
-    /// keeps its work by (RouterSearch.swift). Observed, so a search's memo hit still redraws on the next change.
-    private(set) var routerSearchRevision = 0
-    /// Each history line's search text, in the history's order, as of the revision it was made for: made on the first
-    /// search after a change and kept for the searches after it (`routerHistorySearchKeys`).
-    @ObservationIgnored var routerHistoryKeys: (revision: Int, keys: [String])?
     /// Bumped on every change to `router`: a cheap memo/animation key.
     private(set) var routerRevision = 0
-    /// How many times each card has changed (see `countCardChanges`).
-    @ObservationIgnored var cardRevisions: [String: Int] = [:]
     /// The question forms Fjord's hook holds, by Claude Code session id (`ClaudeSession.cliID`).
     var pendingForms: [String: PendingForm] = [:] {
         didSet { shownRevision &+= 1 }
@@ -400,20 +337,11 @@ final class Store {
     /// Every project's name, with as much of its path as tells it from another of the same name (`customer-a/app`): worked
     /// out when the folders change, not by each view that names a project. Only a change in it redraws what reads it.
     var folderNames: [String: String] = [:] {
-        // The history is searched by its cards' project names too.
-        didSet {
-            routerSearchRevision &+= 1
-            // The rows name each session's project.
-            agentCache = nil
-            refreshSessionRows(sessionRowsChanged(names: oldValue))
-        }
+        // The rows name each session's project.
+        didSet { agentCache = nil }
     }
     /// Names of folders no session is in, worked out among `namedFoldersSeen` (`folderName`); cleared when that changes.
     @ObservationIgnored var folderNameMisses: [String: String] = [:]
-    /// Each session's row as `sessionRow` gives it, in a box of its own (see `refreshSessionRows`).
-    @ObservationIgnored var sessionRowBoxes: [String: SessionRowBox] = [:]
-    /// The rows to make again once a read of Claude is taken in (`batchingSessionRows`); nil outside one.
-    @ObservationIgnored var sessionRowsPending: Set<String>?
     /// The agents' entries by session, made when a row is and dropped with every change to `agents`.
     @ObservationIgnored var agentEntryIndex: [String: AgentEntry]?
     /// The folders `folderNames` was worked out for: the work is skipped while they are the same.
@@ -427,10 +355,6 @@ final class Store {
             corpusRevision &+= 1
             agentCache = nil
             refreshFolderNames()
-            refreshSessionRows(sessionRowsChanged(oldValue, claudeSessions))
-            pruneSessionRows()
-            updateRouterTasks()
-            routerDigester.markDirty(store: self)
         }
     }
     /// Guest execution observations keyed by the Desktop session that owns the SSH mirror. Local reads can refresh
@@ -450,8 +374,6 @@ final class Store {
         didSet {
             shownRevision &+= 1
             agentCache = nil
-            refreshSessionRows(sessionRowsChanged(oldValue, claudeActivity))
-            routerDigester.markDirty(store: self)
         }
     }
     /// Bumped when a recent session ages out of the list (see `Store.recentWindow`).
@@ -467,18 +389,7 @@ final class Store {
         didSet {
             shownRevision &+= 1
             agentCache = nil
-            refreshSessionRows(sessionRowsChanged(oldValue, claudeTasks))
-            updateRouterTasks()
-            routerDigester.markDirty(store: self)
         }
-    }
-    /// `routerTasks` as last worked out (`updateRouterTasks`, as the tasks or the sessions change), and a revision bumped
-    /// only when it changed: what reads it observes that rather than every session.
-    @ObservationIgnored var routerTasksKept: [String: [ClaudeTask]] = [:]
-    private(set) var routerTasksRevision = 0
-    func bumpRouterTasks(_ tasks: [String: [ClaudeTask]]) {
-        routerTasksKept = tasks
-        routerTasksRevision &+= 1
     }
     /// Filled in right after launch (see `start`): the Keychain read stays off the main thread.
     var hasTypesafeKey = false
@@ -486,8 +397,6 @@ final class Store {
     var claudeLink: ClaudeLink = .off {
         didSet {
             if claudeLink == .ok { claudeSessionsRead = true }
-            // Claude missing or unreadable ends the wait for its first listing.
-            if oldValue != claudeLink { routerDigester.check(self) }
         }
     }
     /// Claude's sessions have been read since Fjord started reading them: a read failing after that leaves the
@@ -577,35 +486,8 @@ final class Store {
     /// The system-wide shortcuts the system last refused to register (another app holds the key), by the key it refused:
     /// one still stored does nothing, and Settings says so.
     var refusedShortcuts: [ShortcutAction: Shortcut] = [:]
-    /// Cards the feed just made, or that Jev's triage found need you (for banners).
-    @ObservationIgnored var onNewRouterCards: (([RouterCard]) -> Void)?
-    /// What finished turns ended on, by Jev (see RouterTriage.swift).
-    @ObservationIgnored let routerTriager = RouterTriager()
-    /// What each card tells you, in plain words (see RouterBrief.swift).
-    @ObservationIgnored let routerBriefer = RouterBriefer()
-    /// Each shown session's two lines: its latest turn, and its whole life (see RouterLife.swift).
-    @ObservationIgnored let routerLife = RouterLifeWriter()
-    /// Keeps the Brief up to date (RouterDigestWriter.swift).
-    @ObservationIgnored let routerDigester = RouterDigestWriter()
-    /// The Brief, kept with the Router's state.
-    var routerDigest: RouterDigest? {
-        get { router.digest }
-        set { router.digest = newValue }
-    }
-    /// What decides whether something interrupts you, and what came while you were away (see RouterAttention.swift).
-    @ObservationIgnored let routerAttention = RouterAttention()
-    /// Whether the Claude app is in front (tests answer for it).
-    @ObservationIgnored var claudeIsFrontmost: () -> Bool = { Claude.isFrontmost }
-    /// The Router was just switched on: its open cards are settled against how things are now at the next feed.
-    @ObservationIgnored var routerReconcilePending = false
     /// The forms folder has been read since the Router was switched on: until then no form is known to be gone.
     @ObservationIgnored var routerFormsLoaded = false
-    /// The sessions whose background work the last read looked at (see `ClaudeSnapshot.taskInventory`); nil until a read
-    /// has said (a test feeding sessions by hand: every one).
-    @ObservationIgnored var claudeTaskInventory: Set<String>?
-    /// Every session the last read listed, archived ones too, with when each was active last: what the Router's memory of
-    /// handled turns is kept for (`RouterFeed.update`). Nil until a read has said.
-    @ObservationIgnored var claudeSessionsListed: [String: Date]?
     @ObservationIgnored let formBridge = FormBridge()
     /// Claude Code's binary, which the Router's runs use.
     @ObservationIgnored lazy var routerStatus = RouterStatus()
@@ -654,7 +536,6 @@ final class Store {
     /// Who may make the relay key (see `RelayKeyFence`), and the key as last read (see `signRelay`).
     @ObservationIgnored let relayKeyFence = RelayKeyFence()
     @ObservationIgnored var relayKeyCache: RelayKeyCache?
-    @ObservationIgnored var mutedIDsCache: (muted: [String], starts: [PendingDesktopStart], folders: [String: String], result: Set<String>)?
     /// Takes back a delivery through its session's plugin ; tests answer for it. Nil: `cancelDelivery`.
     @ObservationIgnored var deliveryCanceller: ((RouterDecision.Delivered, @escaping @MainActor @Sendable () -> String?) async throws -> RouterDecision.Cancelled)?
     @ObservationIgnored var pluginQuitObserver: NSObjectProtocol?
@@ -665,7 +546,6 @@ final class Store {
     @ObservationIgnored let activityReader = Claude.ActivityReader()
     @ObservationIgnored lazy var claudeFeed: ClaudeFeed = {
         let feed = ClaudeFeed(activityReader: activityReader)
-        feed.batched = { [weak self] body in if let self { self.batchingClaudeReads(body) } else { body() } }
         feed.gate = motionGate
         return feed
     }()
@@ -771,7 +651,6 @@ final class Store {
                 self.typesafeKeyCache = key
                 self.hasTypesafeKey = !key.isEmpty
                 self.pickIcons()
-                self.typesafeKeyArrived()
             }
         }
     }
@@ -833,24 +712,6 @@ final class Store {
         refreshClaude()
     }
 
-    /// How soon to read again because a session's background work isn't known yet (see `RouterFeed.update`): only while the
-    /// Router waits on a finished turn of a session that isn't running, or a waiting card on another session (`resolveWaits`),
-    /// and the last read couldn't say. Nil otherwise (no tick for it at rest).
-    var inventoryRecheck: TimeInterval? {
-        guard router.enabled, let inventory = claudeTaskInventory else { return nil }
-        let watched = router.cards.compactMap { card -> String? in
-            guard card.isOpen, card.kind == .waiting, card.triage?.ready == nil,
-                  case .session(let id, _) = card.triage?.watch?.target else { return nil }
-            return id
-        }
-        let waiting = (Array(router.pendingTurns.keys) + watched).contains { id in
-            claudeSessions[id].map { !$0.running && !inventory.contains(id) } ?? false
-        }
-        return waiting ? Self.inventoryRecheckDelay : nil
-    }
-
-    /// Past the five seconds a command just listed has to show up open (see `Claude.TaskReader.read`).
-    nonisolated static let inventoryRecheckDelay: TimeInterval = 5
 
     /// What nothing announces is the clock: a turn with no summary stops counting as running two hours after its last
     /// message, and a background subagent that stopped writing is given up on. One timer, set after each read for the
@@ -870,9 +731,6 @@ final class Store {
         }
         // Sessions with background work: its end isn't always an event (a command's process just exits).
         if !claudeTasks.isEmpty { next = min(next ?? 60, 60) }
-        // A finished turn the Router waits to card while what it left running isn't known yet: read again soon (past the
-        // grace a just-listed command gets), until it is.
-        if let recheck = inventoryRecheck { next = min(next ?? recheck, recheck) }
         // Icon picking waits out a failure (a rejected key waits for a new one instead).
         if agents.iconsEnabled, iconsPausedUntil > now, iconsPausedUntil < .distantFuture {
             next = min(next ?? .infinity, iconsPausedUntil.timeIntervalSince(now))
@@ -1045,12 +903,9 @@ final class Store {
         if !state.dropped.isEmpty { keepAside(file, data, dropped: state.dropped) }
         settings = state.settings
         agents = state.agents ?? AgentsState()
-        var router = state.router ?? RouterState()
+        var router = state.router ?? RouterSaved()
         router.settleInterrupted()
-        // What was saved isn't news for the Brief.
-        routerDigester.suspended = true
         self.router = router
-        routerDigester.suspended = false
         changingInbox(.load) {
             if let c = state.categories { categories = c }
             groups = state.groups ?? []
@@ -1079,8 +934,6 @@ final class Store {
         // Once the login, marks and actions' records are in: carried during the load, a cached rating or Done was lost.
         loading = false
         carryAssignmentStamps(seenBefore: things)
-        // The Brief compares with the state as loaded, not as the Store was before it.
-        routerDigester.baseline(store: self)
     }
 
     /// The saved state as decoded from what the file held; nil when it doesn't decode.
@@ -1791,12 +1644,6 @@ final class Store {
     /// The inbox's banners; none with Triage off (a refresh under way when it was switched off).
     func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil) {
         guard triageOn, settings.notifications, !isSnoozed else { return }
-        // Away, a thing's banner comes only if Jev rates it high or urgent; the others are counted for when you're back.
-        if id.hasPrefix(Self.inboxNotificationPrefix) {
-            let thing = things[String(id.dropFirst(Self.inboxNotificationPrefix.count))]
-            let importance = thing.flatMap { InboxEngine.importance($0, context: inboxContext) }
-            if !routerAttention.admitInbox(importance) { return }
-        }
         notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet, url: url)
     }
 

@@ -1,8 +1,7 @@
 import SwiftUI
 
-// The Router's window as a sibling of Claude's Code tab: the Router's page (its history, what works on its own, what needs
-// you; see RouterPage.swift) over the composer, in the app window's detail area. Built on `RouterModel` and the
-// form and plan logic of RouterView.swift; only the presentation is Claude's.
+// The Router's window as a sibling of Claude's Code tab: the brief (RouterBriefView.swift) over the composer and its history's
+// drawer, in the app window's detail area. Built on `RouterModel` (RouterView.swift); only the presentation is Claude's.
 
 struct RouterCodeView: View {
     let store: Store
@@ -37,45 +36,22 @@ struct RouterMain: View {
     @Bindable var model: RouterModel
     var leadingInset: CGFloat = 0
 
-    var body: some View {
-        let flights = model.flights
-        page
-            // Your messages in flight, from over the composer to where each went (`RouterFlights`).
-            .overlay {
-                FlightLayer(store: store, flights: flights)
-            }
-            .coordinateSpace(.named(FlightSpace.name))
-            .onPreferenceChange(FlightFramesKey.self) { flights.frames = $0 }
-            .environment(flights)
-            .onChange(of: model.layout, initial: true) {
-                flights.landedInHistory = { [weak model] in model?.show(.history) }
-                flights.resolvePlace = model.layout == .canvas ? { [weak model, weak store, weak flights] key, fallback in
-                    guard let model, let store, let flights else { return nil }
-                    return model.canvasFlightPlace(key, frames: flights.frames, fallback: fallback, store: store)
-                } : nil
-                flights.didLand = model.layout == .canvas ? { [weak model] flight in
-                    model?.canvas.flightLanded(flight)
-                } : { _ in }
-            }
-    }
+    var body: some View { page }
 
     @ViewBuilder private var page: some View {
         if #available(macOS 26, *) {
-            // The page runs under its top bar (glass-plan §5.3): in a wide window the history, Now's
-            // column with a hard edge under its own bar (see `NowColumn`). The composer floats over the page's bottom
+            // The page runs under its top bar (glass-plan §5.3). The composer floats over the page's bottom
             // (§5.4): its height is the page's bottom inset, so the last line still lands above it and earlier ones scroll
             // under it, fading out under a soft edge down to the window's bottom, as under Claude's composer.
             VStack(spacing: 0) {
                 RouterSetupNotice(store: store, model: model)
-                // The brief (RouterBriefView.swift); the Now and canvas pages stay compiled, unused.
                 RouterBriefView(store: store, model: model)
                     .frame(maxHeight: .infinity)
             }
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 composer
                     .frame(maxWidth: .infinity)
-                    // The page's ground from the composer's middle down, so no line shows below it or through its glass. On
-                    // the canvas, nothing: the composer and your messages float over its ground, which goes on round them.
+                    // The page's ground from the composer's middle down, so no line shows below it or through its glass.
                     .background {
                         LinearGradient(colors: [CDS.Surface.s1.opacity(0), CDS.Surface.s1], startPoint: .top, endPoint: .center)
                             .allowsHitTesting(false)
@@ -106,7 +82,7 @@ struct RouterMain: View {
         .padding(.bottom, 10)
     }
 
-    /// §3: a 48pt header holding the 32pt session bar: the title (13pt, wght 460, primary), and on the Brief when it was
+    /// §3: a 48pt header holding the 32pt session bar: the title (13pt, wght 460, primary), and when the brief was last
     /// written, muted, as the other pages' subtitles. On the inbox's column, as the inbox's header is, so the title and the
     /// palette's trigger don't move going from one to the other; the page under it keeps the window's width.
     private var topBar: some View {
@@ -117,6 +93,7 @@ struct RouterMain: View {
                     .foregroundStyle(CDS.Text.primary)
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
+                BriefUpdated(store: store)
                 Spacer(minLength: 24)
                 // The palette's trigger, where the Router's own search field was.
                 PaletteTrigger()
@@ -125,19 +102,7 @@ struct RouterMain: View {
         .frame(height: CDS.TitleBar.bar)
         .frame(height: CDS.TitleBar.header)
         .frame(maxWidth: .infinity)
-        .onChange(of: model.search.query) { model.searchChanged(store: store) }
         // The page's ground behind its title line, so nothing scrolled under it shows through the title.
         .background(CDS.Surface.s1)
-    }
-}
-
-/// The project chip beside the title (§3; classes untraced, MEASURED: 17 tall, white 10%, 12pt secondary).
-struct ProjectChip: View {
-    let name: String
-    var body: some View {
-        Text(name).font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, CDS.TitleBar.chipPadding).frame(height: CDS.TitleBar.chipHeight)
-            .background(RoundedRectangle(cornerRadius: CDS.TitleBar.chipRadius, style: .continuous).fill(CDS.TitleBar.chipFill))
     }
 }

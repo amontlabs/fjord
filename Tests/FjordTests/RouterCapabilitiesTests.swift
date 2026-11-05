@@ -29,7 +29,7 @@ struct RouterCapabilitiesTests {
             }
             #expect(change.contains("Triage's inbox categories") == triage)
             let question = RouterRun.role(.question, triage: triage)
-            #expect(question.contains("cards, working sessions, the Brief, settings") && question.contains("the inbox, categories") == triage)
+            #expect(question.contains("the brief's entries, working sessions, the Brief, settings") && question.contains("the inbox, categories") == triage)
         }
         #expect(FjordTools.triageNames == RouterCapability.triageToolNames && FjordTools.triageNames.contains("mark_entries"))
     }
@@ -39,14 +39,14 @@ struct RouterCapabilitiesTests {
         for triage in [true, false] {
             let all = FjordTools.names.subtracting(triage ? [] : FjordTools.triageNames)
             let reads = readNames.union(["board"]).subtracting(triage ? [] : FjordTools.triageNames)
-            #expect(RouterRun.toolNames(.changeFjord, triage: triage) == all.union(["board"]))
+            #expect(RouterRun.toolNames(.changeFjord, triage: triage) == all.union(["board", "answer"]))
             #expect(RouterRun.toolNames(.question, triage: triage) == reads)
         }
     }
 
     @Test func everyToolIsInACapabilityAndEveryCapabilityToolExists() {
         let named = Set(RouterCapability.all.flatMap(\.tools))
-        #expect(named.subtracting(["board"]).isSubset(of: FjordTools.names))
+        #expect(named.subtracting(["board", "answer"]).isSubset(of: FjordTools.names))
         #expect(FjordTools.names.isSubset(of: named))
         #expect(named.isSubset(of: Set(RouterTools.specs.compactMap { $0["name"] as? String })))
         // The tools of Triage's capabilities are FjordTools' Triage tools, and no other is.

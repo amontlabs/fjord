@@ -1014,11 +1014,14 @@ export const register: Register = (on) => {
 /// `⟦fjord v1 <target> <nonce> <ms> <hex HMAC-SHA256>⟧`, then the body. The MAC covers `v1`, the target, the nonce, the
 /// time and the body, one per line; its key is `relay.key`'s text.
 enum RelaySigner {
+    /// Milliseconds since 1970, as the header carries them.
+    static func ms(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded(.down)) }
+
     /// The text to send to the session whose CLI session id is `target`: the header line, then the body's UTF-8 bytes in
     /// standard base64 (padded, one line), so the peer channel's escaping and Unicode normalization can't change them.
     ///
     static func sign(body: String, target: String, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
-        let ts = String(RouterFeed.Stamp.ms(now))
+        let ts = String(ms(now))
         let id = nonce.uuidString.lowercased()
         let bytes = Data(body.utf8)
         return "⟦fjord v1 \(target) \(id) \(ts) \(mac(key: key, target: target, nonce: id, ts: ts, body: bytes))⟧\n"
@@ -1029,7 +1032,7 @@ enum RelaySigner {
     /// `⟦fjord abort v1 <target> <nonce> <ms> <cancels> <hex HMAC-SHA256>⟧`, its MAC over
     /// `abort-v1\n<target>\n<nonce>\n<ms>\n<cancels>\n`. Only a plugin that says `abort-v1` reads it, from its inbox alone.
     static func signAbort(target: String, cancels: String, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
-        let ts = String(RouterFeed.Stamp.ms(now))
+        let ts = String(ms(now))
         let id = nonce.uuidString.lowercased()
         let input = Data("abort-v1\n\(target)\n\(id)\n\(ts)\n\(cancels)\n".utf8)
         let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: Data(key.utf8)))
@@ -1042,7 +1045,7 @@ enum RelaySigner {
     /// `carry-v1\n<carrier>\n<nonce>\n<ms>\n<local>\n` and the message's bytes. Only a plugin that says `carry-v1` reads it, from
     /// its inbox alone.
     static func signCarry(message: String, local: String, carrier: String, key: String, nonce: UUID = UUID(), now: Date = Date()) -> String {
-        let ts = String(RouterFeed.Stamp.ms(now))
+        let ts = String(ms(now))
         let id = nonce.uuidString.lowercased()
         let bytes = Data(message.utf8)
         let input = Data("carry-v1\n\(carrier)\n\(id)\n\(ts)\n\(local)\n".utf8) + bytes

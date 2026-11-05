@@ -10,10 +10,6 @@ import Foundation
 enum JevUse {
     /// Where a message you send goes.
     case routing
-    /// How a session's turn ended.
-    case triage
-    /// Whether your message resolves a session's cards.
-    case cards
     /// Sessions' icons.
     case icons
     /// The inbox's new comments and requests.
@@ -44,8 +40,6 @@ enum JevUse {
     private(set) var failures = 0
     /// Counts the pauses failures put in: a call that worked doesn't lift one put in after it was let through.
     private(set) var pauses = 0
-    /// The cards judged at once, whatever message they were judged for (`Store.judgeCards`).
-    let cardSlots = JevSlots(CardJudge.concurrency)
 
     /// Told when a call made in its task is let through the gate (`Store.throughJevGate`): a call refused at the gate was
     /// never sent, and is not a failure of what it asked about.
@@ -109,29 +103,11 @@ enum JevUse {
     }
 }
 
-/// At most `count` at once: the others wait their turn, first come first served.
-@MainActor final class JevSlots {
-    private var free: Int
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    init(_ count: Int) { free = count }
-
-    func acquire() async {
-        if free > 0 { free -= 1; return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func release() {
-        if waiting.isEmpty { free += 1 } else { waiting.removeFirst().resume() }
-    }
-}
-
 extension Store {
     /// Whether `use` may ask Jev now: its switch (the key is the gate's to check).
     func jevAllows(_ use: JevUse) -> Bool {
         switch use {
         case .routing: routerOn
-        case .triage, .cards: router.enabled
         case .icons: agents.enabled && agents.iconsEnabled
         case .inbox: jevReadsInbox
         // It reads the item (its title and what GitHub wrote): only when Jev may read the inbox.

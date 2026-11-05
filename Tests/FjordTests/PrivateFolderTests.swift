@@ -19,7 +19,7 @@ import Testing
     @Test func theSendAndPreparePathsDontMakeItOnTheMainThread() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/Fjord")
-        for file in ["RouterWaiting.swift", "RouterDispatcher.swift", "RouterMCP.swift", "RouterRun.swift", "RouterCarry.swift"] {
+        for file in ["RouterDispatcher.swift", "RouterMCP.swift", "RouterRun.swift", "RouterCarry.swift"] {
             let text = try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8)
             #expect(!text.contains("FileManager.default.createDirectory(at: home"), "\(file) makes the Router's folder on the main thread")
         }

@@ -22,9 +22,9 @@ enum PaletteFixture {
                         date: age.map { now.addingTimeInterval(-$0) }, actions: open)
         }
         var items = [
-            item("card:1", .card, "Which branch should the transfer land on?", "Question · transfer", icon: .symbol("questionmark.bubble"),
+            item("thread:p/1", .thread, "Which branch should the transfer land on?", "Question · transfer", icon: .symbol("questionmark.bubble"),
                  dot: .attention, age: 90),
-            item("card:2", .card, "Plan: split the ownership migration in two", "Plan · lookout", icon: .symbol("list.bullet.rectangle"),
+            item("thread:p/2", .thread, "Plan: split the ownership migration in two", "Plan · lookout", icon: .symbol("list.bullet.rectangle"),
                  dot: .attention, age: 20 * 60),
             item("entry:1", .entry, "Fix flaky reconnect test", "fjord#482", icon: .symbol("arrow.triangle.pull"), dot: .attention,
                  age: 3 * 3600),

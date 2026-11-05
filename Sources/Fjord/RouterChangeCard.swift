@@ -4,7 +4,16 @@ import SwiftUI
 // what it touched (a category's rules as the editor's own chips, a setting's before → after…), and Open and Revert. A
 // card taken back says so.
 
+/// The column's content width, for the previews' measure.
+private struct ColumnWidthKey: EnvironmentKey { static let defaultValue = CDS.Transcript.measure }
+
 extension EnvironmentValues {
+    /// The column's content width: what a change card measures its previews by.
+    var cdsColumnWidth: CGFloat {
+        get { self[ColumnWidthKey.self] }
+        set { self[ColumnWidthKey.self] = newValue }
+    }
+
     /// Shows a change's place in the app window (the window's own; a shot or a hub shows nothing).
     @Entry var openChange: (FjordChange) -> Void = { _ in }
 }
@@ -139,10 +148,10 @@ struct ChangeCard: View {
             }
         case .marks(_, let changes):
             MarksPreview(changes: changes, store: store)
-        case .cardAction(let action):
+        case .briefAction(_, _, let act, _):
             VStack(alignment: .leading, spacing: 2) {
-                Text(action.before).cdsText(CDS.Transcript.text, .regular, CDS.Text.muted)
-                Text(action.after).cdsText(CDS.Transcript.text)
+                Text("Needs you").cdsText(CDS.Transcript.text, .regular, CDS.Text.muted)
+                Text(act.label).cdsText(CDS.Transcript.text)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)

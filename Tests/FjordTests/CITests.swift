@@ -289,16 +289,11 @@ import Testing
         #expect(things.map(\.id) == ["workflow:a/x:11@master"])
         // Named, labeled and re-run by the name it has now.
         let thing = try #require(things.first)
-        #expect(thing.branch == "master" && thing.ciBranch == "main" && RouterWaits.ciLabel(thing) == "CI: CI on main in a/x")
+        #expect(thing.branch == "master" && thing.ciBranch == "main")
         #expect(InboxActions.reference(thing) == "a/x · CI on main")
         let rerun = try await StoreActionPerformer(store: store).failedRuns(for: thing)
         #expect(rerun.map(\.name) == ["CI"])
         store.things = [thing.id: thing]
-        let session = ClaudeSession(id: "s", title: "t", folder: "/x", completedTurns: 1, lastActivity: Date())
-        let watch = RouterTriage.Watch(target: .ci(thing: thing.id), label: "", ref: "a/x")
-        #expect(store.waitNamed(watch, in: "Waiting for the CI workflow on main in a/x.", by: session))
-        #expect(store.waitNamed(watch, in: "Waiting for the CI workflow on master in a/x.", by: session))
-        #expect(!store.waitNamed(watch, in: "Waiting for the CI workflow on dev in a/x.", by: session))
         // The default branch found as master before the rename is main now.
         let main = try await store.fetchCI("a/x")
         #expect(main.branch == "main" && main.workflows.map(\.name) == ["CI"] && store.defaultBranches["a/x"] == "main")

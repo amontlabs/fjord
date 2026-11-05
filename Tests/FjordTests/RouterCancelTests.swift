@@ -158,8 +158,6 @@ import Testing
                 "local_b": ClaudeSession(id: "local_b", title: "Update the docs", folder: "/code/docs", completedTurns: 7,
                                          lastActivity: Date().addingTimeInterval(-60)),
             ]
-            s.router.cards = [RouterCard(id: "local_b#t7", sessionID: "local_b", kind: .done, title: "Update the docs",
-                                         folder: "/code/docs", text: "Updated the README.", createdAt: Date())]
             store = s
             dispatcher = RouterDispatcher(store: s)
             fakes.install(dispatcher)
@@ -184,9 +182,9 @@ import Testing
             await waitUntil { id.map { fakes.finished.contains($0) } ?? true }
         }
 
-        /// A reply to the docs session's card: the only message the Router still sends to a local session.
+        /// A reply to the docs session's thread: the only message the Router still sends to a local session.
         func reply(_ text: String = "add a changelog entry") async -> UUID? {
-            let id = dispatcher.submit(text, context: RouterContext(replyTo: "local_b#t7"))
+            let id = dispatcher.submit(text, context: RouterContext(replyTo: BriefTarget(project: "local:docs", thread: "local_b")))
             await finish(id)
             return id
         }

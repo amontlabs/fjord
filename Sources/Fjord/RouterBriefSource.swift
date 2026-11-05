@@ -48,7 +48,7 @@ struct CourierBriefFacts: Sendable, Equatable {
     var threads: [Thread] = []
     var watch: CourierWatch = .none
     var turning = false
-    var cards: [String: Card] = [:]
+    var cardItems: [String: Card] = [:]
     var sent: [SentLine] = []
 }
 
@@ -85,7 +85,7 @@ extension CourierHost {
                                                status: status, statusAt: core.log.statusAt[id], needs: core.log.statusNeeds[id]))
             if status == "needs you", let key = core.watching.pendingCard[id], let card = core.log.latest(kind: "card", id: key),
                card.get("answered") != .bool(true) {
-                out[project]!.cards[id] = .init(key: key, kind: card.get("kind")?.asString ?? "question",
+                out[project]!.cardItems[id] = .init(key: key, kind: card.get("kind")?.asString ?? "question",
                                                 options: card.get("options")?.asArray?.compactMap(\.asString) ?? [],
                                                 text: core.log.latest(kind: "row", id: key)?.get("text")?.asString)
             }
@@ -229,7 +229,7 @@ struct CourierBriefSource: BriefSource {
                                source: local ? .local : .cloud, asOf: asOf)
             if t.needs == "permission" {
                 e.kind = .permission
-            } else if let card = f.cards[t.id] {
+            } else if let card = f.cardItems[t.id] {
                 e.kind = card.kind == "plan" ? .plan : .question
                 e.card = card.key
                 e.options = card.options
@@ -247,7 +247,7 @@ struct CourierBriefSource: BriefSource {
     static func signature(_ f: CourierBriefFacts) -> String {
         var parts = [f.name, "\(f.watch)", "\(f.turning)"]
         parts += f.threads.map { "\($0.id)|\($0.title)|\($0.state)|\($0.status ?? "")|\($0.needs ?? "")|\($0.touched)" }
-        parts += f.cards.keys.sorted().map { "card \($0)=\(f.cards[$0]!.key)/\(f.cards[$0]!.options.count)" }
+        parts += f.cardItems.keys.sorted().map { "card \($0)=\(f.cardItems[$0]!.key)/\(f.cardItems[$0]!.options.count)" }
         parts += f.sent.map { "sent \($0.intent)=\($0.state)" }
         return parts.joined(separator: "\n")
     }

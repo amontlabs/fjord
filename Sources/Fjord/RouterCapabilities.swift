@@ -36,11 +36,15 @@ extension RouterCapability {
               roleSentence: "Triage's inbox things are GitHub PRs, issues and workflows: you mark those with `mark_entries` (`archived` archives "
                   + "them; also seen, unread, restore).",
               needsTriage: true, scope: "Triage's inbox (what is archived or seen)"),
-        // The Brief and the cards are read before a change too ("the docs card" is named by what the board shows).
+        // The brief and its entries are read before a change too ("the docs thread" is named by what the board shows).
         .init(id: "change-board", intent: .changeFjord, tools: ["board"], roleSentence: nil),
+        .init(id: "answer-entry", intent: .changeFjord, tools: ["answer"],
+              roleSentence: "What waits on the user is the board's entries: when the user's message gives the answer to one, you "
+                  + "answer it with `answer` (one of its options, or the user's words), as the brief's own buttons do.",
+              scope: "the answers to the brief's entries"),
         .init(id: "question-board", intent: .question, tools: ["board", "get_settings"],
               roleSentence: "The Brief is the short written summary of what needs the user, per project: you can read it through `board`.",
-              reads: "cards, working sessions, the Brief, settings"),
+              reads: "the brief's entries, working sessions, the Brief, settings"),
         .init(id: "question-triage", intent: .question,
               tools: ["list_categories", "get_category", "list_groups", "list_inbox", "explain_entry", "list_known"],
               roleSentence: nil, needsTriage: true, reads: "the inbox, categories"),

@@ -2,12 +2,11 @@ import AppKit
 import SwiftUI
 
 /// Where you write to the Router, drawn as the Claude Code tab's composer (docs/design/spec/composer-overlays.md): the
-/// context strip over the card (the card the message replies to, with its ×; Backspace at the start takes it off) and the
+/// context strip over the card (the thread the message replies to, with its ×; Backspace at the start takes it off) and the
 /// card (Return sends, ⇧Return starts a new line, see `RouterKeys`). Typing @ suggests projects, sessions, notifications and
 /// categories over the caret (↑↓, Return or Tab picks, Esc dismisses); a pick is a pill in the text where the @ was (see
 /// `MentionField`, `RouterPointer`). Once typing pauses, Jev's
-/// pick of where the message goes is a ghost chip in the strip, its card or row marked on the page: a click fixes it, Esc
-/// waves it off. Stop while the Router works. On macOS 26 it floats over the page (glass-plan
+/// pick of where the message goes is a ghost chip in the strip: a click fixes it, Esc waves it off. Stop while the Router works. On macOS 26 it floats over the page (glass-plan
 /// §5.4): the card and the strip are Regular glass (their field and chips as they are), or `s3` where the chrome is opaque.
 struct RouterComposer: View {
     let store: Store
@@ -56,10 +55,11 @@ struct RouterComposer: View {
             // What the engine is doing for claude.ai, over your messages still finding where they go.
             RouterCourierStack(pills: store.routerCourier)
                 .padding(.bottom, store.routerCourier.items.isEmpty ? 0 : C.dockGap)
-            // Your messages on their way, rising from here until they fly to where they went.
-            FlightStack(store: store, flights: model.flights, showsOtherAsks: model.layout == .canvas)
-                .padding(.bottom, model.flights.pills.isEmpty && (model.layout != .canvas || store.routerDispatcher.askBacks.isEmpty) ? 0 : C.dockGap)
-            // Who your words go to, as the Code tab's strip over its composer: the card you reply to.
+            // A message of yours waiting for you to say where it goes.
+            if let ask = store.routerDispatcher.askBacks.last {
+                RouterAskPill(store: store, ask: ask).padding(.bottom, C.dockGap).transition(.opacity)
+            }
+            // Who your words go to, as the Code tab's strip over its composer: the thread you reply to.
             if model.replyTo != nil || store.routerBriefs.focused != nil {
                 strip.padding(.bottom, C.dockGap)
             }
@@ -126,7 +126,7 @@ struct RouterComposer: View {
 
     // MARK: Strip
 
-    /// The card the message replies to, removable.
+    /// The thread the message replies to, removable.
     private var strip: some View {
         FlowLayout(spacing: C.stripGap) {
             // The brief entry focused: your words go to its thread.
@@ -135,9 +135,10 @@ struct RouterComposer: View {
                 ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.warning,
                              removeLabel: "Stop replying to \(title)") { store.routerBriefs.focus(nil) }
             }
-            if let id = model.replyTo, let card = store.router.cards.first(where: { $0.id == id }) {
-                ComposerChip(symbol: "arrow.right", text: card.title, tint: card.kind.color,
-                             removeLabel: "Stop replying to \(card.title)") { model.replyTo = nil }
+            if let target = model.replyTo {
+                let title = store.routerBriefs.title(target)
+                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.accent,
+                             removeLabel: "Stop replying to \(title)") { model.replyTo = nil }
             }
         }
         .padding(CDS.Density.compact.pad.md)
@@ -165,7 +166,6 @@ struct RouterComposer: View {
                 .padding(C.pad)
         }
         .modifier(ComposerMaterial(shape: shape, glass: glass, fill: CDS.Surface.s3))
-        .flightFrame("composer")
         .background(AnchorView(anchor: anchor) { windowHeight = $0 })
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardWidth = $0 }
         .overlay(shape.strokeBorder(ring, lineWidth: 1))
@@ -475,5 +475,42 @@ private struct AnchorView: NSViewRepresentable {
         }
 
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    }
+}
+
+/// "Where should this go?" over the composer: your words, why it asks, and the places to pick (⌘1–⌘4 by key position), or
+/// Dismiss: nothing is sent until you pick.
+struct RouterAskPill: View {
+    let store: Store
+    let ask: RouterAskBack
+
+    var body: some View {
+        let dispatcher = store.routerDispatcher
+        let options = ask.options.filter { dispatcher.eligible($0.target, store: store) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.circle").font(.system(size: 11, weight: .medium)).foregroundStyle(CDS.Text.warning)
+                    .frame(width: 14, height: 14)
+                Text(ask.message).cdsText((13, 18), .regular, CDS.Text.primary).lineLimit(1).truncationMode(.tail)
+                    .layoutPriority(1)
+                Text(ask.note ?? "Where should this go?").cdsText((12, 16), .regular, CDS.Text.muted).lineLimit(1)
+                Spacer(minLength: 0)
+                ChipClose(label: "Dismiss") { dispatcher.dismiss(ask.id) }
+            }
+            FlowLayout(spacing: 6) {
+                ForEach(Array(options.prefix(RouterKeys.pickKeys.count).enumerated()), id: \.element.id) { i, option in
+                    ClaudeButton(option.title, variant: option.target == ask.suggestion ? .primary : .secondary, size: .sm,
+                                 shortcut: ["cmd", "\(i + 1)"]) {
+                        _ = dispatcher.pick(ask.id, target: option.target)
+                    }
+                    .help(option.detail)
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: 560, alignment: .leading)
+        .pillGround()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Where should “\(ask.message)” go?")
     }
 }

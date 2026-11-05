@@ -203,14 +203,14 @@ extension FjordHub {
 
     // MARK: Router
 
-    /// The Router's cell in the bar; a click opens its window. Its counts are read in a view of their own, so the cards and
-    /// the sessions changing redraw the cell and not the whole bar.
+    /// The Router's cell in the bar; a click opens its window. Its count is read in a view of its own, so the brief changing
+    /// redraws the cell and not the whole bar.
     var routerCell: some View {
         let openApp = openApp
         return CountedRouterCell(store: store) { openApp(.router) }
     }
 
-    /// "Router", then what's open (amber for what needs you, blue for finished turns). The whole line opens its window.
+    /// "Router", then how many entries need you (amber). The whole line opens its window.
     var routerHeader: some View {
         sectionHeader("Router", status: routerStatusParts)
             .contentShape(Rectangle())
@@ -221,36 +221,36 @@ extension FjordHub {
             .accessibilityAction { openApp(.router) }
     }
 
-    /// A card clicked on the bar: the Router opens on it. Its session isn't opened, and the card stays open.
-    func openRouterCard(_ id: String) {
-        pickRouterCard(id)
+    /// An entry clicked on the bar: the Router opens on it, focused. Its thread isn't opened.
+    func openBriefEntry(_ target: BriefTarget) {
+        pickBriefEntry(target)
         openApp(.router)
     }
 
     var routerStatusParts: [(String, Color)] {
-        let counts = store.routerCounts
-        var status: [(String, Color)] = []
-        if counts.needsYou > 0 { status.append(("\(counts.needsYou) need you", Theme.amber)) }
-        if counts.notes > 0 { status.append(("\(counts.notes) worth a look", Theme.accent)) }
-        return status.isEmpty ? [("nothing open", Theme.tertiary)] : status
+        let needsYou = store.routerBriefs.untoldNeedsYou
+        return needsYou > 0 ? [("\(needsYou) need you", Theme.amber)] : [("nothing open", Theme.tertiary)]
     }
 
-    /// Open cards a panel lists before the rest are left to the window.
-    static let routerCardLimit = 5
+    /// Entries a panel lists before the rest are left to the window.
+    static let routerEntryLimit = 5
 
-    /// The Router in its panel: the header, the latest open cards, then the status line and the way to the window.
+    /// The Router in its panel: the header, the entries that need you (in the brief's order), then what works and the way to
+    /// the window.
     @ViewBuilder var peekRouter: some View {
-        let cards = store.routerPanelCards
+        let entries = store.routerBriefs.page().entries
         routerHeader.frame(height: Self.peekLine)
-        if cards.isEmpty {
+        if entries.isEmpty {
             Text("Nothing needs you").font(Theme.Typography.body).chromeInk(.tertiary, Theme.tertiary)
                 .padding(.horizontal, Theme.Space.md).frame(height: Theme.Metrics.line)
         } else {
             VStack(alignment: .leading, spacing: 1) {
-                ForEach(cards.prefix(Self.routerCardLimit)) { RouterCardLine(card: $0, store: store) { openRouterCard($0) } }
+                ForEach(entries.prefix(Self.routerEntryLimit), id: \.target) { e in
+                    BriefEntryLine(entry: e, store: store) { openBriefEntry(e.target) }
+                }
             }
-            if cards.count > Self.routerCardLimit {
-                Text("\(cards.count - Self.routerCardLimit) more in the Router").font(Theme.Typography.meta)
+            if entries.count > Self.routerEntryLimit {
+                Text("\(entries.count - Self.routerEntryLimit) more in the Router").font(Theme.Typography.meta)
                     .chromeInk(.tertiary, Theme.tertiary).padding(.horizontal, Theme.Space.md).padding(.top, 2)
             }
         }
@@ -259,7 +259,7 @@ extension FjordHub {
         routerFooter
     }
 
-    /// What is working, under the cards, and Claude's files failing to read: a broken read never goes silent.
+    /// What is working, under the entries, and Claude's files failing to read: a broken read never goes silent.
     var routerWorking: some View {
         VStack(alignment: .leading, spacing: 0) {
             ClaudeNotice(store: store).padding(.horizontal, Theme.Space.md)
@@ -273,7 +273,7 @@ extension FjordHub {
             Spacer(minLength: 0)
             ActionButton("Open Router") { openApp(.router) }
                 .fixedSize()
-                .tip("Open Router", "Cards and the chat · \(store.shortcut(.router).display)")
+                .tip("Open Router", "The brief and the composer · \(store.shortcut(.router).display)")
         }
         .padding(.leading, Theme.Space.md)
         .frame(minHeight: Theme.Metrics.line)

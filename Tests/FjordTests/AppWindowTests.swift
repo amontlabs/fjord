@@ -412,13 +412,13 @@ extension WindowSeams {
             await waitUntil { !window.isOpen }
         }
 
-        @Test func aCardOpensOnTheRouter() async throws {
+        @Test func anEntryOpensOnTheRouterFocused() async throws {
             let (window, store) = controller()
             window.show(.settings)
             away(window)
-            let card = try #require(store.openRouterCards.first)
-            window.show(card: card.id)
-            #expect(window.navigator.selection == .router && window.routerModel.selection == card.id)
+            let entry = try #require(store.routerBriefs.page().entries.first)
+            window.show(entry: entry.target)
+            #expect(window.navigator.selection == .router && store.routerBriefs.focused == entry.target)
             window.close()
             await waitUntil { !window.isOpen }
         }
@@ -1292,15 +1292,15 @@ extension WindowSeams {
 
         /// A close turned round by a banner's click on another card of the same place captures nothing: the overlay, whose
         /// picture shows the card it closed on, fades into the real window at the handoff.
-        @Test func aCloseTurnedRoundOnAnotherCardFadesIntoIt() throws {
+        @Test func aCloseTurnedRoundOnAnotherEntryFadesIntoIt() throws {
             try morphing { controller, ticks in
-                let cards = controller.store.openRouterCards
-                try #require(cards.count >= 2)
-                controller.routerModel.select(cards[0].id, store: controller.store)
+                let entries = controller.store.routerBriefs.page().entries
+                try #require(entries.count >= 2)
+                controller.store.routerBriefs.focus(entries[0].target)
                 openAndStartClosing(controller, ticks, on: .router)
                 guard let run = controller.run, let shown = run.image else { return #expect(Bool(false), "no close morph") }
                 let taken = AppTransition.captures
-                controller.show(card: cards[1].id)
+                controller.show(entry: entries[1].target)
                 #expect(controller.phase == .opening && controller.run === run && controller.navigator.selection == .router)
                 ticks.runTurns()
                 run.complete()
@@ -1337,7 +1337,7 @@ extension WindowSeams {
                 controller.show(.router)
                 ticks.runTurns()
                 guard let run = controller.run, let shown = run.image else { return #expect(Bool(false), "no kept picture") }
-                if let card = controller.store.openRouterCards.last { controller.pick(card: card.id) }
+                if let e = controller.store.routerBriefs.page().entries.last { controller.pick(entry: e.target) }
                 controller.pick(message: UUID())
                 controller.navigator.go(.done)
                 ticks.runTurns()
@@ -1371,7 +1371,7 @@ extension WindowSeams {
                 let taken = AppTransition.captures
                 controller.navigator.go(.done)
                 controller.showUpdates()
-                if let card = controller.store.openRouterCards.first { controller.pick(card: card.id) }
+                if let e = controller.store.routerBriefs.page().entries.first { controller.pick(entry: e.target) }
                 ticks.runTurns()
                 #expect(AppTransition.captures == taken)
             }

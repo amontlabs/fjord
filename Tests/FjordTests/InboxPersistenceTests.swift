@@ -340,14 +340,14 @@ import Testing
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         func json<T: Encodable>(_ value: T) throws -> String { String(decoding: try enc.encode(value), as: UTF8.self) }
-        let summary = RouterSummary(at: Date(timeIntervalSince1970: 1_800_000_000), text: "all good")
+        let decision = RouterDecision(at: Date(timeIntervalSince1970: 1_800_000_000), trigger: .you("hi"), outcome: .done)
         try Data("""
         {"settings": {"pollInterval": 60, "notifications": true},
          "categories": [\(try json(good)), {"name": 5}],
          "groups": [{"name": "broken"}, \(try json(InboxGroup(name: "Friends", kind: .people, members: ["octo"])))],
          "things": {"pr:a/one#1": \(try json(InboxFixture.pr(1))), "pr:a/one#2": {"id": 2}},
          "marks": {"pr:a/one#1": {"seen": ["k"]}, "pr:a/one#2": {"seen": 5}},
-         "router": {"overviews": [\(try json(summary)), {"at": 5}], "decisions": [{"at": 5}], "changes": [{"nope": true}]}}
+         "router": {"decisions": [\(try json(decision)), {"at": 5}], "changes": [{"nope": true}]}}
         """.utf8).write(to: file)
         let store = Store()
         store.stateFile = file
@@ -355,7 +355,7 @@ import Testing
         #expect(store.categories.map(\.id) == [good.id])
         #expect(store.groups.map(\.name) == ["Friends"])
         #expect(store.things.keys.sorted() == ["pr:a/one#1"] && store.marks.keys.sorted() == ["pr:a/one#1"])
-        #expect(store.router.summaries == [summary])
+        #expect(store.router.decisions == [decision])
         // What was lost is kept aside, in the file as it was.
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).contains { $0.hasPrefix("state.json.bak-") })
     }
@@ -369,24 +369,44 @@ import Testing
         let decision = RouterDecision(at: Date(timeIntervalSince1970: 1_800_000_000), trigger: .you("hi"), outcome: .done)
         let original = Data("""
         {"settings": {"pollInterval": 60, "notifications": true},
-         "router": {"enabled": true, "decisions": [\(String(decoding: try enc.encode(decision), as: UTF8.self)), {"at": 5}],
-                    "waits": {"s1": 12, "s2": "late"}}}
+         "router": {"enabled": true, "decisions": [\(String(decoding: try enc.encode(decision), as: UTF8.self)), {"at": 5}]}}
         """.utf8)
         try original.write(to: file)
         let state = try { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return try d.decode(PersistedState.self, from: original) }()
-        #expect(state.dropped == ["router: 1 of decisions", "router: 1 of waits"])
+        #expect(state.dropped == ["router: 1 of decisions"])
         #expect(state.router?.dropped == [])
         let store = Store()
         store.stateFile = file
         store.load()
-        #expect(store.router.enabled && store.router.decisions == [decision] && store.router.waits == ["s1": 12])
+        #expect(store.router.enabled && store.router.decisions == [decision])
         store.marks = ["pr:a/one#1": EntryMarks(seen: ["k"])]
         store.flushSave()
         let backups = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("state.json.bak-") }
         #expect(try backups.map { try Data(contentsOf: folder.appendingPathComponent($0)) } == [original])
     }
 
-    @Test func aChangeWhoseEntryIsLostOrThatAnOlderFileKeptInItsChatGetsAnEntryOfItsOwn() throws {
+    /// The launch migration: a file of the card model (its cards, waits, summaries, brief) loads with none of it lost
+    /// aside, and the next save writes only what the Router keeps now.
+    @Test func theCardModelsStateIsDroppedAtLaunch() throws {
+        let decision = RouterDecision(at: Date(timeIntervalSince1970: 1_800_000_000), trigger: .you("hi"), outcome: .done)
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        let old = Data("""
+        {"enabled": true, "decisions": [\(String(decoding: try enc.encode(decision), as: UTF8.self))],
+         "cards": [{"id": "s#t1", "sessionID": "s", "kind": "question"}], "waits": {"s": 12}, "overviews": [{"at": 5}],
+         "lives": {}, "seen": {"s": "x"}, "pendingTurns": {}, "heldWaits": {}, "digest": {"at": 5}, "chat": [{"text": "hi"}]}
+        """.utf8)
+        let state = try dec.decode(RouterSaved.self, from: old)
+        #expect(state.dropped.isEmpty && state.enabled && state.decisions == [decision])
+        let saved = try JSONSerialization.jsonObject(with: try enc.encode(state)) as? [String: Any] ?? [:]
+        #expect(Set(saved.keys) == ["enabled", "changes", "decisions", "runsOnProjects", "pendingDesktopStarts",
+                                    "guestRelayDeliveries", "guestPendingForms", "pendingGuestDisables", "pendingGuestRemovals",
+                                    "operations"])
+    }
+
+    @Test func aChangeWhoseEntryIsLostGetsAnEntryOfItsOwn() throws {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         let dec = JSONDecoder()
@@ -400,43 +420,12 @@ import Testing
         let linked = RouterDecision(at: Date(timeIntervalSince1970: 1_800_000_200), trigger: .you("hi"), outcome: .done)
         // Its entry can't be read: the change waiting for your Apply is still reached, through an entry of
         // Fjord's.
-        let state = try dec.decode(RouterState.self, from: Data("""
+        let state = try dec.decode(RouterSaved.self, from: Data("""
         {"changes": [\(try json(waiting)), \(try json(applied))], "decisions": [{"at": 5}, \(try json(linked))]}
         """.utf8))
         #expect(state.dropped == ["1 of decisions"])
         #expect(state.decisions.map(\.links.changes) == [[waiting.id], []])
         #expect(state.decisions.first?.trigger == .system && state.decisions.first?.at == waiting.date)
-        // An older file's chat: each change it kept gets an entry too.
-        let old = try dec.decode(RouterState.self, from: Data("""
-        {"chat": [{"text": "hi"}, {"change": \(try json(applied))}]}
-        """.utf8))
-        #expect(old.changes.map(\.id) == [applied.id])
-        #expect(old.decisions.map(\.links.changes) == [[applied.id]])
-    }
-
-    @Test func anOlderFilesChatChangeThatCannotBeReadIsSaidLostSoTheFileIsKeptAside() throws {
-        let folder = try folder()
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let file = folder.appendingPathComponent("state.json")
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        let good = FjordChange(date: Date(timeIntervalSince1970: 1_800_000_000), title: "Changed the order",
-                                 patch: .order(before: [], after: []))
-        let original = Data("""
-        {"settings": {"pollInterval": 60, "notifications": true},
-         "router": {"chat": [{"text": "hi"}, {"change": \(String(decoding: try enc.encode(good), as: UTF8.self))},
-                             {"change": {"title": 5}}]}}
-        """.utf8)
-        try original.write(to: file)
-        let store = Store()
-        store.stateFile = file
-        store.load()
-        #expect(store.router.changes.map(\.id) == [good.id])
-        store.marks = ["pr:a/one#1": EntryMarks(seen: ["k"])]
-        store.flushSave()
-        // The chat isn't written again: the file as it was is kept aside first.
-        let backups = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("state.json.bak-") }
-        #expect(try backups.map { try Data(contentsOf: folder.appendingPathComponent($0)) } == [original])
     }
 
     @Test func aRunUnderWayWhenTheAppQuitSaysItWasInterrupted() throws {

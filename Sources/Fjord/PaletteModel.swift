@@ -188,12 +188,14 @@ final class PaletteModel {
     var quitPromptUp: Bool { store.computers.quitPrompt != nil }
 
     /// What the sources are made of, as numbers that move when it does: the store's revisions (the inbox and its categories,
-    /// the Router's cards, Claude's sessions and agents, the actions' runs, the snippets, the project folders), the Router's
+    /// the brief's entries, Claude's sessions and agents, the actions' runs, the snippets, the project folders), the Router's
     /// and the tools' switches, whether the Router can send, and the computers (a few). Cheap, so the view can watch it.
     struct Stamp: Equatable {
         var inbox: Int, display: Int, router: Int, corpus: Int
         var routerOn: Bool, canSend: Bool, tools: Set<Tool>
         var computers: Int
+        /// The brief: its threads, what needs you and your marks.
+        var brief: Int
     }
 
     var sourceStamp: Stamp {
@@ -203,9 +205,18 @@ final class PaletteModel {
             computers.combine(computer.name)
             computers.combine(computer.displayState.title)
         }
+        let briefs = store.routerBriefs
+        var brief = Hasher()
+        for (project, doc) in briefs.docs.sorted(by: { $0.key < $1.key }) {
+            brief.combine(project)
+            for t in doc.threads { brief.combine(t.id); brief.combine(t.title); brief.combine(t.status) }
+            for e in doc.needsYou { brief.combine(e) }
+        }
+        brief.combine(briefs.marks.read)
+        brief.combine(briefs.marks.archived)
         return Stamp(inbox: store.inboxRevision, display: store.inboxDisplayRevision, router: store.routerRevision,
                      corpus: store.corpusRevision, routerOn: store.routerOn, canSend: routerModel.canSend(store),
-                     tools: store.tools, computers: computers.finalize())
+                     tools: store.tools, computers: computers.finalize(), brief: brief.finalize())
     }
 
     /// Lists the data again soon, once for the changes that come together (Claude's sessions change by the second).

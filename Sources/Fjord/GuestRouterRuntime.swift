@@ -194,7 +194,6 @@ import Foundation
             store.claudeActivity[desktopID] = nil
             store.claudeTasks[desktopID] = nil
         }
-        store.feedRouter()
     }
 
     func disableAll() {
@@ -358,26 +357,24 @@ import Foundation
             evidence: evidence[pending.location.key] ?? [], allowEditedPrompt: true)
     }
 
-    func answer(_ guestForm: GuestPendingForm, answers: [String: String], cardID: String, snapshot: FormSnapshot? = nil) async throws {
+    func answer(_ guestForm: GuestPendingForm, answers: [String: String], target: BriefTarget, snapshot: FormSnapshot? = nil) async throws {
         guard let store, let client = clients[guestForm.computer.key] else { throw FormWriter.Cancelled() }
         let generation = store.routerGeneration
         try await GuestForms(client: client).answer(guestForm, answers: answers) { [weak store] in
             guard let store, store.routerOn, store.routerGeneration == generation,
-                  let card = store.router.cards.first(where: { $0.id == cardID }), card.isOpen,
-                  let current = store.guestPendingForm(for: card) else { return false }
+                  let current = store.guestPendingForm(for: target) else { return false }
             return current.form.id == guestForm.form.id && current.form.toolUseID == guestForm.form.toolUseID
                 && snapshot.map { $0.holds(store) } != false
         }
     }
 
-    func answer(_ guestForm: GuestPendingForm, plan decision: PendingForm.PlanDecision, cardID: String,
+    func answer(_ guestForm: GuestPendingForm, plan decision: PendingForm.PlanDecision, target: BriefTarget,
                 snapshot: FormSnapshot? = nil) async throws {
         guard let store, let client = clients[guestForm.computer.key] else { throw FormWriter.Cancelled() }
         let generation = store.routerGeneration
         try await GuestForms(client: client).answer(guestForm, plan: decision) { [weak store] in
             guard let store, store.routerOn, store.routerGeneration == generation,
-                  let card = store.router.cards.first(where: { $0.id == cardID }), card.isOpen,
-                  let current = store.guestPendingForm(for: card) else { return false }
+                  let current = store.guestPendingForm(for: target) else { return false }
             return current.form.id == guestForm.form.id && current.form.toolUseID == guestForm.form.toolUseID
                 && snapshot.map { $0.holds(store) } != false
         }
@@ -565,7 +562,6 @@ import Foundation
         if changedSessions { store.claudeSessions = sessions }
         if changedActivities { store.claudeActivity = activities }
         if changedTasks { store.claudeTasks = tasks }
-        if changedSessions || changedActivities || changedTasks { store.feedRouter() }
     }
 
     private func markGuestExecutionInaccessible(_ computer: GuestReference) {

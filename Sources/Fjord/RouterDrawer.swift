@@ -1,8 +1,9 @@
 import SwiftUI
 
-// The history under the composer (docs/design/router-watch-and-briefs.md 5.0): your messages with where they went, your acts
-// on the brief with Revert, the answers you gave (one line each), and the briefs' prose versions. It reads RouterDecisions,
-// the briefs' versions and the acts; never a card.
+// The history under the composer (docs/design/router-watch-and-briefs.md 5.0): your messages with where they went, the Router's
+// reply and what it changed in Fjord (Apply, Revert), your acts on the brief with Revert (`FjordChange.briefAction`), the
+// answers you gave (one line each), and the briefs' prose versions. It reads RouterDecisions, the changes, the briefs' versions
+// and the answers.
 
 struct RouterDrawer: View {
     let store: Store
@@ -11,7 +12,7 @@ struct RouterDrawer: View {
 
     /// One line of the drawer, newest first.
     struct Line: Identifiable, Equatable {
-        enum Kind: Equatable { case message, act(BriefAct), version }
+        enum Kind: Equatable { case message(changes: [UUID]), act(FjordChange), answer, version }
         var id: String
         var at: Date
         var kind: Kind
@@ -45,7 +46,12 @@ struct RouterDrawer: View {
                             Text("Your messages, answers and the briefs' changes will be here.")
                                 .cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
                         }
-                        ForEach(lines) { DrawerLine(store: store, line: $0, now: briefs.clock()) }
+                        ForEach(lines) { line in
+                            DrawerLine(store: store, line: line, now: briefs.clock())
+                            if case .message(let ids) = line.kind {
+                                ForEach(store.router.changes.filter { ids.contains($0.id) }) { ChangeCard(change: $0, store: store) }
+                            }
+                        }
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -63,18 +69,18 @@ struct RouterDrawer: View {
         let briefs = store.routerBriefs
         var out: [Line] = []
         for d in store.router.decisions.suffix(60) {
-            guard case .you(let words) = d.trigger, !words.isEmpty else { continue }
-            out.append(Line(id: d.id.uuidString, at: d.at, kind: .message, text: words,
-                            detail: d.decision.label ?? d.decision.target ?? ""))
-        }
-        for a in briefs.acts {
-            let text: String, detail: String
-            switch a.kind {
-            case .answered(let words): text = "Answered \(a.title)"; detail = words
-            case .read: text = "Marked \(a.title) read"; detail = ""
-            case .archived: text = "Archived \(a.title)"; detail = ""
+            guard case .you(let words) = d.trigger, !words.isEmpty, d.decision.intent != "answer" else { continue }
+            let changes = d.links.changes.filter { id in
+                store.router.changes.contains { $0.id == id && !$0.isBriefAction }
             }
-            out.append(Line(id: a.id.uuidString, at: a.at, kind: .act(a), text: text, detail: detail))
+            out.append(Line(id: d.id.uuidString, at: d.at, kind: .message(changes: changes), text: words,
+                            detail: d.reply ?? d.decision.target ?? d.decision.label ?? ""))
+        }
+        for c in store.router.changes.suffix(60) where c.isBriefAction {
+            out.append(Line(id: c.id.uuidString, at: c.date, kind: .act(c), text: c.title, detail: c.revertNote ?? ""))
+        }
+        for a in briefs.answers {
+            out.append(Line(id: a.id.uuidString, at: a.at, kind: .answer, text: "Answered \(a.title)", detail: a.words))
         }
         for (project, versions) in briefs.versions() {
             let name = briefs.names[project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(project)
@@ -104,22 +110,25 @@ private struct DrawerLine: View {
                 }
             }
             Spacer(minLength: 6)
-            if case .act(let act) = line.kind, !act.reverted, !isAnswer(act) {
-                Button("Revert") { store.routerBriefs.revert(act) }
+            if case .act(let change) = line.kind, !change.isReverted {
+                Button("Revert") { store.revertFjordChange(change.id) }
+                    .buttonStyle(.plain).font(CDS.sans(12, .medium)).foregroundStyle(CDS.Text.accent)
+            }
+            if case .message = line.kind, store.routerDispatcher.canSendElsewhere(UUID(uuidString: line.id)) {
+                Button("Elsewhere…") { if let id = UUID(uuidString: line.id) { store.routerDispatcher.sendElsewhere(id) } }
                     .buttonStyle(.plain).font(CDS.sans(12, .medium)).foregroundStyle(CDS.Text.accent)
             }
             Text(BriefAge.text(now.timeIntervalSince(line.at))).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted).fixedSize()
         }
     }
 
-    private var reverted: Bool { if case .act(let a) = line.kind { return a.reverted }; return false }
-
-    private func isAnswer(_ a: BriefAct) -> Bool { if case .answered = a.kind { return true }; return false }
+    private var reverted: Bool { if case .act(let c) = line.kind { return c.isReverted }; return false }
 
     private var symbol: String {
         switch line.kind {
         case .message: "arrow.up.right"
-        case .act(let a): isAnswer(a) ? "checkmark.bubble" : "arrow.uturn.backward"
+        case .act(let c): c.symbol
+        case .answer: "checkmark.bubble"
         case .version: "doc.text"
         }
     }

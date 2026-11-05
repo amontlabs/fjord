@@ -622,3 +622,8 @@ extension View {
         modifier(Tip(title: title, detail: detail, focused: focused))
     }
 }
+
+extension EnvironmentValues {
+    /// Playground only: force a tooltip to show.
+    @Entry var previewTip: String? = nil
+}

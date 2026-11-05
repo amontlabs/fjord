@@ -67,7 +67,7 @@ enum FjordGate {
         case .marks(_, let changes):
             if changes.count > manyMarks { return "It marks \(changes.count) things at once" }
             return said.contains(where: { word in markWords.contains { word.hasPrefix($0) } }) ? nil : "Your message didn't ask to mark anything"
-        case .cardAction:
+        case .briefAction:
             return nil
         }
     }
@@ -277,8 +277,8 @@ extension Store {
             try FjordSetting.named(key)?.apply(self, after)
         case .marks(_, let changes):
             for item in changes { marks[item.thing] = item.after }
-        case .cardAction(let action):
-            try applyCardAction(action)
+        case .briefAction(_, _, let act, let mark):
+            routerBriefs.setMark(act, mark, on: true)
         }
     }
 }

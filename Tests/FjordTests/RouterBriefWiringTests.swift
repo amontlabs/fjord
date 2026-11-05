@@ -9,9 +9,9 @@ import Testing
     func boardChanged(_ project: String) { calls.append("board " + project) }
 }
 
-private func facts(_ threads: [CourierBriefFacts.Thread], cards: [String: CourierBriefFacts.Card] = [:], watch: CourierWatch = .live,
+private func facts(_ threads: [CourierBriefFacts.Thread], cardItems: [String: CourierBriefFacts.Card] = [:], watch: CourierWatch = .live,
                    turning: Bool = false) -> CourierBriefFacts {
-    CourierBriefFacts(project: "chan_p", name: "p", threads: threads, watch: watch, turning: turning, cards: cards)
+    CourierBriefFacts(project: "chan_p", name: "p", threads: threads, watch: watch, turning: turning, cardItems: cardItems)
 }
 
 private func th(_ id: String, _ status: String?, state: String = "idle", session: String? = nil, at: Double = 10, needs: String? = nil) -> CourierBriefFacts.Thread {
@@ -64,7 +64,7 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
 @MainActor @Suite struct BriefEntryBuilding {
     @Test func aPendingCardIsAnEntryWithItsRowKeyAndOptionsAsData() {
         let b = CourierBriefSource.board(facts([th("t1", "needs you"), th("t2", "working")],
-                                               cards: ["t1": .init(key: "row_9", kind: "question", options: ["A", "B"], text: "Which?")]))
+                                               cardItems: ["t1": .init(key: "row_9", kind: "question", options: ["A", "B"], text: "Which?")]))
         #expect(b.entries.count == 1)
         let e = b.entries[0]
         #expect(e.kind == .question && e.card == "row_9" && e.options == ["A", "B"] && e.question == "Which?" && e.since == 10)

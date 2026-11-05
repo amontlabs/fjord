@@ -164,7 +164,7 @@ The canvas also carries main's memoized zones, counts, equatable cards and hidde
   A heap assigns shortest columns; a bounded search around the 16:10 crossing replaces trying every possible column count.
   This keeps a deterministic near-screen shape, rather than promising the exhaustive global minimum for arbitrary heights.
 
-Final release `scripts/morph-timings.sh --scenario routerCanvas --steps "open,close x6"`:
+Final release `scripts/morph-timings.sh --scenario routerCanvas --steps "open,close x6"` (the canvas and its `routerCanvas` scenario are gone since; measure with `--scenario router`):
 
 | Interval | p50 | p95 |
 | --- | ---: | ---: |

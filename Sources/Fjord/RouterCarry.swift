@@ -18,7 +18,7 @@ import Foundation
 /// (nothing can send it until you open the session).
 struct DeliveryOperation: Codable, Equatable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable {
-        /// Your words to a card's session.
+        /// Your words to a thread's session.
         case message
     }
 
@@ -374,7 +374,7 @@ extension Store {
         }
     }
 
-    /// The lines that say a send failed, as a quit (`RouterState.settleInterrupted`) or an unsure end (`RouterCarry.unsure`)
+    /// The lines that say a send failed, as a quit (`RouterSaved.settleInterrupted`) or an unsure end (`RouterCarry.unsure`)
     /// leaves them in the history.
     private static func staleFailure(_ item: RouterDecision.Done) -> Bool {
         guard case .failed(let why) = item else { return false }

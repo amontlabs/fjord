@@ -5,7 +5,7 @@ import Testing
 struct ProjectPlacementTests {
     @Test func routerStatePersistsProjectIdentityAndPlacement() throws {
         let id = UUID()
-        var state = RouterState()
+        var state = RouterSaved()
         state.runsOnProjects = [RunsOnProject(
             id: id,
             name: "fjord",
@@ -13,7 +13,7 @@ struct ProjectPlacementTests {
             placement: .computer(deviceId: "owner-a", computerId: "computer-a", guestPath: "/workspace/fjord")
         )]
 
-        let decoded = try JSONDecoder().decode(RouterState.self, from: JSONEncoder().encode(state))
+        let decoded = try JSONDecoder().decode(RouterSaved.self, from: JSONEncoder().encode(state))
 
         #expect(decoded.runsOnProjects == state.runsOnProjects)
         #expect(decoded.runsOnProjects.first?.id == id)

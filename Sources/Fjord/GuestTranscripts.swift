@@ -12,9 +12,6 @@ struct GuestTranscriptSnapshot: Equatable, Sendable {
 
     var messages: [YourMessages.Message] { YourMessages.messages(in: tail) }
     var activity: ClaudeActivity? { Claude.activity(tail: tail) }
-    var finalMessage: String? { Claude.finalMessage(tail: tail) }
-    var recentSteps: [Claude.TranscriptStep] { Claude.recentTimedSteps(tail: tail) }
-    var earlierTurnEnds: [String] { Array(Claude.turnEnds(tail: tail).dropLast()) }
 }
 
 /// Keeps only recent transcript tails. Metadata is checked on every read so append, truncate, and atomic replacement

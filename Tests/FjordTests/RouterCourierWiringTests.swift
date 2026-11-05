@@ -90,17 +90,10 @@ import Testing
     @Test func aSendToAClaudeProjectLeavesItsPillToTheEngines() async {
         let (s, d, f) = RouterDispatcherTests().setup()
         f.decisions = [RouterProjectDecision(kind: .project("lookout", thread: nil), confidence: 0.9, decider: .jev)]
-        let flights = RouterFlights()
-        var context = RouterContext()
-        context.flies = true
-        let id = d.submit("ship the release notes", context: context)
-        flights.sync(store: s)
-        #expect(flights.pills.count == 1)
+        let id = d.submit("ship the release notes")
         await waitUntil { id.map { f.finished.contains($0) } ?? true }
         await waitUntil { !f.requests.isEmpty }
         #expect(f.prepared.isEmpty && f.sent.isEmpty, "no local session was sent to")
-        flights.sync(store: s)
-        #expect(flights.pills.isEmpty && flights.flights.isEmpty, "the message's own pill left: the engine's says it")
         #expect(s.routerCourier.items.count == 1)
     }
 }

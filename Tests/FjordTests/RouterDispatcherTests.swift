@@ -18,7 +18,7 @@ import Testing
         var decideHeld: CheckedContinuation<Void, Never>?
         var prepared: [String] = []
         var sent: [RouterDispatcher.Delivery] = []
-        var answered: [(card: String, answers: [String: String])] = []
+        var answered: [(target: BriefTarget, answers: [String: String])] = []
         var runs: [(intent: RouterRun.Intent, input: String)] = []
         var answer = RouterRun.Answer(reply: "Done.", done: "set it")
         var finished: [UUID] = []
@@ -46,9 +46,9 @@ import Testing
                     sent.append(delivery)
                     return nil
                 },
-                answer: { [self] _, card, answers, snapshot in
+                answer: { [self] _, target, answers, snapshot in
                     guard snapshot.holds(store!) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
-                    answered.append((card, answers))
+                    answered.append((target, answers))
                     return "answered"
                 },
                 run: { [self] _, intent, input in
@@ -71,8 +71,6 @@ import Testing
         s.claudeSessions = [
             "local_a": ClaudeSession(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: Date(), running: true),
         ]
-        s.router.cards = [RouterCard(id: "local_a#w1", sessionID: "local_a", kind: .question, title: "Fix the login bug",
-                                     folder: "/code/lookout", text: "Which database?", createdAt: Date())]
         s.routerCourierLink.take(CourierSnapshot(health: .init(tabConnected: true, signedIn: true), places: [Self.lookout, Self.lcu]))
         let d = s.routerDispatcher
         let f = Fakes()
@@ -113,9 +111,9 @@ import Testing
         #expect(decision(s, id)?.decision.confirmed == true && decision(s, id)?.decision.decider == nil)
     }
 
-    @Test func aReplyGoesToItsCardsSessionWithNoModel() async {
+    @Test func aReplyGoesToItsThreadsSessionWithNoModel() async {
         let (s, d, f) = setup()
-        let id = d.submit("use postgres and keep the old schema", context: RouterContext(replyTo: "local_a#w1"))
+        let id = d.submit("use postgres and keep the old schema", context: RouterContext(replyTo: BriefTarget(project: "local:lookout", thread: "local_a")))
         await finish(f, id)
         #expect(f.decided.isEmpty && f.prepared == ["local_a"] && f.sent.count == 1)
         #expect(decision(s, id)?.done.contains(where: \.sendsWords) == true)
@@ -138,7 +136,7 @@ import Testing
         await finish(f, id)
         let entry = decision(s, id)
         #expect(entry?.done.contains(where: \.sendsWords) == false)
-        #expect(entry.flatMap(RouterFlights.failure) == RouterDispatcher.notTakenWords)
+        #expect(entry?.done.contains(.failed(RouterDispatcher.notTakenWords)) == true)
         #expect(entry?.decision.courierIntent == nil)
         // Retry: the engine takes it this time, and it goes once.
         s.routerCourier.attach(RouterCourierSource(submit: { [f] in f.requests.append($0); return f.requests.count }, updates: AsyncStream { _ in }))
@@ -146,19 +144,6 @@ import Testing
         await finish(f, again)
         #expect(decision(s, again)?.done.contains(where: \.sendsWords) == true)
         #expect(sentWords(f).count == 2)
-    }
-
-    @Test func aCorrectionWhoseSendFailedRetriesToTheSamePlace() async {
-        let (s, d, f) = setup()
-        f.decisions = [decided(.ask([.project("lookout", thread: nil)]), .sonnet, p: 0.3)]
-        let id = d.submit("bump the version", context: { var c = RouterContext(); c.flies = true; return c }())!
-        await finish(f, id)
-        s.routerCourier.attach(RouterCourierSource(submit: { [f] in f.requests.append($0); return 0 }, updates: AsyncStream { _ in }))
-        #expect(d.pick(id, target: "claude-project:lcu"))
-        await waitUntil { d.askBacks.isEmpty && d.progress[id] == nil }
-        let entry = decision(s, id)
-        #expect(entry?.decision.confirmed == true && entry?.decision.targetID == "claude-project:lcu")
-        #expect(d.resendContext(id)?.target == "claude-project:lcu")
     }
 
     @Test func aSendTheEngineFailedIsNotARoutingExample() async {

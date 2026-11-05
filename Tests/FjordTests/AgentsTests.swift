@@ -686,7 +686,7 @@ import Testing
         let ended = session("b", ended: t0.addingTimeInterval(-2))
         var read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: reader, outputs: outputs, transcript: { _ in nil })
         #expect(!read.inventory.contains("b"))
-        clock = t0.addingTimeInterval(Store.inventoryRecheckDelay + 1)
+        clock = t0.addingTimeInterval(6)
         read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: reader, outputs: outputs, transcript: { _ in nil })
         #expect(read.inventory.contains("b") && read.tasks.isEmpty)
     }

@@ -1,7 +1,8 @@
 import Foundation
 
-// The palette's source for Router: the cards waiting on you, the other open cards, every session, their actions, and the
-// send-to-the-Router row (docs/design/palette/DESIGN.md, jobs 1–3). Nothing at all while the Router is off.
+// The palette's source for Router: the brief's entries waiting on you, then the threads touched in the last 24 hours, every
+// session and their actions, and the send-to-the-Router row (docs/design/palette/DESIGN.md, jobs 1–3). Nothing at all while
+// the Router is off.
 
 @MainActor
 enum PaletteRouterSource {
@@ -14,114 +15,85 @@ enum PaletteRouterSource {
         static let older = 0.8
     }
 
-    /// What the palette finds in the Router: one pass over the cards and the sessions, with the lookups the rows share (a
-    /// session's open card, a session's linked PR) built once. Runs once per open, on the main actor.
+    /// What the palette finds in the Router: one pass over the brief and the sessions, with the lookups the rows share (a
+    /// session's linked PR) built once. Runs once per open, on the main actor.
     static func make(_ context: PaletteContext) -> PaletteSourceOutput {
         let store = context.store
         guard store.routerOn else { return PaletteSourceOutput() }
-        let page = store.routerZones
+        let page = store.routerBriefs.page()
         let now = Date()
         let rows = Dictionary(store.allAgentRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let links = Links(store)
 
-        // The Needs-you zone: what stops a session on you first (questions, plans, asks, OKs, a wait that is over), then what
-        // is stuck or left to finish; oldest first within each.
-        let ready = Set(page.ready.map(\.id))
-        let needing = (page.needs + page.ready).sorted {
-            let (a, b) = (urgency($0, ready: ready), urgency($1, ready: ready))
-            return a != b ? a < b : $0.createdMs < $1.createdMs
-        }
-        let needingIDs = Set(needing.map(\.id))
-        let others = (page.notes + page.waiting).filter { !needingIDs.contains($0.id) }
-
-        let working = Set(page.working.map(\.id))
-
-        // A session's card to show it with: the newest of those on the page.
-        var openCard: [String: RouterCard] = [:]
-        for card in needing + others where card.createdMs >= (openCard[card.sessionID]?.createdMs ?? .min) {
-            openCard[card.sessionID] = card
-        }
-
         var output = PaletteSourceOutput()
-        output.needsYou = needing.map { card in
-            cardItem(card, needsYou: true, context: context, running: rows[card.sessionID]?.session.running == true, links: links)
-        }
-        output.items = output.needsYou + others.map { card in
-            cardItem(card, needsYou: false, context: context, running: rows[card.sessionID]?.session.running == true, links: links)
-        }
+        output.needsYou = page.sections.flatMap { s in s.entries.map { entryItem($0, section: s, context: context) } }
+        let recent = page.sections.flatMap { s in s.recent.map { threadItem($0, section: s, context: context) } }
+        output.items = output.needsYou + recent
         output.items += store.claudeSessions.values.map { session in
-            sessionItem(session, row: rows[session.id], card: openCard[session.id], working: working.contains(session.id), now: now,
-                        context: context, links: links)
+            sessionItem(session, row: rows[session.id], now: now, context: context, links: links)
         }
         return output
     }
 }
 
-// MARK: - Cards
+// MARK: - Entries and threads
 
 extension PaletteRouterSource {
-    private static func cardItem(_ card: RouterCard, needsYou: Bool, context: PaletteContext, running: Bool,
-                                 links: Links) -> PaletteItem {
+    private static func entryItem(_ e: BriefEntry, section: BriefPage.Section, context: PaletteContext) -> PaletteItem {
         let store = context.store
-        let model = context.routerModel
-        let project = store.routerProject(card).name
-        let label = card.kind.label
-        var keywords = [label, project]
-        if let line = firstLine(card.text) { keywords.append(line) }
-        if let brief = card.brief, !brief.isEmpty { keywords.append(brief) }
-        if let origin = card.origin { keywords.append(origin.thing) }
-        let thing = links.thing(card)
-        if let thing { keywords += links.keywords(thing) }
-
-        var actions = [
+        let briefs = store.routerBriefs
+        let t = e.target
+        let label = BriefEntryCard.kindLabel(e)
+        var keywords = [label, section.name]
+        if let q = e.question, !q.isEmpty { keywords.append(String(q.prefix(200))) }
+        let actions = [
             PaletteAction(id: "show", title: "Show in Router", symbol: "rectangle.stack") {
-                model.select(card.id, store: store)
+                briefs.focus(t)
                 context.go(.router)
             },
             PaletteAction(id: "reply", title: "Reply", symbol: "arrowshape.turn.up.left", caps: ["↩"]) {
-                model.reply(to: card.id, store: store)
+                briefs.focus(t)
+                context.routerModel.reply()
                 context.go(.router)
             },
-            PaletteAction(id: "open", title: "Open in Claude", symbol: "arrow.up.forward.app") {
-                store.openCard(card.id)
+            PaletteAction(id: "open", title: e.source == .local ? "Open in Claude" : "Open on claude.ai", symbol: "arrow.up.forward.app") {
+                briefs.open(t, store: store)
+            },
+            PaletteAction(id: "read", title: "Mark read", symbol: "checkmark.circle") { briefs.markRead(t, store: store) },
+            PaletteAction(id: "archive", title: "Archive", symbol: "archivebox", destructive: true) { briefs.archive(t, store: store) },
+        ]
+        return PaletteItem(id: "thread:" + t.key, kind: .thread, title: briefs.title(t), subtitle: label + " · " + section.name,
+                           keywords: keywords, icon: .symbol(BriefEntryCard.symbol(e.kind)), dot: .attention,
+                           date: Date(timeIntervalSince1970: e.since), weight: Weight.needsYou, actions: actions)
+    }
+
+    private static func threadItem(_ th: BriefThread, section: BriefPage.Section, context: PaletteContext) -> PaletteItem {
+        let store = context.store
+        let briefs = store.routerBriefs
+        let t = BriefTarget(project: section.id, thread: th.id)
+        let word = BriefThreadLine.word(th.status)
+        let actions = [
+            PaletteAction(id: "open", title: th.source == .local ? "Open in Claude" : "Open on claude.ai", symbol: "arrow.up.forward.app") {
+                briefs.open(t, store: store)
+            },
+            PaletteAction(id: "reply", title: "Reply", symbol: "arrowshape.turn.up.left") {
+                context.routerModel.reply(to: t)
+                context.go(.router)
             },
         ]
-        if let thing { actions.append(linkAction(thing, context)) }
-        actions.append(PaletteAction(id: "archive", title: "Archive", symbol: "archivebox", destructive: true) {
-            model.address(card.id, store: store)
-        })
-
-        return PaletteItem(id: "card:" + card.id, kind: .card, title: store.claudeSessions[card.sessionID]?.title ?? card.title,
-                           subtitle: label + " · " + project, keywords: keywords, icon: .session(card.sessionID),
-                           dot: needsYou ? .attention : running ? .running : nil, date: card.createdAt,
-                           weight: needsYou ? Weight.needsYou : Weight.open, actions: actions)
-    }
-
-    /// 0 for what stops a session on you (a question, a plan, asks, an OK, a wait that is over), 1 for stuck turns and last
-    /// steps.
-    private static func urgency(_ card: RouterCard, ready: Set<String>) -> Int {
-        switch card.kind {
-        case .stuck, .finish, .done: 1
-        case .waiting: ready.contains(card.id) ? 0 : 1
-        default: 0
-        }
-    }
-
-    /// The first line of a card's text with something in it, cut to what a keyword needs.
-    private static func firstLine(_ text: String) -> String? {
-        guard let line = text.split(whereSeparator: \.isNewline).lazy
-            .map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }) else { return nil }
-        return String(line.prefix(200))
+        return PaletteItem(id: "thread:" + t.key, kind: .thread, title: th.title.nonEmpty ?? "Untitled thread",
+                           subtitle: word + " · " + section.name, keywords: [word, section.name], icon: .symbol("bubble.left"),
+                           dot: th.status == .working ? .running : nil, date: Date(timeIntervalSince1970: th.age),
+                           weight: Weight.open, actions: actions)
     }
 }
 
 // MARK: - Sessions
 
 extension PaletteRouterSource {
-    private static func sessionItem(_ session: ClaudeSession, row: AgentRow?, card: RouterCard?, working: Bool, now: Date,
-                                    context: PaletteContext, links: Links) -> PaletteItem {
+    private static func sessionItem(_ session: ClaudeSession, row: AgentRow?, now: Date, context: PaletteContext,
+                                    links: Links) -> PaletteItem {
         let store = context.store
-        let model = context.routerModel
         let id = session.id
         let project = row?.projectName ?? session.folderName
         var keywords = [project]
@@ -130,18 +102,7 @@ extension PaletteRouterSource {
         let thing = links.thing(session: id)
         if let thing { keywords += links.keywords(thing) }
 
-        let open = PaletteAction(id: "open", title: "Open in Claude", symbol: "arrow.up.forward.app") { store.openAgent(id) }
-        // On the Router's page (a card, or a Working row) it is shown there first; elsewhere, opening it in Claude is it.
-        var actions: [PaletteAction] = []
-        if card != nil || working {
-            actions.append(PaletteAction(id: "show", title: "Show in Router", symbol: "rectangle.stack") { showSession(id, context) })
-        }
-        actions.append(open)
-        if session.running {
-            actions.append(PaletteAction(id: "summary", title: "Summary", symbol: "text.alignleft") {
-                model.summarizer.request(id, store: store)
-            })
-        }
+        var actions = [PaletteAction(id: "open", title: "Open in Claude", symbol: "arrow.up.forward.app") { store.openAgent(id) }]
         if let thing { actions.append(linkAction(thing, context)) }
 
         var subtitle = project
@@ -155,40 +116,11 @@ extension PaletteRouterSource {
     }
 }
 
-// MARK: - Showing a session
-
-extension PaletteRouterSource {
-    /// Shows a session in the window as the Router has it: its newest card if the page draws one (picked, as a click does);
-    /// else its Working row, with the page brought to where it is seen; else opens it in Claude. Works out what is drawn
-    /// now, not when the palette opened.
-    static func showSession(_ sessionID: String, _ context: PaletteContext) {
-        let store = context.store
-        let model = context.routerModel
-        let page = store.routerZones
-        let drawn = (page.needs + page.ready + page.notes + page.waiting).filter { $0.sessionID == sessionID }
-        if let card = drawn.max(by: { $0.createdMs < $1.createdMs }) {
-            model.select(card.id, store: store)
-            context.go(.router)
-        } else if page.working.contains(where: { $0.id == sessionID }) {
-            // Seen only on Now, with its state chip on, its section open and no search leaving it out.
-            if model.searching, !model.zones(store).working.contains(where: { $0.id == sessionID }) { model.endSearch() }
-            model.show(.now)
-            model.filter.reveal(.working)
-            model.setFolded(.working, false)
-            context.go(.router)
-            model.reveal(RouterModel.workingID(sessionID))
-        } else {
-            store.openAgent(sessionID)
-        }
-    }
-}
-
 // MARK: - Items and sessions that belong together
 
 extension PaletteRouterSource {
     /// Which inbox thing each session belongs with, from what Fjord knows: a Triage action that handed the thing to the
-    /// session (`ActionLedger`), a waiting card whose watch is the thing's CI. Built once per open; a thing no longer
-    /// fetched links nothing.
+    /// session (`ActionLedger`). Built once per open; a thing no longer fetched links nothing.
     @MainActor
     private struct Links {
         private let store: Store
@@ -202,18 +134,9 @@ extension PaletteRouterSource {
                 latest[session] = run.at
                 bySession[session] = run.thing
             }
-            for card in store.router.cards where card.isOpen {
-                if case .ci(let thing)? = card.triage?.watch?.target { bySession[card.sessionID] = thing }
-            }
         }
 
         func thing(session: String) -> Thing? { bySession[session].flatMap { store.things[$0] } }
-
-        /// The card's own watch first, else the session's link.
-        func thing(_ card: RouterCard) -> Thing? {
-            if case .ci(let id)? = card.triage?.watch?.target, let thing = store.things[id] { return thing }
-            return thing(session: card.sessionID)
-        }
 
         /// What typing the PR's number finds the session by: `owner/repo#482` and `#482`.
         func keywords(_ thing: Thing) -> [String] {

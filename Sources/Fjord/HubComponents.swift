@@ -1055,55 +1055,48 @@ struct UpdateAnnouncer: View {
     }
 }
 
-/// The Router in the bar: its symbol, and on its corner how many cards are open, amber while one needs you (a question, a
-/// plan, a stuck turn, a last step), blue when they are only worth a look, nothing at zero. A click opens the Router in the app window.
-/// The bar's Router cell with the Router's counts, read here (`Store.routerCounts`): only it redraws as they change.
+/// The Router in the bar: its symbol, and on its corner, amber, how many of the brief's entries need you (untold), nothing at
+/// zero. A click opens the Router in the app window. The count is read here: only it redraws as it changes.
 struct CountedRouterCell: View {
     let store: Store
     let action: () -> Void
 
     var body: some View {
-        // The brief's needs-you entries not yet read.
-        RouterCell(needsYou: store.routerBriefs.untoldNeedsYou, notes: 0, action: action)
+        RouterCell(needsYou: store.routerBriefs.untoldNeedsYou, action: action)
     }
 }
 
 struct RouterCell: View {
     let needsYou: Int
-    let notes: Int
     let action: () -> Void
     @FocusState private var focused: Bool
 
     var body: some View {
-        Button(action: action) { RouterCellLabel(needsYou: needsYou, notes: notes) }
+        Button(action: action) { RouterCellLabel(needsYou: needsYou) }
             .buttonStyle(.plain)
             .focused($focused)
             .accessibilityLabel("Router")
-            .accessibilityValue([needsYou > 0 ? "\(needsYou) need you" : nil, notes > 0 ? "\(notes) worth a look" : nil]
-                .compactMap { $0 }.joined(separator: ", ").nonEmpty ?? "Nothing open")
+            .accessibilityValue(needsYou > 0 ? "\(needsYou) need you" : "Nothing open")
             .accessibilityHint("Opens the Router")
-            .motion(.snappy, value: needsYou + notes)
+            .motion(.snappy, value: needsYou)
     }
 }
 
 private struct RouterCellLabel: View {
     let needsYou: Int
-    let notes: Int
     @State private var hover = false
     @Environment(\.onBarGlass) private var glass
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let open = needsYou + notes
         Image(systemName: "arrow.triangle.branch")
             .font(Theme.Typography.glyph(14))
             .foregroundStyle(BarGlass.ink(hover ? .primary : .secondary, glass: glass, opaque: hover ? Theme.text : Theme.secondary))
             .frame(width: 28, height: 28)
             .background(RoundedRectangle(cornerRadius: CDS.Tile.radius, style: .continuous)
                 .fill(hover ? BarGlass.fill(.hover, glass: glass, scheme: scheme, opaque: Theme.Fill.hover) : Theme.Fill.rest))
-            // Awaiting yellow while one needs you, accent blue for those worth a look.
-            .cornerBadge(open, fill: needsYou > 0 ? CDS.Fill.warning : CDS.Fill.accent,
-                         ink: needsYou > 0 ? CDS.Text.onPrimary : Color.white)
+            // Awaiting yellow while one needs you.
+            .cornerBadge(needsYou, fill: CDS.Fill.warning, ink: CDS.Text.onPrimary)
             .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
             .contentShape(Rectangle())
             .onHover { hover = $0 }

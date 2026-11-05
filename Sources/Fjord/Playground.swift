@@ -18,7 +18,7 @@ struct PlaygroundView: View {
     /// Opens the app window on a place; a toast says so when there is none (in shots).
     var openApp: ((AppDestination) -> Void)? = nil
     var reopenApp: (() -> Void)? = nil
-    var pickRouterCard: ((String) -> Void)? = nil
+    var pickBriefEntry: ((BriefTarget) -> Void)? = nil
     /// How the bar and its panels draw: the app's, or a fixed one in shots.
     var chrome: Chrome = .shared
     @State private var behindClicks = 0
@@ -49,7 +49,7 @@ struct PlaygroundView: View {
         }
         .frame(minWidth: minSize.width, minHeight: minSize.height)
         .environment(chrome)
-        .environment(\.pickRouterCard) { card in pickRouterCard?(card) }
+        .environment(\.pickBriefEntry) { entry in pickBriefEntry?(entry) }
         .environment(\.openApp) { [hub] destination in
             if let openApp { openApp(destination) } else { hub.toast = "Open the window on \(destination.token)" }
         }
@@ -180,10 +180,7 @@ final class Playground: NSObject, NSWindowDelegate {
                                       guard let self else { return }
                                       self.openApp(self.app.navigator.selection)
                                   },
-                                  pickRouterCard: { [weak self] card in
-                                      guard let self else { return }
-                                      self.app.routerModel.select(card, store: self.store)
-                                  })
+                                  pickBriefEntry: { [weak self] entry in self?.store.routerBriefs.focus(entry) })
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
                           styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "Fjord playground"
@@ -257,18 +254,12 @@ extension [DockEdge] {
     static let rightAndTop: [DockEdge] = [.right, .top]
 }
 
-/// The Router in a shot (it fills the app window's content): the card picked, and what was done there.
+/// The Router in a shot (it fills the app window's content): the brief, an entry focused, and the composer.
 struct RouterWindowShot {
-    /// The open question picked, its form showing.
-    var picksQuestion = false
-    /// The question's form answered from the window ("Sent", and what was sent).
-    var answered = false
-    /// The composer mid-message: replying to the question, a project tagged, and an @ being typed.
+    /// The first entry of this kind focused, its options showing.
+    var focuses: BriefEntry.Kind?
+    /// The composer mid-message: replying to the local question, a project tagged, and an @ being typed.
     var composing = false
-    /// The open plan picked, its text and buttons showing.
-    var picksPlan = false
-    /// The plan sent back from the window with a note.
-    var planSentBack = false
     static let size = CGSize(width: 1100, height: 720)
 }
 
@@ -302,8 +293,6 @@ struct Shot {
     var routerWindow: RouterWindowShot?
     /// The category editor's page instead of the playground (see `CategoriesDemo`).
     var categories: CategoriesShot?
-    /// The Router cards all in a guest project with a long label ("name · SSH host · silo"), to see it give way.
-    var longProjectLabel = false
 
     /// The same shot on each of these edges, named `<edge>-<state>`.
     static func edges(_ state: String, on edges: [DockEdge] = .all, _ configure: (inout Shot) -> Void = { _ in }) -> [Shot] {
@@ -382,28 +371,21 @@ enum PlaygroundShots {
             + Shot.edges("peek-\(slug)", on: .rightAndTop) { $0.section = .inbox; $0.environment = environment }
     }
 
-    /// The Router: its cell at rest and its peek on every edge; the Router itself, with the question's form picked, under
-    /// Increase Contrast, switched off, the form answered, mid-message, and with the plan picked and sent back.
+    /// The Router: its cell at rest and its peek on every edge; the Router itself, with a question focused, under Increase
+    /// Contrast, switched off, mid-message, and with a plan focused.
     private static let routerShots: [Shot] = {
         var shots = Shot.edges("rest-router") { $0.scenario = .router }
         shots += Shot.edges("peek-router") { $0.scenario = .router; $0.section = .router }
-        shots += Shot.edges("peek-router-long-label", on: .rightAndTop) {
-            $0.scenario = .router; $0.section = .router; $0.longProjectLabel = true
-        }
         let window = { (name: String, configure: (inout Shot) -> Void) -> Shot in
             var shot = Shot(name: "right-router-window\(name)", scenario: .router, routerWindow: RouterWindowShot())
             configure(&shot)
             return shot
         }
-        shots.append(window("") { $0.routerWindow?.picksQuestion = true })
+        shots.append(window("") { $0.routerWindow?.focuses = .question })
         shots.append(window("-contrast") { $0.environment = .contrast })
         shots.append(window("-off") { $0.scenario = .routerOff })
-        shots.append(window("-answered") { $0.routerWindow?.answered = true })
         shots.append(window("-composing") { $0.routerWindow?.composing = true })
-        shots.append(window("-plan") { $0.routerWindow?.picksPlan = true })
-        shots.append(window("-plan-sent-back") { $0.routerWindow?.planSentBack = true })
-        // The Router's own conversation, with the cards of what it changed in Fjord.
-        shots.append(window("-changes") { _ in })
+        shots.append(window("-plan") { $0.routerWindow?.focuses = .plan })
 
         return shots
     }()
@@ -463,11 +445,6 @@ enum PlaygroundShots {
     private static func open(_ shot: Shot) -> NSWindow {
         let store = Store()
         Demo.populate(store, shot.scenario)
-        if shot.longProjectLabel {
-            for i in store.router.cards.indices {
-                store.router.cards[i].folder = "/Users/demo/e2e-proj-with-a-very-long-name \u{00B7} SSH some-long-host-name \u{00B7} silo"
-            }
-        }
         if let router = shot.routerWindow { return openRouterWindow(router, store: store, environment: shot.environment) }
         if let page = shot.categories { return CategoriesDemo.window(page, store: store) }
         let ui = UIState(persists: false, edge: shot.edge)
@@ -496,22 +473,12 @@ enum PlaygroundShots {
     /// The Router, offscreen, as the app window shows it.
     private static func openRouterWindow(_ shot: RouterWindowShot, store: Store, environment: ShotEnvironment) -> NSWindow {
         let model = RouterModel()
-        if shot.picksQuestion { model.selection = store.openRouterCards.first { $0.kind == .question }?.id }
-        if shot.composing, let card = store.openRouterCards.first(where: { $0.kind == .question }) {
-            model.replyTo = card.id
+        let briefs = store.routerBriefs
+        if let kind = shot.focuses { briefs.focus(briefs.page().entries.first { $0.kind == kind }?.target) }
+        if shot.composing, let local = briefs.page().entries.first(where: { $0.source == .local }) {
+            model.replyTo = local.target
             model.pointers = [.project("/Users/me/code/lookout")]
             model.draft = "yes, ask first; and tell \(MentionText.markString) about it"
-        }
-        if shot.answered, let card = store.openRouterCards.first(where: { $0.kind == .question }),
-           let form = store.pendingForm(for: card) {
-            model.sent.insert(form.id)
-            model.delivered[form.id] = [form.questions[0].question: "Ask first"]
-        }
-        if shot.picksPlan || shot.planSentBack { model.selection = store.openRouterCards.first { $0.kind == .plan }?.id }
-        if shot.planSentBack, let card = store.openRouterCards.first(where: { $0.kind == .plan }),
-           let form = store.pendingForm(for: card) {
-            model.sent.insert(form.id)
-            model.planDecided[form.id] = .init(approve: false, feedback: "Keep the macOS backend as the default; Linux behind a flag.")
         }
         let size = RouterWindowShot.size
         let root = RouterCodeView(store: store, model: model, checksClaudeCode: false)

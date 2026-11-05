@@ -35,10 +35,10 @@ Fjord has two tools, the Router and Triage. Each works alone, and the first laun
 
 ### Router: one chat above all your Claude Code sessions
 
-- **See who needs you.** Every session from the Claude desktop app on one page: *Needs you*, *Worth a look*, *Waiting* and *Working*. Each question, plan to approve, finished or stuck session is a card you answer right there; it stays until you do.
+- **See who needs you.** One brief over every project, local and on claude.ai: what needs you first, then what finished, what is working and what is quiet. Each question or plan to approve is an entry you answer right there, by its option or in your own words; mark it read or archive it, with Revert in the history.
 - **Type once.** The Router picks the claude.ai project or thread your message is for and delivers your exact words as your own message. When it isn't sure, it asks *Where should this go?*
 - **Change your mind.** Cancel a message, edit and resend it, or send it somewhere else.
-- **Look away.** Working sessions show what they're doing, live, with a summary one click away.
+- **Look away.** Working threads show what they're doing in the brief; the bar's panel lists what needs you and what works.
 - **Bring things in.** `@` adds a project, a session, a GitHub item or a saved prompt to your message.
 - **It only talks.** It never edits files, runs commands or acts on GitHub.
 

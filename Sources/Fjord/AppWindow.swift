@@ -221,7 +221,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
     /// last (off for shots and tests).
     init(store: Store, routerModel: RouterModel? = nil, remembers: Bool = true, checksClaudeCode: Bool = true) {
         self.store = store
-        self.routerModel = routerModel ?? RouterModel(defaults: remembers ? .standard : nil)
+        self.routerModel = routerModel ?? RouterModel()
         self.checksClaudeCode = checksClaudeCode
         self.remembers = remembers
         navigator = AppNavigator(fallback: store.firstPlace, defaults: remembers ? .standard : nil)
@@ -307,12 +307,12 @@ final class AppWindowController: NSObject, NSWindowDelegate {
     private var pending: Int?
     /// The morph under way, from its request to its overlay gone: its signpost interval, and the motion gate it holds.
     private var span = MorphSpan()
-    /// Whether the window has the keyboard, or is about to (no banner for the Router then: you are looking at the cards).
+    /// Whether the window has the keyboard, or is about to.
     var isKey: Bool { window?.isKeyWindow == true || pending != nil }
 
-    /// Shows the window in front, on `destination` when one is given (else where it was left). `card`: a Router card to pick
+    /// Shows the window in front, on `destination` when one is given (else where it was left). `entry`: a brief entry to focus
     /// (it opens on the Router).
-    func show(_ destination: AppDestination? = nil, card: String? = nil) {
+    func show(_ destination: AppDestination? = nil, entry: BriefTarget? = nil) {
         // Until the opening's first frame is flushed (see `startOpening`), or at once when there is no morph.
         let asked = MorphSignposts.signposter.beginInterval("Open to first flush")
         defer { MorphSignposts.signposter.endInterval("Open to first flush", asked) }
@@ -322,9 +322,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         Self.active = self
         settle()
         var destination = destination
-        if card != nil { destination = .router }
-        if let card {
-            routerModel.select(card, store: store)
+        if entry != nil { destination = .router }
+        if let entry {
+            store.routerBriefs.focus(entry)
             changes &+= 1
         }
         // Another place, while on its way in: the navigator says so (see `init`).
@@ -359,8 +359,8 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         // rather than being asked only once it is.
         AppPolicy.update(windowOpen: true)
         AppPolicy.activate()
-        // A card picked on the way in: the place may be the same, what it shows is not.
-        if card != nil, arriving { contentChanged() }
+        // An entry picked on the way in: the place may be the same, what it shows is not.
+        if entry != nil, arriving { contentChanged() }
         watchKeys()
         watchInput()
         watchFront()
@@ -940,15 +940,15 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         contentChanged()
     }
 
-    /// A Router card picked from the bar (the window opens on the Router next).
-    func pick(card: String) {
-        routerModel.select(card, store: store)
+    /// A brief entry picked from the bar (the window opens on the Router next).
+    func pick(entry: BriefTarget) {
+        store.routerBriefs.focus(entry)
         contentChanged()
     }
 
-    /// A message the Router left asked for from the bar, scrolled to in its conversation (the window opens on the Router next).
+    /// A message asked for from the bar: the Router's history drawer opens (the window opens on the Router next).
     func pick(message: UUID) {
-        routerModel.show(message: message)
+        store.routerBriefs.drawerOpen = true
         contentChanged()
     }
 
@@ -1254,7 +1254,7 @@ struct AppRootView: View {
             .background(CDS.Surface.s1)
             .modifier(AppRootFollow(store: store, navigator: navigator, routerModel: routerModel, hub: hub, search: search))
             .environment(\.openRouter, actions.openRouter)
-            .environment(\.pickRouterCard, actions.pickRouterCard)
+            .environment(\.pickBriefEntry, actions.pickBriefEntry)
             // Chips in the window's own lists: a place, or the Router on the message an action left in its conversation.
             .environment(\.openApp, actions.openApp)
             .environment(\.openRouterMessage, actions.openRouterMessage)
@@ -1277,8 +1277,8 @@ struct AppRootView: View {
 /// The window's actions on itself, for its lists' chips, cards and changes (see `AppRootView.actions`).
 @MainActor
 final class AppRootActions {
-    let openRouter: (String?) -> Void
-    let pickRouterCard: (String) -> Void
+    let openRouter: (BriefTarget?) -> Void
+    let pickBriefEntry: (BriefTarget) -> Void
     let openInRouter: (String) -> Void
     let openApp: (AppDestination) -> Void
     let openRouterMessage: (UUID) -> Void
@@ -1287,15 +1287,15 @@ final class AppRootActions {
 
     init(store: Store, navigator: AppNavigator, routerModel: RouterModel, hub: HubState, palette: PaletteModel) {
         openPalette = { palette.open(pointer: true) }
-        openRouter = { card in
-            if let card { routerModel.select(card, store: store) }
+        openRouter = { entry in
+            if let entry { store.routerBriefs.focus(entry) }
             navigator.go(.router)
         }
-        pickRouterCard = { card in routerModel.select(card, store: store) }
+        pickBriefEntry = { entry in store.routerBriefs.focus(entry) }
         openInRouter = { routerModel.open(thing: $0, in: navigator) }
         openApp = { navigator.go($0.resolved(shown: store.shownCategories.map(\.id), tools: store.tools)) }
-        openRouterMessage = { message in
-            routerModel.show(message: message)
+        openRouterMessage = { _ in
+            store.routerBriefs.drawerOpen = true
             navigator.go(.router)
         }
         openChange = { change in
@@ -1304,13 +1304,6 @@ final class AppRootActions {
             case .group(let id): navigator.go(.categories); hub.openGroup(id)
             case .categories: navigator.go(.categories)
             case .router: navigator.go(.router)
-            case .session(let id):
-                navigator.go(.router)
-                if let card = store.router.cards.first(where: { $0.sessionID == id && $0.isOpen }) {
-                    routerModel.select(card.id, store: store)
-                } else {
-                    routerModel.reveal(RouterModel.workingID(id))
-                }
             case .settings(let section):
                 navigator.go(.settings)
                 hub.settingsScroll = ScrollRequest(id: section, seq: (hub.settingsScroll?.seq ?? 0) + 1)
@@ -1355,7 +1348,6 @@ private struct AppRootFollow: ViewModifier {
             // Another place has its own pick and search; a row asked for there (a banner's click) stays.
             .onChange(of: navigator.selection) { _, place in
                 search.end()
-                routerModel.endSearch()
                 if let pick = hub.selection, let tab = place.tab, store.entries(in: tab).contains(where: { "i:" + $0.id == pick }) { return }
                 hub.selection = nil
                 hub.keyboardSelection = nil

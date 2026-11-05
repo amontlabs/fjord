@@ -1264,7 +1264,7 @@ final class DiskCheckingPerformer: ActionPerformer {
         let run = store.actionLedger.run(category, "t", action, "enter")
         #expect(run?.state == .failed && run?.detail == "its message is no longer in the Router's history")
         // The cap never drops an action's message still under way.
-        var state = RouterState()
+        var state = RouterSaved()
         var waiting = RouterDecision(at: .distantPast, trigger: .you("Fix @o/r#1"))
         waiting.fromAction = SessionOrigin(category: "C", thing: "o/r#1 T", actionID: "a", runID: "r")
         state.log(waiting)

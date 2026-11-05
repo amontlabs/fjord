@@ -11,7 +11,7 @@ import SwiftUI
 /// action runs, as it is then).
 @MainActor
 enum PaletteTriageSource {
-    /// How many Triage items the empty palette's "Needs you" lists, after the Router's cards.
+    /// How many Triage items the empty palette's "Needs you" lists, after the brief's entries.
     static let needsYouLimit = 5
 
     static func make(_ context: PaletteContext) -> PaletteSourceOutput {
@@ -66,7 +66,7 @@ enum PaletteTriageSource {
         }
     }
 
-    /// What was started for each thing: the latest session its category actions began. A waiting Router card that watches a thing's CI links its session to it too. Built once.
+    /// What was started for each thing: the latest session its category actions began. Built once.
     private struct Links {
         var session: [String: String] = [:]
 
@@ -78,9 +78,6 @@ enum PaletteTriageSource {
                     sessionAt[action.thing] = action.at
                     session[action.thing] = id
                 }
-            }
-            for card in store.router.cards where card.kind == .waiting && card.isOpen {
-                if case .ci(let thing)? = card.triage?.watch?.target, session[thing] == nil { session[thing] = card.sessionID }
             }
         }
     }
@@ -181,11 +178,11 @@ enum PaletteTriageSource {
                            date: thing.updatedAt, weight: entry.isDone ? 0.6 : hidden ? 0.7 : 1, actions: actions)
     }
 
-    /// "Open its session": in the Router when it is on (`PaletteRouterSource.showSession`), else in the Claude app.
+    /// "Open its session": in the Claude app.
     private static func sessionAction(_ session: String, context: PaletteContext) -> PaletteAction {
         let store = context.store
         return PaletteAction(id: "session", title: "Open its session", symbol: "bubble.left.and.text.bubble.right") {
-            if store.routerOn { PaletteRouterSource.showSession(session, context) } else { store.openAgent(session) }
+            store.openAgent(session)
         }
     }
 

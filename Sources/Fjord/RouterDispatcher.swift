@@ -3,19 +3,19 @@ import Observation
 
 // What you type (docs/design/router-redesign.md, "How a message flows"). Each message is a run of its own (several can be in
 // flight), one entry of the decision log, its stage shown on its pill over the composer. Where it goes is decided once, among
-// your claude.ai projects only: a reply armed on a card goes to the card's session; a claude.ai project or thread you tagged
+// your claude.ai projects only: a reply armed on a thread goes to that thread (its session on this Mac); a claude.ai project or thread you tagged
 // goes there with no model; anything else is for the project decider (`RouterProjectDecider`: Jev, then Sonnet),
 // whose decision is acted on as it is: a thread gets the words, a project's coordinator picks the thread, a new project is
 // proposed under the composer, the Router answers here, or you're asked where it goes. Nothing is sent when it isn't sure.
 
-/// What a message of yours comes with besides its text: the card you're replying to (its session is the target), the claude.ai
+/// What a message of yours comes with besides its text: the thread you're replying to (it is the target), the claude.ai
 /// place a Retry goes to again or one waved off, and its pills.
 struct RouterContext: Equatable {
-    /// A card id.
-    var replyTo: String?
+    /// The thread it replies to.
+    var replyTo: BriefTarget?
     /// The local projects the message tags (their folders): context for an answer, and the folder a new project may use.
     var projects: [String]
-    /// A claude.ai target (`RouterCourier.Target`) a Retry goes to again: the place you confirmed (`resendContext`).
+    /// A claude.ai target (`RouterCourier.Target`) it goes to: the place you confirmed.
     var target: String?
     /// A target you dismissed (or a wrong send's, on Send elsewhere): the message never goes there without asking you.
     var notTo: String?
@@ -30,11 +30,8 @@ struct RouterContext: Equatable {
     /// (never the Router's own runs: an incoming PR must never change settings), and when where isn't clear it waits for your
     /// pick, with no fallback.
     var action: RouterActionSource?
-    /// Sent from the Router page's composer: its run shows as a pill over the composer, flying to where it went
-    /// (`RouterFlights`), and an ask about it unfolds there rather than in Needs you.
-    var flies = false
 
-    init(replyTo: String? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
+    init(replyTo: BriefTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
         self.replyTo = replyTo
         self.projects = projects
         self.target = target
@@ -43,7 +40,7 @@ struct RouterContext: Equatable {
     }
 }
 
-// MARK: - The ask-back card
+// MARK: - The ask-back
 
 /// "Where should this go?": a message waiting for you to say where. Nothing is sent until you pick.
 struct RouterAskBack: Identifiable, Equatable {
@@ -79,7 +76,8 @@ struct RouterAskBack: Identifiable, Equatable {
 @Observable @MainActor final class RouterDispatcher {
     /// Where a message goes without asking a model, or that it needs the decider.
     enum Plan: Equatable {
-        case reply(session: String, card: String?)
+        /// A thread of this Mac (or a remote computer's Desktop session) you replied to: its session id.
+        case reply(project: String, thread: String, session: String)
         /// A claude.ai project or thread you tagged, or a Retry's confirmed one.
         case send(String)
         /// Wholly for the Router ("@router what needs me?").
@@ -105,13 +103,13 @@ struct RouterAskBack: Identifiable, Equatable {
         /// an action's message, read by Jev only as an inbox action may be.
         var decide: @MainActor (RouterTools, _ message: String, _ unattended: Bool,
                                 _ stage: @escaping @MainActor (RouterProjectDecider.Stage) -> Void) async throws -> RouterProjectDecision
-        /// The message for a card's session with its addressing taken out (`Addressing`), and its signature.
+        /// The message for a thread's session with its addressing taken out (`Addressing`), and its signature.
         var prepare: @MainActor (RouterTools, _ session: String) async throws -> Delivery
         /// The signed send, through the gate: the plugin's ack when it went through the inbox.
         var send: @MainActor (RouterTools, Delivery) async throws -> String?
-        /// A form answered for a card: what was answered.
-        /// Only while the card still holds the form it was judged on (`FormSnapshot`).
-        var answer: @MainActor (RouterTools, _ card: String, _ answers: [String: String], FormSnapshot) async throws -> String
+        /// A form answered for a thread: what was answered.
+        /// Only while the thread still holds the form it was judged on (`FormSnapshot`).
+        var answer: @MainActor (RouterTools, BriefTarget, _ answers: [String: String], FormSnapshot) async throws -> String
         /// A Haiku run for an intent, given the context it starts from.
         var run: @MainActor (RouterTools, RouterRun.Intent, _ input: String) async throws -> RouterRun.Answer
         /// What revises a proposed project from your words (the app's asks Sonnet).
@@ -122,26 +120,20 @@ struct RouterAskBack: Identifiable, Equatable {
         var cancel: @MainActor (RouterDecision.Delivered) async throws -> RouterDecision.Cancelled = { _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
-        /// A plan decided for a card (approved, or sent back with the message): what was done.
-        /// Only while the card still holds the plan it was judged on (`FormSnapshot`).
-        var answerPlan: @MainActor (RouterTools, _ card: String, PendingForm.PlanDecision, FormSnapshot) async throws -> String = { _, _, _, _ in
+        /// A plan decided for a thread (approved, or sent back with the message): what was done.
+        /// Only while the thread still holds the plan it was judged on (`FormSnapshot`).
+        var answerPlan: @MainActor (RouterTools, BriefTarget, PendingForm.PlanDecision, FormSnapshot) async throws -> String = { _, _, _, _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
     }
 
     /// Asks waiting for a pick, oldest first.
     private(set) var askBacks: [RouterAskBack] = []
-    /// The runs of messages sent from the composer (`RouterContext.flies`), oldest first: the composer's pills.
-    private(set) var flying: [UUID] = []
-    /// The context each of `flying` was sent with, until its pill is done with: a Retry sends again as it was sent.
-    @ObservationIgnored private var sentWith: [UUID: RouterContext] = [:]
     /// How far each run under way is, by its entry in the log ("finding where it goes", "sending"…).
     private(set) var progress: [UUID: String] = [:]
     /// What each Haiku run under way has shown so far: the reply as far as it is written, what it thought, the tools it
     /// called. Updated at most ten times a second; gone when the run ends.
     private(set) var live: [UUID: RouterRunLive] = [:]
-    /// The last of a composer run's, kept for its pill (answered, it still lists what the run did) until the pill is done with.
-    private(set) var lastLive: [UUID: RouterRunLive] = [:]
     /// A run of yours is under way: the composer shows Stop. An action's message being placed, or waiting its turn, is the
     /// inbox's, in the background (`actionRuns`): you send meanwhile, and Stop leaves it be.
     var isBusy: Bool { progress.keys.contains { !actionRuns.contains($0) } }
@@ -185,42 +177,11 @@ struct RouterAskBack: Identifiable, Equatable {
         var tools: RouterTools
     }
 
-    /// A composer pill is done with (landed, failed or dismissed): its run is no longer one of `flying`.
-    func forgetFlying(_ id: UUID) {
-        flying.removeAll { $0 == id }
-        lastLive[id] = nil
-        sentWith[id] = nil
-    }
-
-    /// What a composer message is sent again with (a Retry): what it was sent with, so its tags, armed reply and pin are the
-    /// same; a place it went to only by being decided is decided again. Nil: it wasn't sent from the composer, or its pill is
-    /// gone.
-    func resendContext(_ id: UUID) -> RouterContext? {
-        guard var context = sentWith[id] else { return nil }
-        context.flies = true
-        // A place you confirmed (tagged or picked) is where it goes again: no new ask.
-        if context.target == nil, context.replyTo == nil, let entry = store?.router.record(id), entry.decision.confirmed == true,
-           let target = entry.decision.targetID, RouterCourier.Target(target) != nil {
-            context.target = target
-        }
-        return context
-    }
-
-    /// The demo's ask and run under way gone.
-    func clearPreview() {
-        askBacks = []
-        progress = [:]
-        flying = []
-    }
-
     /// A demo or a shot: an ask waiting for you and runs shown under way, with nothing behind them.
-    func preview(ask: RouterAskBack? = nil, progress runs: [UUID: String] = [:], flying messages: [UUID] = [],
-                 live shown: [UUID: RouterRunLive] = [:], kept: [UUID: RouterRunLive] = [:]) {
+    func preview(ask: RouterAskBack? = nil, progress runs: [UUID: String] = [:], live shown: [UUID: RouterRunLive] = [:]) {
         askBacks = ask.map { [$0] } ?? []
         progress = runs
-        flying = messages
         live = shown
-        lastLive = kept
     }
 
     // MARK: Entry points
@@ -242,14 +203,10 @@ struct RouterAskBack: Identifiable, Equatable {
         context.pills = context.pills.filter { $0.lowerBound >= 0 && $0.upperBound <= chars.count && !$0.isEmpty && chars[$0.lowerBound] == "@" }
         context.mentions = Self.mentions(context.mentions, in: text)
         var entry = RouterDecision(trigger: .you(text), decision: .init(intent: "message"),
-                                   links: .init(cards: context.replyTo.map { [$0] } ?? []))
+                                   links: .init(threads: context.replyTo.map { [$0.key] } ?? []))
         entry.mentions = context.mentions.isEmpty ? nil : context.mentions
         entry.fromAction = context.action?.origin
         let id = store.logDecision(entry)
-        if context.flies, context.action == nil {
-            flying.append(id)
-            sentWith[id] = context
-        }
         let job = Job(id: id, text: text, context: context,
                       tools: makeTools(id, text, pills: context.pills, mentions: context.mentions, action: context.action != nil))
         // Actions' messages one at a time, in order (`nextAction`); yours at once.
@@ -327,7 +284,7 @@ struct RouterAskBack: Identifiable, Equatable {
                 $0.outcome = .corrected(from: ask.suggestion.map { describe($0, store: store) } ?? "no clear target", to: chosen)
                 $0.decision.fromID = ask.suggestion
             }
-            // A place you picked, or corrected to, is yours: a Retry keeps it (`resendContext`).
+            // A place you picked, or corrected to, is yours.
             $0.decision.confirmed = true
         }
         let tools = makeTools(id, ask.message, pills: ask.context.pills, mentions: ask.context.mentions,
@@ -449,7 +406,7 @@ struct RouterAskBack: Identifiable, Equatable {
         job.tools.endTurn()
         actionRuns.remove(job.id)
         progress[job.id] = nil
-        if let last = live.removeValue(forKey: job.id), flying.contains(job.id) { lastLive[job.id] = last }
+        live[job.id] = nil
         tasks[job.id] = nil
         runTools[job.id] = nil
         // Waiting for your pick, or on a proposal, is not over; anything else not settled is done.
@@ -472,8 +429,8 @@ struct RouterAskBack: Identifiable, Equatable {
 
     func stage(_ job: Job, _ text: String) { progress[job.id] = text }
 
-    func note(_ job: Job, _ item: RouterDecision.Done, session: String? = nil, card: String? = nil) {
-        store?.updateDecision(job.id) { $0.add(item, session: session, card: card) }
+    func note(_ job: Job, _ item: RouterDecision.Done, session: String? = nil, thread: BriefTarget? = nil) {
+        store?.updateDecision(job.id) { $0.add(item, session: session, thread: thread) }
     }
 
     // MARK: Routing
@@ -481,9 +438,9 @@ struct RouterAskBack: Identifiable, Equatable {
     func execute(_ job: Job) async throws {
         guard let store else { return }
         switch Self.plan(text: job.text, context: job.context, store: store) {
-        case .reply(let session, let card):
+        case .reply(let project, let thread, let session):
             chosen(job)
-            try await reply(job, session: session, card: card)
+            try await reply(job, to: BriefTarget(project: project, thread: thread), session: session)
         case .send(let target):
             // A place you tagged (or a Retry's): yours, as a pick is.
             confirm(job, target)
@@ -495,7 +452,7 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Where it goes is yours (the card you replied to).
+    /// Where it goes is yours (the thread you replied to).
     func chosen(_ job: Job) {
         store?.updateDecision(job.id) { $0.decision.confirmed = true }
     }
@@ -511,14 +468,18 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Where a message goes without a model: the card a reply is armed on, a Retry's confirmed place, or the one claude.ai
+    /// Where a message goes without a model: the thread a reply is armed on (its session on this Mac, else its claude.ai thread), a Retry's confirmed place, or the one claude.ai
     /// place tagged (and nothing else that says where). Words wholly for the Router are its own. Anything else is decided.
     static func plan(text: String, context: RouterContext, store: Store) -> Plan {
         // An action's message is never the Router's own, nor a reply: it goes to a claude.ai place.
         let unattended = context.action != nil
         if !unattended, forRouter(text, pills: context.pills) { return .answer }
-        if !unattended, let id = context.replyTo, let card = store.router.cards.first(where: { $0.id == id }) {
-            return .reply(session: card.sessionID, card: id)
+        if !unattended, let t = context.replyTo {
+            if let session = store.routerBriefs.desktopSession(t, store: store) {
+                return .reply(project: t.project, thread: t.thread, session: session)
+            }
+            let thread = RouterCourier.Target.thread(project: t.project, thread: t.thread)
+            if !t.project.hasPrefix("local:"), RouterCourier.eligible(thread, store: store) { return .send(thread.targetID) }
         }
         if !unattended, let target = context.target, let courier = RouterCourier.Target(target),
            RouterCourier.eligible(courier, store: store) {
@@ -711,9 +672,9 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    // MARK: Replies to cards
+    // MARK: Replies to threads
 
-    /// The answer a question card's form takes from a message that is exactly an option (or several, for a multiple choice):
+    /// The answer a question's form takes from a message that is exactly an option (or several, for a multiple choice):
     /// anything else is text for the session. Only a single question; a plan is never answered this way.
     static func formAnswers(_ form: PendingForm, message: String) -> [String: String]? {
         guard !form.isPlan, form.questions.count == 1, let q = form.questions.first else { return nil }
@@ -739,17 +700,17 @@ struct RouterAskBack: Identifiable, Equatable {
         return [q.question: FormBridge.joined(labels)]
     }
 
-    /// Passes your words to a card's session: the form's answer when you gave one, else your words without their addressing,
-    /// signed, through the gate.
-    private func reply(_ job: Job, session: String, card: String?) async throws {
+    /// Passes your words to a thread's session: the form's answer when you gave one, else your words without their
+    /// addressing, signed, through the gate.
+    private func reply(_ job: Job, to t: BriefTarget, session: String) async throws {
         guard let store else { return }
         // What the session would get, its addressing taken out ("@router no rush"), is what answers its form.
         let said = (try? Addressing.edit(job.text, pills: job.context.pills).text) ?? job.text
-        let held = card.map { id in store.router.cards.filter { $0.id == id } } ?? []
-        if held.count == 1, let c = held.first, let form = store.pendingForm(for: c) {
-            // An answer is given only while the card still holds that very form (it may have moved on while it was read), and
-            // at the write itself once more.
-            let snapshot = FormSnapshot(card: c, form: form, store: store)
+        let title = store.routerBriefs.title(t)
+        if let form = store.heldForm(t) {
+            // An answer is given only while the thread still holds that very form (it may have moved on while it was read),
+            // and at the write itself once more.
+            let snapshot = FormSnapshot(target: t, form: form)
             if form.isPlan {
                 // A plan is approved or sent back, never sent as text it stays pending under.
                 stage(job, "reading your decision")
@@ -757,14 +718,14 @@ struct RouterAskBack: Identifiable, Equatable {
                 try Task.checkCancellation()
                 // Jev couldn't be asked: nothing is read into your words, the plan stays waiting for you.
                 guard let decision = read else {
-                    note(job, .failed("Couldn't read your answer to “\(RouterDecision.clip(c.title, 40))” (Jev didn't answer): its plan is still waiting"),
-                         session: session, card: c.id)
+                    note(job, .failed("Couldn't read your answer to “\(RouterDecision.clip(title, 40))” (Jev didn't answer): its plan is still waiting"),
+                         session: session, thread: t)
                     return
                 }
                 if snapshot.holds(store) {
                     stage(job, decision.approve ? "approving" : "sending it back")
-                    _ = try await effects.answerPlan(job.tools, c.id, decision, snapshot)
-                    note(job, .answered(card: c.title), session: session, card: c.id)
+                    _ = try await effects.answerPlan(job.tools, t, decision, snapshot)
+                    note(job, .answered(thread: title), session: session, thread: t)
                     return
                 }
             } else {
@@ -776,8 +737,8 @@ struct RouterAskBack: Identifiable, Equatable {
                 }
                 if let answers, snapshot.holds(store) {
                     stage(job, "answering")
-                    _ = try await effects.answer(job.tools, c.id, answers, snapshot)
-                    note(job, .answered(card: c.title), session: session, card: c.id)
+                    _ = try await effects.answer(job.tools, t, answers, snapshot)
+                    note(job, .answered(thread: title), session: session, thread: t)
                     return
                 }
             }
@@ -786,18 +747,11 @@ struct RouterAskBack: Identifiable, Equatable {
         stage(job, "preparing")
         let delivery = try await effects.prepare(job.tools, session)
         stage(job, "sending")
-        // The cards open now, as they are: one that changes while this goes isn't addressed by it.
-        let eligible = Dictionary(store.router.cards.filter(\.isOpen).map { ($0.id, store.cardRevisions[$0.id, default: 0]) },
-                                  uniquingKeysWith: { a, _ in a })
         let before = store.claudeSessions[session]
         _ = try await effects.send(job.tools, delivery)
         note(job, .sent(to: delivery.to, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
-             session: session, card: card)
+             session: session, thread: t)
         await delivered(job, delivery, session: session, turns: before?.completedTurns ?? 0, busy: before?.running ?? false)
-        // Its turn cards are cleared by it; Jev reads it for the questions it left, and judges a question or plan it waits on.
-        stage(job, "checking its cards")
-        await store.judgeCards(session: session, message: job.text, eligible: eligible,
-                               asker: job.tools.chooser.map(JevClient.asker(choosing:)), decision: job.id)
     }
 
     /// A send went: what it delivered, for a Cancel (`turns` and `busy`: the session as it was just before).
@@ -878,9 +832,8 @@ struct RouterAskBack: Identifiable, Equatable {
     /// take-back); the place you pick gets the words, and the pick is a correction of where it went, with who decided it (the
     /// engine's intent keeps it too).
     func sendElsewhere(_ id: UUID) {
-        guard let store, store.routerOn, progress[id] == nil, !askBacks.contains(where: { $0.id == id }),
-              let entry = store.router.record(id), case .you(let text) = entry.trigger,
-              let wrong = entry.decision.targetID, RouterCourier.Target(wrong) != nil else { return }
+        guard canSendElsewhere(id), let store, let entry = store.router.record(id), case .you(let text) = entry.trigger,
+              let wrong = entry.decision.targetID else { return }
         var context = RouterContext(notTo: wrong)
         context.mentions = entry.mentions ?? []
         context.action = entry.actionSource
@@ -891,6 +844,14 @@ struct RouterAskBack: Identifiable, Equatable {
         let places = Self.places(store, without: wrong)
         let ask = RouterProjectDecider.ask(places, confidence: 0, decider: .none)
         askBack(job, ask, suggestion: wrong, note: "Sent to \(describe(wrong, store: store)); where else should it go?")
+    }
+
+    /// Whether the message went to a claude.ai place and is settled: it can be asked again elsewhere.
+    func canSendElsewhere(_ id: UUID?) -> Bool {
+        guard let id, let store, store.routerOn, progress[id] == nil, !askBacks.contains(where: { $0.id == id }),
+              let entry = store.router.record(id), case .you = entry.trigger,
+              let wrong = entry.decision.targetID else { return false }
+        return RouterCourier.Target(wrong) != nil
     }
 
     /// Every claude.ai place but `wrong`: its project's latest threads first, then the projects.
@@ -916,13 +877,12 @@ struct RouterAskBack: Identifiable, Equatable {
     /// Whether a target can still be sent to: a claude.ai place the Board has, "New project…", or an intent.
     func eligible(_ target: String, store: Store) -> Bool {
         if let courier = RouterCourier.Target(target) { return RouterCourier.eligible(courier, store: store) }
-        if target.hasPrefix("answer:") { return store.routerShownOpenCards.contains { $0.id == String(target.dropFirst(7)) } }
         return target == RouterAskBack.newProject || RouterRun.Intent(rawValue: target) != nil
     }
 
-    /// The label a target stands for: reply (a card or a claude.ai place), a new project, or the intent.
+    /// The label a target stands for: reply (a claude.ai place), a new project, or the intent.
     static func label(_ target: String) -> String {
-        if target.hasPrefix("answer:") || RouterCourier.Target(target) != nil { return "reply" }
+        if RouterCourier.Target(target) != nil { return "reply" }
         return target
     }
 
@@ -972,12 +932,6 @@ struct RouterAskBack: Identifiable, Equatable {
     /// A target as a button.
     func option(_ target: String, store: Store) -> RouterAskBack.Option? {
         if let courier = RouterCourier.Target(target) { return RouterCourier.option(courier, store: store) }
-        if target.hasPrefix("answer:") {
-            guard let card = store.router.cards.first(where: { $0.id == String(target.dropFirst(7)) }),
-                  RouterPage.shows(card, tasks: store.routerTasks) else { return nil }
-            return .init(target: target, title: card.title,
-                         detail: "\(card.kind.label) · \(store.routerSessionProject(card.sessionID).name)")
-        }
         switch target {
         case RouterAskBack.newProject: return .init(target: target, title: "New project…", detail: "on claude.ai")
         case "change_fjord": return .init(target: target, title: "Answer here", detail: "The Router answers, or changes Fjord")
@@ -993,7 +947,6 @@ struct RouterAskBack: Identifiable, Equatable {
             return courier.thread == nil ? "claude.ai project “\(courier.project)”" : "thread “\(title)” in claude.ai project \(courier.project)"
         }
         guard let option = option(target, store: store) else { return target }
-        if target.hasPrefix("answer:") { return "card “\(option.title)” (\(option.detail))" }
         return option.title.lowercased()
     }
 
@@ -1096,21 +1049,20 @@ extension RouterDispatcher.Effects {
                                                    session: delivery.session, kind: .message,
                                                    decisionID: tools.decision, hostSessionID: delivery.session, body: delivery.body)
             },
-            answer: { [weak dispatcher] tools, card, answers, snapshot in
+            answer: { [weak dispatcher] tools, target, answers, snapshot in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
                 guard snapshot.holds(store) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
-                guard let c = store.router.cards.first(where: { $0.id == card }), c.isOpen,
-                      let form = store.guestPendingForm(for: c)?.form ?? store.pendingForm(for: c), !form.isPlan else {
+                guard let form = store.heldForm(target), !form.isPlan else {
                     throw RouterTools.Failure("That question isn't waiting anymore")
                 }
                 let ticket = tools.ticket()
                 try tools.live(ticket)
                 // The write itself checks the snapshot once more, right before it.
-                switch await store.answerForm(form, answers, card: card, snapshot: snapshot,
+                switch await store.answerForm(form, answers, target: target, snapshot: snapshot,
                                               alsoValid: { (try? tools.live(ticket)) != nil }) {
                 case .success:
-                    return "Answered “\(c.title)”: " + form.questions.map { "\($0.question) = \(answers[$0.question] ?? "")" }.joined(separator: "; ")
+                    return "Answered “\(store.routerBriefs.title(target))”: " + form.questions.map { "\($0.question) = \(answers[$0.question] ?? "")" }.joined(separator: "; ")
                 case .failure(let error): throw error
                 }
             },
@@ -1135,17 +1087,17 @@ extension RouterDispatcher.Effects {
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 return try await store(dispatcher).cancelDelivery(sent)
             },
-            answerPlan: { [weak dispatcher] tools, card, decision, snapshot in
+            answerPlan: { [weak dispatcher] tools, target, decision, snapshot in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
                 try tools.live(tools.ticket())
                 guard snapshot.holds(store) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
-                guard let c = store.router.cards.first(where: { $0.id == card }), c.isOpen,
-                      let form = store.guestPendingForm(for: c)?.form ?? store.pendingForm(for: c), form.isPlan else {
+                guard let form = store.heldForm(target), form.isPlan else {
                     throw RouterTools.Failure("That plan isn't waiting anymore")
                 }
-                switch await store.answerPlan(form, decision, card: card, snapshot: snapshot) {
-                case .success: return decision.approve ? "Approved “\(c.title)”" : "Sent “\(c.title)” back"
+                let title = store.routerBriefs.title(target)
+                switch await store.answerPlan(form, decision, target: target, snapshot: snapshot) {
+                case .success: return decision.approve ? "Approved “\(title)”" : "Sent “\(title)” back"
                 case .failure(let error): throw error
                 }
             }

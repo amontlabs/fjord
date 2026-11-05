@@ -140,7 +140,7 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable {
     /// rund.py's intents (formats.INTENTS and UNCLEAR_V2, with Fjord for Lookout): options Jev may pick that are never taken.
     static let intents: [(String, String)] = [
         ("change_fjord", "The user wants to change Fjord itself: its inbox categories, groups or settings"),
-        ("question", "A question about what is going on now (cards, working sessions, the inbox, settings), not for any session"),
+        ("question", "A question about what is going on now (what needs the user, working sessions, the inbox, settings), not for any session"),
         ("compound", "Several different things in one message, such as changing Fjord and telling a session something"),
         ("unclear", "none of these: small talk, a fragment, or nothing says where it goes"),
     ]

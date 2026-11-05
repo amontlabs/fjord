@@ -27,16 +27,4 @@ struct SelectionMarksTests {
         #expect(hub.isSelected("i:kept") && !hub.isSelected("i:0"))
     }
 
-    @Test func theRoutersCardsAreMarkedByTheirOwnMarks() {
-        let model = RouterModel()
-        var aChanged = false
-        withObservationTracking { _ = model.isMarked("a") } onChange: { aChanged = true }
-        model.selection = "b"
-        #expect(!aChanged)
-        model.highlighted = "a"
-        #expect(aChanged && model.isMarked("a") && model.isMarked("b"))
-        for i in 0...HubState.Mark.kept { _ = model.isMarked("\(i)") }
-        model.selection = nil
-        #expect(model.isMarked("a") && !model.isMarked("b") && !model.isMarked("0"))
-    }
 }

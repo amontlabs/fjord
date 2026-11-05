@@ -64,21 +64,6 @@ import Testing
         #expect(AppPolicy.takingFocusBack(.current) == nil && AppPolicy.takingFocusBack(nil) == nil)
     }
 
-    /// Launch wires the banners' routing before the Router chains its own onto it: a Router banner's click opens its card,
-    /// any other reaches what the store routes, and nothing the launch does after (`startServices`) sets it again.
-    @Test func launchWiresTheBannersBeforeTheRouterChainsOntoThem() {
-        let store = Store()
-        store.persists = false
-        Demo.populate(store, .router)
-        store.wireNotifications()
-        let stores = store.notifier.onOpen
-        #expect(stores != nil)
-        var opened: String?
-        RouterBanners.attach(store: store, windowIsKey: { false }) { opened = $0 }
-        store.notifier.onOpen?(RouterBanners.prefix + "card#1", nil)
-        #expect(opened == "card#1")
-    }
-
     /// Becoming active: an activation Fjord asked for landing with no window shown (a quick close got there first)
     /// gives the keyboard back; one the user made (⌘-Tab, the Dock) while the window closes opens it again rather than being
     /// bounced; anything else stays, a banner's click shortly after a close included.

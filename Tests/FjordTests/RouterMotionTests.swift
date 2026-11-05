@@ -65,7 +65,7 @@ import Testing
 
     @Test func everyAnimationHonoursReduceMotion() throws {
         let files = try Self.swiftFiles()
-        #expect(files.contains("RouterPage.swift") && files.contains("Motion.swift"))
+        #expect(files.contains("RouterBriefView.swift") && files.contains("Motion.swift"))
         var found: [String] = []
         var used = Set<Int>()
         for file in files {

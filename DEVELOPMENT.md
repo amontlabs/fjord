@@ -66,10 +66,11 @@ Mock data with Triage on (and the Router, in its scenarios). Nothing is saved. `
 | Inbox | `inboxMany` `hiddenCategory` `jev` `sections` |
 | CI | `noCI` `allPassing` `manyCI` `ciRunning` |
 | Updates | `updateAvailable` `updateDownloading` `updateReady` |
-| Router | `router` `routerCanvas` `routerOff` |
+| Router | `router` `routerOff` |
 
-`--demo routerCanvas --open` opens the Router directly on its canvas, using the same data as `router`.
-For release window timings, run `scripts/morph-timings.sh --scenario routerCanvas --steps "open,close x6"`.
+`router` is the brief over demo projects (DemoBriefs.swift): entries that need you (a claude.ai question and plan, a local
+form the hook holds), working and finished threads, a decision log and an ask waiting for its pick.
+For release window timings, run `scripts/morph-timings.sh --scenario router --steps "open,close x6"`.
 
 ### Window, bar and screenshots
 
@@ -89,10 +90,12 @@ FJORD_THEME=dark .build/debug/Fjord --window
 ### The Router's routing
 
 Every message goes to a claude.ai project or thread through the delivery engine (`CourierHost`), which starts at launch
-(never in `--demo`, the shots or tests). A reply armed on a card goes to that card's session; a tagged claude.ai project or
+(never in `--demo`, the shots or tests). A reply armed on a brief entry (or one focused) goes to that
+thread: its session on this Mac through the signed plugin, else its claude.ai thread; a tagged claude.ai project or
 thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Jev first at 0.7, else
 Sonnet through `claude -p`), whose stage shows on the message's pill. A project that fits nothing is proposed under the
-composer (`RouterProjectProposal`, revised by Sonnet). Each history entry keeps who decided (`decision.decider`) and a
+composer (`RouterProjectProposal`, revised by Sonnet). The brief's entries are the one model of what needs you (no cards):
+mark read and archive are Fjord changes with a Revert in the history drawer, kept with the Told marks in briefs.db. Each history entry keeps who decided (`decision.decider`) and a
 correction (Send elsewhere, a different pick on an ask, a proposal you changed) as its outcome, for measurement.
 
 ### Live data

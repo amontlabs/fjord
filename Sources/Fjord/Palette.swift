@@ -11,13 +11,13 @@ enum Palette {
     static let shortcut = Shortcut(keyCode: UInt16(kVK_ANSI_K), modifiers: .command)
 }
 
-/// One thing the palette can list: a card, a session, an inbox item, a place, a setting, a command.
+/// One thing the palette can list: a brief's thread, a session, an inbox item, a place, a setting, a command.
 struct PaletteItem: Identifiable {
     enum Kind: String, CaseIterable {
-        case card, session, entry, project, category, computer, snippet, page, setting, command, send
+        case thread, session, entry, project, category, computer, snippet, page, setting, command, send
     }
 
-    /// Stable across opens, prefixed with the kind ("card:<id>", "session:<id>", "entry:<thing id>", "page:<token>",
+    /// Stable across opens, prefixed with the kind ("thread:<project>/<thread>", "session:<id>", "entry:<thing id>", "page:<token>",
     /// "setting:<anchor>.<row>", "command:<name>"): the usage store remembers picks by it.
     let id: String
     let kind: Kind
@@ -32,7 +32,7 @@ struct PaletteItem: Identifiable {
     var dot: PaletteDot?
     /// When it last changed, shown at the row's end as a short time and used to break ties.
     var date: Date?
-    /// How much the source vouches for it among equal matches: 1 is plain; open cards and live sessions above, archived
+    /// How much the source vouches for it among equal matches: 1 is plain; what needs you and live sessions above, archived
     /// and history below. Never lifts a weaker match over a stronger one (DESIGN.md, Ranking).
     var weight: Double = 1
     /// What it does: the first is ↩; all of them are its actions page (Tab, ⌥↩). Never empty.

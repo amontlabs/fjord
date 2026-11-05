@@ -250,3 +250,90 @@ extension View {
     /// made while the window was away included. Without one, the app window's.
     func windowArrival(_ arrival: WindowArrival = .appWindow) -> some View { modifier(WindowArrivalModifier(arrival: arrival)) }
 }
+
+/// `dframe-dot-blink`: 1.2s ease-in-out, opacity .3 → 1 → .3, forever; lit and still with Reduce Motion. Core Animation
+/// blinks it, so SwiftUI draws nothing while it runs (as `FjordLoader` does).
+struct BlinkingDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        BlinkingDotRepresentable(color: NSColor(CDS.Text.muted), still: reduceMotion).frame(width: 6, height: 6)
+    }
+}
+
+private struct BlinkingDotRepresentable: NSViewRepresentable {
+    let color: NSColor
+    let still: Bool
+
+    func makeNSView(context: Context) -> BlinkingDotView { BlinkingDotView() }
+    func updateNSView(_ view: BlinkingDotView, context: Context) {
+        view.color = color
+        view.still = still
+    }
+}
+
+/// The working dot: a circle filling the view, its opacity going .3 → 1 → .3 every 1.2 s on the wall clock's phase, so
+/// every dot on screen blinks together. It stops when out of a window or hidden; still (lit) is opacity 1.
+final class BlinkingDotView: NSView {
+    /// Half of the blink: .3 up to 1 (ease-in-out), then back the same way.
+    static let half: CFTimeInterval = 0.6
+    static let dim: Float = 0.3
+
+    var color: NSColor = .secondaryLabelColor { didSet { if color != oldValue { paint() } } }
+    var still = false { didSet { if still != oldValue { animate() } } }
+    private let dot = CALayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        dot.actions = ["bounds": NSNull(), "position": NSNull(), "cornerRadius": NSNull(),
+                       "backgroundColor": NSNull(), "opacity": NSNull()]
+        layer?.addSublayer(dot)
+        paint()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        // (The dot's actions are off: it moves and resizes with no implicit animation.)
+        let side = min(bounds.width, bounds.height)
+        dot.frame = NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
+        dot.cornerRadius = side / 2
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        paint()
+    }
+
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); animate() }
+    override func viewDidHide() { super.viewDidHide(); animate() }
+    override func viewDidUnhide() { super.viewDidUnhide(); animate() }
+
+    /// The colour as it reads in this view's look (a dynamic colour resolved again when the look changes).
+    private func paint() {
+        var cg = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { cg = color.cgColor }
+        dot.backgroundColor = cg
+    }
+
+    /// The blink, on the wall clock's phase; none when it can't be seen, and lit when still.
+    private func animate() {
+        dot.removeAllAnimations()
+        dot.opacity = 1
+        guard !still, window != nil, !isHiddenOrHasHiddenAncestor else { return }
+        let blink = CABasicAnimation(keyPath: "opacity")
+        blink.fromValue = Self.dim
+        blink.toValue = Float(1)
+        // SwiftUI's `easeInOut` is this same curve (0.42, 0, 0.58, 1).
+        blink.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        blink.duration = Self.half
+        blink.autoreverses = true
+        blink.repeatCount = .infinity
+        blink.timeOffset = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2 * Self.half)
+        blink.isRemovedOnCompletion = false
+        dot.add(blink, forKey: "blink")
+    }
+}

@@ -292,12 +292,12 @@ struct BriefEntryCard: View {
                 Text(Self.hint(entry, picked: picked)).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted).lineLimit(1)
             }
             Spacer(minLength: 0)
-            ClaudeButton("Mark read", variant: .ghost, size: .sm) { briefs.markRead(t) }
+            ClaudeButton("Mark read", variant: .ghost, size: .sm) { briefs.markRead(t, store: store) }
                 .help("It leaves the brief (R); Revert in the history")
             ClaudeButton("Open", variant: .secondary, size: .sm, icon: "arrow.up.right") { briefs.open(t, store: store) }
                 .help(entry.source == .local ? "Open the session in the Claude app (O)" : "Open the thread on claude.ai (O)")
             if !entry.options.isEmpty {
-                ClaudeButton(picked.map { "Send \($0)" } ?? "Send", variant: .primary, size: .sm, shortcut: ["enter"],
+                ClaudeButton(picked.map { "Answer \($0)" } ?? "Answer", variant: .primary, size: .sm, shortcut: ["enter"],
                              busy: briefs.sending[t] != nil) { briefs.confirm(t, store: store) }
                     .disabled(picked == nil)
             }
@@ -335,7 +335,7 @@ struct BriefEntryCard: View {
 
     static func hint(_ e: BriefEntry, picked: Int?) -> String {
         if e.kind == .permission || e.kind == .stranded { return "Open it to go on" }
-        if let picked { return "Return sends option \(picked)" }
+        if let picked { return "Return answers with option \(picked)" }
         if !e.options.isEmpty { return "Pick an option, or type an answer below" }
         return "Type your answer below"
     }
@@ -440,5 +440,41 @@ enum BriefAge {
         if s < 3600 { return "\(Int(s / 60))m ago" }
         if s < 86_400 { return "\(Int(s / 3600))h ago" }
         return "\(Int(s / 86_400))d ago"
+    }
+}
+
+/// When the brief was last written, beside the Router's title as the other pages' subtitles: the newest of the general
+/// brief and the projects' documents, kept current on the minute.
+struct BriefUpdated: View {
+    let store: Store
+
+    var body: some View {
+        let briefs = store.routerBriefs
+        let at = ([briefs.general.at] + briefs.docs.values.map(\.at)).max() ?? 0
+        if at > 0 {
+            TimelineView(.everyMinute) { context in
+                Text("Updated " + agoPhrase(Date(timeIntervalSince1970: at), now: context.date))
+                    .font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+            }
+        }
+    }
+}
+
+/// An act on a brief entry that Revert sets back: what `FjordChange.briefAction` records.
+enum BriefAction: String, Codable, Hashable, Sendable {
+    case archive, read
+
+    var label: String {
+        switch self {
+        case .archive: "Archived"
+        case .read: "Marked read"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .archive: "archivebox"
+        case .read: "checkmark.circle"
+        }
     }
 }

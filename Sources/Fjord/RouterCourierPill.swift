@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The engine's intents as pills over the composer, drawn as the Router's own (`FlightPill`): the mark, your words or what the
+// The engine's intents as pills over the composer: the mark, your words or what the
 // tool does, what it is at, muted. What the engine said about it (a cause, why it waits) is a line under the face, as it
 // said it, and the one thing to do about it is the pill's one button.
 
@@ -13,7 +13,7 @@ struct RouterCourierStack: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(pills.items) { item in
                 RouterCourierPill(pills: pills, item: item)
-                    // Rises out of the composer, as your messages do; goes as a fade.
+                    // Rises out of the composer; goes as a fade.
                     .transition(.asymmetric(insertion: reduce ? .opacity : .offset(y: 26).combined(with: .opacity), removal: .opacity))
             }
         }
@@ -40,14 +40,14 @@ struct RouterCourierPill: View {
                     .textSelection(.enabled)
             }
             .frame(maxWidth: 560, alignment: .leading)
-            .flightPillGround()
+            .pillGround()
             .accessibilityElement(children: .contain)
             .accessibilityLabel(label(face))
         } else {
             // With a button it spreads to the box's width, as one with a note does; else it hugs its words.
             line(face).padding(.horizontal, 12).frame(height: 34)
                 .frame(maxWidth: face.action != nil || face.dismissible ? 560 : nil, alignment: .leading)
-                .flightPillGround()
+                .pillGround()
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(label(face))
         }
@@ -108,4 +108,20 @@ struct RouterCourierPill: View {
             ClaudeButton(action.label, variant: .secondary, size: .sm) { pills.perform(action, on: item.id) }
         }
     }
+}
+
+/// A pill over the composer: an `s3` ground in a 17 pt radius with the hairline ring, Regular glass where the chrome is.
+private struct PillGround: ViewModifier {
+    @Environment(Chrome.self) private var chrome: Chrome?
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 17, style: .continuous)
+        content
+            .modifier(ComposerMaterial(shape: shape, glass: chrome?.mode == .glass, fill: CDS.Surface.s3))
+            .overlay(shape.strokeBorder(CDS.border, lineWidth: 1))
+    }
+}
+
+extension View {
+    func pillGround() -> some View { modifier(PillGround()) }
 }

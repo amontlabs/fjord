@@ -4,17 +4,17 @@ import Observation
 
 // The briefs in the app (docs/design/router-watch-and-briefs.md 3.5, 4 and 5): the engine's documents (or a demo's), the
 // page they make (`BriefPage`, ordered as in 4), what you focus and pick, and the acts: an option answered by Return, your
-// words sent to the thread, Open, mark read, archive. A local thread's form is answered through the hook, as before.
+// words sent to the thread, Open, mark read, archive. A local thread's form is answered through the hook (on this Mac or a
+// remote computer). Mark read and archive are Fjord changes with a Revert (`FjordChange.briefAction`); the marks, and which
+// finished threads were told, are kept in briefs.db.
 
-/// One of your acts on the brief, kept for the drawer and its Revert.
-struct BriefAct: Identifiable, Equatable {
-    enum Kind: Equatable { case answered(String), read, archived }
+/// An answer you gave from the brief, one line in the drawer (an answer can't be taken back).
+struct BriefAnswer: Identifiable, Equatable {
     let id = UUID()
     var target: BriefTarget
     var title: String
-    var kind: Kind
+    var words: String
     var at: Date
-    var reverted = false
 }
 
 /// The brief as the page shows it: the lead, then up to 12 project sections in the order of 4, the rest folded.
@@ -61,10 +61,10 @@ struct BriefPage: Equatable {
         var sections: [(Section, Double)] = []
         var count = 0
         for (id, doc) in docs {
-            let entries = doc.needsYou.filter { !read.contains(entryKey($0)) && !archived.contains($0.thread) }
+            let entries = doc.needsYou.filter { !read.contains(entryKey($0)) && !archived.contains($0.target.key) }
             count += entries.count
             let waiting = Set(entries.map(\.thread))
-            let threads = doc.threads.filter { !archived.contains($0.id) }
+            let threads = doc.threads.filter { !archived.contains(BriefTarget(project: id, thread: $0.id).key) }
             let recent = threads.filter { now - $0.age <= Self.recent && !waiting.contains($0.id) }.sorted { ($0.age, $0.id) > ($1.age, $1.id) }
             let finished = recent.filter { $0.status == .done && !told.contains(finishKey($0)) }
             let group: Group, key: Double
@@ -149,12 +149,14 @@ enum BriefKeys {
     var trouble: [BriefTarget: String] = [:]
     /// Answers handed over, until the entry leaves on proof.
     var sending: [BriefTarget: Int] = [:]
-    var read: Set<String> = []
-    var archived: Set<String> = []
-    /// Finished threads told: their section was shown and then left.
-    var told: Set<String> = []
+    /// Entries marked read (`BriefPage.entryKey`), threads archived (`BriefTarget.key`), and finished threads told (their
+    /// section was shown and then left), as briefs.db keeps them.
+    private(set) var marks = BriefMarks()
+    var read: Set<String> { marks.read }
+    var archived: Set<String> { marks.archived }
+    var told: Set<String> { marks.told }
     @ObservationIgnored var shownFinishes: Set<String> = []
-    private(set) var acts: [BriefAct] = []
+    private(set) var answers: [BriefAnswer] = []
     /// The page's clock (a shot pins it).
     @ObservationIgnored var clock: () -> Date = Date.init
 
@@ -180,6 +182,7 @@ enum BriefKeys {
         let engine = RouterBriefEngine(source: CourierBriefSource(host: host), store: db, model: RouterBriefer.haiku(store: store),
                                        style: { [weak store] in store?.routerStyle ?? RouterStyle.defaultText })
         self.engine = engine
+        marks = engine.marks()
         link.onChange = { [weak self, weak store] change in
             guard let self else { return }
             if self.names != change.names { self.names = change.names }
@@ -196,10 +199,28 @@ enum BriefKeys {
 
     // MARK: Entries
 
-    /// The form Fjord's hook holds for a local entry's session.
+    /// A local thread's Claude Code session id (`ClaudeSession.cliID`).
+    func cli(_ t: BriefTarget, store: Store) -> String? {
+        if let key = sessions[t.thread], let cli = clis[key] { return cli }
+        return store.claudeSessions[t.thread]?.cliID
+    }
+
+    /// A local thread's session in the Claude app (a remote computer's runs there as a Desktop SSH session).
+    func desktopSession(_ t: BriefTarget, store: Store) -> String? {
+        if store.claudeSessions[t.thread] != nil { return t.thread }
+        guard let cli = cli(t, store: store) else { return nil }
+        return store.claudeSessions.first { $0.value.cliID == cli }?.key
+    }
+
+    /// The form Fjord's hook holds on this Mac for a local thread's session.
+    func localForm(_ t: BriefTarget, store: Store) -> PendingForm? {
+        cli(t, store: store).flatMap { store.pendingForms[$0] }
+    }
+
+    /// The form held for a local entry's session, on this Mac or on a remote computer.
     func form(_ e: BriefEntry, store: Store) -> PendingForm? {
-        guard e.source == .local, let key = sessions[e.thread], let cli = clis[key] else { return nil }
-        return store.pendingForms[cli]
+        guard e.source == .local else { return nil }
+        return store.heldForm(e.target)
     }
 
     /// An entry as acted on: a local one with its form (`FormSnapshot`), the form's question and options.
@@ -266,7 +287,7 @@ enum BriefKeys {
         } else {
             return false
         }
-        record(t, .answered(label))
+        record(t, label)
         return true
     }
 
@@ -277,7 +298,7 @@ enum BriefKeys {
         guard !text.isEmpty else { return false }
         if let e = entry(t, store: store), let form = form(e, store: store) {
             answerForm(form, entry: e, option: nil, words: text, store: store)
-            record(t, .answered(text))
+            record(t, text)
             return true
         }
         guard !t.project.hasPrefix("local:") else {
@@ -287,7 +308,7 @@ enum BriefKeys {
         let pills = store.routerCourier
         let shown = names[t.project]
         Task { await pills.send(text, to: .thread(project: t.project, thread: t.thread), shown: shown) }
-        if docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true { record(t, .answered(text)) }
+        if docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true { record(t, text) }
         return true
     }
 
@@ -302,40 +323,37 @@ enum BriefKeys {
         }
     }
 
-    /// A local form: an option picked (a plan's first approves), or your words read by Jev, written for the hook.
+    /// A local form: an option picked (a plan's first approves), or your words read by Jev, written for the hook (on this Mac
+    /// or the remote computer that holds it).
     private func answerForm(_ form: PendingForm, entry e: BriefEntry, option: Int?, words: String?, store: Store) {
         let t = e.target
-        let holds: @MainActor () -> Bool = { [weak store] in store?.pendingForms[form.cliSessionID]?.id == form.id }
+        let snapshot = FormSnapshot(target: t, form: form)
         Task { [weak self, weak store] in
             guard let store else { return }
-            do {
-                if form.isPlan {
-                    var decision: PendingForm.PlanDecision
-                    if let option { decision = .init(approve: option == 1) } else {
-                        guard let read = await RouterDispatcher.planDecision(form, message: words ?? "", ask: store.jevAsker(.routing)) else {
-                            self?.trouble[t] = "Couldn't tell whether that approves the plan: pick Approve or Keep planning."
-                            return
-                        }
-                        decision = read
-                    }
-                    if store.routerIsPretend { _ = try FormBridge.answerData(form, plan: decision); return }
-                    guard let dir = store.formBridge.dir else { throw FormWriter.Cancelled() }
-                    try await FormWriter.write(form, plan: decision, dir: dir, stillValid: holds)
-                } else {
-                    var answers: [String: String]
-                    if let option, let q = form.questions.first, option <= q.options.count {
-                        answers = [q.question: q.options[option - 1].label]
-                    } else if let read = await RouterDispatcher.askFormAnswers(form, message: words ?? "", ask: store.jevAsker(.routing)) {
-                        answers = read
-                    } else {
-                        self?.trouble[t] = "Couldn't read an answer to every question: pick an option, or answer in the Claude app."
+            let result: Result<Void, Error>
+            if form.isPlan {
+                var decision: PendingForm.PlanDecision
+                if let option { decision = .init(approve: option == 1) } else {
+                    guard let read = await RouterDispatcher.planDecision(form, message: words ?? "", ask: store.jevAsker(.routing)) else {
+                        self?.trouble[t] = "Couldn't tell whether that approves the plan: pick Approve or Keep planning."
                         return
                     }
-                    if store.routerIsPretend { _ = try FormBridge.validate(form, answers); return }
-                    guard let dir = store.formBridge.dir else { throw FormWriter.Cancelled() }
-                    try await FormWriter.write(form, answers: answers, dir: dir, stillValid: holds)
+                    decision = read
                 }
-            } catch {
+                result = await store.answerPlan(form, decision, target: t, snapshot: snapshot)
+            } else {
+                var answers: [String: String]
+                if let option, let q = form.questions.first, option <= q.options.count {
+                    answers = [q.question: q.options[option - 1].label]
+                } else if let read = await RouterDispatcher.askFormAnswers(form, message: words ?? "", ask: store.jevAsker(.routing)) {
+                    answers = read
+                } else {
+                    self?.trouble[t] = "Couldn't read an answer to every question: pick an option, or answer in the Claude app."
+                    return
+                }
+                result = await store.answerForm(form, answers, target: t, snapshot: snapshot)
+            }
+            if case .failure(let error) = result {
                 self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't written."
             }
         }
@@ -343,8 +361,7 @@ enum BriefKeys {
 
     /// Opens the thread: a cloud thread in a new active tab, a local one in the Claude app.
     func open(_ t: BriefTarget, store: Store) {
-        if let key = sessions[t.thread], let cli = clis[key],
-           let session = store.claudeSessions.first(where: { $0.value.cliID == cli })?.key {
+        if let session = desktopSession(t, store: store) {
             Claude.open(session)
             return
         }
@@ -359,31 +376,29 @@ enum BriefKeys {
         }
     }
 
-    func markRead(_ t: BriefTarget) {
+    /// Marks the entry read: a change of Fjord's, with its Revert in the drawer.
+    func markRead(_ t: BriefTarget, store: Store) {
         guard let e = docs[t.project]?.needsYou.first(where: { $0.target == t }) else { return }
-        read.insert(BriefPage.entryKey(e))
-        record(t, .read)
+        store.briefAct(.read, on: t, mark: BriefPage.entryKey(e), title: title(t))
         advanceFocus(from: t)
     }
 
-    func archive(_ t: BriefTarget) {
-        archived.insert(t.thread)
-        record(t, .archived)
+    /// Archives the thread: it leaves the brief until Revert.
+    func archive(_ t: BriefTarget, store: Store) {
+        store.briefAct(.archive, on: t, mark: t.key, title: title(t))
         advanceFocus(from: t)
     }
 
-    /// Revert: an act set back (an answer can't be).
-    func revert(_ act: BriefAct) {
-        guard let i = acts.firstIndex(where: { $0.id == act.id }), !acts[i].reverted else { return }
-        switch act.kind {
-        case .read:
-            if let e = docs[act.target.project]?.needsYou.first(where: { $0.target == act.target }) { read.remove(BriefPage.entryKey(e)) }
-        case .archived:
-            archived.remove(act.target.thread)
-        case .answered:
-            return
-        }
-        acts[i].reverted = true
+    /// Sets or clears a mark, and keeps it in briefs.db.
+    func setMark(_ act: BriefAction, _ key: String, on: Bool) {
+        let kind: BriefMarks.Kind = act == .read ? .read : .archived
+        set(kind, key, on: on)
+    }
+
+    private func set(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
+        guard marks[kind].contains(key) != on else { return }
+        if on { marks[kind].insert(key) } else { marks[kind].remove(key) }
+        engine?.setMark(kind, key, on: on)
     }
 
     private func advanceFocus(from t: BriefTarget) {
@@ -391,9 +406,9 @@ enum BriefKeys {
         focus(page().entries.first?.target)
     }
 
-    func record(_ t: BriefTarget, _ kind: BriefAct.Kind) {
-        acts.insert(BriefAct(target: t, title: title(t), kind: kind, at: clock()), at: 0)
-        if acts.count > 100 { acts.removeLast(acts.count - 100) }
+    func record(_ t: BriefTarget, _ words: String) {
+        answers.insert(BriefAnswer(target: t, title: title(t), words: words, at: clock()), at: 0)
+        if answers.count > 100 { answers.removeLast(answers.count - 100) }
     }
 
     /// The page was shown: what it told of finished threads is told once it is left.
@@ -403,7 +418,7 @@ enum BriefKeys {
 
     func left() {
         guard !shownFinishes.isSubset(of: told) else { return }
-        told.formUnion(shownFinishes)
+        for key in shownFinishes { set(.told, key, on: true) }
         shownFinishes = []
     }
 
@@ -425,19 +440,25 @@ enum BriefKeys {
         case .open:
             open(focused!, store: store)
         case .archive:
-            archive(focused!)
+            archive(focused!, store: store)
         case .read:
-            markRead(focused!)
+            markRead(focused!, store: store)
         }
         return true
     }
 }
 
-extension FormSnapshot {
-    /// The form an entry's answer was read against: a judgment is applied only while the hook still holds that very form.
-    init(target: BriefTarget, form: PendingForm) {
-        card = "\(target.project)/\(target.thread)"
-        formID = form.id
-        toolUseID = form.toolUseID
+extension Store {
+    /// An act on a brief entry, done at once and logged as a change of Fjord's that Revert sets back.
+    func briefAct(_ act: BriefAction, on t: BriefTarget, mark: String, title: String, now: Date = Date()) {
+        guard !routerBriefs.marks[act == .read ? .read : .archived].contains(mark) else { return }
+        routerBriefs.setMark(act, mark, on: true)
+        let change = FjordChange(date: now, title: "\(act.label) \(title)",
+                                 patch: .briefAction(project: t.project, thread: t.thread, act: act, mark: mark))
+        var state = router
+        state.changes.append(change)
+        state.pruneChanges()
+        router = state
+        logChange(change)
     }
 }

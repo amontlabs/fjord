@@ -5,7 +5,7 @@ import Foundation
 
 struct RouterDecision: Identifiable, Equatable {
     enum Trigger: Codable, Equatable {
-        /// Your message, or something you did on a card (what it was, in words).
+        /// Your message, or something you did on the brief (what it was, in words).
         case you(String)
         /// An inbox action that started a session itself, as it did before its message went through the Router: its category
         /// and thing (names), the action, and its run. Only in entries from before; an action's message now is `.you`, with
@@ -26,7 +26,7 @@ struct RouterDecision: Identifiable, Equatable {
         /// You went with the target: Jev's pick shown while you typed (sent as it was, or clicked), his suggestion picked on
         /// an ask, or a place you tagged. An example for the next routings, as corrections are.
         var confirmed: Bool?
-        /// The target itself (`session:<id>`, `answer:<card>`, `new:<folder>`, an intent), and on a correction the one Jev
+        /// The target itself (`session:<id>`, `answer:<project>/<thread>`, `new:<folder>`, an intent), and on a correction the one Jev
         /// suggested: what examples name it by, as titles can be shared or change. Nil in entries from before.
         var targetID: String?
         var fromID: String?
@@ -49,15 +49,13 @@ struct RouterDecision: Identifiable, Equatable {
             if case .sent = self { true } else { false }
         }
 
-        /// A message sent to a claude.ai place or a card's session, with what you wrote when it was rephrased.
+        /// A message sent to a claude.ai place or a thread's session, with what you wrote when it was rephrased.
         case sent(to: String, text: String, original: String?)
         case changed(UUID)
-        /// A card answered or marked handled (its id).
-        case answered(card: String)
+        /// A thread answered (its title).
+        case answered(thread: String)
         /// The Router asked you which of these.
         case asked([String])
-        /// A card your message resolved, by Jev's judgement (its title, and what you wrote).
-        case resolved(card: String, message: String)
         case failed(String)
         /// A message sent here taken back (`RouterDispatcher.cancel`): how far it had gone.
         case cancelled(Cancelled)
@@ -134,17 +132,18 @@ struct RouterDecision: Identifiable, Equatable {
 
     struct Links: Codable, Equatable {
         var sessions: [String] = []
-        var cards: [String] = []
+        /// The threads it touched (`BriefTarget.key`).
+        var threads: [String] = []
         var changes: [UUID] = []
-        init(sessions: [String] = [], cards: [String] = [], changes: [UUID] = []) {
+        init(sessions: [String] = [], threads: [String] = [], changes: [UUID] = []) {
             self.sessions = sessions
-            self.cards = cards
+            self.threads = threads
             self.changes = changes
         }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             sessions = try c.decodeIfPresent([String].self, forKey: .sessions) ?? []
-            cards = try c.decodeIfPresent([String].self, forKey: .cards) ?? []
+            threads = try c.decodeIfPresent([String].self, forKey: .threads) ?? []
             changes = try c.decodeIfPresent([UUID].self, forKey: .changes) ?? []
         }
     }
@@ -158,7 +157,7 @@ struct RouterDecision: Identifiable, Equatable {
     var links = Links()
     var reply: String?
     var note: String?
-    /// The last message it sent to a card's session, for a Cancel.
+    /// The last message it sent to a session, for a Cancel.
     var delivered: Delivered?
 
     /// The pills of your message (`.you`), drawn where their "@name" is; nil for anything else and in entries from before.
@@ -186,11 +185,11 @@ struct RouterDecision: Identifiable, Equatable {
     static let maxKept = 1000
 
     /// Adds `done` and the links it implies.
-    mutating func add(_ item: Done, session: String? = nil, card: String? = nil) {
+    mutating func add(_ item: Done, session: String? = nil, thread: BriefTarget? = nil) {
         done.append(item)
         if case .changed(let id) = item, !links.changes.contains(id) { links.changes.append(id) }
         if let session, !links.sessions.contains(session) { links.sessions.append(session) }
-        if let card, !links.cards.contains(card) { links.cards.append(card) }
+        if let key = thread?.key, !links.threads.contains(key) { links.threads.append(key) }
     }
 
     /// Its last send was stopped by a cancel: one that sent its words again since (to another place) isn't cancelled.
@@ -220,9 +219,8 @@ struct RouterDecision: Identifiable, Equatable {
             switch item {
             case .sent(let to, let text, _): "sent to \(to): \(Self.clip(text, 80))"
             case .changed(let id): "changed Fjord (\(id.uuidString.prefix(8)))"
-            case .answered(let card): "answered \(card)"
+            case .answered(let thread): "answered \(thread)"
             case .asked(let options): "asked which: " + options.joined(separator: " / ")
-            case .resolved(let card, let message): "closed \(card) by \(forModel ? "the user\'s" : "your") message: \(Self.clip(message, 80))"
             case .failed(let reason): "failed: \(reason)"
             case .cancelled(let how): how.words
             }
@@ -244,7 +242,6 @@ struct RouterDecision: Identifiable, Equatable {
         case .changed: return "changed Fjord" + more
         case .answered: return "answered" + more
         case .asked: return "asked you" + more
-        case .resolved: return "addressed a card" + more
         case .failed: return "failed" + more
         case .cancelled: return "cancelled" + more
         }
@@ -261,7 +258,6 @@ struct RouterDecision: Identifiable, Equatable {
         case .changed: return "slider.horizontal.3"
         case .answered: return "checkmark"
         case .asked: return "questionmark.bubble"
-        case .resolved: return "checkmark"
         case .failed: return "exclamationmark.triangle"
         case .cancelled: return "xmark.circle"
         case nil: return "text.bubble"
@@ -357,7 +353,7 @@ extension RouterDecision: Codable {
         var merged = try c.decodeIfPresent(Links.self, forKey: .links) ?? Links()
         for part in parts ?? [] {
             merged.sessions += part.links.sessions.filter { !merged.sessions.contains($0) }
-            merged.cards += part.links.cards.filter { !merged.cards.contains($0) }
+            merged.threads += part.links.threads.filter { !merged.threads.contains($0) }
             merged.changes += part.links.changes.filter { !merged.changes.contains($0) }
         }
         links = merged
@@ -427,7 +423,7 @@ extension RouterDecision: Codable {
 
 // MARK: - Store
 
-extension RouterState {
+extension RouterSaved {
     /// Adds an entry, newest last; the oldest go past the cap, but never one linking a change still waiting for your Apply
     /// or Discard (its only place on the page), nor an action's message still under way (its run follows it), nor one whose ask-back card is still up (`inUse`, by the entry's id or a part's).
     mutating func log(_ decision: RouterDecision, inUse: Set<UUID> = []) {
@@ -444,7 +440,7 @@ extension RouterState {
     }
 }
 
-extension RouterState {
+extension RouterSaved {
     /// Runs and asks still under way when the app quit (quitting can't wait for them to settle) can't go on in this launch:
     /// they say they were interrupted, rather than "working…" for ever.
     mutating func settleInterrupted() {
@@ -457,11 +453,11 @@ extension RouterState {
 
     func record(_ id: UUID) -> RouterDecision? { decisions.first { $0.id == id } }
 
-    /// A change waiting for your Apply or Discard, or one an older file kept in its chat, is reached only through an
-    /// entry linking it: one whose entry was lost (unreadable) or never made gets an entry of Fjord's own, at its date.
-    mutating func linkUnlinkedChanges(legacy: Set<UUID>) {
+    /// A change waiting for your Apply or Discard is reached only through an entry linking it: one whose entry was lost
+    /// (unreadable) or never made gets an entry of Fjord's own, at its date.
+    mutating func linkUnlinkedChanges() {
         let linked = Set(decisions.flatMap(\.links.changes))
-        for change in changes where !linked.contains(change.id) && (change.isPending || legacy.contains(change.id)) {
+        for change in changes where !linked.contains(change.id) && change.isPending {
             var entry = RouterDecision(at: change.date, trigger: .system, outcome: change.isReverted ? .reverted : .done)
             entry.add(.changed(change.id))
             decisions.insert(entry, at: decisions.firstIndex { $0.at > change.date } ?? decisions.endIndex)
@@ -532,12 +528,11 @@ extension Store {
         }
     }
 
-    /// Something you did on a card from the page (answered its form, approved its plan, marked it handled).
-    func logCardAction(_ text: String, card: String, done: RouterDecision.Done? = nil, now: Date = Date()) {
-        let session = router.cards.first { $0.id == card }?.sessionID
-        var entry = RouterDecision(at: now, trigger: .you(text), decision: .init(target: router.cards.first { $0.id == card }?.title,
-                                                                                  intent: "answer"), outcome: .done)
-        entry.add(done ?? .answered(card: router.cards.first { $0.id == card }?.title ?? card), session: session, card: card)
+    /// Something you did on a brief entry (answered its form, approved its plan).
+    func logEntryAction(_ text: String, target: BriefTarget, now: Date = Date()) {
+        let title = routerBriefs.title(target)
+        var entry = RouterDecision(at: now, trigger: .you(text), decision: .init(target: title, intent: "answer"), outcome: .done)
+        entry.add(.answered(thread: title), thread: target)
         logDecision(entry)
     }
 }

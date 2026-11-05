@@ -54,6 +54,34 @@ protocol BriefStore: AnyObject {
     func append(_ version: BriefVersion)
     func cursor(_ project: String) -> Int
     func setCursor(_ project: String, _ cursor: Int)
+    /// Your marks on the brief, by kind (`BriefMarks.Kind`): kept across launches.
+    func marks() -> BriefMarks
+    func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool)
+}
+
+/// What you marked on the brief: entries read, threads archived, finished threads told.
+struct BriefMarks: Equatable, Sendable {
+    enum Kind: String, CaseIterable, Sendable { case read, archived, told }
+    var read: Set<String> = []
+    var archived: Set<String> = []
+    var told: Set<String> = []
+
+    subscript(_ kind: Kind) -> Set<String> {
+        get {
+            switch kind {
+            case .read: read
+            case .archived: archived
+            case .told: told
+            }
+        }
+        set {
+            switch kind {
+            case .read: read = newValue
+            case .archived: archived = newValue
+            case .told: told = newValue
+            }
+        }
+    }
 }
 
 final class MemoryBriefStore: BriefStore {
@@ -64,10 +92,15 @@ final class MemoryBriefStore: BriefStore {
     func append(_ version: BriefVersion) { rows[version.project, default: []].append(version) }
     func cursor(_ project: String) -> Int { cursors[project] ?? 0 }
     func setCursor(_ project: String, _ cursor: Int) { cursors[project] = cursor }
+    private var kept = BriefMarks()
+    func marks() -> BriefMarks { kept }
+    func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
+        if on { kept[kind].insert(key) } else { kept[kind].remove(key) }
+    }
 }
 
-/// `briefs` in router.db: project, version, at, fields, diff, items, cursor; plus the project's cursor on its own, since a
-/// landed answer that changed nothing advances it without making a version.
+/// `briefs` in briefs.db: project, version, at, fields, diff, items, cursor; the project's cursor on its own, since a landed
+/// answer that changed nothing advances it without making a version; and your marks (`brief_marks`: kind, key).
 final class SQLiteBriefStore: BriefStore {
     private var db: OpaquePointer?
 
@@ -80,6 +113,7 @@ final class SQLiteBriefStore: BriefStore {
         create table if not exists briefs (project text not null, version integer not null, at real not null, fields text not null,
             diff text not null, items text not null, cursor integer not null, primary key (project, version));
         create table if not exists brief_cursors (project text primary key, cursor integer not null);
+        create table if not exists brief_marks (kind text not null, key text not null, primary key (kind, key));
         """)
     }
 
@@ -135,6 +169,19 @@ final class SQLiteBriefStore: BriefStore {
 
     func setCursor(_ project: String, _ cursor: Int) {
         exec("insert or replace into brief_cursors (project, cursor) values (?, \(cursor))", [project])
+    }
+
+    func marks() -> BriefMarks {
+        var out = BriefMarks()
+        for (kind, key) in select("select kind, key from brief_marks", [], { (Self.text($0, 0), Self.text($0, 1)) }) {
+            if let k = BriefMarks.Kind(rawValue: kind) { out[k].insert(key) }
+        }
+        return out
+    }
+
+    func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
+        exec(on ? "insert or ignore into brief_marks (kind, key) values (?, ?)" : "delete from brief_marks where kind = ? and key = ?",
+             [kind.rawValue, key])
     }
 }
 
@@ -244,6 +291,10 @@ struct GeneralBrief: Equatable, Sendable {
 
     /// A project's stored versions, oldest first (the drawer's prose history).
     func versions(_ project: String) -> [BriefVersion] { store.versions(project) }
+
+    /// Your marks as stored, and one set or cleared.
+    func marks() -> BriefMarks { store.marks() }
+    func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) { store.setMark(kind, key, on: on) }
 
     /// Waits for every spawned piece of work (tests, and a quit that drains).
     func idle() async {

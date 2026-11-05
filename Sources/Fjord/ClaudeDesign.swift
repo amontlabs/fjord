@@ -365,16 +365,6 @@ extension CDS {
     enum Dot {
         static let size: CGFloat = 6
     }
-
-    /// The compact SegmentedControl (forms-buttons.md §5.4, global §2.2): track white 5% with 1pt padding, the thumb white
-    /// 10% with a 1pt white-10% ring, segments 13pt, muted until picked (primary).
-    enum Segmented {
-        static let height: CGFloat = 24
-        static let radius: CGFloat = 6
-        static let track = alpha(0.05)
-        static let thumb = alpha(0.10)
-        static let padX: CGFloat = 8
-    }
 }
 
 extension CDS {

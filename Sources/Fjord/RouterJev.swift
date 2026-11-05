@@ -27,7 +27,7 @@ extension RouterModel {
 
     /// The same, for the draft as it will be sent, worked out once by the caller (`sentDraft` writes every pill's name).
     func context(_ store: Store, sent: (text: String, mentions: [RouterMention])) -> RouterContext {
-        let reply = replyTo.flatMap { id in store.router.cards.contains { $0.id == id } ? id : nil }
+        let reply = replyTo.flatMap { t in store.routerBriefs.docs[t.project]?.thread(t.thread) != nil ? t : nil }
         var context = RouterContext(replyTo: reply)
         context.tag(sent.mentions)
         return context

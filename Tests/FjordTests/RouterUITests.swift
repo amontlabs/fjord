@@ -35,179 +35,6 @@ import UserNotifications
 
     // MARK: Window keys
 
-    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func arrowsWalkTheCardsAndSpaceArchivesNothing() throws {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let open = model.cards(store).filter(\.isOpen).map(\.id)
-        try #require(open.count == 3)
-        #expect(keys.key(key(kVK_DownArrow), responder: nil))
-        #expect(model.selection == open[0])
-        #expect(keys.key(key(kVK_DownArrow), responder: nil))
-        #expect(model.selection == open[1])
-        // Space is no key of the Router's: the picked card stays open and picked, and no reply starts with a blank.
-        let request = model.focusRequest
-        #expect(!keys.key(key(kVK_Space, " "), responder: nil))
-        #expect(store.router.cards.first { $0.id == open[1] }?.isOpen == true)
-        #expect(model.selection == open[1] && model.pendingKeys.isEmpty && model.focusRequest == request)
-        // Archived, the card goes up to the history: the next open one is picked, and replied to (nothing was written).
-        model.address(open[1], store: store)
-        #expect(store.router.cards.first { $0.id == open[1] }?.addressedBy == .you)
-        #expect(model.selection == open[2] && model.replyTo == open[2])
-        // Words written to the picked card stay its own when it is archived: the pick moves on, the reply doesn't, and the
-        // words go to its session, archived or not.
-        model.draft = "on it"
-        model.address(open[2], store: store)
-        #expect(model.selection == open[0] && model.replyTo == open[2])
-        model.send(store: store)
-        #expect(store.router.decisions.last?.links.cards == [open[2]])
-        model.select(open[0], store: store)
-        model.draft = "on it too"
-        model.address(open[0], store: store)
-        #expect(model.selection == nil && model.replyTo == open[0])
-        model.draft = ""
-        // The pick is replied to: Esc takes that off; then, with nothing left to step out of, it goes on (the window stays).
-        #expect(keys.key(key(kVK_Escape), responder: nil) && model.replyTo == nil)
-        #expect(!keys.key(key(kVK_Escape), responder: nil))
-    }
-
-    @Test(.disabled("The Router window shows the brief (RouterBriefView); the old Now, history and canvas views go in a later step")) func theArrowsWalkTheCardsInTheOrderThePageShowsThem() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        reopenTransfer(store)
-        // Two addressed cards in the history, the one addressed now below the older one.
-        store.setCardAddressed(store.openRouterCards.first { $0.kind == .stuck }!.id, true)
-        // The history's addressed cards as it draws them (oldest first), then Now top to bottom: what needs you, then the
-        // finished turns worth a look. Not the newest first, which walks the history upwards.
-        let (needs, done, earlier) = model.sections(store)
-        let listed = (earlier + needs + done).map(\.id)
-        #expect(!needs.isEmpty && !done.isEmpty && earlier.count > 1)
-        #expect(earlier.map(\.id) == store.routerHistory.compactMap { if case .card(let c) = $0 { c.id } else { nil } })
-        #expect(earlier.map(\.addressedAt!) == earlier.map(\.addressedAt!).sorted())
-        #expect(model.cards(store).map(\.id) == listed)
-        // None picked, ↓ starts at the top of Now (Needs you) and goes down it.
-        var walked: [String] = []
-        for _ in needs + done {
-            #expect(keys.key(key(kVK_DownArrow), responder: nil))
-            walked += model.selection.map { [$0] } ?? []
-            #expect(model.pane == .now)
-        }
-        #expect(walked == (needs + done).map(\.id))
-        // At the bottom it stays there; ↑ walks back up the same way, into the history up to its oldest card.
-        #expect(keys.key(key(kVK_DownArrow), responder: nil) && model.selection == listed.last)
-        walked = []
-        for _ in 1..<listed.count {
-            #expect(keys.key(key(kVK_UpArrow), responder: nil))
-            walked += model.selection.map { [$0] } ?? []
-        }
-        #expect(walked == listed.dropLast().reversed())
-        #expect(keys.key(key(kVK_UpArrow), responder: nil) && model.selection == listed.first)
-        // Up past the top of Now, the keys went on into the history, which shows; back down, Now shows again.
-        #expect(model.pane == .history)
-        for _ in earlier { model.move(down: true, store: store) }
-        #expect(model.selection == needs.first?.id && model.pane == .now)
-    }
-
-    /// The demo's finished turn whose session is idle, open again: its only open one is from a session still running things.
-    private func reopenTransfer(_ store: Store) {
-        guard let i = store.router.cards.firstIndex(where: { $0.sessionID == "local_demo-transfer" && $0.kind == .done }) else { return }
-        store.router.cards[i].addressedAt = nil
-        store.router.cards[i].addressedBy = nil
-    }
-
-    @Test func aFinishedTurnNotShownWhileItsSessionRunsThingsIsNotWalkedPickedNorCounted() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let hidden = store.openRouterCards.first { $0.sessionID == "local_demo-ci" && $0.kind == .done }!
-        #expect(!(store.claudeTasks["local_demo-ci"] ?? []).isEmpty)
-        #expect(!store.routerPage.notes.contains { $0.id == hidden.id })
-        #expect(!model.cards(store).contains { $0.id == hidden.id })
-        // The arrows never land on it, a pick on it moves off, and Return can't reach it.
-        for _ in 0...model.cards(store).count {
-            #expect(keys.key(key(kVK_DownArrow), responder: nil))
-            #expect(model.selection != hidden.id)
-        }
-        model.selection = hidden.id
-        model.reconcile(store: store)
-        #expect(model.selection != hidden.id)
-        #expect(keys.key(key(kVK_Return, "\r"), responder: nil) && model.replyTo != hidden.id)
-        // Away, it isn't said to have finished, nor counted.
-        #expect(AwayStrip(since: Date(), cards: [hidden.id]).line(store.routerShownCards) == nil)
-        #expect(store.routerCounts.notes == 0)
-        // Once what it ran ends, it is everywhere.
-        store.claudeTasks["local_demo-ci"] = nil
-        #expect(store.routerPage.notes.contains { $0.id == hidden.id })
-        #expect(model.cards(store).contains { $0.id == hidden.id })
-        #expect(AwayStrip(since: Date(), cards: [hidden.id]).line(store.routerShownCards) == "1 finished")
-        #expect(store.routerCounts.notes == 1)
-    }
-
-    @Test func mutingAProjectWhoseFinishedSessionStillRunsThingsKeepsItsCardHiddenOnThePageAsForTheKeys() {
-        let store = demo()
-        let model = RouterModel()
-        let hidden = store.openRouterCards.first { $0.sessionID == "local_demo-ci" && $0.kind == .done }!
-        store.setFolderMuted(store.claudeSessions["local_demo-ci"]!.folderKey, true)
-        // Its Working row goes with the mute; what it runs doesn't, and the page goes by that as the keys and counts do.
-        #expect(!store.routerWorkingRows.contains { $0.id == "local_demo-ci" })
-        #expect(!store.routerPage.notes.contains { $0.id == hidden.id })
-        #expect(!store.routerZones.notes.contains { $0.id == hidden.id })
-        #expect(!model.cards(store).contains { $0.id == hidden.id })
-        #expect(store.routerCounts.notes == 0)
-        store.claudeTasks["local_demo-ci"] = nil
-        #expect(store.routerPage.notes.contains { $0.id == hidden.id })
-        #expect(model.cards(store).contains { $0.id == hidden.id })
-    }
-
-
-    @Test func reopenOpensAgainACardYouArchivedNotOneWhoseSessionIsGone() {
-        let store = demo()
-        let model = RouterModel()
-        let ids = store.routerShownOpenCards.filter { $0.kind != .waiting }.prefix(2).map(\.id)
-        #expect(ids.count == 2)
-        let i = store.router.cards.firstIndex { $0.id == ids[0] }!
-        store.router.cards[i].addressedAt = now
-        store.router.cards[i].addressedBy = .gone
-        #expect(!store.router.cards[i].canReopen)
-        // Reopen on the archived session's card in the history: it stays addressed, with its reason.
-        model.reopen(ids[0], store: store)
-        #expect(store.router.cards[i].addressedBy == .gone && !store.router.cards[i].isOpen)
-        // A card you archived opens again.
-        store.setCardAddressed(ids[1], true)
-        #expect(store.router.cards.first { $0.id == ids[1] }!.canReopen)
-        model.reopen(ids[1], store: store)
-        #expect(store.router.cards.first { $0.id == ids[1] }!.isOpen)
-    }
-
-    @Test func aHandledCardIsNotOpenedAgainOnceItsSessionIsArchivedOrDeleted() {
-        let store = demo()
-        let model = RouterModel()
-        let ids = store.routerShownOpenCards.filter { $0.kind != .waiting }.prefix(2).map(\.id)
-        #expect(ids.count == 2)
-        let cards = ids.map { id in store.router.cards.first { $0.id == id }! }
-        #expect(cards[0].sessionID != cards[1].sessionID)
-        for id in ids { store.setCardAddressed(id, true) }
-        let handled = ids.map { id in store.router.cards.first { $0.id == id }! }
-        #expect(handled.allSatisfy { store.routerCanReopen($0) })
-        // Handled, then its session archived (the first) or deleted (the second): only open cards are marked gone.
-        store.claudeSessions[cards[0].sessionID]?.isArchived = true
-        store.claudeSessions[cards[1].sessionID] = nil
-        for card in handled { #expect(!store.routerCanReopen(card)) }
-        for id in ids { model.reopen(id, store: store) }
-        #expect(ids.allSatisfy { id in store.router.cards.first { $0.id == id }?.isOpen == false })
-        // A read failing since: the sessions last read still say they are gone.
-        for link in [ClaudeLink.unreadable, .missing] {
-            store.claudeLink = link
-            for card in handled { #expect(!store.routerCanReopen(card)) }
-            for id in ids { model.reopen(id, store: store) }
-            #expect(ids.allSatisfy { id in store.router.cards.first { $0.id == id }?.isOpen == false })
-        }
-        // Before the sessions are read, nothing is known gone.
-        store.claudeLink = .off
-        store.claudeSessionsRead = false
-        #expect(store.routerCanReopen(handled[1]))
-    }
 
 
     @Test func returnInTheComposerSendsAndShiftReturnDoesNot() {
@@ -234,28 +61,6 @@ import UserNotifications
         let request = model.focusRequest
         #expect(keys.key(key(kVK_ANSI_H, "h"), responder: nil))
         #expect(model.focusRequest != request && model.pendingKeys.count == 1)
-    }
-
-    @Test func spaceNeitherArchivesNorOpensAgain() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let ids = store.routerShownOpenCards.filter { $0.kind != .waiting }.prefix(2).map(\.id)
-        #expect(ids.count == 2)
-        store.setCardAddressed(ids[1], true)
-        // Space, pressed twice, on an open card and on one you archived: the cards and the pick stay as they were, and the
-        // key goes on to whatever has the keyboard.
-        for id in ids {
-            model.select(id, store: store)
-            let before = store.router.cards
-            for _ in 0..<2 { #expect(!keys.key(key(kVK_Space, " "), responder: nil)) }
-            #expect(store.router.cards == before && model.selection == id)
-        }
-        // Nothing picked: the same.
-        model.selection = nil
-        let before = store.router.cards
-        #expect(!keys.key(key(kVK_Space, " "), responder: nil))
-        #expect(store.router.cards == before && model.selection == nil && model.pendingKeys.isEmpty)
     }
 
     // MARK: Sending
@@ -309,30 +114,12 @@ import UserNotifications
 
     // MARK: Reply and @
 
-    @Test func returnOnAPickedCardRepliesToItAndTheReplyGoesWithTheMessage() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let card = model.cards(store).filter(\.isOpen)[1]
-        model.select(card.id, store: store)
-        #expect(keys.key(key(kVK_Return, "\r"), responder: nil))
-        #expect(model.replyTo == card.id)
-        model.pointers = [.project("/Users/me/code/lookout")]
-        model.draft = "go ahead in \(MentionText.markString)"
-        model.send(store: store)
-        let line = store.router.decisions.last
-        #expect(line?.links.cards == [card.id])
-        #expect(line?.triggerText.hasPrefix("go ahead in @") == true && line?.triggerText.contains(MentionText.markString) == false)
-        // The chips go with the message.
-        #expect(model.replyTo == nil && model.projects.isEmpty && model.draft.isEmpty)
-    }
-
     @Test func escClearsTheSuggestionsThenTheReplyThenCloses() {
         let store = demo()
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)
         model.composerFocused = true
-        model.replyTo = store.openRouterCards[0].id
+        model.replyTo = store.routerBriefs.page().entries[0].target
         let editor = editor(model, "tell @mi")
         #expect(!model.suggestions(store).isEmpty)
         #expect(keys.key(key(kVK_Escape), responder: editor))
@@ -524,76 +311,18 @@ import UserNotifications
         #expect(!anchor.owns(beside))
     }
 
-    @Test func aClickedFinishedCardIsOpenedAndStaysOpenAndPicked() {
-        let store = demo()
-        let model = RouterModel()
-        let done = store.routerShownOpenCards.first { $0.kind.isTurn && $0.kind != .waiting }!
-        model.open(done.id, store: store)
-        model.reconcile(store: store)
-        // Opening its session addresses nothing; the pick is on it.
-        #expect(store.router.cards.first { $0.id == done.id }?.isOpen == true)
-        #expect(model.selection == done.id)
-    }
-
-    @Test func returnRepliesOnlyToAListedCard() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        // Picked, then gone from the list (the file dropped it): Return replies to the listed card next to it.
-        let listed = model.cards(store).map(\.id)
-        model.selection = listed[1]
-        model.reconcile(store: store)
-        store.router.cards.removeAll { $0.id == listed[1] }
-        #expect(keys.key(key(kVK_Return, "\r"), responder: nil))
-        #expect(model.replyTo == listed[2])
-        // Nothing listed at all: Return only focuses the composer.
-        store.router.cards.removeAll()
-        #expect(model.cards(store).isEmpty)
-        model.replyTo = nil
-        let request = model.focusRequest
-        #expect(keys.key(key(kVK_Return, "\r"), responder: nil))
-        #expect(model.replyTo == nil && model.focusRequest != request)
-    }
-
-    @Test(.hostsWindows) func aCardPickedWhileThePageIsAwayIsTheOneRepliedToAndAReplyTakenOffStaysOff() async {
-        let store = demo()
-        let model = RouterModel()
-        let open = store.routerShownOpenCards.filter { $0.kind != .waiting }.map(\.id)
-        #expect(open.count >= 2)
-        // Replying to one card when the Router was left; a banner then picks another, with no page drawn to follow the pick.
-        model.reply(to: open[0], store: store)
-        model.select(open[1], store: store)
-        #expect(model.replyTo == open[1])
-        // The reply taken off: the page shown again doesn't put it back.
-        model.replyTo = nil
-        let hosting = NSHostingView(rootView: RouterCodeView(store: store, model: model, checksClaudeCode: false)
-            .frame(width: 1100, height: 720))
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 720), styleMask: .borderless,
-                              backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        defer { window.contentView = nil; window.orderOut(nil) }
-        for _ in 0..<3 {
-            await drainMainQueue()
-            hosting.layoutSubtreeIfNeeded()
-        }
-        #expect(model.selection == open[1] && model.replyTo == nil)
-    }
-
     @Test func backspaceAtTheStartTakesTheReplyOff() {
         let store = demo()
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)
         let editor = NSTextView()
         model.composerFocused = true
-        model.replyTo = store.openRouterCards[0].id
+        model.replyTo = store.routerBriefs.page().entries[0].target
         #expect(keys.key(key(kVK_Delete), responder: editor))
         #expect(model.replyTo == nil)
         // Nothing left: the key is the field's. Not at the start: the field's.
         #expect(!keys.key(key(kVK_Delete), responder: editor))
-        model.replyTo = store.openRouterCards[0].id
+        model.replyTo = store.routerBriefs.page().entries[0].target
         editor.string = "abc"
         editor.setSelectedRange(NSRange(location: 3, length: 0))
         #expect(!keys.key(key(kVK_Delete), responder: editor) && model.replyTo != nil)
@@ -637,32 +366,6 @@ import UserNotifications
 
     // MARK: Forms
 
-    @Test func aFormIsAnsweredOnceEveryQuestionIs() async {
-        let store = demo()
-        let card = store.openRouterCards.first { $0.kind == .question }!
-        let form = store.pendingForm(for: card)!
-        let model = RouterModel()
-        #expect(model.answers(form) == nil)
-        let q = form.questions[0]
-        model.pick("Ask first", in: q, of: form)
-        #expect(model.answers(form) == [q.question: "Ask first"])
-        // Your own words replace the pick of a one-choice question.
-        model.setOther("Ask once a week", in: q, of: form)
-        #expect(model.answers(form) == [q.question: "Ask once a week"])
-        model.sendAnswer(form, card: card.id, store: store)
-        // Written off the main thread: "Sent" shows once it is; meanwhile nothing can be changed or sent again.
-        #expect(model.sending.contains(form.id) && !model.sent.contains(form.id) && model.locked(form))
-        model.pick("Install silently", in: q, of: form)
-        model.setOther("changed my mind", in: q, of: form)
-        #expect(model.answers(form) == [q.question: "Ask once a week"])
-        await model.lastWrite?.value
-        #expect(model.sent.contains(form.id) && model.formErrors[form.id] == nil && model.sending.isEmpty)
-        // Once sent: what was answered (read-only), and still nothing to change.
-        #expect(model.delivered[form.id] == [q.question: "Ask once a week"] && model.locked(form))
-        model.pick("Install silently", in: q, of: form)
-        #expect(model.answers(form) == [q.question: "Ask once a week"])
-    }
-
     /// A store that writes for real, its forms folder in `dir` (nil: never started, as with the Router off).
     private func writing(_ dir: URL?) -> Store {
         let store = demo()
@@ -672,127 +375,49 @@ import UserNotifications
         return store
     }
 
-    @Test func anAnswerIsWrittenToTheFormsFolder() async {
+    @Test func anAnswerIsWrittenToTheFormsFolder() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-forms-\(UUID().uuidString)")
         let store = writing(dir)
         defer { store.formBridge.stop(); store.persists = false; try? FileManager.default.removeItem(at: dir) }
-        let card = store.openRouterCards.first { $0.kind == .question }!
-        let form = store.pendingForm(for: card)!
-        let model = RouterModel()
-        model.pick("Ask first", in: form.questions[0], of: form)
-        model.sendAnswer(form, card: card.id, store: store)
-        await model.lastWrite?.value
-        #expect(model.sent.contains(form.id))
-        #expect(FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: dir).path))
+        // The brief's local question: option 2 picked, then Return.
+        let briefs = store.routerBriefs
+        let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
+        let form = try #require(store.heldForm(t))
+        briefs.pick(t, 2, store: store)
+        #expect(briefs.confirm(t, store: store))
+        await waitUntil { FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: dir).path) }
+        #expect(briefs.trouble[t] == nil && briefs.answers.first?.words == "Ask first")
     }
 
-    @Test func answeringWhileTheRouterIsSwitchedOffWritesNothing() async {
+    @Test func answeringWhileTheRouterIsSwitchedOffWritesNothing() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-forms-\(UUID().uuidString)")
         let store = writing(dir)
         defer { store.formBridge.stop(); store.persists = false; try? FileManager.default.removeItem(at: dir) }
-        let card = store.openRouterCards.first { $0.kind == .question }!
-        let form = store.pendingForm(for: card)!
-        let model = RouterModel()
-        model.pick("Ask first", in: form.questions[0], of: form)
-        model.sendAnswer(form, card: card.id, store: store)
+        let briefs = store.routerBriefs
+        let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
+        let form = try #require(store.heldForm(t))
+        briefs.pick(t, 2, store: store)
+        #expect(briefs.confirm(t, store: store))
         // Switched off before the write happens.
         store.router.enabled = false
-        await model.lastWrite?.value
-        #expect(!model.sent.contains(form.id) && !model.locked(form))
-        #expect(model.formErrors[form.id] == FormWriter.Cancelled().errorDescription)
+        await waitUntil { briefs.trouble[t] != nil }
+        #expect(briefs.trouble[t] == FormWriter.Cancelled().errorDescription)
         #expect(!FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: dir).path))
     }
 
-    @Test func aRefusedAnswerShowsWhyAndIsNotSent() async {
-        // A real write (not a demo's), with no forms folder to write to (the Router off): an error, nothing written.
-        let store = writing(nil)
-        defer { store.persists = false; try? FileManager.default.removeItem(at: store.stateFile!) }
-        let card = store.openRouterCards.first { $0.kind == .question }!
-        let form = store.pendingForm(for: card)!
-        let model = RouterModel()
-        model.pick("Ask first", in: form.questions[0], of: form)
-        model.sendAnswer(form, card: card.id, store: store)
-        await model.lastWrite?.value
-        #expect(!model.sent.contains(form.id) && model.formErrors[form.id] != nil && model.sending.isEmpty)
-    }
-
     // MARK: Plans
-
-    @Test func aPlanIsApprovedOrSentBackFromItsCard() async throws {
-        let store = demo()
-        let card = try #require(store.openRouterCards.first { $0.kind == .plan })
-        let form = try #require(store.pendingForm(for: card))
-        #expect(form.isPlan)
-        let model = RouterModel()
-        model.setPlanNote("Use the existing CI runner", of: form)
-        model.decidePlan(form, approve: false, card: card.id, store: store)
-        #expect(model.sending.contains(form.id) && model.locked(form))
-        // Nothing changes while it is written, nor once it is.
-        model.setPlanNote("changed my mind", of: form)
-        model.decidePlan(form, approve: true, card: card.id, store: store)
-        await model.lastWrite?.value
-        #expect(model.sent.contains(form.id) && model.formErrors[form.id] == nil && model.sending.isEmpty)
-        #expect(model.planDecided[form.id] == .init(approve: false, feedback: "Use the existing CI runner"))
-        #expect(model.planNote(form) == "Use the existing CI runner")
-    }
-
-    @Test func escIsThePlansBackWhileItIsRevisedAndItsReviseOnceNothingElseIs() throws {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let card = try #require(store.routerShownOpenCards.first { $0.kind == .plan })
-        let form = try #require(store.pendingForm(for: card))
-        let other = try #require(store.routerShownOpenCards.first { $0.kind != .plan && $0.kind != .waiting })
-        model.select(card.id, store: store)
-        #expect(model.expandedPlan(store)?.id == form.id)
-        // Revising, the feedback field has the keyboard, the composer still replying to a card: Esc is Back, nothing else.
-        model.revisingPlan = form.id
-        model.replyTo = other.id
-        let feedback = NSTextView()
-        #expect(keys.key(key(kVK_Escape), responder: feedback))
-        #expect(model.revisingPlan == nil && model.replyTo == other.id)
-        // Then the composer's context, then the plan's Revise….
-        #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.replyTo == nil && model.revisingPlan == nil)
-        #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.revisingPlan == form.id)
-        #expect(keys.key(key(kVK_Escape), responder: feedback))
-        #expect(model.revisingPlan == nil)
-        // Another card shown in full: no plan to revise. Picking it armed a reply to it, which Esc takes off; then, with
-        // nothing left to step out of, it goes on (the window stays).
-        model.select(other.id, store: store)
-        #expect(model.expandedPlan(store) == nil && model.replyTo == other.id)
-        #expect(keys.key(key(kVK_Escape), responder: nil))
-        #expect(model.replyTo == nil)
-        #expect(!keys.key(key(kVK_Escape), responder: nil))
-    }
 
     @Test func anApprovalIsWrittenToTheFormsFolder() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-forms-\(UUID().uuidString)")
         let store = writing(dir)
         defer { store.formBridge.stop(); store.persists = false; try? FileManager.default.removeItem(at: dir) }
-        let card = try #require(store.openRouterCards.first { $0.kind == .plan })
-        let form = try #require(store.pendingForm(for: card))
-        let model = RouterModel()
-        // A note typed, then Approve: an approval carries no note.
-        model.setPlanNote("unused", of: form)
-        model.decidePlan(form, approve: true, card: card.id, store: store)
-        await model.lastWrite?.value
-        #expect(model.planDecided[form.id]?.approve == true)
+        // The Linux sandbox's session, stopped on its plan: Approve carries no note.
+        let t = BriefTarget(project: "local:sandbox", thread: "local_demo-linux")
+        let form = try #require(store.heldForm(t))
+        #expect(form.isPlan)
+        if case .failure(let error) = await store.answerPlan(form, .init(approve: true), target: t) { Issue.record("\(error)") }
         let written = try JSONSerialization.jsonObject(with: Data(contentsOf: FormBridge.answerURL(form.id, in: dir))) as? NSDictionary
         #expect(written == ["plan": ["approve": true, "feedback": ""]] as NSDictionary)
-    }
-
-    @Test func severalChoicesAreJoinedAsTheFormTakesThem() {
-        let q = PendingForm.Question(question: "Which?", header: "", multiSelect: true,
-                                     options: [.init(label: "A", description: ""), .init(label: "B", description: "")])
-        let form = PendingForm(id: "k", cliSessionID: "c", transcriptPath: "", questions: [q], createdAt: now, pid: 0)
-        let model = RouterModel()
-        model.pick("A", in: q, of: form)
-        model.pick("B", in: q, of: form)
-        #expect(model.answers(form) == ["Which?": "A, B"])
-        model.pick("A", in: q, of: form)
-        #expect(model.answers(form) == ["Which?": "B"])
     }
 
     // MARK: What works
@@ -835,34 +460,6 @@ import UserNotifications
 
     // MARK: Banners
 
-    @Test func bannersAreForWhatNeedsYouAndNotWhileTheWindowHasTheKeys() {
-        let store = demo()
-        store.settings.notifications = true
-        var posted: [String] = []
-        store.notifier.onPost = { posted.append($0.identifier) }
-        let cards = store.openRouterCards
-        RouterBanners.post(cards, store: store, windowIsKey: true)
-        #expect(posted.isEmpty)
-        RouterBanners.post(cards, store: store, windowIsKey: false)
-        #expect(posted.sorted() == cards.filter { RouterAttention.bannerNow($0, away: false) }.map { RouterBanners.prefix + $0.id }.sorted())
-        #expect(!posted.isEmpty)
-        posted = []
-        store.settings.snoozeUntil = Date().addingTimeInterval(600)
-        RouterBanners.post(cards, store: store, windowIsKey: false)
-        #expect(posted.isEmpty)
-    }
-
-    @Test func aBannersClickOpensTheWindowOnItsCard() {
-        let store = demo()
-        var opened: String?
-        var other: String?
-        store.notifier.onOpen = { id, _ in other = id }
-        RouterBanners.attach(store: store, windowIsKey: { false }) { opened = $0 }
-        store.notifier.onOpen?(RouterBanners.prefix + "card#1", nil)
-        store.notifier.onOpen?("item", nil)
-        #expect(opened == "card#1" && other == "item")
-    }
-
     // MARK: Shortcut
 
     @Test func theRoutersDefaultKeyIsFreeAndEachGlobalKeyHasItsOwnID() {
@@ -874,87 +471,6 @@ import UserNotifications
     }
 
     // MARK: The page
-
-    @Test func thePageGroupsAndOrdersItsThreeZones() {
-        let store = demo()
-        let page = store.routerPage
-        // Needs you: blockers first (a question or plan before a stuck turn, newest first among equals), then finished
-        // turns; only open cards.
-        #expect(!page.needs.isEmpty && page.needs.allSatisfy(\.isOpen))
-        let kinds = page.needs.map { $0.kind == .done }
-        #expect(kinds == kinds.sorted { !$0 && $1 })
-        let blockers = page.needs.filter { $0.kind != .done }
-        #expect(blockers.map(\.kind) == [.question, .plan, .stuck])
-        // Working: the sessions running on their own, none of them stopped on you.
-        #expect(Set(page.working.map(\.id)) == Set(store.routerWorkingRows.map(\.id)))
-        #expect(!page.working.isEmpty && page.working.allSatisfy { !$0.waitsForYou })
-        // History: oldest first, addressed cards, runs and summaries together, no open card.
-        #expect(page.history.map(\.date) == page.history.map(\.date).sorted())
-        let cardLines = page.history.compactMap { entry -> RouterCard? in if case .card(let c) = entry { c } else { nil } }
-        #expect(!cardLines.isEmpty && cardLines.allSatisfy { !$0.isOpen })
-        #expect(page.history.count == store.router.decisions.count + store.router.summaries.count + store.router.cards.filter { !$0.isOpen }.count)
-        // The keys' order is the page's: the keys walk Needs you the way it is shown.
-        let (needs, done, _) = RouterModel().sections(store)
-        #expect(page.needs.map(\.id) == (needs + done).map(\.id))
-    }
-
-    @Test func theHistoryIsWorkedOutOnlyWhenWhatItIsMadeOfChanges() {
-        let store = demo()
-        #expect(store.routerHistory == RouterPage.history(cards: store.router.cards, decisions: store.router.decisions,
-                                                         summaries: store.router.summaries))
-        #expect(Set(store.routerHistory.map(\.id)).count == store.routerHistory.count)
-        var notified = false
-        withObservationTracking { _ = store.routerHistory } onChange: { notified = true }
-        // A session's stamp, a wait, an open card's text: the history (and the views drawing it) are left alone.
-        store.router.seen["local_demo-lookout"] = "a new stamp"
-        store.router.waits["local_demo-lookout"] = 42
-        let open = store.router.cards.firstIndex(where: \.isOpen)!
-        store.router.cards[open].text = "Edited"
-        #expect(!notified)
-        store.logDecision(RouterDecision(at: Date(), trigger: .you("one more"), outcome: .done))
-        #expect(notified && store.routerHistory.last?.id == store.router.decisions.last?.id.uuidString)
-    }
-
-    @Test func aDuplicatedIdIsOneLineOfTheHistory() {
-        let decision = RouterDecision(at: Date(), trigger: .you("twice"), outcome: .done)
-        let history = RouterPage.history(cards: [], decisions: [decision, decision], summaries: [])
-        #expect(history.map(\.id) == [decision.id.uuidString])
-    }
-
-    @Test func anAddressedCardGoesToTheHistoryAndReopensIntoNeedsYou() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.routerPage.needs[0]
-        let before = store.routerPage
-        model.address(card.id, store: store)
-        let after = store.routerPage
-        #expect(!after.needs.contains { $0.id == card.id })
-        #expect(after.history.contains { $0.id == card.id })
-        // The card, and the applied change it recorded (with Revert).
-        #expect(after.history.count == before.history.count + 2)
-        #expect(store.router.changes.last.map { $0.title.hasPrefix("Archive") && !$0.isPending } == true)
-        // Its line sits at the time it was addressed, after the older entries.
-        #expect(after.history.last { $0.id == card.id }?.date == store.router.cards.first { $0.id == card.id }?.addressedAt)
-        model.reopen(card.id, store: store)
-        let back = store.routerPage
-        #expect(back.needs.contains { $0.id == card.id })
-        #expect(!back.history.contains { $0.id == card.id })
-        // Reopening picks it and opens nothing in the history.
-        #expect(model.selection == card.id && !model.expanded.contains(card.id))
-    }
-
-    @Test func reopenOnAnArchivedCardOpensItAndShowsIt() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.routerPage.needs[0]
-        model.address(card.id, store: store)
-        model.expandedNeed = nil
-        model.select(card.id, store: store)
-        model.reopen(card.id, store: store)
-        #expect(store.router.cards.first { $0.id == card.id }?.isOpen == true)
-        // The reopened card is the one shown in full, as Reopen does.
-        #expect(model.selection == card.id && model.expandedNeed == card.id && !model.expanded.contains(card.id))
-    }
 
     @Test func theMentionListStaysInsideTheCard() {
         // Room for it: under the caret.
@@ -969,164 +485,4 @@ import UserNotifications
         #expect(MentionList.place(caretX: -5, available: 800).x == 0)
     }
 
-    @Test func aSupersededCardIsNotReopened() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.router.cards.first { $0.addressedBy == .answered }!
-        store.router.cards[store.router.cards.firstIndex { $0.id == card.id }!].addressedBy = .superseded
-        model.reopen(card.id, store: store)
-        #expect(store.router.cards.first { $0.id == card.id }?.isOpen == false)
-    }
-
-    @Test func aWorkingSessionThatNeedsYouMovesToNeedsYou() {
-        let store = demo()
-        let id = "local_demo-lookout"
-        var page = store.routerPage
-        #expect(page.working.contains { $0.id == id } && !page.needs.contains { $0.sessionID == id })
-        // It stops on a question: the feed makes its card, and it leaves Working.
-        let at = Date()
-        store.claudeActivity[id] = ClaudeActivity(text: "Which branch?", since: at, waitsForYou: true, tool: "AskUserQuestion",
-                                                 toolUseID: "toolu_x")
-        store.router.cards.append(RouterCard(id: "\(id)#w\(RouterFeed.Stamp.ms(at))", sessionID: id, kind: .question,
-                                             title: "Agent completion notifications", folder: nil, text: "Which branch?", createdAt: at))
-        page = store.routerPage
-        #expect(!page.working.contains { $0.id == id })
-        #expect(page.needs.first?.sessionID == id, "the newest blocker is first")
-        // A turn that ends leaves Working too.
-        let other = "local_demo-ci"
-        #expect(store.routerPage.working.contains { $0.id == other })
-        store.claudeTasks[other] = []
-        #expect(!store.routerPage.working.contains { $0.id == other })
-    }
-
-    @Test func selectingAnAddressedCardOpensItInTheHistoryAndAsksThePageToScroll() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.router.cards.first { !$0.isOpen }!
-        model.select(card.id, store: store)
-        #expect(model.expanded.contains(card.id) && model.revealRequest?.id == card.id && model.highlighted == card.id)
-        model.select(nil, store: store)
-        #expect(model.revealRequest?.id == RouterModel.endID)
-    }
-
-    @Test func oneNeedsYouCardIsOpenAtATimeTheAskedForOneElseTheNewest() {
-        let store = demo()
-        let page = store.routerPage
-        #expect(page.openNeed(preferred: nil) == page.needs.first?.id)
-        let other = page.needs[2].id
-        #expect(page.openNeed(preferred: other) == other)
-        #expect(page.openNeed(preferred: "gone") == page.needs.first?.id, "a card that left falls back to the newest")
-        // Picking a card in the list (or with the arrows) opens it on the page.
-        let model = RouterModel()
-        model.select(other, store: store)
-        #expect(model.expandedNeed == other)
-    }
-
-    @Test func clickingAnOpenCardShowsItInFullAndRepliesToIt() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.routerPage.needs[2]
-        let request = model.focusRequest
-        model.tap(card.id, store: store)
-        #expect(model.expandedNeed == card.id && model.replyTo == card.id && model.selection == card.id)
-        #expect(model.focusRequest != request)
-        // Clicked again it stays shown in full.
-        model.tap(card.id, store: store)
-        #expect(store.routerPage.openNeed(preferred: model.expandedNeed) == card.id && model.replyTo == card.id)
-    }
-
-    @Test func clickingAResolvedCardShowsItInFullRepliesToItAndTheReplyGoesToItsSession() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.router.cards.first { !$0.isOpen }!
-        model.tap(card.id, store: store)
-        #expect(model.expanded.contains(card.id) && model.replyTo == card.id)
-        // It was clicked where it is: the history isn't asked to scroll anywhere.
-        #expect(model.revealRequest == nil)
-        // Clicked again it folds back; the reply stays armed.
-        model.tap(card.id, store: store)
-        #expect(!model.expanded.contains(card.id) && model.replyTo == card.id)
-        #expect(RouterDispatcher.plan(text: "one more thing", context: RouterContext(replyTo: card.id), store: store)
-            == .reply(session: card.sessionID, card: card.id))
-        model.draft = "one more thing"
-        model.send(store: store)
-        #expect(store.router.decisions.last?.links.cards == [card.id] && model.replyTo == nil)
-    }
-
-    @Test func aMessageOpenedFromAnActionsChipLeavesNoReplyArmed() {
-        let store = demo()
-        let model = RouterModel()
-        let card = store.routerPage.needs[0]
-        // Replying to a card when the page was left; an inbox action's chip then opens a Router message.
-        model.reply(to: card.id, store: store)
-        model.show(message: store.router.decisions.last!.id)
-        #expect(model.selection == nil && model.replyTo == nil)
-        // What is written next goes to the Router, not to that card's session.
-        let before = store.router.decisions.count
-        model.draft = "what's left today?"
-        model.send(store: store)
-        #expect(store.router.decisions.count > before && store.router.decisions.last?.links.cards == [])
-    }
-
-    @Test func archiveOpensTheCardThePickMovesOnTo() throws {
-        let store = demo()
-        let model = RouterModel()
-        let open = model.cards(store).filter(\.isOpen).map(\.id)
-        try #require(open.count == 3)
-        // The middle card picked and handled: the next one is picked, shown in full and gone to, not the first one.
-        model.tap(open[1], store: store)
-        model.address(open[1], store: store)
-        #expect(model.selection == open[2] && model.expandedNeed == open[2] && model.revealRequest?.id == open[2])
-        #expect(store.routerPage.openNeed(preferred: model.expandedNeed) == open[2])
-        // The same again, back up to the first card when it was the last.
-        model.address(open[2], store: store)
-        #expect(model.selection == open[0] && model.expandedNeed == open[0] && model.revealRequest?.id == open[0])
-    }
-
-    @Test func archiveTakesOnlyTheFirstClickOfADoubleClick() {
-        func click(_ type: NSEvent.EventType, _ count: Int) -> NSEvent {
-            NSEvent.mouseEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                               eventNumber: 0, clickCount: count, pressure: 1)!
-        }
-        // The card leaves on the first click and the next one's Archive slides under the pointer: the second click is no
-        // press of it.
-        #expect(!CardView.secondClick(click(.leftMouseUp, 1)))
-        #expect(CardView.secondClick(click(.leftMouseUp, 2)) && CardView.secondClick(click(.leftMouseUp, 3)))
-        // A press with no click (a key, VoiceOver) archives.
-        #expect(!CardView.secondClick(nil) && !CardView.secondClick(key(kVK_Space, " ")))
-    }
-
-    @Test(.hostsWindows) func thePickMovingOnFromAHandledCardArmsNoReplyYouTookOff() async {
-        let store = demo()
-        let model = RouterModel()
-        let hosting = NSHostingView(rootView: RouterCodeView(store: store, model: model, checksClaudeCode: false)
-            .frame(width: 1100, height: 720))
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 720), styleMask: .borderless,
-                              backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        defer { window.contentView = nil; window.orderOut(nil) }
-        func settle() async {
-            for _ in 0..<3 {
-                await drainMainQueue()
-                hosting.layoutSubtreeIfNeeded()
-            }
-        }
-        await settle()
-        // A card clicked, its reply chip taken off, a general request typed, then its Archive: the pick moves on to the
-        // next card, but no reply is armed, so the request goes to the Router.
-        let open = model.cards(store).filter(\.isOpen).map(\.id)
-        #expect(open.count >= 3)
-        model.tap(open[0], store: store)
-        #expect(model.removeLastChip() && model.replyTo == nil)
-        model.draft = "what's left today?"
-        model.address(open[0], store: store)
-        await settle()
-        #expect(model.selection == open[1] && model.replyTo == nil)
-        let before = store.router.decisions.count
-        model.send(store: store)
-        #expect(store.router.decisions.count > before && store.router.decisions.last?.links.cards == [])
-    }
 }

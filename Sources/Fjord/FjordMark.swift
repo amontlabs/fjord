@@ -34,7 +34,7 @@ enum FjordMark {
 
 /// The mark as Fjord's loading indicator, always in one colour: the sun, then each band, fades to a faint trace (0.1) one
 /// after another from the top, and they come back in the same order, every 2.6 s (mark.html's `level()`). It fills the
-/// square that fits its frame. Core Animation moves it, so SwiftUI draws nothing while it runs (see `SheenNSView`); it
+/// square that fits its frame. Core Animation moves it, so SwiftUI draws nothing while it runs (see `BlinkingDotView`); it
 /// stops when out of a window or hidden, and with Reduce Motion it is the whole mark, still (as mark.html leaves it).
 ///
 /// The colour is a parameter, not the environment's foreground style (which an AppKit view can't read): pass the colour

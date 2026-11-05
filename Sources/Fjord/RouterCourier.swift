@@ -268,6 +268,8 @@ struct RouterCourierSource {
     struct Item: Identifiable, Equatable {
         enum Work: Equatable {
             case send(words: String, project: String, thread: String?)
+            /// An option picked on a thread's pending card: the option's words, answered there.
+            case answer(option: String, project: String, thread: String)
             /// `reverts`: a Revert's tool, setting back what another one changed.
             case tool(CourierTool, args: [String: JSON], reverts: Bool = false)
         }
@@ -325,7 +327,7 @@ struct RouterCourierSource {
     @ObservationIgnored private var source: RouterCourierSource?
     @ObservationIgnored private var following: Task<Void, Never>?
     /// How long a settled pill stays; nil keeps it (a shot, a test).
-    @ObservationIgnored var settleAfter: Duration? = RouterFlights.confirmation
+    @ObservationIgnored var settleAfter: Duration? = .seconds(4)
     /// What the pause buttons open outside Fjord; a test records them.
     @ObservationIgnored var open: (Action) -> Void = RouterCourierPills.openOutside
 
@@ -369,11 +371,11 @@ struct RouterCourierSource {
                      work: .send(words: display ?? words, project: shown ?? target.project, thread: threadTitle(target) ?? target.thread))
     }
 
-    /// Clicks option `option` (1-based, the page's order) of a thread's pending card: its pill shows the option's words going.
+    /// Clicks option `option` (1-based, the page's order) of a thread's pending card: its pill shows the option as your answer.
     @discardableResult
     func answer(project: String, thread: String, card: String, option: Int, label: String, shown: String? = nil) async -> Int {
         await submit(.answer(project: project, thread: thread, card: card, option: option),
-                     work: .send(words: label, project: shown ?? project, thread: threadTitle(.thread(project: project, thread: thread)) ?? thread))
+                     work: .answer(option: label, project: shown ?? project, thread: threadTitle(.thread(project: project, thread: thread)) ?? thread))
     }
 
     /// A delivery corrected (Send elsewhere): the engine keeps where it should have gone on its intent, for the measurement.
@@ -514,6 +516,7 @@ struct RouterCourierSource {
     static func face(_ item: Item) -> Face {
         switch item.work {
         case .send(let words, let project, let thread): sendFace(item, words: words, to: place(project, thread))
+        case .answer(let option, let project, let thread): answerFace(item, option: option, to: place(project, thread))
         case .tool(let name, let args, let reverts): toolFace(item, name, args, reverts: reverts)
         }
     }
@@ -530,6 +533,26 @@ struct RouterCourierSource {
             return Face(mark: .warning, words: words, status: "Not delivered to \(place)", note: item.cause, dismissible: true, settles: false)
         case .paused:
             return Face(mark: .paused, words: words, status: "Waiting to send to \(place)", note: item.cause,
+                        action: RouterCourier.action(item.pause), dismissible: false, settles: false)
+        case .awaiting:
+            return Face(mark: .asks, words: words, status: "Waiting for you", note: item.cause, dismissible: true, settles: false)
+        }
+    }
+
+    /// An option answered on a thread's card: "Answered: <option>", never a message sent.
+    private static func answerFace(_ item: Item, option: String, to place: String) -> Face {
+        let words = "Answered: " + option
+        switch item.state {
+        case .sending, .taken:
+            return Face(mark: .working, words: words, status: "Answering in \(place)", dismissible: false, settles: false)
+        case .delivered, .toolDone:
+            return Face(mark: .done, words: words, status: "in \(place)", dismissible: false, settles: true)
+        case .deliveredLate:
+            return Face(mark: .done, words: words, status: "in \(place) after all", dismissible: true, settles: true)
+        case .failed, .refused, .toolUnconfirmed:
+            return Face(mark: .warning, words: "Not answered: " + option, status: place, note: item.cause, dismissible: true, settles: false)
+        case .paused:
+            return Face(mark: .paused, words: words, status: "Waiting to answer in \(place)", note: item.cause,
                         action: RouterCourier.action(item.pause), dismissible: false, settles: false)
         case .awaiting:
             return Face(mark: .asks, words: words, status: "Waiting for you", note: item.cause, dismissible: true, settles: false)

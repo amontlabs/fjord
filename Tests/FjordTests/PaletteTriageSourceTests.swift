@@ -228,45 +228,6 @@ import Testing
         #expect(visits.calls.isEmpty)
     }
 
-    @Test func openingItsSessionSelectsItsCardOrRevealsItsWorkingRow() throws {
-        let store = store([InboxFixture.pr(11)])
-        Demo.populate(store, .router)
-        store.categories = self.store([]).categories
-        store.things = [:]
-        let thing = InboxFixture.pr(11)
-        store.things[thing.id] = thing
-        let working = try #require(store.routerWorkingRows.first { row in !store.router.cards.contains { $0.sessionID == row.id } })
-        store.actionLedger.runs["k"] = ActionRun(category: UUID(), thing: thing.id, action: UUID(), trigger: "enter",
-                                                 state: .done, at: Date(), sessionID: working.id)
-        let visits = Visits()
-        let model = RouterModel()
-        let ctx = PaletteContext(store: store, navigator: AppNavigator(start: .router, defaults: nil), routerModel: model,
-                                 hub: HubState(), go: { visits.calls.append(($0, nil)) })
-        var entry = try #require(item("entry:" + thing.id, in: PaletteTriageSource.make(ctx)))
-        try #require(entry.actions.first { $0.title == "Open its session" }).run()
-        #expect(visits.calls.last?.destination == .router)
-        #expect(model.revealRequest?.id == RouterModel.workingID(working.id))
-
-        // An open card that the page draws is selected instead.
-        let card = try #require(store.router.cards.first { $0.isOpen && store.routerZones.zone(of: $0.id) != nil })
-        store.actionLedger.runs["k"]?.sessionID = card.sessionID
-        entry = try #require(item("entry:" + thing.id, in: PaletteTriageSource.make(ctx)))
-        try #require(entry.actions.first { $0.title == "Open its session" }).run()
-        #expect(model.selection == card.id)
-        #expect(visits.calls.last?.destination == .router)
-    }
-
-    @Test func aWaitingCardWatchingAThingsCILinksItsSessionToIt() throws {
-        let store = store([workflow(50, state: .pending)])
-        store.setTool(.router, on: true)
-        store.claudeSessions["s2"] = ClaudeSession(id: "s2", title: "Waiter", folder: nil, lastActivity: Date())
-        var card = RouterCard(id: "s2#w1", sessionID: "s2", kind: .waiting, title: "Waiting", folder: nil, text: "", createdAt: Date())
-        card.triage = RouterTriage(watch: .init(target: .ci(thing: "workflow:c/ci:50@main"), label: "CI on c/ci"))
-        store.router.cards = [card]
-        let entry = try #require(item("entry:workflow:c/ci:50@main", in: PaletteTriageSource.make(context(store))))
-        #expect(entry.actions.contains { $0.title == "Open its session" })
-    }
-
     @Test func aSessionUnknownToClaudeIsNotOffered() throws {
         let store = store([InboxFixture.pr(10)])
         store.actionLedger.runs["k"] = ActionRun(category: UUID(), thing: "pr:a/one#10", action: UUID(), trigger: "enter",

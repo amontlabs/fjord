@@ -86,9 +86,8 @@ import Testing
         let routing = s.jevAsker(.routing)
         await #expect(throws: JevClient.Failure.unauthorized) { try await routing?(["q": .noul(instructions: "?")], [:]) }
         #expect(sent == ["Bearer sk-old"])
-        // The triage, the cards, the icons and the inbox don't call with it either.
-        await #expect(throws: JevClient.Failure.unauthorized) { try await s.jevAsker(.triage)?(["q": .noul(instructions: "?")], [:]) }
-        await #expect(throws: JevClient.Failure.unauthorized) { try await s.jevChooser(.cards)?(["a"], [:], [:], "") }
+        // The routing's chooser, the icons and the inbox don't call with it either.
+        await #expect(throws: JevClient.Failure.unauthorized) { try await s.jevChooser(.routing)?(["a"], [:], [:], "") }
         s.agents.iconsEnabled = true
         await #expect(throws: JevClient.Failure.unauthorized) { try await s.jevChooser(.icons)?(["a"], [:], [:], "") }
         #expect(!s.jevGate.isOpen(for: "sk-old") && sent.count == 1)
@@ -102,12 +101,12 @@ import Testing
         let s = store()
         var calls = 0
         s.inboxAsker = { _, _ in calls += 1; throw JevClient.Failure.overloaded(retryAfter: 60) }
-        s.routerTriager.asker = { _, _ in calls += 1; return [:] }
+        let routing: JevAsker = { _, _ in calls += 1; return [:] }
         await #expect(throws: JevClient.Failure.overloaded(retryAfter: 60)) {
             try await s.throughJevGate(.inbox, generation: s.jevGate.generation) { try await s.inboxAsker!([:], [:]) }
         }
         await #expect(throws: JevClient.Failure.overloaded(retryAfter: 60)) {
-            try await s.jevAsker(.triage, base: s.routerTriager.asker)?([:], [:])
+            try await s.jevAsker(.routing, base: routing)?([:], [:])
         }
         #expect(calls == 1)
     }
@@ -139,15 +138,15 @@ import Testing
     @Test func anAnswerAfterTheKeyOrTheSwitchChangedIsDropped() async {
         let s = store()
         var flip: () -> Void = {}
-        let ask = s.jevAsker(.triage, base: { _, _ in flip(); return ["q": .noul(1)] })
+        let ask = s.jevAsker(.routing, base: { _, _ in flip(); return ["q": .noul(1)] })
         flip = { _ = s.setTypesafeKey("sk-other") }
         await #expect(throws: JevClient.Failure.cancelled) { try await ask?([:], [:]) }
         // Taken before the switch went off, it asks nothing.
         var asked = false
-        let off = s.jevAsker(.triage, base: { _, _ in asked = true; return [:] })
+        let off = s.jevAsker(.routing, base: { _, _ in asked = true; return [:] })
         s.router.enabled = false
         await #expect(throws: JevClient.Failure.cancelled) { try await off?([:], [:]) }
-        #expect(!asked && s.jevAsker(.triage, base: { _, _ in [:] }) == nil)
+        #expect(!asked && s.jevAsker(.routing, base: { _, _ in [:] }) == nil)
     }
 
     @Test func aRejectionOfAKeySinceReplacedIsDroppedAndPausesNoIcons() async {
@@ -180,28 +179,6 @@ import Testing
             set { lock.lock(); isOpen = newValue; lock.unlock() }
         }
         func wait() async { while !open { try? await Task.sleep(for: .milliseconds(2)) } }
-    }
-
-    @Test func aTriageUnderWayWhenTheKeyChangesAsksNothingWithTheOldOneAndIsAskedAgain() async {
-        let s = store()
-        s.routerTriager.rescanned = true
-        let a = ClaudeSession(id: "a", title: "T a", folder: "/code/a", completedTurns: 2, lastActivity: Date().addingTimeInterval(-300), cliID: "cli-a")
-        s.claudeSessions = ["a": a]
-        s.router.cards = [RouterCard(id: "a#t2", sessionID: "a", kind: .done, title: "T a", folder: "/code/a", text: "Pushed", createdAt: Date())]
-        let latch = Latch()
-        s.routerTriager.reader = { _ in await latch.wait(); return "All done. Should I push to main?" }
-        var calls = 0
-        s.routerTriager.asker = { _, _ in
-            calls += 1
-            return ["state": .choice(JevClient.Choice(choice: "asks", confidence: 0.9, probabilities: ["asks": 0.9, "done": 0.1]))]
-        }
-        s.triageTurns()
-        // The key changes while the turn's final message is read.
-        #expect(s.setTypesafeKey("sk-new"))
-        latch.open = true
-        for _ in 0..<200 where s.router.cards[0].triage == nil { try? await Task.sleep(for: .milliseconds(5)) }
-        await s.routerTriager.idle()
-        #expect(calls == 1 && s.router.cards[0].triage?.state == .asks)
     }
 
     @Test func anIconUnderWayAsksNothingOnceIconsAreOffOrTheKeyChanged() async throws {

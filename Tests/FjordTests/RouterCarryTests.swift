@@ -787,9 +787,6 @@ import Testing
         // Without an answer it is unsure, and says so rather than "interrupted".
         let line = done(quiet).compactMap { item -> String? in if case .failed(let why) = item { why } else { nil } }.first
         #expect(line?.hasPrefix("It may not have arrived") == true)
-        // The history the page draws is made from these.
-        let shown = s.routerHistory.compactMap { entry -> RouterDecision? in if case .decision(let d) = entry { d } else { nil } }
-        #expect(shown.first { $0.id == went }?.done == [.sent(to: "Target", text: "ship it", original: nil)])
     }
 
 
@@ -822,8 +819,8 @@ import Testing
         #expect(s.router.operations.first { $0.nonce == "n6" }?.state == .sent)
         // They survive the state's own coding, and a state from before has none.
         let data = try JSONEncoder().encode(s.router)
-        #expect(try JSONDecoder().decode(RouterState.self, from: data).operations == s.router.operations)
-        let old = try JSONDecoder().decode(RouterState.self, from: Data(#"{"enabled":true,"relay":{"sessionID":"x","cliID":"y"}}"#.utf8))
+        #expect(try JSONDecoder().decode(RouterSaved.self, from: data).operations == s.router.operations)
+        let old = try JSONDecoder().decode(RouterSaved.self, from: Data(#"{"enabled":true,"relay":{"sessionID":"x","cliID":"y"}}"#.utf8))
         #expect(old.operations.isEmpty && old.enabled)
     }
 }

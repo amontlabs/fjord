@@ -18,12 +18,12 @@ extension EnvironmentValues {
     @Entry var reopenApp: () -> Void = {}
     /// Opens the app window on Settings, scrolled to Updates.
     @Entry var openUpdates: () -> Void = {}
-    /// Opens the app window on the Router, on a card if one is given.
-    @Entry var openRouter: (String?) -> Void = { _ in }
+    /// Opens the app window on the Router, on a brief entry if one is given.
+    @Entry var openRouter: (BriefTarget?) -> Void = { _ in }
     /// Opens the app window on the Router, scrolled to a message of its conversation (an inbox action's).
     @Entry var openRouterMessage: (UUID) -> Void = { _ in }
-    /// Picks a card in the Router (window open or not): a click on it in the bar's panel, before the window opens on the Router.
-    @Entry var pickRouterCard: (String) -> Void = { _ in }
+    /// Picks a brief entry (window open or not): a click on it in the bar's panel, before the window opens on the Router.
+    @Entry var pickBriefEntry: (BriefTarget) -> Void = { _ in }
     /// "Open in Router" on an inbox thing (its id): the app window on the Router, its composer holding the thing's pill and
     /// the keyboard, for you to say what to do with it. Nil where the Router can't take it (off, or nothing to open it):
     /// the rows offer no such action.
@@ -230,12 +230,12 @@ struct FjordHub: View {
     @State var barSize: CGSize = .zero
     @State var peekSizes: [HubSection: CGSize] = [:]
     @Environment(\.accessibilityReduceMotion) var reduce
-    /// Opens the app window on a place, or on a Router card.
+    /// Opens the app window on a place, or on a brief entry.
     @Environment(\.openApp) var openApp
     @Environment(\.reopenApp) var reopenApp
     @Environment(\.openUpdates) var openUpdates
     @Environment(\.openRouter) var openRouter
-    @Environment(\.pickRouterCard) var pickRouterCard
+    @Environment(\.pickBriefEntry) var pickBriefEntry
     @Environment(\.hubPointer) var hubPointer
     /// How the bar and its panels draw (none in a test that draws the bar alone: opaque).
     @Environment(Chrome.self) var chrome: Chrome?

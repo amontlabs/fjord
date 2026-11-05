@@ -57,14 +57,14 @@ final class SidebarMenu: NSObject, NSMenuItemValidation {
 
     @objc private func toggle() { SidebarState.shared.toggle() }
 
-    @objc private func toggleHistory() { AppWindowController.active?.routerModel.digest.toggleHistory() }
+    @objc private func toggleHistory() { AppWindowController.active?.store.routerBriefs.drawerOpen.toggle() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let window = AppWindowController.active
         let usable = window?.isOpen == true && window?.paletteIsOpen != true
         if menuItem === history {
-            menuItem.title = window?.routerModel.digest.historyOpen == true ? "Hide History" : "Show History"
-            return usable && window?.navigator.selection == .router && window?.routerModel.layout == .brief
+            menuItem.title = window?.store.routerBriefs.drawerOpen == true ? "Hide History" : "Show History"
+            return usable && window?.navigator.selection == .router
         }
         menuItem.title = SidebarState.shared.collapsed ? "Expand Sidebar" : "Collapse Sidebar"
         return usable
@@ -285,14 +285,13 @@ struct AppSidebar: View {
             .accessibilityHidden(true)
     }
 
-    static func routerTip(_ c: (needsYou: Int, notes: Int)) -> String {
-        let parts = [c.needsYou > 0 ? "\(c.needsYou) need you" : nil, c.notes > 0 ? "\(c.notes) worth a look" : nil].compactMap { $0 }
-        return parts.isEmpty ? "Router" : "Router · " + parts.joined(separator: ", ")
+    static func routerTip(_ needsYou: Int) -> String {
+        needsYou > 0 ? "Router · \(needsYou) need you" : "Router"
     }
 }
 
-/// The Router's row, with what needs you and what is worth a look: its counts read here, so the cards and the sessions
-/// changing redraw this row and not the whole sidebar.
+/// The Router's row, with how many of the brief's entries need you: the count read here, so the brief changing redraws
+/// this row and not the whole sidebar.
 private struct RouterSidebarRow: View {
     let store: Store
     let navigator: AppNavigator
@@ -300,27 +299,18 @@ private struct RouterSidebarRow: View {
     typealias M = CDS.Sidebar
 
     var body: some View {
-        let routerCounts = store.routerCounts
+        let needsYou = store.routerBriefs.untoldNeedsYou
         AppSidebarRow(title: "Router", on: navigator.selection == .router,
-                      badge: routerCounts.needsYou + routerCounts.notes > 0
-                          ? RailBadge(count: routerCounts.needsYou + routerCounts.notes,
-                                      fill: CDS.solid(routerCounts.needsYou > 0 ? 0xFAB219 : 0x2A78D6),
-                                      ink: routerCounts.needsYou > 0 ? CDS.solid(0x0B0B0B) : .white)
-                          : nil,
-                      tip: AppSidebar.routerTip(routerCounts),
+                      badge: needsYou > 0 ? RailBadge(count: needsYou, fill: CDS.solid(0xFAB219), ink: CDS.solid(0x0B0B0B)) : nil,
+                      tip: AppSidebar.routerTip(needsYou),
                       action: { navigator.go(.router) }) { on in
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: M.symbol, weight: .medium))
                 .chromeInk(on ? .primary : .secondary, glass: onGlass)
         } trailing: {
-            HStack(spacing: 6) {
-                if routerCounts.needsYou > 0 { CountText(routerCounts.needsYou, color: CDS.Fill.warning) }
-                if routerCounts.notes > 0 { CountText(routerCounts.notes, color: CDS.Text.accent) }
-            }
+            if needsYou > 0 { CountText(needsYou, color: CDS.Fill.warning) }
         }
-        .accessibilityValue([routerCounts.needsYou > 0 ? "\(routerCounts.needsYou) need you" : nil,
-                             routerCounts.notes > 0 ? "\(routerCounts.notes) worth a look" : nil]
-            .compactMap { $0 }.joined(separator: ", ").nonEmpty ?? "Nothing open")
+        .accessibilityValue(needsYou > 0 ? "\(needsYou) need you" : "Nothing open")
     }
 }
 

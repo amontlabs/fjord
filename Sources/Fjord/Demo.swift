@@ -17,18 +17,12 @@ enum Demo {
         case noCI, allPassing, manyCI, ciRunning
         // The update tile.
         case updateAvailable, updateDownloading, updateReady
-        // The Router: cards of each kind (a question with its form) and a chat with receipts; and the Router switched off.
-        case router, routerCanvas, routerOff
+        // The Router: the brief over its demo projects, local forms the hook holds and a decision log; and the Router off.
+        case router, routerOff
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
         store.persists = false
-        // A demo's state isn't news for the Brief.
-        store.routerDigester.suspended = true
-        defer {
-            store.routerDigester.suspended = false
-            store.routerDigester.baseline(store: store)
-        }
         // Both tools, picked: the demo shows everything.
         store.settings.triage = true
         store.settings.toolsPicked = true
@@ -159,7 +153,7 @@ enum Demo {
         case .updateReady:
             agents(store, now)
             store.updater.preview(.ready, version: "0.5.0")
-        case .router, .routerCanvas:
+        case .router:
             agents(store, now)
             router(store, now)
             briefs(store, now: now)
@@ -168,9 +162,6 @@ enum Demo {
         }
     }
 
-    /// The Router on, over the `agents` sessions: the one that asks is stopped on its question (whose form
-    /// Fjord holds), a plan and a stuck turn wait, a turn is done, older cards are addressed; a short chat
-    /// with what the Router did.
     /// The demo's claude.ai projects and their threads, as the engine's Board would share them: where the Router sends.
     static func claudeProjects(_ store: Store, now: Date = Date()) {
         func thread(_ id: String, _ title: String, _ state: String, minutes: Double) -> CourierPlace.Thread {
@@ -195,6 +186,8 @@ enum Demo {
         store.routerCourierLink.take(snapshot)
     }
 
+    /// The Router on, over the `agents` sessions: the one that asks is stopped on its question and the Linux sandbox on its
+    /// plan (forms Fjord's hook holds), with the decision log of what you said and what the Router did.
     private static func router(_ store: Store, _ now: Date) {
         claudeProjects(store, now: now)
         let lcu = blockedAgentID
@@ -211,7 +204,7 @@ enum Demo {
                 PendingForm.Option(label: "Ask first", description: "Show a prompt before each update"),
             ])],
             createdAt: now.addingTimeInterval(-60), pid: 0, toolUseID: "toolu_demo_lcu")
-        // The Linux sandbox's plan, held the same way: its card shows it, to approve or send back.
+        // The Linux sandbox's plan, held the same way: its entry shows it, to approve or send back.
         let linux = "local_demo-linux"
         store.claudeSessions[linux]?.cliID = "cli-demo-linux"
         store.pendingForms["cli-demo-linux"] = PendingForm(
@@ -223,34 +216,9 @@ enum Demo {
             2. Boot a minimal kernel and rootfs with the JS runtime baked in; talk to it over vsock.
             3. Run the existing sandbox tests against both backends in CI (Linux runner with KVM).
             """)
-        func card(_ session: String, _ kind: RouterCard.Kind, _ text: String, minutes: Double, addressed: RouterCard.Addressed? = nil)
-            -> RouterCard {
-            let s = store.claudeSessions[session]
-            let at = now.addingTimeInterval(-minutes * 60)
-            // Ids as the feed makes them: a wait by when it began, a turn by its number.
-            let id = kind.isTurn ? "\(session)#t\(s?.completedTurns ?? 0)" : "\(session)#w\(RouterFeed.Stamp.ms(at))"
-            return RouterCard(id: id, sessionID: session, kind: kind,
-                              title: s?.title ?? session, folder: s?.folder, text: text, createdAt: at,
-                              addressedAt: addressed == nil ? nil : at.addingTimeInterval(120), addressedBy: addressed)
-        }
-        var state = RouterState()
+        var state = RouterSaved()
         state.enabled = true
         state.enabledAt = now.addingTimeInterval(-86400)
-        state.cards = [
-            card("local_demo-transfer", .done, "Transfer is done; both remotes point at the new org.", minutes: 12, addressed: .router),
-            card("local_demo-games", .question, "Single-player immersion or online squads?", minutes: 30, addressed: .answered),
-            card("local_demo-ci", .done, "Fixed the flaky sandbox test; **CI is green** on the branch.", minutes: 4),
-            card("local_demo-linux", .plan, "Run the JavaScript sandbox in a Firecracker microVM on Linux", minutes: 9),
-            card("local_demo-calc", .stuck, "Can't reach the staging database: the VPN is down.", minutes: 6),
-            card(lcu, .question, question, minutes: 2),
-        ]
-        state.cards[state.cards.count - 1].toolUseID = "toolu_demo_lcu"
-        let fromAction = SessionOrigin(category: "Contributing", thing: "lcu#41 Update notifications", actionID: "a", runID: "r")
-        if let i = state.cards.firstIndex(where: { $0.sessionID == "local_demo-calc" }) { state.cards[i].origin = fromAction }
-        state.cards[state.cards.count - 1].origin = fromAction
-        if let i = state.cards.firstIndex(where: { $0.sessionID == linux }) { state.cards[i].toolUseID = "toolu_demo_linux" }
-        // The question is the wait the session is on now, so its form shows on its card.
-        state.waits[lcu] = state.cards.last?.waitMs
         state.changes = fjordChanges(store, now)
         // The decision log behind the same story: what you said and what the Router did with it.
         func entry(_ minutes: Double, _ trigger: RouterDecision.Trigger, _ intent: String, _ done: [RouterDecision.Done],
@@ -300,19 +268,11 @@ enum Demo {
         if let last = state.decisions.indices.last, changes.last?.isReverted == true {
             state.decisions[last].outcome = .reverted
         }
-        state.summaries = [
-            RouterSummary(at: now.addingTimeInterval(-420), text: "Lookout is mid-way through its test suite after wiring the "
-                          + "completion notifications; nothing has failed so far.", sessionID: "local_demo-lookout",
-                          title: "Agent completion notifications"),
-            RouterSummary(at: now.addingTimeInterval(-180), text: "The flaky sandbox test is fixed and CI is green; two "
-                          + "subagents are still reviewing the sandbox changes and the other jobs.", sessionID: "local_demo-ci",
-                          title: "CI failure diagnosis"),
-        ]
         // A message the Router couldn't place: asks where it goes (its run's entry waits for the pick), and one run under way.
         var asking = RouterDecision(at: now.addingTimeInterval(-15), trigger: .you("ship it tomorrow morning"), decision: .init(intent: "message", label: "unclear", confidence: 0.48))
         asking.decision.decider = "sonnet"
         asking.add(.asked(["CI failure diagnosis", "Repository ownership transfer setup", "lcu"]))
-        var running = RouterDecision(at: now.addingTimeInterval(-4), trigger: .you("archive the old fork once the transfer is done"), decision: .init(intent: "message"))
+        let running = RouterDecision(at: now.addingTimeInterval(-4), trigger: .you("archive the old fork once the transfer is done"), decision: .init(intent: "message"))
         state.decisions += [asking, running]
         store.router = state
         let ci = RouterCourier.Target.thread(project: "lookout", thread: "thr_demo_ci").targetID
@@ -324,231 +284,6 @@ enum Demo {
             ask: RouterAskBack(id: asking.id, message: "ship it tomorrow morning", context: RouterContext(),
                                options: options, suggestion: ci, at: now.addingTimeInterval(-15)),
             progress: [running.id: RouterProjectDecider.Stage.sonnet.words])
-    }
-
-    /// What Jev's triage makes of finished turns, on top of the Router's demo: a turn asking your OK, one asking two
-    /// questions, chips on the finished ones, and sessions waiting on CI and on another session (one of them ready to go on).
-    static func routerTriage(_ store: Store, now: Date = Date()) {
-        let added = [
-            (session("local_demo-release", "Release 2.4 to the App Store", "lookout", minutes: 3,
-                     detail: "The build and the release notes are ready."), "shippingbox"),
-            (session("local_demo-api", "Rate limiter for the public API", "microsandbox", minutes: 8,
-                     detail: "The limiter works; two choices are left to you."), "gauge.with.needle"),
-            (session("local_demo-docs", "Docs site redesign", "lcu", minutes: 14, detail: "The new layout is in place."), "doc.richtext"),
-            (session("local_demo-login", "Fix the login redirect", "lookout", minutes: 6,
-                     detail: "Pushed the fix; waiting for CI on the PR."), "arrow.uturn.right"),
-            (session("local_demo-schema", "Schema migration", "microsandbox", minutes: 11,
-                     detail: "Waiting for the migration session to finish."), "cylinder.split.1x2"),
-            (session("local_demo-bump", "Bump the SDK", "lcu", minutes: 20, detail: "Opened the PR; CI is running."), "arrow.up.circle"),
-            (session("local_demo-theme", "Router theme fix", "lookout", minutes: 1,
-                     detail: "PR #88 is green and ready to merge."), "paintpalette"),
-            (session("local_demo-icons", "Fjord icon set", "lookout", minutes: 9,
-                     detail: "All 24 icons exported, committed and pushed."), "square.grid.3x3"),
-        ]
-        for (session, icon) in added {
-            store.claudeSessions[session.id] = session
-            store.agents.entries.append(AgentEntry(id: session.id, seen: session.activity, focusedAt: session.lastFocused, icon: icon))
-        }
-        func card(_ session: ClaudeSession, _ triage: RouterTriage, asks: [RouterAsk]? = nil, minutes: Double) -> RouterCard {
-            var c = RouterCard(id: "\(session.id)#t\(session.completedTurns)", sessionID: session.id,
-                               kind: RouterTriage.kind(blocked: false, triage: triage), title: session.title, folder: session.folder,
-                               text: session.summary?.detail ?? "", createdAt: now.addingTimeInterval(-minutes * 60))
-            c.triage = triage
-            c.asks = asks
-            return c
-        }
-        let s = { (id: String) in store.claudeSessions[id]! }
-        var ready = RouterTriage(state: .waiting, urgency: 1, work: .pr, waitingOn: .ci,
-                                 watch: .init(target: .ci(thing: "pr:me/lookout#212"), label: "CI on me/lookout#212", ref: "me/lookout#212"))
-        ready.ready = .init(result: "passing", at: now.addingTimeInterval(-40))
-        store.router.cards += [
-            card(s("local_demo-release"), RouterTriage(state: .approval, urgency: 4, work: .committed),
-                 asks: [RouterAsk(question: "OK to publish 2.4 to the App Store and push the `v2.4.0` tag?")], minutes: 3),
-            card(s("local_demo-api"), RouterTriage(state: .asks, urgency: 3, work: .uncommitted),
-                 asks: [RouterAsk(question: "Should the limit be **per API key** or per IP?", options: ["Per API key", "Per IP"]),
-                        RouterAsk(question: "Is 100 requests a minute the right default?")], minutes: 8),
-            card(s("local_demo-docs"), RouterTriage(state: .done, urgency: 0, unverified: true, work: .committed), minutes: 14),
-            card(s("local_demo-login"), ready, minutes: 6),
-            card(s("local_demo-schema"), RouterTriage(state: .waiting, urgency: 1, work: .none, waitingOn: .session,
-                                                      watch: .init(target: .session(id: "local_demo-lookout", turns: 4),
-                                                                   label: "session “Agent completion notifications”")), minutes: 11),
-            card(s("local_demo-bump"), RouterTriage(state: .waiting, urgency: 1, work: .pr, waitingOn: .ci), minutes: 20),
-        ]
-        // A last step left to you, and a turn with nothing in it for you, gone to the history unread (RouterTiers.swift).
-        var finish = RouterTriage(state: .done, urgency: 2, work: .pr)
-        finish.next = .you
-        var settled = RouterTriage(state: .done, urgency: 0, work: .pushed)
-        settled.next = .nothing
-        var icons = card(s("local_demo-icons"), settled, minutes: 9)
-        icons.addressedAt = now.addingTimeInterval(-8 * 60)
-        icons.addressedBy = .settled
-        icons.unread = true
-        icons.brief = "All 24 icons are exported, committed and pushed; nothing left to do."
-        var theme = card(s("local_demo-theme"), finish, minutes: 1)
-        theme.brief = "PR #88 is green: merge it, then relaunch Fjord to check light mode."
-        store.router.cards += [icons, theme]
-        if let i = store.router.cards.firstIndex(where: { $0.sessionID == "local_demo-docs" }) {
-            store.router.cards[i].brief = "The new docs layout is in, but it wasn't checked on mobile widths."
-        }
-        // The finished CI turn opened a PR, which its chip says.
-        if let i = store.router.cards.firstIndex(where: { $0.sessionID == "local_demo-ci" && $0.isOpen }) {
-            store.router.cards[i].triage = RouterTriage(state: .done, urgency: 0, work: .pr)
-        }
-    }
-
-    /// A day with more projects on top of the triage's: seven projects, some asking, some only running, one quiet. What
-    /// the Brief and the busy canvas shots are made on.
-    static func routerBusyDay(_ store: Store, now: Date = Date()) {
-        routerTriage(store, now: now)
-        let added = [
-            (session("local_demo-silo-ckpt", "Checkpoint restore over vsock", "silo", minutes: 1, running: true), "externaldrive"),
-            (session("local_demo-silo-guest", "Rebase the guest agent branch", "silo", minutes: 5,
-                     detail: "Rebased on main; 3 conflicts resolved."), "arrow.triangle.branch"),
-            (session("local_demo-silo-rel", "Release v0.9", "silo", minutes: 16,
-                     detail: "Tagged; waiting for the release workflow."), "shippingbox"),
-            (session("local_demo-site-copy", "Landing page copy", "fjord-site", minutes: 22,
-                     detail: "Three headline options drafted."), "text.quote"),
-            (session("local_demo-site-og", "Social preview images", "fjord-site", minutes: 1, running: true), "photo"),
-            (session("local_demo-zig", "std.fs: walk symlinks", "zig", minutes: 41,
-                     detail: "Upstream asks for a test before merging."), "z.circle"),
-            (session("local_demo-dots", "Ghostty config cleanup", "dotfiles", minutes: 1, running: true), "terminal"),
-        ]
-        for (session, icon) in added {
-            store.claudeSessions[session.id] = session
-            store.agents.entries.append(AgentEntry(id: session.id, seen: session.activity, focusedAt: session.lastFocused, icon: icon))
-            if let folder = session.folder { store.agents.assignColor(folder) }
-        }
-        store.claudeActivity["local_demo-silo-ckpt"] = ClaudeActivity(text: "Running cargo test -p silo-checkpoint",
-            since: now.addingTimeInterval(-40), todo: .init(done: 2, total: 5, active: "Restoring a snapshot over vsock"))
-        store.claudeActivity["local_demo-site-og"] = ClaudeActivity(text: "Rendering og-image.png", since: now.addingTimeInterval(-15))
-        store.claudeActivity["local_demo-dots"] = ClaudeActivity(text: "Editing ghostty/config", since: now.addingTimeInterval(-8))
-        let s = { (id: String) in store.claudeSessions[id]! }
-        func card(_ session: ClaudeSession, _ triage: RouterTriage, asks: [RouterAsk]? = nil, minutes: Double) -> RouterCard {
-            var c = RouterCard(id: "\(session.id)#t\(session.completedTurns)", sessionID: session.id,
-                               kind: RouterTriage.kind(blocked: false, triage: triage), title: session.title, folder: session.folder,
-                               text: session.summary?.detail ?? "", createdAt: now.addingTimeInterval(-minutes * 60))
-            c.triage = triage
-            c.asks = asks
-            return c
-        }
-        var copy = card(s("local_demo-site-copy"), RouterTriage(state: .done, urgency: 1, work: .uncommitted), minutes: 22)
-        copy.brief = "Three headline options for the landing page; pick one and it ships the page."
-        store.router.cards += [
-            card(s("local_demo-silo-guest"), RouterTriage(state: .approval, urgency: 4, work: .committed),
-                 asks: [RouterAsk(question: "OK to **force-push** the rebased `guest-agent` branch?")], minutes: 5),
-            card(s("local_demo-silo-rel"), RouterTriage(state: .waiting, urgency: 1, work: .pushed, waitingOn: .ci), minutes: 16),
-            copy,
-            card(s("local_demo-zig"), RouterTriage(state: .asks, urgency: 2, work: .pr),
-                 asks: [RouterAsk(question: "Add the test to `std/fs/test.zig` or a new file?", options: ["fs/test.zig", "New file"])],
-                 minutes: 41),
-        ]
-        store.router.summaries += [
-            RouterSummary(at: now.addingTimeInterval(-60), text: "Restore works for small guests; the 2 GB case is still slow.",
-                          sessionID: "local_demo-silo-ckpt", title: "Checkpoint restore over vsock"),
-        ]
-    }
-
-    /// The Brief over the busy day, as its agent would write it: what's for you, what's worth a look, then each project;
-    /// and the five rewrites that led to it (sessions finishing, an answer of yours, a new project), each paragraph's text
-    /// chaining from one to the next.
-    static func routerDigest(_ store: Store, now: Date = Date()) {
-        routerBusyDay(store, now: now)
-        func need(_ s: String, _ t: String) -> String { "<need s=\"local_demo-\(s)\">\(t)</need>" }
-        func look(_ s: String, _ t: String) -> String { "<look s=\"local_demo-\(s)\">\(t)</look>" }
-        func run(_ s: String, _ t: String) -> String { "<run s=\"local_demo-\(s)\">\(t)</run>" }
-        func folder(_ name: String) -> String { "/Users/me/code/\(name)" }
-
-        // For you, as each rewrite left it.
-        let answers = "\(need("lcu", "how lcu updates install")), \(need("api", "two rate-limit settings")), "
-            + "\(need("zig", "where the zig test goes")), and \(need("linux", "a sandbox plan")) to approve."
-        let pr = "\(need("theme", "PR #88")) is green"
-        let stuck = "\(need("calc", "lcu-research is stuck")) until the VPN is back."
-        let twoOKs = "Two OKs first: \(need("release", "publish Fjord 2.4")) and \(need("silo-guest", "force-push silo's guest branch")). "
-        let youA = "Quick answers: where sandbox storage lives, \(answers) \(pr). \(stuck)"
-        let youB = "Quick answers: \(answers) \(pr). \(stuck)"
-        let youC = "One OK first: \(need("silo-guest", "force-push silo's guest branch")). Then quick answers: \(answers) \(pr). \(stuck)"
-        let youD = "\(twoOKs)Then quick answers: \(answers) \(pr). \(stuck)"
-        let you = "\(twoOKs)Then quick answers: \(answers) \(pr) and \(need("login", "the login fix")) can go on. \(stuck)"
-
-        let lookA = "\(look("docs", "The new lcu docs")) weren't checked on mobile."
-        let lookNow = "\(look("docs", "The new lcu docs")) weren't checked on mobile, and "
-            + "\(look("site-copy", "three landing-page headlines")) are ready to pick from."
-
-        let tests = "\(run("lookout", "The test suite is running")), nothing has failed so far. The icon set is pushed."
-        let theme = "\(need("theme", "PR #88 is green")): merge it, then relaunch to check light mode."
-        let lookoutA = "Release 2.4 is building. The login fix waits on CI, and \(theme) \(tests)"
-        let lookoutB = "\(need("release", "2.4 is built with its notes")), waiting for your OK to publish and tag it. "
-            + "The login fix waits on CI, and \(theme) \(tests)"
-        let lookout = "\(need("release", "2.4 is built with its notes")), waiting for your OK to publish and tag it. "
-            + "\(need("login", "The login fix passed CI")) and can carry on, and \(theme) \(tests)"
-
-        let sandbox = "\(need("linux", "A plan to run the sandbox in a Firecracker microVM")) is ready for review. "
-            + "\(need("api", "The rate limiter")) needs two choices: per API key or per IP, and whether 100 a minute is right. "
-            + "\(run("ci", "CI is green")), with two reviewers still reading the changes; "
-            + "\(run("schema", "the schema migration")) waits for lookout's tests."
-        let sandboxA = "Sandbox storage asks where its cache should live: per project, or shared. \(sandbox)"
-
-        let siloRest = "\(run("silo-ckpt", "Checkpoint restore works")), but the 2 GB case is still slow. "
-            + "\(run("silo-rel", "v0.9 is tagged")); its release workflow is running."
-        let siloA = "\(run("silo-guest", "Rebasing the guest-agent branch on main.")) \(siloRest)"
-        let silo = "\(need("silo-guest", "The guest-agent branch is rebased")) and needs your OK to force-push. \(siloRest)"
-
-        let siteA = "\(run("site-og", "Social previews")) are rendering."
-        let site = "\(look("site-copy", "Three headline options")) for the landing page are drafted; picking one ships the page. "
-            + siteA
-
-        var digest = RouterDigest(
-            forYou: you, worthALook: lookNow,
-            projects: [
-                .init(folder: folder("lookout"), text: lookout),
-                .init(folder: folder("microsandbox"), text: sandbox),
-                .init(folder: folder("lcu"), text: "\(need("lcu", "Should updates install silently, or ask first?")) "
-                      + "\(look("docs", "The docs redesign is in")), not yet checked on mobile widths. "
-                      + "\(run("bump", "The SDK bump")) waits on CI."),
-                .init(folder: folder("silo"), text: silo),
-                .init(folder: folder("lcu-research"),
-                      text: need("calc", "Stuck: the staging database is unreachable while the VPN is down.")),
-                .init(folder: folder("zig"), text: "Upstream wants a test before merging the symlink walk: "
-                      + need("zig", "in fs/test.zig, or a new file?")),
-                .init(folder: folder("fjord-site"), text: site),
-                .init(folder: folder("dotfiles"), text: run("dots", "Cleaning up the Ghostty config.")),
-            ],
-            at: now.addingTimeInterval(-40))
-        typealias Change = RouterDigest.Revision.Change
-        digest.history = [
-            .init(at: now.addingTimeInterval(-40), trigger: .session("local_demo-login"),
-                  label: "The login fix passed CI and can go on",
-                  why: "CI on me/lookout#212 finished green. The session stopped to wait for it, so it's yours to tell it to go on.",
-                  changes: [Change(key: "lead-you", before: youD, after: you),
-                            Change(key: folder("lookout"), before: lookoutB, after: lookout)]),
-            .init(at: now.addingTimeInterval(-180), trigger: .session("local_demo-release"),
-                  label: "Fjord 2.4 is ready to publish",
-                  why: "The release session built 2.4 and its notes, and asks your OK before it publishes to the App Store and "
-                    + "pushes the v2.4.0 tag. Publishing can't be taken back, so it leads For you.",
-                  changes: [Change(key: "lead-you", before: youC, after: youD),
-                            Change(key: folder("lookout"), before: lookoutA, after: lookoutB)]),
-            .init(at: now.addingTimeInterval(-300), trigger: .session("local_demo-silo-guest"),
-                  label: "silo wants an OK to force-push its rebased branch",
-                  why: "The rebase on main is done with 3 conflicts resolved. A force-push rewrites the branch others may "
-                    + "have pulled, so it asks first.",
-                  changes: [Change(key: "lead-you", before: youB, after: youC),
-                            Change(key: folder("silo"), before: siloA, after: silo)]),
-            .init(at: now.addingTimeInterval(-420), trigger: .you("per project"),
-                  label: "You answered where sandbox storage lives",
-                  why: "You told the storage session to keep its cache per project. It went on with that, so the question "
-                    + "left the brief.",
-                  changes: [Change(key: "lead-you", before: youA, after: youB),
-                            Change(key: folder("microsandbox"), before: sandboxA, after: sandbox)]),
-            .init(at: now.addingTimeInterval(-1320), trigger: .session("local_demo-site-copy"),
-                  label: "Three landing-page headlines to pick from",
-                  why: "The copy session drafted three headline options. Nothing waits on them, so they're worth a look "
-                    + "rather than for you.",
-                  changes: [Change(key: "lead-look", before: lookA, after: lookNow),
-                            Change(key: folder("fjord-site"), before: siteA, after: site)]),
-        ]
-        // You last looked four minutes ago: the last two rewrites are new.
-        digest.seenAt = now.addingTimeInterval(-240)
-        store.routerDigest = digest
     }
 
     /// The Router changing Fjord itself: a record for each change (one taken back).

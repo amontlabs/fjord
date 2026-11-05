@@ -738,11 +738,6 @@ enum InboxSync {
             if let head = nodes(node["head"]).first.flatMap({ dict($0["commit"]) }),
                let rollup = dict(head["statusCheckRollup"]), let contexts = dict(rollup["contexts"]) {
                 let execution = ciExecution(sha: head["oid"] as? String ?? "", contexts: contexts)
-                // Only from all its checks: of 60 with 50 read, the latest of those may be well before the CI finished, so
-                // it is left to when the thing is found.
-                let read = nodes(contexts)
-                thing.ciFinishedAt = (contexts["totalCount"] as? Int ?? read.count) > read.count ? nil
-                    : read.compactMap { date($0["completedAt"] ?? $0["createdAt"]) }.max()
                 thing.ciRun = execution.run
                 thing.ciRunning = execution.running || checkState(rollup["state"]) == .pending
                 // Failing only by checks cancelled (none failed, errored or timed out): cancelled, never a failure of its own.
@@ -778,7 +773,6 @@ enum InboxSync {
             thing.failingJobs = workflow.failing
             thing.ciRun = workflow.run
             thing.ciRunning = workflow.running ?? false
-            thing.ciFinishedAt = workflow.updatedAt
             // Cancelled isn't passing: it counts as failing (as GitHub's rollup has it), and the wait says it was cancelled.
             thing.ciCancelled = workflow.state == .cancelled
             thing.checks = switch workflow.state {
@@ -1922,7 +1916,6 @@ extension Store {
         var updated = marks
         var baselines = categoryBaselines
         var posts: [(category: InboxCategory, entry: InboxEntry, fresh: [Fact])] = []
-        let context = inboxContext
         let byThing = Dictionary(all.map { ($0.thing.id, $0) }, uniquingKeysWith: { a, _ in a })
         for category in categories {
             let ruleIDs = Set(category.rules.map(\.id))
@@ -1958,11 +1951,6 @@ extension Store {
         baselines = baselines.filter { id, _ in categories.contains { $0.id == id } }
         if baselines != categoryBaselines { categoryBaselines = baselines }
         if updated != marks { marks = updated }
-        // Away, each post goes by Jev's rating as its own banner would (RouterAttention.swift), before any batch is made:
-        // the rest is counted for when you're back, and a batch is only of what may interrupt you.
-        if settings.notifications, !isSnoozed {
-            posts = posts.filter { routerAttention.admitInbox(InboxEngine.importance(things[$0.entry.thing.id] ?? $0.entry.thing, context: context)) }
-        }
         guard !posts.isEmpty else { return }
         if posts.count > 4 {
             let names = Set(posts.map(\.category.title)).sorted()
