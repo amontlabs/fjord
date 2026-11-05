@@ -426,6 +426,165 @@ import Testing
         #expect(w.core.checks()["t4"]?.owed == true)
     }
 
+    // MARK: Review fixes: deltas, loads, drops, pins, the handover, checks, the log
+
+    /// A thread frame's delta after its settled read: rows by key only, with its dock.
+    static func delta(_ rows: [JSON], stop: Bool = false) -> JSON {
+        ["type": "rows", "side": "thread", "full": false, "turning": false, "stop": .bool(stop), "approval": .null, "rows": .array(rows)]
+    }
+
+    @Test func aCardAskedInADeltaIsNeedsYouAndItsAnswerFromADeltaIsProved() throws {
+        let w = try World()
+        try w.up()
+        try w.overview([Self.running("t1")])
+        try w.threadView("t1", [Self.msg("m1", 1)])
+        try w.core.handle(w.frame(Self.delta([], stop: true), "chan_a", "t1"))
+        #expect(w.core.watching.states[CourierFrame(project: "chan_a", thread: "t1")]?.stop == true)  // the dock from a delta
+        try w.core.handle(w.frame(Self.delta([Self.card("c1", 2)]), "chan_a", "t1"))
+        #expect(w.status("t1") == "needs you" && w.core.watching.pendingCard["t1"] == "c1")
+        try w.core.handle(w.frame(["type": "threads", "threads": [Self.dashed("t1")]]))
+        try w.core.handle(w.frame(["type": "threads", "threads": [Self.row("t1", "done", "done")]]))
+        #expect(w.statusItems("t1") == ["working", "needs you"])  // never done past a pending card
+        var finished: JSON?
+        try w.core.answer("chan_a", "t1", card: "c1", option: 1, finished: { finished = $0 })
+        let answer = try #require(w.commands("answer").last)
+        try w.core.handle(w.frame(["type": "done", "id": answer["id"]!, "ok": true, "clicked": true], "chan_a", "t1"))
+        try w.core.handle(w.frame(Self.delta([Self.card("c1", 2, answered: true)]), "chan_a", "t1"))
+        #expect(w.core.watching.pendingCard["t1"] == nil)
+        try w.core.handle(w.frame(["type": "threads", "threads": [Self.running("t1")]]))
+        #expect(finished?["status"] == "confirmed" && w.status("t1") == "working")
+    }
+
+    @Test func aPageBeforeItsFrameLoadedWaitsForNothing() throws {
+        let w = try World()
+        try w.up()
+        try w.core.handle(w.frame(["type": "page", "signed_in": true, "page_ok": true, "loaded": 10, "instance": "f1", "documentId": "d1"]))
+        try w.core.handle(w.frame(["type": "frame_loaded", "frameId": 3, "documentId": "d1"]))
+        w.box.t += 21
+        try w.core.tick()
+        w.box.t += 21
+        try w.core.tick()
+        #expect(w.commands("frame_inject").isEmpty && w.commands("reload").isEmpty)
+    }
+
+    @Test func theDropAfterTheEnginesReloadOrTheTopsIsNoFailure() throws {
+        let w = try World()
+        try w.up(projects: ["chan_a", "chan_b"])
+        try w.core.handle(w.frame(["type": "frame_stuck"]))
+        #expect(w.commands("reload").count == 1)
+        try w.core.handle(w.frame(["type": "frame_gone"]))  // the old document of the engine's own reload
+        #expect(w.commands("reload").count == 1 && w.core.watch("chan_a") == .none)
+        try w.core.handle(w.frame(["type": "page", "signed_in": true, "page_ok": true, "loaded": 11, "instance": "f2"]))
+        w.box.t += 50
+        try w.core.tick()
+        #expect(w.commands("frame_inject").isEmpty && w.commands("reload").count == 1)
+        try w.core.handle(["type": "page", "signed_in": .null, "page_ok": false, "gone": true])  // the top document went
+        try w.core.handle(w.frame(["type": "frame_gone"], "chan_b"))
+        #expect(w.commands("reload").count == 1 && w.core.watch("chan_b") == .none)
+    }
+
+    @Test func anAnswersFrameIsPinnedAndItsRetryWantsItAgain() throws {
+        let w = try World()
+        try w.up()
+        try w.overview([Self.running("t1"), Self.running("t2"), Self.running("t3")])
+        for t in ["t1", "t2", "t3"] { try w.threadView(t, [Self.card("c-\(t)", 1)]); w.box.t += 1 }
+        try w.core.answer("chan_a", "t1", card: "c-t1", option: 1)
+        try w.core.handle(w.frame(["type": "threads", "threads": [Self.running("t5")]]))
+        #expect(w.core.watching.kept.map(\.thread).contains("t1"))  // the LRU card frame, but pinned: t2's went
+        try w.core.handle(["type": "page", "signed_in": true, "page_ok": true, "loaded": 2, "instance": "top2"])  // a new top document
+        #expect(w.core.watching.kept.map(\.thread).contains("t1") && w.wantsThread("t1"))
+        w.core.watching.kept.removeAll { $0.thread == "t1" }  // gone anyway
+        w.box.t += 21
+        try w.core.tick()
+        #expect(w.commands("answer").count == 2 && w.wantsThread("t1"))  // the retry wants it again
+    }
+
+    @Test func alreadyAnsweredAfterOurOwnClickIsProofPending() throws {
+        let w = try World()
+        try w.up()
+        try w.overview([Self.dashed("t1")])
+        try w.threadView("t1", [Self.card("c1", 1)])
+        var finished: JSON?
+        try w.core.answer("chan_a", "t1", card: "c1", option: 1, finished: { finished = $0 })
+        let first = try #require(w.commands("answer").last)
+        try w.core.handle(w.frame(["type": "done", "id": first["id"]!, "ok": true, "clicked": true], "chan_a", "t1"))
+        try w.threadView("t1", [Self.card("c1", 1)], loaded: 21)  // the answer's frame, opened again: its settled read, then deltas
+        w.box.t += 21
+        try w.core.tick()
+        let second = try #require(w.commands("answer").last)
+        try w.core.handle(w.frame(["type": "done", "id": second["id"]!, "ok": false, "refused": true, "error": "already answered"], "chan_a", "t1"))
+        #expect(finished == nil)
+        try w.core.handle(w.frame(Self.delta([Self.card("c1", 1, answered: true)]), "chan_a", "t1"))
+        try w.core.handle(w.frame(["type": "threads", "threads": [Self.running("t1")]]))
+        #expect(finished?["status"] == "confirmed")
+    }
+
+    @Test func oneHandoverAtATimeAndItsBaseSetOnce() throws {
+        let w = try World()
+        try w.up()
+        try w.core.handle(["type": "handover_wanted", "budget": 6])
+        try w.core.handle(["type": "handover_wanted", "budget": 7])
+        #expect(w.commands("handover").count == 1)
+        let bases = { w.commands("frames").filter { $0["base"] == true }.count }
+        let before = bases()
+        try w.core.handle(["type": "handover_done", "tabId": 8, "instance": "top2"])
+        try w.core.handle(["type": "page", "signed_in": true, "page_ok": true, "loaded": 2, "instance": "top2"])
+        #expect(bases() == before + 1)
+        try w.core.handle(["type": "done", "id": "x", "ok": true])
+        try w.core.tick()
+        #expect(w.commands("handover").count == 1 && w.core.watching.handoverBudget == nil)
+    }
+
+    @Test func aFrameIsLiveOnlyAfterASettledWholeRead() throws {
+        let w = try World()
+        try w.up()
+        try w.core.handle(w.frame(["type": "commands", "waiting": [], "done": []]))
+        #expect(w.core.watch("chan_a") == .none)
+        try w.overview([])
+        #expect(w.core.watch("chan_a") == .live)
+    }
+
+    @Test func departuresCountOnlyAfterAListedReadAndKeepOwedChecks() throws {
+        let w = try World()
+        try w.up()
+        try w.overview([Self.dashed("t1")], listed: false)
+        try w.core.handle(w.frame(["type": "threads", "threads": [["thread": "t1", "gone": true]]]))
+        #expect(w.status("t1") == "paused")  // no listed read of this document yet
+        try w.overview([Self.dashed("t1")])
+        try w.core.handle(w.frame(["type": "threads", "threads": [["thread": "t1", "gone": true]]]))
+        #expect(w.status("t1") == "done" && w.core.checks()["t1"]?.owed == true)
+    }
+
+    @Test func aCheckThatNeverSettlesIsRequeuedThenUnchecked() throws {
+        let w = try World()
+        try w.up()
+        try w.overview([Self.dashed("t1")])
+        #expect(w.core.watching.check?.thread == "t1")
+        w.box.t += 61
+        try w.core.tick()
+        #expect(w.core.watching.check?.thread == "t1" && w.core.checks()["t1"]?.owed == true)  // requeued
+        w.box.t += 61
+        try w.core.tick()
+        #expect(w.core.watching.check == nil && w.core.checks()["t1"]?.owed == false)
+        #expect(w.core.checks()["t1"]?.why?.hasPrefix("unchecked") == true)
+    }
+
+    @Test func aRenumberingOrARowsClockAddsNoItem() throws {
+        let w = try World()
+        try w.up()
+        try w.core.handle(w.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [Self.msg("k1", 1)]]))
+        try w.core.handle(w.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [Self.msg("k1", 7)]]))
+        #expect(try w.core.db.items(project: "chan_a", after: 0, kind: "row").count == 1)
+        var r = Self.running("t1"); r["text"] = "T t1 now"
+        try w.overview([r])
+        r["text"] = "T t1 1m"
+        try w.overview([r])
+        #expect(try w.core.db.items(project: "chan_a", after: 0, kind: "thread").count == 1)
+        let w2 = try w.reopen()
+        try w2.core.handle(w2.top(["type": "rows", "side": "project", "full": true, "settled": true, "turning": false, "rows": [Self.msg("k1", 9)]]))
+        #expect(try w2.core.db.items(project: "chan_a", after: 0, kind: "row").count == 1)  // after a restart too
+    }
+
     @Test func noFramesNoHomeUntilTheTopFrameReportsThem() throws {
         let w = try World()
         try w.up(frames: false)

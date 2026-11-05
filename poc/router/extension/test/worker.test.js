@@ -47,6 +47,7 @@ function world({ storage = { tabId: 7 }, tabs = [{ id: 7, url: PIN, status: "com
   w.load = () => {
     const ctx = vm.createContext({ chrome: w.chrome, console: { log() {}, warn() {}, error() {} }, setTimeout: (f, ms) => setTimeout(f, Math.min(ms, 30)), clearTimeout, URL, Date, Promise, Map, Set, WeakMap, JSON, Math, Error, Array, Object, Number, String });
     vm.runInContext(SOURCE, ctx);
+    w.eval = (code) => vm.runInContext(code, ctx);  // the worker's own state, for what no message shows
     return w;
   };
   // A port as the worker sees it: `say` delivers a message from the script, `drop` its disconnect; `got` what the worker posted to it.
@@ -76,8 +77,8 @@ async function adopted(opts) {
   assert(kinds(page).includes("snapshot"), "the top frame is adopted");
   return { w, page };
 }
-async function frame(w, { tab = 7, frameId = 3, name = "fjord:chan_A:-", url } = {}) {
-  const port = w.port({ tab, frameId, name: "fjord-frame", url });
+async function frame(w, { tab = 7, frameId = 3, name = "fjord:chan_A:-", url, documentId } = {}) {
+  const port = w.port({ tab, frameId, name: "fjord-frame", url, ...(documentId ? { documentId } : {}) });
   port.say({ type: "frame_hello", name });
   await settle();
   return port;
@@ -306,6 +307,77 @@ const cases = {
     await settle();
     eq(typesTo(w, "handover_done").length, 1, "and takes over");
     eq(w.storage.tabId, 8, "re-pointed");
+  },
+
+  async new_document_before_old_drop_keeps_its_answer() {
+    const { w } = await adopted();
+    const old = await frame(w, { frameId: 5, name: "fjord:chan_A:cmsg_T", documentId: "doc1" });
+    w.fromHost({ kind: "answer", id: "a1", project: "chan_A", thread: "cmsg_T", card: "k", option: 1 });
+    eq(old.got.filter((m) => m.kind === "answer").map((m) => m.id), ["a1"], "sent to the live port");
+    const fresh = await frame(w, { frameId: 5, name: "fjord:chan_A:cmsg_T", documentId: "doc2" });
+    eq(kinds(fresh), ["answer", "snapshot"], "the new document's port takes the answer in flight, before its snapshot");
+    old.drop();
+    await settle();
+    eq(typesTo(w, "frame_gone").length, 0, "no frame_gone while a live document of that frame remains");
+    eq(fresh.got.filter((m) => m.kind === "answer").length, 1, "the answer isn't sent twice");
+    fresh.say({ type: "page", signed_in: true, page_ok: true, loaded: 5, instance: "i" });
+    await settle();
+    eq(typesTo(w, "page").at(-1).documentId, "doc2", "a frame's events carry its document");
+    fresh.drop();
+    await settle();
+    eq(typesTo(w, "frame_gone").length, 1, "the last document's drop is frame_gone");
+    const third = await frame(w, { frameId: 5, name: "fjord:chan_A:cmsg_T", documentId: "doc3" });
+    eq(kinds(third), ["answer", "snapshot"], "its answer waits for the next port");
+  },
+
+  async frame_loaded_names_its_document() {
+    const { w } = await adopted({ inject: async (opts) => (opts.func ? [{ result: "fjord:chan_A:-" }] : []) });
+    w.ev.navDone.fire({ tabId: 7, frameId: 3, parentFrameId: 0, url: "https://claude.ai/code/project/chan_A", documentId: "docX" });
+    await settle();
+    eq(typesTo(w, "frame_loaded").map((m) => m.documentId), ["docX"], "frame_loaded carries the documentId");
+  },
+
+  async loads_counted_when_delivered() {
+    const { w, page } = await adopted();
+    page.drop();
+    await settle();
+    const want = (n) => Array.from({ length: n }, (_, i) => ({ project: "chan_" + i, thread: null }));
+    w.fromHost({ kind: "frames", want: want(1), base: true });
+    w.fromHost({ kind: "frames", want: want(4) });
+    w.fromHost({ kind: "reload", frame: { project: "chan_0", thread: null } });
+    await settle();
+    eq(w.storage.budget ?? 0, 0, "nothing is counted while queued");
+    const fresh = w.port();
+    await settle();
+    eq(fresh.got.filter((m) => m.kind === "frames").length, 1, "the newer frames replaced the queued one");
+    assert(!kinds(fresh).includes("reload"), "a reload of the gone document isn't queued");
+    eq(w.storage.budget, 4, "the delivered set counts against the last delivered one");
+  },
+
+  async abort_checks_after_its_awaits() {
+    const { w, page } = await adopted();
+    w.fromHost({ kind: "handover" });
+    await settle();
+    const fresh = w.port({ tab: 8 });
+    await settle();
+    w.fromHost({ kind: "handover_abort" });
+    await Promise.resolve(); await Promise.resolve();
+    fresh.say({ type: "commands", waiting: [], done: [], instance: "n" });
+    await settle();
+    // The abort passed its first await before the takeover began: it must see the takeover after its next one.
+    eq(typesTo(w, "handover_done").length, 1, "the takeover goes on");
+    eq(w.storage.tabId, 8, "a takeover begun is never aborted");
+    eq(w.removed, [7], "the new tab stays, the old one closes");
+    assert(page.disconnected, "the old page let go");
+  },
+
+  async frame_names_pruned() {
+    const { w, page } = await adopted();
+    await frame(w, { frameId: 3, name: "fjord:chan_A:-" });
+    await frame(w, { frameId: 4, name: "fjord:chan_B:-" });
+    page.say({ type: "frames", have: [{ name: "fjord:chan_A:-", project: "chan_A", thread: null, src: "x" }] });
+    await settle();
+    eq(w.eval("[...frameOf.keys()]"), ["7:3"], "a frame no longer shown is forgotten");
   },
 
   async restart_with_missing_new_tab_clears() {

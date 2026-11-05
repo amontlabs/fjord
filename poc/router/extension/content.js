@@ -7,7 +7,7 @@ let stopped = false;
 // `recent` starts empty. Every `page` and `commands` event carries it, so routerd tells the two apart by (`loaded`, `instance`).
 const INSTANCE = crypto.randomUUID();
 // Watch mode (router-watch-and-briefs.md 1.1): in one of the hidden <iframe>s Fjord's top frame keeps, the script only reports, and runs
-// only `wake`, `overview` and, in a thread frame, `answer`: it never types, never clicks a composer, never opens a place. Its identity is
+// only `wake` and, in a thread frame, `answer`: it never types, never clicks a composer, never opens a place. Its identity is
 // the <iframe>'s name, `fjord:<project>:<thread|->` (`window.name`), never its address: a project frame jumps to `?thread=` as it loads.
 // A frame whose name isn't Fjord's (the page's own) runs nothing.
 const FRAME = window !== window.top;
@@ -17,7 +17,7 @@ const parseName = (name) => {
 };
 const NAME = FRAME ? parseName(window.name) : null;
 if (FRAME && !NAME) return;
-const THREAD_FRAME = !!NAME?.thread, PROJECT_FRAME = !!NAME && !NAME.thread;
+const THREAD_FRAME = !!NAME?.thread;
 const alive =() => { try { return !stopped && !!chrome.runtime.id; } catch { return false; } };
 // A script left behind by a reloaded extension can't see its runtime any more, so it doesn't count. It is stopped (observers, waiting
 // steps) before this one takes over, in case it still runs in the same isolated world; if a reload doesn't share the world, there is
@@ -448,6 +448,8 @@ function scan(full) {
       told.quiet.project = told.settle.project = null;
       told.threads.clear(); told.emptied = false;  // another project's Threads panel: this one's are sent whole anyway (`full`), and the map doesn't grow per visit
     }
+    // Any arrival on an overview (a `?thread=` closed too) starts its threads again: a row told before the jump says nothing of now.
+    if (threadParam() === null) told.threads.clear();
     told.owed = { project: true, thread: true }; told.empty = { project: false, thread: false }; told.quiet.thread = told.settle.thread = null; told.composer = { project: "", thread: "" };
     told.unsettled = { project: null, thread: null }; told.turning = { project: null, thread: null };
     told.listed = false; told.dock = null;
@@ -489,10 +491,10 @@ function scan(full) {
   const threads = listed.filter((row) => whole || told.threads.get(row.thread) !== JSON.stringify(row));
   for (const row of threads) told.threads.set(row.thread, JSON.stringify(row));
   // Departures: a thread told in an active section (`needs`, `running`, `active`) and no longer rendered leaves, said as `{thread, gone:
-  // true}` in the same event, under the emptied case's conditions (project composer mounted, no thread open, this visit's rows seen:
-  // `told.threads` is cleared by a new path). A `done` row dropping out of the group's 20 is no departure, and says nothing.
+  // true}` in the same event, only while the overview is listed (`overviewListed`: loaded by structure, no thread open; `told.threads`
+  // is cleared by every arrival on an overview). A `done` row dropping out of the group's 20 is no departure, and says nothing.
   const gone = [];
-  if (threadParam() === null && box("project")) {
+  if (isListed && box("project")) {
     const shown = new Set(listed.map((row) => row.thread));
     for (const [id, said] of told.threads) {
       if (shown.has(id)) continue;
@@ -1513,16 +1515,6 @@ function watchPlace() {
   }
   stuck();
 }
-// `overview`: the engine asks a project frame to get back to its overview now (its counts start again).
-function overviewStep() {
-  return () => {
-    if (!PROJECT_FRAME) return { ok: false, refused: true, error: "not a project frame" };
-    Object.assign(place, { phase: null, at: 0, moves: 0, stuck: false, off: null });
-    watchPlace();
-    return { ok: true };
-  };
-}
-
 // ---- Answering a card by click (router-watch-and-briefs.md 3.5), in a thread frame only. `answer {id, project, thread, card, option}`:
 // once this frame's thread side has sent a settled whole read (`told.owed.thread` false), the row whose `data-entry-key` is `card` must
 // hold `[data-testid=decision-card]` with no `data-state` (pending); then the `option`th (1-based) `ul[role=list] button` of that card is
@@ -1551,8 +1543,8 @@ function answerStep(command) {
 }
 
 // A frame runs only its watching steps; the top frame everything else.
-const FRAME_STEPS = new Set(["answer", "overview"]);
-const steps = { answer: answerStep, overview: overviewStep, open: openStep, send: sendStep, create_project: createProject, set_field: setField, add_repo: addRepo, preapprove_folder: preapproveFolder, remove_folder: removeFolder, read_settings: readSettings, unarchive };
+const FRAME_STEPS = new Set(["answer"]);
+const steps = { answer: answerStep, open: openStep, send: sendStep, create_project: createProject, set_field: setField, add_repo: addRepo, preapprove_folder: preapproveFolder, remove_folder: removeFolder, read_settings: readSettings, unarchive };
 
 // Stops this instance for good: no observer, no waiting step, no port. A step woken by a timer afterwards finds nothing to run.
 function stop() {
@@ -1653,7 +1645,9 @@ observer.observe(document.body, {
   subtree: true,
   characterData: true,
   attributes: true,
-  attributeFilter: ["disabled", "data-index", "data-entry-key", "data-perf-row-streaming", "data-perf-row", "data-home-card", "data-home-section", "data-home-title", "data-home-status-line", "data-home-status-mark", "aria-current", "aria-expanded", "aria-selected", "data-highlighted", "data-closed"],
+  attributeFilter: ["disabled", "data-index", "data-entry-key", "data-perf-row-streaming", "data-perf-row", "data-home-card", "data-home-section", "data-home-title", "data-home-status-line", "data-home-status-mark", "aria-current", "aria-expanded", "aria-selected", "data-highlighted", "data-closed",
+    // a card answered or busy, the coordinator card's glyph, the overview's list loaded: each changes what a scan or a step reads
+    "data-state", "aria-busy", "aria-disabled", "data-glyph", "data-home-state"],
 });
 // A script with no port (its connect failed, or its reconnect did) connects again rather than say it is alive with nothing to adopt.
 // The worker asking is a reason to connect now, whatever the backoff says (`connectAfter`): it is the one that wants a page.

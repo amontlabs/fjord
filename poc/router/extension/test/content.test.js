@@ -38,7 +38,7 @@ function page({ url, name = "", frame = false, build = () => [] }) {
     setTimeout: () => 0, clearTimeout() {}, queueMicrotask: (f) => Promise.resolve().then(f),
     dispatchEvent: () => { env.popstates++; env.onPop?.(); return true; },
     PopStateEvent: class { constructor(type, init) { this.type = type; this.state = init?.state; } },
-    MutationObserver: class { constructor(cb) { env.mutations = cb; } observe() {} disconnect() {} },
+    MutationObserver: class { constructor(cb) { env.mutations = cb; } observe(_target, options) { env.observed = options; } disconnect() {} },
     PerformanceObserver: class { constructor(cb) { env.resources = cb; } observe() {} disconnect() {} },
     chrome: { runtime: { id: "ext", connect: ({ name: portName }) => { env.portName = portName; return port; }, onMessage: { addListener() {}, removeListener() {} } } },
   };
@@ -250,6 +250,47 @@ const cases = {
     env.say({ kind: "answer", id: "t1", project: "chan_A", thread: "cmsg_T", card: "k", option: 1 });
     eq(env.events("done").map((d) => d.error), ["only a frame runs that"], "the top frame never answers");
     assert(env.events("page").at(-1).heap === 123, "the heap rides on the top frame's page");
+  },
+
+  async departures_only_from_a_listed_overview() {
+    const rows = [{ id: "cmsg_1", section: "active" }, { id: "cmsg_2", section: "running", spin: true }];
+    const env = page({ url: "https://claude.ai/code/project/chan_A", name: "fjord:chan_A:-", frame: true, build: (h) => overview(h, rows) });
+    env.say({ kind: "snapshot" });  // no /timeline fetch yet: not listed
+    env.doc.querySelector('[data-home-card="cmsg_2"]').remove();
+    env.flush();
+    assert(!env.events("threads").some((e) => e.threads.some((t) => t.gone)), "a row leaving an overview not yet listed is no departure");
+  },
+
+  async a_thread_jump_starts_the_overviews_threads_again() {
+    const rows = [{ id: "cmsg_1", section: "active" }, { id: "cmsg_2", section: "running", spin: true }];
+    const env = page({ url: "https://claude.ai/code/project/chan_A", name: "", build: (h) => overview(h, rows) });
+    env.say({ kind: "snapshot" });
+    env.clock.t += 50;
+    env.timeline("chan_A");
+    eq(env.events("threads").filter((e) => e.listed).length, 1, "listed");
+    env.go("https://claude.ai/code/project/chan_A?thread=cmsg_2");
+    env.flush();
+    env.doc.querySelector('[data-home-card="cmsg_2"]').remove();
+    env.go("https://claude.ai/code/project/chan_A");
+    const n = env.events("threads").length;
+    env.flush();
+    const back = env.events("threads").slice(n);
+    assert(!back.some((e) => e.threads.some((t) => t.gone)), "rows told before the jump make no departure");
+    eq(back.filter((e) => e.listed).map((e) => e.threads.map((t) => t.thread)), [["cmsg_1"]], "the arrival's whole listed read says the list");
+  },
+
+  async observer_watches_card_and_list_states() {
+    const env = page({ url: "https://claude.ai/code/project/chan_A", name: "fjord:chan_A:-", frame: true, build: (h) => overview(h, []) });
+    for (const attr of ["data-state", "aria-busy", "aria-disabled", "data-glyph", "data-home-state"]) {
+      assert(env.observed.attributeFilter.includes(attr), attr + " is observed");
+    }
+  },
+
+  async overview_command_is_gone() {
+    const env = page({ url: "https://claude.ai/code/project/chan_A", name: "fjord:chan_A:-", frame: true, build: (h) => overview(h, []) });
+    env.say({ kind: "snapshot" });
+    env.say({ kind: "overview", id: "o1" });
+    eq(env.events("done").map((d) => [d.id, d.error]), [["o1", "unknown command"]], "no overview command");
   },
 
   async foreign_frame_runs_nothing() {

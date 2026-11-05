@@ -98,8 +98,11 @@ function hostLost() {
 // Tells routerd there is no page, and why when the tab says (`away`, `signed_in`): its runs pause with that cause (`do.blocked`).
 const noPage = (why = {}) => toHost(stamp({ type: "page", signed_in: null, page_ok: false, ...why }));
 
+// A load is counted when its command reaches the page (`frames`, `reload`), never when it is queued: a superseded one loads nothing.
 function toPage(command) {
-  try { page.postMessage(command); return true; } catch { pageGone(page); return false; }
+  try { page.postMessage(command); } catch { pageGone(page); return false; }
+  if (command.kind === "frames" || command.kind === "reload") countLoads(command);
+  return true;
 }
 
 // The page's port dropped (its tab closed, reloaded or navigated away): routerd is told at once, as when there is no page, so its runs
@@ -124,6 +127,8 @@ const queuedAt = new WeakMap();  // when each queued command was queued
 const freshCancels = (commands) => commands.filter((command) => command.kind !== "cancel" || Date.now() - (queuedAt.get(command) ?? 0) < CANCEL_KEEP_MS);
 function queue(command) {
   waitingForPage = freshCancels(waitingForPage);
+  // A `reload` names a frame of the document that went: it isn't queued (the next document's base set loads every frame anyway).
+  if (command.kind === "reload") return;
   if (command.kind === "cancel") {
     const target = waitingForPage.findIndex((queued) => queued.id === command.target);
     if (target >= 0) {
@@ -236,7 +241,6 @@ function fromHost(message) {
   if (message.kind === "frame_inject") return void inject(message).catch(() => {});
   if (message.kind === "handover") return void startHandover().catch(() => {});
   if (message.kind === "handover_abort") return void abortHandover().catch(() => {});
-  if (message.kind === "frames" || message.kind === "reload") countLoads(message);  // both go to the top frame, as below
   if (page && toPage(message)) return;
   queue(message);
   if (message.kind === "cancel") return;  // kept queued for a page that connects on its own: it opens no tab
@@ -381,7 +385,12 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
 // What the adopted top frame says goes to routerd. The worker notes two things on the way: the top frame's `frames {have}` (to tell which
 // frame a failed document was, `frame_blank`), and each `page`'s `loaded` (a document the worker didn't load wants a handover).
 function fromPage(event, port) {
-  if (event?.type === "frames" && Array.isArray(event.have)) lastHave = event.have;
+  if (event?.type === "frames" && Array.isArray(event.have)) {
+    lastHave = event.have;
+    // a frame no longer shown is named by nothing any more
+    const shown = new Set(lastHave.map((h) => frameKey(parseName(h.name))));
+    for (const [at, frame] of frameOf) if (!shown.has(frameKey(frame))) frameOf.delete(at);
+  }
   if (event?.type === "page") checkLoaded(event, port.sender?.tab?.id);
   toHost(event);
 }
@@ -468,10 +477,18 @@ async function frameConnected(port) {
     if (event?.type !== "frame_hello") return;
     const frame = parseName(event.name);
     if (!frame) { try { port.postMessage({ kind: "stop" }); } catch {} return; }
-    entry = { port, key: `${tab.id}:${frameId}:${documentId ?? ""}`, tabId: tab.id, frameId, frame: { ...frame, frameId }, inFlight: new Map(), dropped: false };
+    entry = { port, key: `${tab.id}:${frameId}:${documentId ?? ""}`, tabId: tab.id, frameId, documentId, frame: { ...frame, frameId }, inFlight: new Map(), dropped: false };
+    const key = frameKey(frame);
+    // A new document's port can connect before the old one's drop: the old one's answers in flight move here (its document is going).
+    const moved = [];
+    for (const other of framePorts.values()) {
+      if (other.dropped || frameKey(other.frame) !== key) continue;
+      moved.push(...other.inFlight.values());
+      other.inFlight.clear();
+    }
     framePorts.set(entry.key, entry);
     frameOf.set(`${tab.id}:${frameId}`, frame);
-    const key = frameKey(frame), list = waitingForFrame.get(key) ?? [];
+    const list = [...moved, ...(waitingForFrame.get(key) ?? [])];
     waitingForFrame.delete(key);
     const lost = list.findIndex((command) => !postFrame(entry, command));
     if (lost >= 0) waitingForFrame.set(key, list.slice(lost));
@@ -487,17 +504,23 @@ async function frameConnected(port) {
   for (const event of early.splice(0)) take(event);
 }
 
+// Each event goes up with its frame and its document (`documentId`: a `frame_loaded` of a document whose `page` came is no wait).
 function fromFrame(entry, event) {
   if (event?.type === "done") entry.inFlight.delete(event.id);
-  toHost({ ...stamp(event), frame: entry.frame });
+  toHost({ ...stamp(event), frame: entry.frame, ...(entry.documentId ? { documentId: entry.documentId } : {}) });
 }
 
+// A port drops. Its answers not done go to the frame's live port if a newer document has one, else back on its list. `frame_gone` is
+// said only when no live document of that frame remains.
 function frameGone(entry) {
   if (framePorts.get(entry.key) === entry) framePorts.delete(entry.key);
   const key = frameKey(entry.frame);
-  if (entry.inFlight.size) waitingForFrame.set(key, [...entry.inFlight.values(), ...(waitingForFrame.get(key) ?? [])]);
+  const pending = [...entry.inFlight.values()];
   entry.inFlight.clear();
-  if (entry.dropped) return;  // its tab was handed over: the new document's frames replace it, nothing went
+  const live = entry.dropped ? null : portFor(key);
+  const lost = live ? pending.filter((command) => !postFrame(live, command)) : pending;
+  if (lost.length) waitingForFrame.set(key, [...lost, ...(waitingForFrame.get(key) ?? [])]);
+  if (entry.dropped || live) return;  // its tab was handed over, or a newer document of it is live: nothing went
   toHost(stamp({ type: "frame_gone", frame: entry.frame }));
 }
 
@@ -508,6 +531,7 @@ function dropFramesOf(tabId) {
     entry.dropped = true;
     framePorts.delete(entry.key);
   }
+  for (const at of [...frameOf.keys()]) if (at.startsWith(`${tabId}:`)) frameOf.delete(at);
 }
 
 // ---- Frame loads (1.2), by `webNavigation`: a frame of Fjord's tab that completed a load is named by `executeScript` (which runs where
@@ -539,7 +563,7 @@ chrome.webNavigation?.onCompleted.addListener(async (d) => {
   const frame = parseName(name);
   if (!frame || !atCode(d.url)) return;  // not one of Fjord's frames, or its first about:blank
   frameOf.set(`${d.tabId}:${d.frameId}`, frame);
-  toHost(stamp({ type: "frame_loaded", frame: { ...frame, frameId: d.frameId }, frameId: d.frameId }));
+  toHost(stamp({ type: "frame_loaded", frame: { ...frame, frameId: d.frameId }, frameId: d.frameId, ...(d.documentId ? { documentId: d.documentId } : {}) }));
 });
 
 chrome.webNavigation?.onErrorOccurred.addListener(async (d) => {
@@ -599,12 +623,12 @@ async function takeOver(port, handover, commands) {
 
 async function abortHandover() {
   await handoverReady;
-  if (takingOver) return;  // the new tab is being adopted: too late to abort, `handover_done` follows
   const { handover } = await session.get("handover");
-  if (!handover) return;
-  await session.remove("handover");
+  // Checked after the awaits: the new tab may have begun taking over meanwhile, too late to abort (`handover_done` follows).
+  if (!handover || takingOver) return;
   const port = handoverPort;
-  handoverPort = null;
+  handoverPort = null;  // at once: its `commands` now takes nothing over
+  await session.remove("handover");
   try { port?.disconnect(); } catch {}
   dropFramesOf(handover.newTabId);
   await chrome.tabs.remove(handover.newTabId).catch(() => {});

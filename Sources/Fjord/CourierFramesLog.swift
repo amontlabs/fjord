@@ -19,7 +19,8 @@ import Foundation
 //   "session"  id the local session id          {state, title, needs, detail}; `thread` the Board's thread id
 //   "status"   id the thread's id               {status: "working"|"needs you"|"paused"|"done", needs?: "permission"}; `thread` set
 // An item is appended only when its content differs from the last one stored for (kind, id): a reload, a handover, a second frame
-// or a coordinator repeat adds nothing. A streaming row is stored once settled; `turning` and streaming text are never items.
+// or a coordinator repeat adds nothing. Volatile fields (`CourierLog.volatile`: a row's `index`, a thread row's `text`, its innerText
+// with relative times) are stored but never compared, so a renumbering or a clock tick adds nothing either. A streaming row is stored once settled; `turning` and streaming text are never items.
 
 struct CourierItem: Equatable, Sendable {
     let seq: Int
@@ -96,7 +97,10 @@ extension CourierStore {
 /// The log in memory: the newest content of each item, so a repeat is dropped without a query, and the threads' statuses.
 final class CourierLog {
     let db: CourierStore
+    /// Fields stored but left out of the comparison, by kind: they change with no change to the item.
+    static let volatile: [String: Set<String>] = ["row": ["index"], "thread": ["text"]]
     private var last: [String: String]
+    private var stable: [String: String] = [:]  // (kind, id) -> the newest content without its volatile fields
     private(set) var status: [String: String] = [:]  // thread -> the latest recorded status
     private(set) var statusProject: [String: String] = [:]
     private(set) var statusAt: [String: Double] = [:]  // thread -> when its latest status was recorded
@@ -107,6 +111,10 @@ final class CourierLog {
     init(_ db: CourierStore) {
         self.db = db
         last = (try? db.latestItems()) ?? [:]
+        for (key, text) in last {
+            let kind = String(key.split(separator: "\u{1}", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+            stable[key] = Self.volatile[kind] == nil ? text : Self.stableText(kind, (try? JSON.parse(text)) ?? .null)
+        }
         lastSeq = ((try? db.query("select max(seq) as seq from items")) ?? []).first?["seq"]?.asInt ?? 0
         for i in (try? db.items(project: nil, after: 0, kind: "status")) ?? [] { noteStatus(i.id, project: i.project, at: i.at, i.content) }
     }
@@ -124,12 +132,19 @@ final class CourierLog {
     }
 
     /// Stores the item unless its content is the last stored for (kind, id). Returns whether it was new.
+    static func stableText(_ kind: String, _ content: JSON) -> String {
+        guard let drop = volatile[kind], var o = content.asObject else { return content.encoded() }
+        for k in drop { o[k] = nil }
+        return JSON.object(o).encoded()
+    }
+
     @discardableResult
     func record(_ now: Double, project: String?, thread: String?, kind: String, id: String, content: JSON) throws -> Bool {
-        let key = kind + "\u{1}" + id, text = content.encoded()
-        if last[key] == text { return false }
+        let key = kind + "\u{1}" + id, text = content.encoded(), same = Self.stableText(kind, content)
+        if stable[key] == same { return false }
         lastSeq = max(lastSeq, try db.addItem(now, project: project, thread: thread, kind: kind, id: id, content: content))
         last[key] = text
+        stable[key] = same
         if kind == "status" { noteStatus(id, project: project, at: now, content) }
         return true
     }

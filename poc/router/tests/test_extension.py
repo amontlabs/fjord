@@ -73,10 +73,10 @@ class NodeStubs(unittest.TestCase):
                 self.assertTrue(case["ok"], case.get("error"))
 
     def test_worker(self):
-        self.check("worker.test.js", 15)
+        self.check("worker.test.js", 20)
 
     def test_content(self):
-        self.check("content.test.js", 10)
+        self.check("content.test.js", 14)
 
 
 if __name__ == "__main__":

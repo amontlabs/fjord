@@ -24,8 +24,6 @@ extension CourierCore {
         let f = CourierFrame(project: project, thread: thread)
         let a = CourierAnswer(id: id, frame: f, card: card, option: option, finished: finished)
         watching.answers[id] = a
-        answerFrame(f)
-        syncFrames()
         issueAnswer(a)
     }
 
@@ -36,11 +34,15 @@ extension CourierCore {
         if let i = watching.keptIndex(thread) { watching.kept[i].card = true; watching.kept[i].used = clock(); return }
         if watching.check == f { watching.checkAnswer = true; return }
         if keep(f.project, thread, card: true) { return }
+        if let c = watching.check, watching.checkAnswer, watching.pinned(c.thread) { return }  // another answer's: its deadline retries
         watching.check = f
         watching.checkAnswer = true
     }
 
+    /// Each issue (the first, a retry, a reissue after a cut-off) wants its frame again: it may have gone meanwhile.
     func issueAnswer(_ a: CourierAnswer) {
+        answerFrame(a.frame)
+        syncFrames()
         a.attempts += 1
         a.lost = false
         a.frameInstance = watching.states[a.frame]?.instance
@@ -54,6 +56,8 @@ extension CourierCore {
         guard let id = event.get("id")?.asString, let a = watching.answers.values.first(where: { $0.command == id }) else { return }
         a.command = nil
         if event.get("refused") == .bool(true) {
+            // after Fjord's own click, a card that shows answered is that click's: its proof is pending, not a refusal
+            if a.clicked && event.get("error")?.asString == "already answered" { return try proveAnswers() }
             return try finishAnswer(a, "refused", (event.get("error")?.asString).flatMap { $0.isEmpty ? nil : $0 } ?? "the card was already answered or is gone")
         }
         if event.flag("ok") || event.flag("clicked") {
@@ -88,8 +92,8 @@ extension CourierCore {
     }
 
     /// The frame's port is back and says what it holds: a cut-off answer it neither ran nor holds is reissued, once.
+    /// The frame counts live only after a settled whole read of this document, never at its `commands`.
     func frameReplay(_ f: CourierFrame, _ event: JSON) throws {
-        live(f)
         let waiting = Set((event.get("waiting")?.asArray ?? []).compactMap(\.asString))
         let done = CourierPage.items(event.get("done"))
         for a in Array(watching.answers.values) where a.frame == f {

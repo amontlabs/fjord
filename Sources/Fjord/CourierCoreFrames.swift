@@ -10,6 +10,7 @@ import Foundation
 extension CourierCore {
     static let frameWait = CourierDo.timeout  // seconds after `frame_loaded` for that frame's `page`: then `frame_inject`, then blank
     static let handoverWait = CourierDo.timeout  // seconds after a granted `handover` for `handover_done`, else `handover_abort`
+    static let checkWait = CourierDo.timeout * 3  // seconds the check slot waits for its settled read: then the check is missed
     static let activeStatuses: Set<String> = ["working", "needs you", "paused"]
 
     // MARK: Entry
@@ -36,6 +37,7 @@ extension CourierCore {
         case "frame_loaded", "frame_blank", "frame_gone", "frame_stuck":
             return true  // always carries `frame`; one without names no frame
         case "handover_wanted":
+            if watching.handoverDue != nil { return true }  // one is under way: its new tab starts the budget again
             watching.handoverBudget = event.get("budget")?.asInt ?? 6
             watching.finishesAtWant = watching.finishes
             try afterWatch()
@@ -47,7 +49,7 @@ extension CourierCore {
             }
             return false  // the runs' replay goes on as before
         case "handover_done":
-            try handoverDone()
+            try handoverDone(event)
             try afterWatch()
             return true
         case "done":
@@ -74,9 +76,16 @@ extension CourierCore {
         let type = event.get("type")?.asString ?? ""
         let (project, thread) = CourierPage.place(event)
         try logEvent(event, project: project, thread: thread)
+        if type == "page" && event.get("gone") == .bool(true) && watching.on {
+            watching.topGone = true  // its frames go with it: their drops are no failure
+        }
         if type == "page" && event.get("gone") != .bool(true) && watching.on {
+            watching.topGone = false
             if event.get("signed_in") == .bool(true) { for s in watching.states.values { s.staleTries = 0 } }
-            if loaded?.numeric != nil && (before.0 != loaded || before.1 != instance) { newTopDocument() }
+            if loaded?.numeric != nil && (before.0 != loaded || before.1 != instance) {
+                // the handover's new document: `handover_done` sent its base set already
+                if let base = watching.baseInstance, base == instance { watching.baseInstance = nil } else { newTopDocument() }
+            }
         }
         if type == "projects" && event.get("complete") == .bool(true) { for s in watching.states.values { s.staleTries = 0 } }
         try afterWatch()
@@ -102,7 +111,9 @@ extension CourierCore {
             if loaded?.numeric != nil && !(loaded == s.loaded && inst == s.instance) {
                 for a in watching.answers.values where a.frame == f && a.inFlight && a.frameInstance != nil && a.frameInstance != inst { a.lost = true }
                 s.loaded = loaded; s.instance = inst; s.settled = false; s.live = false; s.stop = false; s.streaming = false
+                s.approval = false; s.rows = [:]; s.expectGone = false
             }
+            if let d = event.get("documentId"), d != .null { s.document = d }
             s.loadDue = nil; s.injected = false
             s.health = JSONObject([("signed_in", event.get("signed_in") ?? .null), ("page_ok", event.get("page_ok") ?? .null), ("away", event.get("away") ?? .null)])
             if f.thread == nil && event.get("stand_in") == .bool(true) { return try archive(f.project) }
@@ -124,6 +135,8 @@ extension CourierCore {
             try frameReplay(f, event)
         case "frame_loaded":
             s.frameId = event.get("frameId")
+            // that document's `page` came first: it is loaded, nothing to wait for
+            if let d = event.get("documentId"), d != .null, d == s.document { return }
             s.loadDue = clock() + Self.frameWait
             s.injected = false
             wake()
@@ -172,36 +185,60 @@ extension CourierCore {
         for a in watching.answers.values where a.frame.thread == thread && raw.contains(where: { $0.get("key")?.asString == a.card && $0.get("answered") == .bool(true) }) {
             a.answered = true
         }
-        if threadSide, f.thread != nil, event.get("full") == .bool(true), event.get("settled") == .bool(true) {
-            s.settled = true
-            s.stop = event.get("stop") == .bool(true)
-            s.streaming = raw.contains { $0.get("streaming") == .bool(true) }
-            live(f)
-            try threadRead(f, s, raw, approval: event.get("approval")?.asString.map { !$0.isEmpty } ?? false)
-        }
+        if threadSide, f.thread != nil { try threadFrameRows(f, s, event, raw) }
         try proveAnswers()
         try advanceAll()
         if !watched.isEmpty { try reconcileSends(Place(f.project, thread)) }
     }
 
+    /// A thread frame's thread side. After its first settled whole read the page sends deltas only: each is merged by row key into the
+    /// whole read, and the card, its `answered`, `stop`, `streaming` and the approval are read from the merged rows every time. A
+    /// pending card in any read, settled or not, is noted at once: no row may record the thread `done` past it.
+    func threadFrameRows(_ f: CourierFrame, _ s: CourierFrameState, _ event: JSON, _ raw: [JSON]) throws {
+        guard let thread = f.thread else { return }
+        let full = event.get("full") == .bool(true), settledRead = full && event.get("settled") == .bool(true)
+        if full { s.rows = [:] }
+        for r in raw { if let k = r.get("key")?.asString, !k.isEmpty { s.rows[k] = r } }
+        if event.get("stop") != nil { s.stop = event.get("stop") == .bool(true) }
+        if event.get("approval") != nil { s.approval = event.get("approval")?.asString.map { !$0.isEmpty } ?? false }
+        s.streaming = s.rows.values.contains { $0.get("streaming") == .bool(true) }
+        let merged = s.rows.values.sorted { ($0.get("index")?.numeric ?? 0) < ($1.get("index")?.numeric ?? 0) }
+        if settledRead {
+            s.settled = true
+            live(f)
+        } else if full || !s.settled {  // an unsettled whole read: not a read to judge by, but a pending card in it holds
+            if let key = Self.pendingCard(merged) { watching.pendingCard[thread] = key }
+            return
+        }
+        try threadRead(f, s, merged, approval: s.approval)
+    }
+
+    /// The bottom pending card (options, not answered, keyed) of a thread's rows, in page order.
+    static func pendingCard(_ rows: [JSON]) -> String? {
+        rows.last { r in
+            (r.get("options")?.asArray.map { !$0.isEmpty } ?? false) && r.get("answered") != .bool(true) && r.get("key")?.asString != nil
+        }?.get("key")?.asString
+    }
+
     /// A project frame's thread rows. The one replacement a frame may make: a `listed` whole read (§2).
     func frameThreads(_ f: CourierFrame, _ s: CourierFrameState, _ event: JSON) throws {
         let e = placed(f, event, threadSide: false)
-        try ingestThreads(f.project, e, listedOnly: true)
         if event.get("listed") == .bool(true) {
             s.settled = true
             live(f)
         }
+        // a departure counts only from an overview this document already read whole and listed
+        try ingestThreads(f.project, e, listedOnly: true, departures: s.settled)
         try advanceAll()
     }
 
     /// Thread rows into Seen (departure rows aside), and their items and statuses. `listedOnly`: an empty list says nothing unless
     /// `listed` (a frame's first partial render makes no departures).
-    func ingestThreads(_ project: String, _ e: JSON, listedOnly: Bool) throws {
+    func ingestThreads(_ project: String, _ e: JSON, listedOnly: Bool, departures: Bool = true) throws {
         let all = CourierPage.items(e.get("threads"))
         let listed = e.get("listed") == .bool(true)
         if !(listedOnly && all.isEmpty && !listed) { try ingest(CourierPage.seenRows(e)) }
-        try threadsSeen(project, all, listed: listed)
+        try threadsSeen(project, all, listed: listed, departures: departures)
     }
 
     // MARK: Statuses and departures (§2)
@@ -236,12 +273,13 @@ extension CourierCore {
         return f.date(from: s)?.timeIntervalSince1970
     }
 
-    func threadsSeen(_ project: String, _ rows: [JSON], listed: Bool) throws {
+    /// `departures`: whether a `gone` row may count (a frame's, only once its document sent a listed read).
+    func threadsSeen(_ project: String, _ rows: [JSON], listed: Bool, departures: Bool = true) throws {
         var ids = Set<String>()
         for t in rows {
             guard let id = t.get("thread")?.asString, !id.isEmpty, CourierPage.belongs(id, project) else { continue }
+            if t.get("gone") == .bool(true) { if departures { try depart(project, id) }; continue }
             ids.insert(id)
-            if t.get("gone") == .bool(true) { try depart(project, id); continue }
             var content: JSON = ["title": .string(t.get("title")?.asString ?? "")]
             if let n = t.get("needs")?.asString, !n.isEmpty { content["needs"] = .string(n) }
             if let x = t.get("text")?.asString, !x.isEmpty { content["text"] = .string(pyPrefix(x, 300)) }
@@ -293,16 +331,16 @@ extension CourierCore {
             f["state"] = "done"; f["needs"] = .null
             try ingest([CourierPage.row("thread", thread, f.pairs.map { ($0.key, $0.value) })])
         }
-        dropThread(thread)
+        dropThread(thread, keepOwed: true)  // a departure is inferred: a check it owes still reads the thread
     }
 
-    /// The thread's frames, kept or check, go; it owes nothing.
-    func dropThread(_ thread: String) {
-        if let i = watching.keptIndex(thread) { watching.kept.remove(at: i) }
+    /// The thread's frames, kept or check, go (not one an answer pins); it owes nothing, unless `keepOwed`.
+    func dropThread(_ thread: String, keepOwed: Bool = false) {
+        if let i = watching.keptIndex(thread), !watching.pinned(thread) { watching.kept.remove(at: i) }
         if watching.check?.thread == thread && !watching.checkAnswer { watching.check = nil }
         watching.overCap.remove(thread)
         watching.removeAfterRead.remove(thread)
-        if var c = checks()[thread], c.owed { c.owed = false; putCheck(c) }
+        if !keepOwed, var c = checks()[thread], c.owed { c.owed = false; putCheck(c) }
     }
 
     /// A thread's status changed: its frames follow (§1.8).
@@ -346,7 +384,7 @@ extension CourierCore {
     }
 
     func removeThreadFrame(_ f: CourierFrame) {
-        guard let thread = f.thread else { return }
+        guard let thread = f.thread, !watching.pinned(thread) else { return }
         if let i = watching.keptIndex(thread) { watching.kept.remove(at: i) }
         if watching.check == f { watching.check = nil; watching.checkAnswer = false }
         watching.removeAfterRead.remove(thread)
@@ -360,10 +398,7 @@ extension CourierCore {
         let project = f.project
         let wasCheck = watching.check == f && !watching.checkAnswer
         if let rows {
-            let pending = rows.last { r in
-                (r.get("options")?.asArray.map { !$0.isEmpty } ?? false) && r.get("answered") != .bool(true) && r.get("key")?.asString != nil
-            }
-            if let key = pending?.get("key")?.asString {
+            if let key = Self.pendingCard(rows) {
                 watching.pendingCard[thread] = key
             } else if watching.pendingCard.removeValue(forKey: thread) != nil {  // answered or gone: the row says what follows
                 watching.expectWork.insert(thread)
@@ -379,7 +414,7 @@ extension CourierCore {
         } else if log.status[thread] == "paused" {
             if watch(project) == .live || (!s.stop && !s.streaming) {
                 try log.setStatus(clock(), project: project, thread: thread, "done")
-                if let i = watching.keptIndex(thread) { watching.kept.remove(at: i) }
+                if let i = watching.keptIndex(thread), !watching.pinned(thread) { watching.kept.remove(at: i) }
                 watching.overCap.remove(thread)
             }
         } else if log.status[thread] == "needs you" || watching.removeAfterRead.contains(thread) {
@@ -387,6 +422,7 @@ extension CourierCore {
         }
         if wasCheck {
             if watching.check == f { watching.check = nil }
+            watching.checkMisses.removeValue(forKey: thread)
             c.owed = false
         }
         if watching.keptIndex(thread) != nil { c.owed = false }
@@ -421,8 +457,28 @@ extension CourierCore {
         let next = checks().values.filter { $0.owed && !watching.holds($0.thread) }
             .sorted { ($0.needs ? 1 : 0, $0.time ?? 0, $0.thread) > ($1.needs ? 1 : 0, $1.time ?? 0, $1.thread) }.first
         if let next {
-            watching.check = CourierFrame(project: next.project, thread: next.thread)
+            let f = CourierFrame(project: next.project, thread: next.thread)
+            watching.check = f
             watching.checkAnswer = false
+            watching.checkSince = (f, clock())
+            wake()
+        }
+    }
+
+    /// The check slot's read never settled by `checkWait`: the slot is freed; the check is requeued (it stays owed) up to `checkTries`
+    /// times in a row, then left unchecked (no longer owed, its cause said in `why`).
+    func checkTick(_ now: Double) {
+        guard let since = watching.checkSince else { return }
+        guard watching.check == since.frame, !watching.checkAnswer, let thread = since.frame.thread else { watching.checkSince = nil; return }
+        guard since.at + Self.checkWait <= now else { return }
+        watching.checkSince = nil
+        watching.check = nil
+        let misses = (watching.checkMisses[thread] ?? 0) + 1
+        if misses < CourierFrames.checkTries {
+            watching.checkMisses[thread] = misses
+        } else {
+            watching.checkMisses.removeValue(forKey: thread)
+            if var c = checks()[thread] { c.owed = false; c.why = "unchecked: its thread view never settled"; putCheck(c) }
         }
     }
 
@@ -463,8 +519,14 @@ extension CourierCore {
         s.settled = false; s.live = false
     }
 
+    /// The engine's reload of a frame: its old document's drop is expected, and the new one's `page` is due by `frameWait`.
     func reload(_ f: CourierFrame) {
+        let s = watching.state(f)
+        s.expectGone = true
+        s.loadDue = clock() + Self.frameWait
+        s.injected = false
         out(["kind": "reload", "frame": f.json])
+        wake()
     }
 
     /// Blank, gone without a removal: reload once, then stale.
@@ -474,11 +536,19 @@ extension CourierCore {
         if !s.reloaded { s.reloaded = true; reload(f) } else { stale(f) }
     }
 
+    /// A frame's document went. After the engine's own reload, or with the top document, that is expected: the new document's
+    /// `page` is waited for (`loadDue`), and nothing counts as a failure or a load.
     func frameGone(_ f: CourierFrame) throws {
         for a in watching.answers.values where a.frame == f && a.inFlight { a.lost = true }
         let s = watching.state(f)
         s.settled = false; s.live = false
-        if wanted().contains(f) { try frameFailed(f) } else { watching.states.removeValue(forKey: f) }
+        guard wanted().contains(f) else { watching.states.removeValue(forKey: f); return }
+        if s.expectGone || watching.topGone {
+            s.expectGone = false
+            if s.loadDue == nil { s.loadDue = clock() + Self.frameWait; s.injected = false; wake() }
+            return
+        }
+        try frameFailed(f)
     }
 
     /// The project shows the archived stand-in: its frame goes, and its threads fold to idle.
@@ -517,11 +587,12 @@ extension CourierCore {
     /// reopen on demand; a check in flight is requeued (it stays owed).
     func newTopDocument() {
         watching.states.removeAll()
-        watching.kept.removeAll { $0.card }
+        watching.kept.removeAll { $0.card && !watching.pinned($0.thread) }
         watching.homeID = nil  // went with the old document
         if !watching.checkAnswer { watching.check = nil }
         try? serveChecks()
         syncFrames(base: true)
+        for f in wanted() { watching.state(f).expectGone = true }  // the old document's frames may still report their drop
     }
 
     // MARK: Deadlines
@@ -529,6 +600,7 @@ extension CourierCore {
     func frameDeadlines() -> [Double] {
         var all = watching.states.values.compactMap(\.loadDue) + watching.wakes.map(\.at) + watching.answers.values.compactMap(\.deadline)
         if let d = watching.handoverDue { all.append(d) }
+        if let c = watching.checkSince { all.append(c.at + Self.checkWait) }
         return all
     }
 
@@ -552,6 +624,7 @@ extension CourierCore {
             out(["kind": "handover_abort"])  // the old tab stays; the budget stays and the next increment asks again
         }
         try answerTick(now)
+        checkTick(now)
         try afterWatch()
     }
 
@@ -594,16 +667,19 @@ extension CourierCore {
         let idle = runs.values.allSatisfy { $0.flag("paused") }
         guard idle || (budget >= CourierFrames.grantBound && watching.finishes > watching.finishesAtWant) else { return }
         watching.handoverBudget = nil
-        watching.kept.removeAll { $0.card }  // thread frames go before a handover; the base set reopens the working ones
+        watching.kept.removeAll { $0.card && !watching.pinned($0.thread) }  // thread frames go before a handover; the base set reopens the working ones
         if !watching.checkAnswer { watching.check = nil }  // a check in flight is requeued: it stays owed
         out(["kind": "handover"])
         watching.handoverDue = clock() + Self.handoverWait
         wake()
     }
 
-    func handoverDone() throws {
+    /// The new tab took over: its base set goes now, once (its first `page` sends none again), and a request made meanwhile is over.
+    func handoverDone(_ event: JSON) throws {
         watching.handoverDue = nil
+        watching.handoverBudget = nil
         watching.homeWanted = true
+        watching.baseInstance = event.get("instance").flatMap { $0 == .null ? nil : $0 }
         newTopDocument()
     }
 

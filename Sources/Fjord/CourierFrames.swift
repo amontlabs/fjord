@@ -36,8 +36,12 @@ final class CourierFrameState {
     var staleSince: Double?
     var staleTries = 0  // reloads at `home` steps since the last event that resets them (three at most)
     var stop = false  // a thread frame's dock shows `code-prompt-stop`
-    var streaming = false  // a thread frame's last read had a streaming row
+    var streaming = false  // a thread frame's rows (whole read and deltas since, merged by key) hold a streaming row
+    var approval = false  // a thread frame's dock shows an approval slot holding something
+    var rows: [String: JSON] = [:]  // a thread frame's rows by key: its last whole read, with every delta since merged in
     var live = false  // a settled whole read of this document came, and it is signed in: a project frame's `watch` is live
+    var document: JSON?  // the worker's `documentId` of this frame's last `page`: a `frame_loaded` of that document waits for nothing
+    var expectGone = false  // the engine reloaded it, or the top document went: its old document's `frame_gone` is no failure
 }
 
 /// A kept thread frame (§1.8): a `working` thread's, or one holding a pending card (its answering surface).
@@ -73,6 +77,7 @@ final class CourierFrames {
     static let staleTries = 3
     static let recent = 86_400.0  // only threads touched within this are checked unprompted
     static let grantBound = 12  // at this budget the next run end grants a handover even with runs queued
+    static let checkTries = 2  // a check that never settles is requeued this many times in a row, then left unchecked
 
     /// Frames are in use once the top frame says what it has on screen (`frames {have}`): until then no `frames`, no `home`.
     var on = false
@@ -104,6 +109,10 @@ final class CourierFrames {
 
     var answers: [Int: CourierAnswer] = [:]
     var checks: [String: CourierCheck]?  // router.db's `checks`, read once
+    var checkSince: (frame: CourierFrame, at: Double)?  // the check slot's thread and when it took it: unsettled by `checkWait`, it is missed
+    var checkMisses: [String: Int] = [:]  // thread -> checks that never settled in a row: requeued up to `checkTries`, then unchecked
+    var topGone = false  // the top document went and no new one came yet: every frame's drop is expected
+    var baseInstance: JSON?  // the handover's new top document, whose base set `handover_done` already sent
 
     func state(_ f: CourierFrame) -> CourierFrameState {
         if let s = states[f] { return s }
@@ -115,9 +124,12 @@ final class CourierFrames {
     func keptIndex(_ thread: String) -> Int? { kept.firstIndex { $0.thread == thread } }
     func holds(_ thread: String) -> Bool { keptIndex(thread) != nil || check?.thread == thread }
 
-    /// The least recently used card frame, which a working thread or an answer may evict.
+    /// An answer in flight for the thread pins its frame: never evicted, never dropped by a grant, a new document or a read.
+    func pinned(_ thread: String?) -> Bool { thread != nil && answers.values.contains { $0.frame.thread == thread } }
+
+    /// The least recently used card frame, which a working thread or an answer may evict (never one an answer pins).
     func lruCard() -> Int? {
-        kept.indices.filter { kept[$0].card }.min { kept[$0].used < kept[$1].used }
+        kept.indices.filter { kept[$0].card && !pinned(kept[$0].thread) }.min { kept[$0].used < kept[$1].used }
     }
 
     /// The thread frames wanted now: the kept ones and the check slot's.
