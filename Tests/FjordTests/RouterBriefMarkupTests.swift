@@ -60,5 +60,65 @@ import Testing
         let e2 = BriefEntry(project: "p", thread: "t2", kind: .plan, state: .needsYou, since: 0, source: .cloud, question: "Approve the <b>plan</b>?")
         let section = BriefPage.Section(name: "p", group: .needsYou, doc: doc, entries: [e1, e2], recent: [], finished: [])
         #expect(BriefSectionView.markup(section) == #"<t id="t1">The pick</t> waits. <t id="t2">Approve the plan?</t>"#)
+        // With a title, the title: a few words, not the whole question.
+        doc.threads = [briefThread("t2", .needsYou, title: "Move the briefs into router.db")]
+        let titled = BriefPage.Section(name: "p", group: .needsYou, doc: doc, entries: [e1, e2], recent: [], finished: [])
+        #expect(BriefSectionView.markup(titled).hasSuffix(#"<t id="t2">Move the briefs into router.db</t>"#))
+    }
+
+    @Test func forYouNamesEveryThreadThatWaitsOnYou() {
+        let e1 = BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 0, source: .cloud, question: "Which?")
+        let e2 = BriefEntry(project: "q", thread: "t2", kind: .plan, state: .needsYou, since: 0, source: .cloud, question: "Approve?")
+        var dq = BriefDoc(project: "q")
+        dq.threads = [briefThread("t2", .needsYou, title: "Ship it")]
+        var page = BriefPage()
+        page.lead = GeneralBrief(forYou: #"<t id="p/t1">The pick</t> waits."#)
+        page.sections = [BriefPage.Section(name: "p", group: .needsYou, doc: BriefDoc(project: "p"), entries: [e1], recent: [], finished: []),
+                         BriefPage.Section(name: "q", group: .needsYou, doc: dq, entries: [e2], recent: [], finished: [])]
+        #expect(BriefLeadText.forYou(page) == #"<t id="p/t1">The pick</t> waits. Also: <t id="q/t2">Ship it</t>."#)
+        page.lead = GeneralBrief()
+        #expect(BriefLeadText.forYou(page) == #"<t id="p/t1">Which?</t>, <t id="q/t2">Ship it</t>."#)
+    }
+
+    @Test func linksStayOnlyOnAddressesTheModelWasGiven() {
+        let text = #"See <a href="https://github.com/a/b/pull/1">the PR</a> and <a href="https://made.up/x">this</a>."#
+        #expect(BriefMarkup.parse(text) == [.text("See "), .link(url: "https://github.com/a/b/pull/1", text: "the PR"), .text(" and "),
+                                             .link(url: "https://made.up/x", text: "this"), .text(".")])
+        let links = BriefMarkup.addresses("Pushed [#1](https://github.com/a/b/pull/1), see https://x.dev/y.")
+        #expect(links == ["https://github.com/a/b/pull/1", "https://x.dev/y"])
+        #expect(BriefMarkup.checked(text, known: { _ in false }, links: links) == #"See <a href="https://github.com/a/b/pull/1">the PR</a> and this."#)
+    }
+
+    @Test func theModelsLinksComeFromItsItems() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        src.setThreads("p", [briefThread("t1", .done)])
+        model.answer = { _ in
+            #"{"now":["<t id=\"t1\">The release</t> is out: <a href=\"https://github.com/a/b/releases/tag/v1\">v1</a>, <a href=\"https://github.com/a/b/releases/tag/v2\">v2</a>."],"needs_you":[],"decisions":[],"loose_ends":[]}"#
+        }
+        let engine = makeEngine(src, model)
+        src.post("p", id: "m", kind: .message, thread: "t1", text: "Published [v1](https://github.com/a/b/releases/tag/v1).")
+        engine.itemsChanged("p"); await engine.idle()
+        #expect(engine.docs["p"]?.now == [#"<t id="t1">The release</t> is out: <a href="https://github.com/a/b/releases/tag/v1">v1</a>, v2."#])
+    }
+
+    @Test func aBriefWrittenBeforeTagsIsWrittenAgainAtLaunch() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        src.setThreads("p", [briefThread("t1", .done)])
+        model.answer = { _ in #"{"now":["Busy."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        let store = MemoryBriefStore()
+        let engine = makeEngine(src, model, store: store)
+        src.post("p", id: "m", kind: .message, thread: "t1", text: "go")
+        engine.itemsChanged("p"); await engine.idle()
+        #expect(RouterBriefEngine.untagged(engine.docs["p"]!))
+        let calls = model.contexts.count
+        model.answer = { _ in #"{"now":["<t id=\"t1\">It</t> is done."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        let again = makeEngine(src, model, store: store)
+        again.start(); await again.idle()
+        #expect(model.contexts.count == calls + 1)
+        #expect(again.docs["p"]?.now == [#"<t id="t1">It</t> is done."#])
+        // Tagged now: the next launch calls nothing.
+        let third = makeEngine(src, model, store: store)
+        third.start(); await third.idle()
+        #expect(model.contexts.count == calls + 1)
     }
 }

@@ -158,6 +158,8 @@ enum BriefKeys {
     var picked: [BriefTarget: Int] = [:]
     /// Sections open to the full document.
     var expanded: Set<String> = []
+    /// Projects with nothing for you, opened from their folded line.
+    var unfolded: Set<String> = []
     /// The highlight under the pointer (`BriefSpan.key`), whose peek shows.
     var hovered: String?
     /// The highlight whose answer popover is open (`BriefSpan.key`: where it is on the page, and its thread).

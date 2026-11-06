@@ -3,17 +3,23 @@ import SwiftUI
 // The briefs' prose with its threads tagged: the model wraps the words about a thread in `<t id="…">`, a project's brief with
 // the thread's id, the general brief's lead with "project/thread". The page draws each tag as a highlight in the colour of
 // what its thread is at now, read from the Board, not from the words (RouterBriefView.swift). A tag whose id isn't a known
-// thread is dropped when the model's answer is checked, its words kept.
+// thread is dropped when the model's answer is checked, its words kept. A link is `<a href="https://…">words</a>`, kept only when
+// its address is one the model was given (an item's or the brief's own), never one it made up.
 
 enum BriefMarkup {
     enum Piece: Equatable {
         case text(String)
         case thread(id: String, text: String)
+        case link(url: String, text: String)
     }
 
     // A tag's text holds no `<`: a tag opened inside another, or one never closed, can't swallow the words after it.
     // swiftlint:disable:next force_try
     nonisolated(unsafe) private static let tag = try! Regex(#"<t\s+id="([^"]+)">([^<]*)</t>"#, as: (Substring, Substring, Substring).self)
+    // swiftlint:disable:next force_try
+    nonisolated(unsafe) private static let anchor = try! Regex(#"<a\s+href="(https?://[^"\s<>]+)">([^<]*)</a>"#, as: (Substring, Substring, Substring).self)
+    // swiftlint:disable:next force_try
+    nonisolated(unsafe) private static let address = try! Regex(#"https?://[^\s<>()\[\]"']+"#)
     // Any tag-shaped text left over: an opening tag, a closing one, whatever the model made up.
     // swiftlint:disable:next force_try
     nonisolated(unsafe) private static let stray = try! Regex(#"</?[A-Za-z][^<>]*>"#)
@@ -23,9 +29,14 @@ enum BriefMarkup {
         parse(text).map { piece in
             switch piece {
             case .text(let s): s
-            case .thread(_, let s): s
+            case .thread(_, let s), .link(_, let s): s
             }
         }.joined()
+    }
+
+    /// The web addresses a text holds (a markdown link's, a bare one), for checking the links a model writes.
+    static func addresses(_ text: String) -> Set<String> {
+        Set(text.matches(of: address).map { String(text[$0.range]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?")) })
     }
 
     /// The pieces in order; no piece ever holds tag text.
@@ -37,11 +48,15 @@ enum BriefMarkup {
             if case .text(let last)? = pieces.last { pieces[pieces.count - 1] = .text(last + clean) } else { pieces.append(.text(clean)) }
         }
         var rest = Substring(markup)
-        while let match = rest.firstMatch(of: tag) {
+        while true {
+            let t = rest.firstMatch(of: tag), a = rest.firstMatch(of: anchor)
+            guard let match = [t, a].compactMap({ $0 }).min(by: { $0.range.lowerBound < $1.range.lowerBound }) else { break }
             add(rest[rest.startIndex..<match.range.lowerBound])
             let words = String(match.output.2).replacing(stray, with: "")
-            if words.trimmingCharacters(in: .whitespaces).isEmpty { add(match.output.2) } else {
+            if words.trimmingCharacters(in: .whitespaces).isEmpty { add(match.output.2) } else if let t, t.range == match.range {
                 pieces.append(.thread(id: String(match.output.1), text: words))
+            } else {
+                pieces.append(.link(url: String(match.output.1), text: words))
             }
             rest = rest[match.range.upperBound...]
         }
@@ -54,12 +69,14 @@ enum BriefMarkup {
         parse(markup).compactMap { if case .thread(let id, _) = $0 { id } else { nil } }
     }
 
-    /// The text written back with only the tags whose id `known` accepts; the others' words kept as text.
-    static func checked(_ markup: String, known: (String) -> Bool) -> String {
+    /// The text written back with only the tags whose id `known` accepts and the links whose address is one of `links`; the
+    /// others' words kept as text.
+    static func checked(_ markup: String, known: (String) -> Bool, links: Set<String> = []) -> String {
         parse(markup).map { piece in
             switch piece {
             case .text(let s): s
             case .thread(let id, let s): known(id) ? "<t id=\"\(id)\">\(s)</t>" : s
+            case .link(let url, let s): links.contains(url) ? "<a href=\"\(url)\">\(s)</a>" : s
             }
         }.joined().trimmingCharacters(in: .whitespaces)
     }
@@ -68,6 +85,7 @@ enum BriefMarkup {
     enum Token: Equatable {
         case word(String, tight: Bool)
         case thread(id: String, text: String, tight: Bool)
+        case link(url: String, text: String, tight: Bool)
     }
 
     static func tokens(_ markup: String) -> [Token] {
@@ -83,6 +101,9 @@ enum BriefMarkup {
                 glued = !(text.last?.isWhitespace ?? true)
             case .thread(let id, let text):
                 out.append(.thread(id: id, text: text, tight: glued))
+                glued = true
+            case .link(let url, let text):
+                out.append(.link(url: url, text: text, tight: glued))
                 glued = true
             }
         }

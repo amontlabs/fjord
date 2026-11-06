@@ -29,9 +29,14 @@ struct RouterBriefView: View {
                          : "Turn the Router on and the brief will tell you what your threads need, project by project.")
                         .cdsText(CDS.Density.compact.prose, .regular, CDS.Text.secondary)
                 }
-                ForEach(page.sections) { section in
+                let waiting = page.sections.filter { !$0.entries.isEmpty }
+                let rest = page.sections.filter { $0.entries.isEmpty }
+                ForEach(waiting) { section in
                     BriefSectionView(store: store, section: section, now: now, expanded: briefs.expanded.contains(section.id))
                         .zIndex(briefs.raised(section.id + "#") ? 1 : 0)
+                }
+                if !rest.isEmpty {
+                    BriefQuietList(store: store, sections: rest, now: now)
                 }
                 if !page.folded.isEmpty {
                     Text("Also: " + page.folded.joined(separator: ", "))
@@ -70,15 +75,16 @@ private struct BriefLead: View {
                     }
                 }
             }
-            if !lead.forYou.isEmpty {
-                part("For you", symbol: "exclamationmark.circle", tint: CDS.Text.warning, markup: lead.forYou, key: Self.forYou)
+            let forYou = BriefLeadText.forYou(page)
+            if !forYou.isEmpty {
+                part("For you", symbol: "exclamationmark.circle", tint: CDS.Text.warning, markup: forYou, key: Self.forYou)
                     .zIndex(briefs.raised(Self.forYou + "#") ? 2 : 1)
             }
             if !lead.worthALook.isEmpty {
                 part("Worth a look", symbol: "eye", tint: CDS.Text.accent, markup: lead.worthALook, key: Self.look)
                     .zIndex(briefs.raised(Self.look + "#") ? 2 : 0)
             }
-            if !counts.isEmpty || !lead.isEmpty {
+            if !counts.isEmpty || !forYou.isEmpty || !lead.worthALook.isEmpty {
                 Rectangle().fill(CDS.border).frame(height: CDS.hairline).padding(.top, 2)
             }
         }
@@ -86,6 +92,24 @@ private struct BriefLead: View {
     }
 
     static let forYou = "lead-you"
+}
+
+enum BriefLeadText {
+    /// What's for you: the lead's words, then every thread that waits on you and that they don't name, so the count over it
+    /// and the threads under it always agree.
+    static func forYou(_ page: BriefPage) -> String {
+        let text = page.lead.forYou
+        let named = Set(BriefMarkup.ids(text))
+        let missing = page.entries.filter { !named.contains($0.target.key) }.map { e in
+            "<t id=\"\(e.target.key)\">\(BriefSectionView.words(e, title: page.sections.first { $0.id == e.project }?.doc.thread(e.thread)?.title))</t>"
+        }
+        guard !missing.isEmpty else { return text }
+        let list = missing.joined(separator: ", ")
+        return text.isEmpty ? list + "." : text + " Also: " + list + "."
+    }
+}
+
+extension BriefLead {
     static let look = "lead-look"
 
     private func part(_ title: String, symbol: String, tint: Color, markup: String, key: String) -> some View {
@@ -113,6 +137,8 @@ struct BriefSectionView: View {
     let section: BriefPage.Section
     let now: Double
     let expanded: Bool
+    /// Folds it back to its line (a project with nothing for you, opened from "Nothing for you").
+    var fold: (() -> Void)?
 
     var body: some View {
         let doc = section.doc
@@ -140,10 +166,16 @@ struct BriefSectionView: View {
         let text = section.doc.now.joined(separator: " ")
         let named = Set(BriefMarkup.ids(text))
         let missing = section.entries.filter { !named.contains($0.thread) }.map { e in
-            let words = BriefMarkup.plain(BriefEntryText.question(e)).replacingOccurrences(of: "<", with: "")
-            return "<t id=\"\(e.thread)\">\(words.count > 70 ? String(words.prefix(68)) + "…" : words)</t>"
+            "<t id=\"\(e.thread)\">\(words(e, title: section.doc.thread(e.thread)?.title))</t>"
         }
         return ([text] + missing).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// A few words for a thread that waits on you when no text names it: its title, else its question, short.
+    static func words(_ e: BriefEntry, title: String?) -> String {
+        let source = title?.nonEmpty ?? BriefMarkup.plain(BriefEntryText.question(e))
+        let words = source.replacingOccurrences(of: "<", with: "").replacingOccurrences(of: "\n", with: " ")
+        return words.count > 48 ? String(words.prefix(46)).trimmingCharacters(in: .whitespaces) + "…" : words
     }
 
     private var header: some View {
@@ -156,6 +188,13 @@ struct BriefSectionView: View {
                     .help("Fjord can't see this project's page now: this is what it showed last")
             }
             Spacer(minLength: 8)
+            if let fold {
+                Button(action: fold) {
+                    Text("Fold").font(CDS.sans(12, .medium)).foregroundStyle(CDS.Text.muted).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Fold \(section.name)")
+            }
             Button {
                 let briefs = store.routerBriefs
                 if briefs.expanded.contains(section.id) { briefs.expanded.remove(section.id) } else { briefs.expanded.insert(section.id) }
@@ -235,6 +274,49 @@ struct BriefSectionView: View {
     }
 }
 
+// MARK: - What has nothing for you
+
+/// The projects with nothing that waits on you, folded to a line each under "Nothing for you": the name, what it's at, and
+/// its first words. A click opens one to its paragraph; what finished is in the lead's "Worth a look" already.
+private struct BriefQuietList: View {
+    let store: Store
+    let sections: [BriefPage.Section]
+    let now: Double
+
+    var body: some View {
+        let briefs = store.routerBriefs
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Nothing for you").cdsText(CDS.Density.compact.footnote, .medium, CDS.Text.muted)
+            ForEach(sections) { section in
+                if briefs.unfolded.contains(section.id) {
+                    BriefSectionView(store: store, section: section, now: now, expanded: briefs.expanded.contains(section.id),
+                                     fold: { briefs.unfolded.remove(section.id) })
+                        .zIndex(briefs.raised(section.id + "#") ? 1 : 0)
+                        .padding(.vertical, 4)
+                } else {
+                    Button { briefs.unfolded.insert(section.id) } label: {
+                        HStack(spacing: 7) {
+                            Circle().fill(BriefSectionView.tint(section.group)).frame(width: 7, height: 7)
+                            Text(section.name).font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.secondary).lineLimit(1).fixedSize()
+                            Text(BriefSectionView.label(section.group)).font(CDS.sans(12)).foregroundStyle(BriefSectionView.labelTint(section.group))
+                                .lineLimit(1).fixedSize()
+                            Text(BriefMarkup.plain(section.doc.now.joined(separator: " ")))
+                                .font(CDS.sans(12.5)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(section.name), \(BriefSectionView.label(section.group))")
+                    .accessibilityHint("Shows its paragraph")
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
 // MARK: - Prose with highlights
 
 /// A paragraph of the brief: its words and its threads' highlights, laid out as text. `project`: the section's, whose tags
@@ -253,6 +335,15 @@ struct BriefProse: View {
                 case .word(let word, let tight):
                     Text(RouterText.inline(word)).font(CDS.sans(size)).foregroundStyle(CDS.Text.secondary)
                         .layoutValue(key: TightKey.self, value: tight)
+                case .link(let url, let text, let tight):
+                    if let destination = URL(string: url) {
+                        SwiftUI.Link(destination: destination) {
+                            Text(text).font(CDS.sans(size, .medium)).foregroundStyle(CDS.Text.accent).underline(color: CDS.Text.accent.opacity(0.4))
+                        }
+                        .buttonStyle(.plain)
+                        .help(url)
+                        .layoutValue(key: TightKey.self, value: tight)
+                    }
                 case .thread(let id, let text, let tight):
                     if let target = target(id) {
                         let spanKey = BriefSpan.key(key, target)

@@ -191,12 +191,14 @@ struct BriefDoc: Codable, Equatable, Sendable {
     /// ones (an unknown tag is dropped, its words kept), a card's options are the card
     /// item's, `now` is cut at three lines, a decision names a thread or your send, an entry whose thread no longer waits on
     /// you is dropped, and every list is capped. `cards` maps a thread to the options of its latest card item.
-    func checked(_ answer: Answer, known: Set<String>, cards: [String: [String]], at now: Double) -> Prose {
+    /// `sources`: the texts the model was given (the new items'), whose web addresses its links may use, besides the brief's own.
+    func checked(_ answer: Answer, known: Set<String>, cards: [String: [String]], at now: Double, sources: [String] = []) -> Prose {
         let exists = known.union(threads.map(\.id))
         var out = prose
         // A thread's tag stays only on a thread of the project (or its coordinator's question); its words stay either way.
         let tagged: (String) -> Bool = { exists.contains($0) || $0 == Self.coordinator }
-        let lines = answer.now.map { BriefMarkup.checked($0, known: tagged) }.filter { !BriefMarkup.plain($0).isEmpty }
+        let links = (sources + self.now + self.looseEnds).reduce(into: Set<String>()) { $0.formUnion(BriefMarkup.addresses($1)) }
+        let lines = answer.now.map { BriefMarkup.checked($0, known: tagged, links: links) }.filter { !BriefMarkup.plain($0).isEmpty }
         out.now = Array(lines.prefix(Self.maxNow))
         var seen = Set<String>()
         out.needsYou = answer.needsYou.compactMap { raw in

@@ -59,7 +59,7 @@ extension Demo {
         silo.watch = "live"
 
         var docs = BriefDoc(project: "chan_demo_docs")
-        docs.now = ["<t id=\"th_guide\">The install guide</t> was rewritten for the new setup; the PR is open."]
+        docs.now = ["<t id=\"th_guide\">The install guide</t> was rewritten for the new setup; <a href=\"https://github.com/demo/docs-site/pull/12\">its PR</a> is open."]
         docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 600)]
         docs.sent = [SentLine(intent: "39", words: "rewrite the install guide for the Chrome setup", state: "delivered")]
         docs.watch = "live"
@@ -97,7 +97,7 @@ extension Demo {
         briefs.demoGeneral = variant == .quiet
             ? GeneralBrief(worthALook: "Every project is quiet; <t id=\"chan_demo_fjord/th_old\">the canvas removal</t> landed yesterday.", at: t - 60)
             : GeneralBrief(forYou: "Three things first: <t id=\"chan_demo_fjord/th_settings\">the Settings layout</t>, <t id=\"chan_demo_fjord/th_migrate\">the migration plan</t> and <t id=\"local:lcu/\(briefLocalThread)\">how updates install</t>.",
-                           worthALook: "<t id=\"chan_demo_docs/th_guide\">The install guide</t> is rewritten, and <t id=\"chan_demo_fjord/th_bar\">the bar's count</t> landed.",
+                           worthALook: "<t id=\"chan_demo_docs/th_guide\">The install guide</t> is rewritten (<a href=\"https://github.com/demo/docs-site/pull/12\">its PR</a>), and <t id=\"chan_demo_fjord/th_bar\">the bar's count</t> landed.",
                            at: t - 60)
         briefs.demoVersions = [
             fjord.project: [
