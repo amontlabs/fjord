@@ -260,6 +260,7 @@ enum AppWindowShots {
         briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
         briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", twoQuestions: true),
         briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide@0"),
+        briefShot("brief-hover-stranded", .aqua, hover: "chan_demo_silo#chan_demo_silo/th_flaky@6", stranded: true),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
         Shot(name: "palette-search", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot(query: "fix")),
         Shot(name: "palette-actions", destination: { $0.shownCategories[0].id.asCategory },
@@ -407,7 +408,7 @@ enum AppWindowShots {
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,
-                                  twoQuestions: Bool = false) -> Shot {
+                                  twoQuestions: Bool = false, stranded: Bool = false) -> Shot {
         Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
              compose: { _, store in
                  let briefs = store.routerBriefs
@@ -419,6 +420,11 @@ enum AppWindowShots {
                  if let hover, let slash = hover.firstIndex(of: "#"), let at = hover.lastIndex(of: "@"),
                     let t = BriefTarget(key: String(hover[hover.index(after: slash)..<at])) {
                      briefs.hover(hover, t, inside: true)
+                 }
+                 if stranded, var silo = briefs.demoDocs["chan_demo_silo"] {
+                     silo.needsYou = [BriefEntry(project: silo.project, thread: "th_flaky", kind: .stranded, state: .paused,
+                                                 since: Date().timeIntervalSince1970 - 7_200, source: .cloud)]
+                     briefs.demoDocs["chan_demo_silo"] = silo
                  }
                  if twoQuestions, var form = store.pendingForms["cli-demo-lcu"] {
                      form.questions.append(PendingForm.Question(question: "Which channel should it follow?", header: "Channel", multiSelect: false,

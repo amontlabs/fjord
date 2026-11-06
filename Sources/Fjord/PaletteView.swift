@@ -410,10 +410,16 @@ private struct PaletteActionRow: View, Equatable {
         let ink = action.destructive ? CDS.Text.danger : (selected ? CDS.Text.primary : CDS.Text.secondary)
         HStack(spacing: M.rowGap) {
             HStack(spacing: M.contentGap) {
-                Image(systemName: action.symbol ?? "circle.fill")
-                    .font(.system(size: action.symbol == nil ? 4 : 14, weight: .medium))
-                    .foregroundStyle(action.destructive ? CDS.Text.danger : CDS.Text.muted)
-                    .frame(width: M.icon, height: M.icon)
+                Group {
+                    if action.symbol == ClaudeMark.openSymbol {
+                        OpenInClaudeGlyph(size: 14)
+                    } else {
+                        Image(systemName: action.symbol ?? "circle.fill")
+                            .font(.system(size: action.symbol == nil ? 4 : 14, weight: .medium))
+                            .foregroundStyle(action.destructive ? CDS.Text.danger : CDS.Text.muted)
+                    }
+                }
+                .frame(width: M.icon, height: M.icon)
                 Text(action.title).font(CDS.sans(M.fontSize)).foregroundStyle(ink).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

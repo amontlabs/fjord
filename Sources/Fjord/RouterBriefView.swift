@@ -533,11 +533,15 @@ struct BriefAnswerPanel: View {
                 if let form, !form.isPlan, form.questions.count > 1 || form.questions.contains(where: \.multiSelect) {
                     formQuestions(form)
                 } else {
-                    question(entry)
+                    // A stop or a permission with nothing written about it: its note says what it waits on instead.
+                    if entry.question?.isEmpty == false || Self.note(entry) == nil { question(entry) }
                     if entry.options.count > 1 { options(entry) }
                 }
             }
             status
+            if let note = Self.note(entry) {
+                Text(note).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             field(entry: entry)
             footer(entry: entry)
         }
@@ -630,43 +634,61 @@ struct BriefAnswerPanel: View {
         }
     }
 
+    /// The line to type in: always there. An answer to what it asks, words to a thread that stopped (it goes on from them), a
+    /// message to one that waits on a permission or doesn't wait on you.
     private func field(entry: BriefEntry?) -> some View {
         let briefs = store.routerBriefs
-        let canType = entry.map { $0.kind != .permission && $0.kind != .stranded } ?? true
-        return Group {
-            if canType {
-                TextField(entry == nil ? "Message this thread" : "Or type an answer", text: $words)
-                    .textFieldStyle(.plain)
-                    .font(CDS.sans(13))
-                    .focused($typing)
-                    .padding(.horizontal, 10).frame(height: 30)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CDS.alpha(0.05)))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(CDS.border, lineWidth: 1))
-                    .onSubmit {
-                        if briefs.send(words, to: target, store: store) { words = ""; close() }
-                    }
+        return TextField(Self.placeholder(entry), text: $words)
+            .textFieldStyle(.plain)
+            .font(CDS.sans(13))
+            .focused($typing)
+            .padding(.horizontal, 10).frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CDS.alpha(0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(CDS.border, lineWidth: 1))
+            .onSubmit {
+                if briefs.send(words, to: target, store: store) { words = ""; close() }
             }
+    }
+
+    static func placeholder(_ e: BriefEntry?) -> String {
+        guard let e else { return "Message this thread" }
+        switch e.kind {
+        case .stranded: return "Tell it to go on"
+        case .permission: return "Message this thread"
+        case .question, .request, .plan: return e.options.count > 1 ? "Or type an answer" : "Type your answer"
+        }
+    }
+
+    /// What it waits on, in a line, when the panel alone can't settle it.
+    static func note(_ e: BriefEntry?) -> String? {
+        switch e?.kind {
+        case .stranded: "It stopped before it finished: tell it to go on, or open it."
+        case .permission: "It waits for a permission, which only Claude can grant: open it to allow or deny."
+        default: nil
         }
     }
 
     private func footer(entry: BriefEntry?) -> some View {
         let briefs = store.routerBriefs
-        return HStack(spacing: 8) {
-            if let entry, entry.kind == .permission || entry.kind == .stranded {
-                Text("Open it to go on").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
-            } else if (entry?.options.count ?? 0) > 1 {
-                Text("Click an option, or 1–\(min(entry!.options.count, 9)) and Return").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
+        return VStack(alignment: .leading, spacing: 8) {
+            if let entry, entry.options.count > 1 {
+                Text("Click an option, or press its number then Return").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
             }
-            Spacer(minLength: 0)
-            if entry != nil {
-                ClaudeButton("Mark read", variant: .ghost, size: .sm) { briefs.markRead(target, store: store); close() }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                if entry != nil {
+                    ClaudeButton("Mark read", variant: .secondary, size: .sm, icon: "envelope.open") {
+                        briefs.markRead(target, store: store); close()
+                    }
                     .help("It leaves the brief; Revert in the history")
+                }
+                ClaudeButton("Open in Claude", variant: .secondary, size: .sm, icon: ClaudeMark.openSymbol) {
+                    briefs.open(target, store: store); close()
+                }
+                .help(target.project.hasPrefix("local:") ? "Open the session in the Claude app" : "Open the thread in Claude")
             }
-            ClaudeButton("Open", variant: .secondary, size: .sm, icon: "arrow.up.right") { briefs.open(target, store: store); close() }
-                .help(target.project.hasPrefix("local:") ? "Open the session in the Claude app" : "Open the thread on claude.ai")
         }
     }
-
 }
 
 // MARK: - An entry's words
