@@ -13,7 +13,6 @@ struct RouterCodeView: View {
     /// Room the window's buttons take at the header's start (when the sidebar is a rail).
     var leadingInset: CGFloat = 0
 
-    static let column: CGFloat = 768
 
     var body: some View {
         RouterMain(store: store, model: model, leadingInset: leadingInset)
@@ -41,25 +40,51 @@ struct RouterMain: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     /// The width from which the history sits beside the brief: the brief's column, its margins and the panel.
-    static let sideFrom: CGFloat = RouterCodeView.column + 64 + RouterDrawer.width + WindowChrome.inset
+    static let sideFrom: CGFloat = RouterBriefView.column + 2 * RouterBriefView.gutter + RouterDrawer.width + WindowChrome.inset
     static func historyAtSide(_ width: CGFloat) -> Bool { width >= sideFrom }
 
     private var open: Bool { store.routerBriefs.drawerOpen }
     private var side: Bool { Self.historyAtSide(width) }
 
+    /// The page's column edges, from its sides: the brief's column centred on the page beside the history, its start past
+    /// the window's buttons when they sit on the title line, its end past the history's toggle when that sits there. The
+    /// title line, the brief and the composer all take them, so they share one left and one right edge.
+    var edges: RouterEdges {
+        let page = width - (open && side ? RouterDrawer.width + WindowChrome.inset : 0)
+        let inset = AppPage<EmptyView, EmptyView>.columnInset((RouterBriefView.column, RouterBriefView.gutter), pageWidth: page)
+        return RouterEdges(leading: max(inset, leadingInset + 14), trailing: max(inset, open && side ? 0 : Self.toggleRoom))
+    }
+
+    @Environment(\.windowGlass) private var glass
+
     var body: some View {
         HStack(spacing: 0) {
             page.frame(maxWidth: .infinity)
             if open && side {
-                RouterDrawer(store: store)
+                // The window's whole height, inset as the left sidebar is: its title on the title line, the toggle over it.
+                RouterDrawer(store: store, titleHeight: CDS.TitleBar.header - WindowChrome.inset)
                     .frame(width: RouterDrawer.width)
-                    .padding(.top, CDS.TitleBar.header)
-                    .padding([.trailing, .bottom], WindowChrome.inset)
+                    .padding([.top, .trailing, .bottom], WindowChrome.inset)
                     .transition(AnyTransition.slide(from: .trailing, reduce: reduce))
             }
         }
+        // The history's toggle mirrors the sidebar's: at the title line's far end, on the history's glass when it is there.
+        .overlay(alignment: .topTrailing) {
+            AppIconButton(symbol: side ? "sidebar.right" : "rectangle.bottomthird.inset.filled",
+                          help: open ? "Hide history" : "Show history", key: "⌥⌘B", enabled: true) {
+                withAnimation(Motion.spatial.resolved(reduce: reduce)) { store.routerBriefs.drawerOpen.toggle() }
+            }
+            .environment(\.onGlass, glass && open && side)
+            .padding(.trailing, Self.toggleTrailing)
+            .frame(height: CDS.TitleBar.header)
+        }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
     }
+
+    /// The toggle's room from the window's far edge, as the sidebar's is from its near one past the window's buttons.
+    static let toggleTrailing: CGFloat = WindowChrome.inset + 10
+    /// What the title line leaves it at its end.
+    static let toggleRoom: CGFloat = toggleTrailing + CDS.TitleBar.button + 8
 
     @ViewBuilder private var page: some View {
         if #available(macOS 26, *) {
@@ -68,7 +93,7 @@ struct RouterMain: View {
             // under it, fading out under a soft edge down to the window's bottom, as under Claude's composer.
             VStack(spacing: 0) {
                 RouterSetupNotice(store: store, model: model)
-                RouterBriefView(store: store, model: model)
+                RouterBriefView(store: store, model: model, edges: edges)
                     .frame(maxHeight: .infinity)
             }
             .safeAreaBar(edge: .bottom, spacing: 0) {
@@ -87,7 +112,7 @@ struct RouterMain: View {
             VStack(spacing: 0) {
                 topBar
                 RouterSetupNotice(store: store, model: model)
-                RouterBriefView(store: store, model: model)
+                RouterBriefView(store: store, model: model, edges: edges)
                     .frame(maxHeight: .infinity)
                 composer
             }
@@ -98,8 +123,7 @@ struct RouterMain: View {
     private var composer: some View {
         VStack(spacing: 10) {
             RouterComposer(store: store, model: model)
-                .frame(maxWidth: RouterCodeView.column)
-                .padding(.horizontal, 32)
+                .padding(.leading, edges.leading).padding(.trailing, edges.trailing)
                 .padding(.bottom, open && !side ? 0 : 10)
             if open && !side {
                 RouterDrawer(store: store)
@@ -111,24 +135,22 @@ struct RouterMain: View {
     }
 
     /// §3: a 48pt header holding the 32pt session bar: the title (13pt, wght 460, primary), and when the brief was last
-    /// written, muted, as the other pages' subtitles. On the inbox's column, as the inbox's header is, so the title and the
-    /// palette's trigger don't move going from one to the other; the page under it keeps the window's width.
+    /// written, muted, as the other pages' subtitles. On the brief's column, as every page's header is on its content's: the
+    /// title starts where the text does and the palette's trigger ends where it ends.
     private var topBar: some View {
-        HeaderInsets(column: AppPage<EmptyView, EmptyView>.inboxColumn, leadingInset: leadingInset) {
-            HStack(spacing: 8) {
-                Text("Router")
-                    .font(CDS.sans(CDS.Density.compact.body.0, .medium))
-                    .foregroundStyle(CDS.Text.primary)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
-                BriefUpdated(store: store)
-                Spacer(minLength: 24)
-                HistoryToggle(store: store, side: side)
-                // The palette's trigger, where the Router's own search field was.
-                PaletteTrigger()
-            }
+        HStack(spacing: 8) {
+            Text("Router")
+                .font(CDS.sans(CDS.Density.compact.body.0, .medium))
+                .foregroundStyle(CDS.Text.primary)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            BriefUpdated(store: store)
+            Spacer(minLength: 24)
+            // The palette's trigger, where the Router's own search field was.
+            PaletteTrigger()
         }
         .frame(height: CDS.TitleBar.bar)
+        .padding(.leading, edges.leading).padding(.trailing, edges.trailing)
         .frame(height: CDS.TitleBar.header)
         .frame(maxWidth: .infinity)
         // The page's ground behind its title line, so nothing scrolled under it shows through the title.
@@ -136,30 +158,10 @@ struct RouterMain: View {
     }
 }
 
-/// The header's history button: the right sidebar's symbol when the history sits there, the bottom one's when it is across
-/// the bottom; lit while it is shown. View ▸ Show History (⌥⌘B) does the same.
-private struct HistoryToggle: View {
-    let store: Store
-    let side: Bool
-    @State private var hovered = false
-    @Environment(\.accessibilityReduceMotion) private var reduce
+/// Where the Router page's column starts and ends, from the page's sides (`RouterMain.edges`).
+struct RouterEdges: Equatable {
+    var leading: CGFloat
+    var trailing: CGFloat
 
-    var body: some View {
-        let open = store.routerBriefs.drawerOpen
-        Button {
-            withAnimation(Motion.spatial.resolved(reduce: reduce)) { store.routerBriefs.drawerOpen.toggle() }
-        } label: {
-            Image(systemName: side ? "sidebar.right" : "rectangle.bottomthird.inset.filled")
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(open ? CDS.Text.primary : CDS.Text.muted)
-                .frame(width: 28, height: 24)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(open || hovered ? CDS.Surface.s3 : .clear))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .help(open ? "Hide the history (⌥⌘B)" : "Show the history (⌥⌘B)")
-        .accessibilityLabel(open ? "Hide the history" : "Show the history")
-    }
+    static let standalone = RouterEdges(leading: RouterBriefView.gutter, trailing: RouterBriefView.gutter)
 }

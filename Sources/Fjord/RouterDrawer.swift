@@ -8,6 +8,8 @@ import SwiftUI
 
 struct RouterDrawer: View {
     let store: Store
+    /// Its title line's height: the window's title line beside the page, shorter across the bottom.
+    var titleHeight: CGFloat = 34
 
     /// Its height across the bottom, its width at the right.
     static let height: CGFloat = 260
@@ -29,18 +31,9 @@ struct RouterDrawer: View {
         let briefs = store.routerBriefs
         let lines = Self.lines(store)
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Text("History").font(CDS.sans(CDS.Density.compact.body.0, .medium)).foregroundStyle(CDS.Text.primary)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 6)
-                Button { briefs.drawerOpen = false } label: {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
-                        .frame(width: 18, height: 18).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hide the history")
-            }
-            .padding(.horizontal, 14).frame(height: 34)
+            Text("History").font(CDS.sans(CDS.Density.compact.body.0, .medium)).foregroundStyle(CDS.Text.primary)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 14).frame(height: titleHeight)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     if lines.isEmpty {

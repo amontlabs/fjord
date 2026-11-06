@@ -71,7 +71,7 @@ extension PaletteRouterSource {
         let store = context.store
         let briefs = store.routerBriefs
         let t = BriefTarget(project: section.id, thread: th.id)
-        let word = BriefThreadLine.word(th.status)
+        let word = BriefThreadWord.word(th.status)
         let actions = [
             PaletteAction(id: "open", title: th.source == .local ? "Open in Claude" : "Open on claude.ai", symbol: "arrow.up.forward.app") {
                 briefs.open(t, store: store)

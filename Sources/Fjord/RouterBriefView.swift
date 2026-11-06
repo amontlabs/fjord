@@ -6,14 +6,17 @@ import SwiftUI
 // quiet; 12 at most, the rest folded to a line of names). The prose names its threads as highlights (RouterBriefMarkup.swift),
 // each in the colour and mark of what its thread is at now, read from the Board. Hovering one shows a peek of it; clicking
 // opens a popover that answers it: its question and options (a click on one sends it), every question of a form with one
-// Send, a line to type an answer or a message, Mark read and Open. Opened, a section shows its threads and the rest of its
-// document. The composer stays under it, the history beside or under it.
+// Send, a line to type an answer or a message, Mark read and Open. A project folds to its header line, as one with nothing for
+// you starts. The composer stays under it, the history beside or under it.
 
 struct RouterBriefView: View {
     let store: Store
     @Bindable var model: RouterModel
+    var edges = RouterEdges.standalone
 
     static let column: CGFloat = 720
+    /// The room each side of the column when the page is narrower than it with it.
+    static let gutter: CGFloat = 32
     static let bottom: CGFloat = 150
 
     var body: some View {
@@ -32,11 +35,17 @@ struct RouterBriefView: View {
                 let waiting = page.sections.filter { !$0.entries.isEmpty }
                 let rest = page.sections.filter { $0.entries.isEmpty }
                 ForEach(waiting) { section in
-                    BriefSectionView(store: store, section: section, now: now, expanded: briefs.expanded.contains(section.id))
+                    BriefSectionView(store: store, section: section, now: now, open: briefs.isOpen(section))
                         .zIndex(briefs.raised(section.id + "#") ? 1 : 0)
                 }
                 if !rest.isEmpty {
-                    BriefQuietList(store: store, sections: rest, now: now)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Nothing for you").cdsText(CDS.Density.compact.footnote, .medium, CDS.Text.muted)
+                        ForEach(rest) { section in
+                            BriefSectionView(store: store, section: section, now: now, open: briefs.isOpen(section))
+                                .zIndex(briefs.raised(section.id + "#") ? 1 : 0)
+                        }
+                    }
                 }
                 if !page.folded.isEmpty {
                     Text("Also: " + page.folded.joined(separator: ", "))
@@ -44,11 +53,10 @@ struct RouterBriefView: View {
                         .lineLimit(2)
                 }
             }
-            .frame(maxWidth: Self.column, alignment: .leading)
-            .padding(.horizontal, 32)
+            .padding(.leading, edges.leading).padding(.trailing, edges.trailing)
             .padding(.top, 20)
             .padding(.bottom, Self.bottom)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { briefs.shown(page) }
         .onChange(of: page.sections.map(\.finished)) { briefs.shown(page) }
@@ -132,31 +140,30 @@ extension BriefLead {
 
 // MARK: - A project
 
+/// A project: one header line, the same open or folded, a click on it opening or folding it in place (the chevron turns, the
+/// name stays where it is). Open, its paragraph and your latest message to it under the line; folded, the paragraph's first
+/// words on the line itself, muted. A project with something for you is open until you fold it; one with nothing, folded
+/// until you open it.
 struct BriefSectionView: View {
     let store: Store
     let section: BriefPage.Section
     let now: Double
-    let expanded: Bool
-    /// Folds it back to its line (a project with nothing for you, opened from "Nothing for you").
-    var fold: (() -> Void)?
+    let open: Bool
 
     var body: some View {
         let doc = section.doc
         VStack(alignment: .leading, spacing: 8) {
             header
-            let markup = Self.markup(section)
-            if !markup.isEmpty {
-                BriefProse(store: store, markup: markup, key: section.id, project: section.id, size: 15)
-            }
-            if doc.proseStale {
-                Text("Being rewritten").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
-            }
-            if !doc.sent.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(doc.sent.suffix(expanded ? 5 : 1), id: \.intent) { BriefSentLine(line: $0) }
+            if open {
+                let markup = Self.markup(section)
+                if !markup.isEmpty {
+                    BriefProse(store: store, markup: markup, key: section.id, project: section.id, size: 15)
                 }
+                if doc.proseStale {
+                    Text("Being rewritten").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
+                }
+                if let sent = doc.sent.last { BriefSentLine(line: sent) }
             }
-            if expanded { full(doc) }
         }
     }
 
@@ -179,69 +186,30 @@ struct BriefSectionView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 7) {
-            Circle().fill(Self.tint(section.group)).frame(width: 7, height: 7)
-            Text(section.name).font(CDS.sans(13, .semibold)).foregroundStyle(CDS.Text.primary).lineLimit(1)
-            Text(Self.label(section.group)).font(CDS.sans(12)).foregroundStyle(Self.labelTint(section.group)).lineLimit(1)
-            if let since = section.staleSince {
-                Text("as of \(BriefAge.text(now - since))").font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).lineLimit(1)
-                    .help("Fjord can't see this project's page now: this is what it showed last")
-            }
-            Spacer(minLength: 8)
-            if let fold {
-                Button(action: fold) {
-                    Text("Fold").font(CDS.sans(12, .medium)).foregroundStyle(CDS.Text.muted).contentShape(Rectangle())
+        Button { store.routerBriefs.toggle(section) } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
+                    .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 10)
+                Circle().fill(Self.tint(section.group)).frame(width: 7, height: 7)
+                Text(section.name).font(CDS.sans(13, .semibold)).foregroundStyle(CDS.Text.primary).lineLimit(1).fixedSize()
+                Text(Self.label(section.group)).font(CDS.sans(12)).foregroundStyle(Self.labelTint(section.group)).lineLimit(1).fixedSize()
+                if let since = section.staleSince {
+                    Text("as of \(BriefAge.text(now - since))").font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
+                        .help("Fjord can't see this project's page now: this is what it showed last")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Fold \(section.name)")
-            }
-            Button {
-                let briefs = store.routerBriefs
-                if briefs.expanded.contains(section.id) { briefs.expanded.remove(section.id) } else { briefs.expanded.insert(section.id) }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(expanded ? "Less" : "More").font(CDS.sans(12, .medium))
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(expanded ? 180 : 0))
+                if !open {
+                    Text(BriefMarkup.plain(section.doc.now.joined(separator: " ")))
+                        .font(CDS.sans(12.5)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
                 }
-                .foregroundStyle(CDS.Text.muted)
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "Show less of \(section.name)" : "Show all of \(section.name)")
+            .contentShape(Rectangle())
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(section.name), \(Self.label(section.group))")
+        .accessibilityValue(open ? "open" : "folded")
+        .accessibilityHint(open ? "Folds it" : "Shows its paragraph")
         .accessibilityAddTraits(.isHeader)
-    }
-
-    /// The rest of the document: its threads, its purpose, what was decided, what's left loose.
-    @ViewBuilder private func full(_ doc: BriefDoc) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !doc.threads.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(doc.threads, id: \.id) { BriefThreadLine(thread: $0, now: now, told: !section.finished.contains($0)) }
-                }
-            }
-            if let purpose = doc.purpose, !purpose.isEmpty { part("Purpose", [purpose]) }
-            if !doc.decisions.isEmpty {
-                part("Decided", doc.decisions.map { d in
-                    let who = d.thread == BriefDoc.yourSend ? "You" : (doc.thread(d.thread)?.title.nonEmpty ?? "A thread")
-                    return "\(who): \(d.text)"
-                })
-            }
-            if !doc.looseEnds.isEmpty { part("Loose ends", doc.looseEnds) }
-        }
-        .padding(.leading, 14)
-        .padding(.top, 4)
-    }
-
-    private func part(_ title: String, _ lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).cdsText(CDS.Density.compact.footnote, .medium, CDS.Text.muted)
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(RouterText.inline(BriefMarkup.plain(line))).cdsText(CDS.Density.compact.body, .regular, CDS.Text.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 
     static func tint(_ g: BriefPage.Group) -> Color {
@@ -274,49 +242,6 @@ struct BriefSectionView: View {
     }
 }
 
-// MARK: - What has nothing for you
-
-/// The projects with nothing that waits on you, folded to a line each under "Nothing for you": the name, what it's at, and
-/// its first words. A click opens one to its paragraph; what finished is in the lead's "Worth a look" already.
-private struct BriefQuietList: View {
-    let store: Store
-    let sections: [BriefPage.Section]
-    let now: Double
-
-    var body: some View {
-        let briefs = store.routerBriefs
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Nothing for you").cdsText(CDS.Density.compact.footnote, .medium, CDS.Text.muted)
-            ForEach(sections) { section in
-                if briefs.unfolded.contains(section.id) {
-                    BriefSectionView(store: store, section: section, now: now, expanded: briefs.expanded.contains(section.id),
-                                     fold: { briefs.unfolded.remove(section.id) })
-                        .zIndex(briefs.raised(section.id + "#") ? 1 : 0)
-                        .padding(.vertical, 4)
-                } else {
-                    Button { briefs.unfolded.insert(section.id) } label: {
-                        HStack(spacing: 7) {
-                            Circle().fill(BriefSectionView.tint(section.group)).frame(width: 7, height: 7)
-                            Text(section.name).font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.secondary).lineLimit(1).fixedSize()
-                            Text(BriefSectionView.label(section.group)).font(CDS.sans(12)).foregroundStyle(BriefSectionView.labelTint(section.group))
-                                .lineLimit(1).fixedSize()
-                            Text(BriefMarkup.plain(section.doc.now.joined(separator: " ")))
-                                .font(CDS.sans(12.5)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
-                            Spacer(minLength: 8)
-                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(section.name), \(BriefSectionView.label(section.group))")
-                    .accessibilityHint("Shows its paragraph")
-                }
-            }
-        }
-        .padding(.top, 4)
-    }
-}
-
 // MARK: - Prose with highlights
 
 /// A paragraph of the brief: its words and its threads' highlights, laid out as text. `project`: the section's, whose tags
@@ -337,12 +262,10 @@ struct BriefProse: View {
                         .layoutValue(key: TightKey.self, value: tight)
                 case .link(let url, let text, let tight):
                     if let destination = URL(string: url) {
-                        SwiftUI.Link(destination: destination) {
-                            Text(text).font(CDS.sans(size, .medium)).foregroundStyle(CDS.Text.accent).underline(color: CDS.Text.accent.opacity(0.4))
-                        }
-                        .buttonStyle(.plain)
-                        .help(url)
-                        .layoutValue(key: TightKey.self, value: tight)
+                        let linkKey = key + "#link:" + url
+                        BriefLink(store: store, destination: destination, text: text, size: size, key: linkKey)
+                            .layoutValue(key: TightKey.self, value: tight)
+                            .zIndex(store.routerBriefs.raised(linkKey) ? 1 : 0)
                     }
                 case .thread(let id, let text, let tight):
                     if let target = target(id) {
@@ -365,6 +288,59 @@ struct BriefProse: View {
     private func target(_ id: String) -> BriefTarget? {
         if let project { return BriefTarget(project: project, thread: id) }
         return BriefTarget(key: id)
+    }
+}
+
+/// A link in the prose: its words, underlined in the accent; hovered, where it leads floats under it (its host bold, then its
+/// path), as a browser's status line shows it.
+private struct BriefLink: View {
+    let store: Store
+    let destination: URL
+    let text: String
+    let size: CGFloat
+    let key: String
+
+    var body: some View {
+        let briefs = store.routerBriefs
+        let hovered = briefs.hovered == key
+        SwiftUI.Link(destination: destination) {
+            Text(text).font(CDS.sans(size, .medium)).foregroundStyle(CDS.Text.accent)
+                .underline(color: CDS.Text.accent.opacity(hovered ? 0.9 : 0.4))
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { briefs.hovered = key; NSCursor.pointingHand.push() } else {
+                NSCursor.pop()
+                if briefs.hovered == key { briefs.hovered = nil }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if hovered {
+                let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
+                    (Text(destination.host() ?? "").foregroundStyle(CDS.Text.primary).fontWeight(.medium)
+                        + Text(Self.rest(destination)).foregroundStyle(CDS.Text.muted))
+                        .font(CDS.sans(12)).lineLimit(1).truncationMode(.middle)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(shape.fill(CDS.Surface.s3))
+                .overlay(shape.strokeBorder(CDS.borderStrong, lineWidth: 1))
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+                .frame(maxWidth: 460, alignment: .leading)
+                .fixedSize()
+                .offset(y: size + 12)
+                .allowsHitTesting(false)
+            }
+        }
+        .accessibilityHint("Opens \(destination.absoluteString)")
+    }
+
+    /// Everything after the host: the path, query and fragment.
+    static func rest(_ url: URL) -> String {
+        let s = url.absoluteString
+        guard let host = url.host(), let r = s.range(of: host) else { return s }
+        return String(s[r.upperBound...])
     }
 }
 
@@ -801,35 +777,8 @@ struct BriefOptionRow: View {
 
 // MARK: - Lines
 
-struct BriefThreadLine: View {
-    let thread: BriefThread
-    let now: Double
-    var told = true
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Self.glyph(thread.status).frame(width: 12)
-            Text(thread.title.nonEmpty ?? "Untitled thread").cdsText(CDS.Density.compact.body, told ? .regular : .medium, CDS.Text.secondary)
-                .lineLimit(1).truncationMode(.tail)
-            Text(Self.word(thread.status)).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted).lineLimit(1).fixedSize()
-            Text(BriefAge.text(now - thread.age)).cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted).lineLimit(1).fixedSize()
-            if thread.source == .local {
-                Image(systemName: "laptopcomputer").font(.system(size: 10)).foregroundStyle(CDS.Text.muted)
-                    .help("A session on this Mac")
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder static func glyph(_ s: ThreadState) -> some View {
-        switch s {
-        case .working: ProgressView().controlSize(.mini).scaleEffect(0.7)
-        case .needsYou: Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(CDS.Fill.warning)
-        case .paused: Image(systemName: "pause.circle").font(.system(size: 10)).foregroundStyle(CDS.Text.muted)
-        case .done: Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(CDS.Text.accent)
-        }
-    }
-
+/// A thread's status in words.
+enum BriefThreadWord {
     static func word(_ s: ThreadState) -> String {
         switch s {
         case .working: "working"

@@ -156,10 +156,8 @@ enum BriefKeys {
     var focused: BriefTarget?
     /// Option N picked on an entry, shown live until Return sends it.
     var picked: [BriefTarget: Int] = [:]
-    /// Sections open to the full document.
-    var expanded: Set<String> = []
-    /// Projects with nothing for you, opened from their folded line.
-    var unfolded: Set<String> = []
+    /// Projects folded or opened against how they start (open with something for you, folded with nothing).
+    var toggled: Set<String> = []
     /// The highlight under the pointer (`BriefSpan.key`), whose peek shows.
     var hovered: String?
     /// The highlight whose answer popover is open (`BriefSpan.key`: where it is on the page, and its thread).
@@ -316,6 +314,13 @@ enum BriefKeys {
     /// its paragraph and section are drawn over what comes after them.
     func raised(_ prefix: String) -> Bool {
         hovered?.hasPrefix(prefix) == true || (BriefSpan.popoverInline && opened?.hasPrefix(prefix) == true)
+    }
+
+    /// Whether a project shows its paragraph: one with something for you starts open, one with nothing folded.
+    func isOpen(_ section: BriefPage.Section) -> Bool { section.entries.isEmpty == toggled.contains(section.id) }
+
+    func toggle(_ section: BriefPage.Section) {
+        if toggled.contains(section.id) { toggled.remove(section.id) } else { toggled.insert(section.id) }
     }
 
     /// A project's name as the page shows it.
