@@ -79,6 +79,8 @@ struct RouterMain: View {
             .frame(height: CDS.TitleBar.header)
         }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+        // A click on a highlight or a history line writes to its thread next.
+        .environment(\.briefReply) { [model] in model.reply() }
     }
 
     /// The toggle's room from the window's far edge, as the sidebar's is from its near one past the window's buttons.

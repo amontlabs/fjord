@@ -145,4 +145,21 @@ import Testing
         try await Task.sleep(for: .milliseconds(RouterBriefs.hoverGrace + 120))
         #expect(briefs.hovered == nil)
     }
+
+    @Test func theHistoryGroupsLinesByDay() {
+        let cal = Calendar(identifier: .gregorian)
+        let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 6, hour: 12))!
+        func line(_ id: String, _ hoursAgo: Double) -> RouterDrawer.Line {
+            RouterDrawer.Line(id: id, at: now.addingTimeInterval(-hoursAgo * 3600), kind: .answer, text: id)
+        }
+        let days = RouterDrawer.days([line("a", 1), line("b", 3), line("c", 20), line("d", 60)], now: now, calendar: cal)
+        #expect(days.map(\.title).prefix(2) == ["Today", "Yesterday"])
+        #expect(days.map { $0.lines.map(\.id) } == [["a", "b"], ["c"], ["d"]])
+    }
+
+    @Test func aMessagesPlaceIsItsThreadOrItsProject() {
+        #expect(RouterDrawer.place("claude-thread:chan_a/th_1").thread == BriefTarget(project: "chan_a", thread: "th_1"))
+        #expect(RouterDrawer.place("claude-project:chan_a").project == "chan_a")
+        #expect(RouterDrawer.place(nil).thread == nil)
+    }
 }

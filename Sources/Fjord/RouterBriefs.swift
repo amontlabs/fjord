@@ -361,6 +361,18 @@ enum BriefKeys {
         if toggled.contains(section.id) { toggled.remove(section.id) } else { toggled.insert(section.id) }
     }
 
+    /// What the latest rewrite of a project's brief changed, in plain words (its new lines), read once per version.
+    func lastChange(_ project: String) -> String? {
+        guard let doc = docs[project], doc.version > 0 else { return nil }
+        if let kept = changeCache[project], kept.version == doc.version { return kept.text }
+        let diff = versions()[project]?.last(where: { $0.version == doc.version })?.diff ?? ""
+        let added = diff.split(separator: "\n").filter { $0.hasPrefix("+ now: ") }.map { BriefMarkup.plain(String($0.dropFirst(7))) }
+        let text = added.isEmpty ? nil : added.joined(separator: " ")
+        changeCache[project] = (doc.version, text)
+        return text
+    }
+    @ObservationIgnored private var changeCache: [String: (version: Int, text: String?)] = [:]
+
     /// A project's name as the page shows it.
     func projectName(_ project: String) -> String {
         names[project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(project)

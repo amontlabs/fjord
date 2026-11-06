@@ -202,6 +202,11 @@ struct BriefSectionView: View {
                     Text("as of \(BriefAge.text(now - since))").font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
                         .help("Fjord can't see this project's page now: this is what it showed last")
                 }
+                if section.doc.at > 0 {
+                    Text("updated \(BriefAge.text(now - section.doc.at))").font(CDS.sans(11.5)).foregroundStyle(CDS.Text.muted)
+                        .lineLimit(1).fixedSize()
+                        .help(store.routerBriefs.lastChange(section.id).map { "Last rewrite: \($0)" } ?? "When this brief was last written")
+                }
                 if !open {
                     Text(BriefMarkup.plain(section.doc.now.joined(separator: " ")))
                         .font(CDS.sans(12.5)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
@@ -762,6 +767,15 @@ struct BriefSentLine: View {
 }
 
 enum BriefAge {
+    /// "now", "4m", "2h", "3d": a line's time where room is short.
+    static func short(_ seconds: Double) -> String {
+        let s = max(0, seconds)
+        if s < 60 { return "now" }
+        if s < 3600 { return "\(Int(s / 60))m" }
+        if s < 86_400 { return "\(Int(s / 3600))h" }
+        return "\(Int(s / 86_400))d"
+    }
+
     static func text(_ seconds: Double) -> String {
         let s = max(0, seconds)
         if s < 60 { return "just now" }
