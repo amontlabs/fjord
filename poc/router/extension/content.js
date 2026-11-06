@@ -255,6 +255,13 @@ function messageText(row) {
   // What a message holds but doesn't show as its words, by structure: math's markup copies, icons, code that isn't text, hidden and
   // closed parts, a folded details' body, and a decision card (the row says it has one: `decision`).
   copy.querySelectorAll('math, annotation, .katex-mathml, svg, style, script, template, noscript, [hidden], [inert], [data-closed], details:not([open]) > :not(summary), [data-testid="decision-card"]').forEach((node) => node.remove());
+  // A link off the page keeps where it goes, as markdown, so a brief can link a release or a PR: its words alone, when they are its
+  // address. The page's own links (a thread, a project) stay words: the brief names threads its own way.
+  copy.querySelectorAll("a[href]").forEach((link) => {
+    const href = link.href, words = squash(link.textContent.replace(/[\ue000-\uf8ff]/g, ""));
+    if (!/^https?:\/\//.test(href) || !words || new URL(href).origin === location.origin) return;
+    link.textContent = words === href ? href : `[${words}](${href})`;
+  });
   return copy.textContent.replace(/[\ue000-\uf8ff]/g, "").trim();
 }
 

@@ -86,7 +86,7 @@ function row(h, { id, mark = "dashed", spin = false, unread = false }) {
 // A thread view: the project's pane, then the thread's pane with its rows, composer and dock.
 // `measured`: the buttons as the page draws them (live, 2026-11-05): a letter, a label and a badge, a consequence line, named by
 // `aria-labelledby` and `aria-describedby`; `options` then holds [label, consequence] pairs.
-function threadView(h, { card = "cmsg_K", state = null, busy = false, stop = false, options = ["Yes", "No"], measured = false } = {}) {
+function threadView(h, { card = "cmsg_K", state = null, busy = false, stop = false, options = ["Yes", "No"], measured = false, words = ["Pick one"] } = {}) {
   const buttons = options.map((text, i) => h("li", {}, measured
     ? h("button", { type: "button", "aria-labelledby": `r-cap-${i} r-label-${i}`, "aria-describedby": `r-badge-${i} r-consequence-${i}` },
       h("span", { id: `r-cap-${i}` }, "AB"[i]),
@@ -102,7 +102,7 @@ function threadView(h, { card = "cmsg_K", state = null, busy = false, stop = fal
       h("div", { "data-testid": "overview-thread-crumb-back" }),
       h("div", { "data-testid": "transcript-sizer" },
         h("div", { "data-testid": "transcript-row", "data-perf-row": "human", "data-index": "0" }, h("div", { "data-entry-key": "cmsg_T" }, h("div", { "data-testid": "user-message" }, "Do it"))),
-        h("div", { "data-testid": "transcript-row", "data-perf-row": "assistant", "data-index": "1" }, h("div", { "data-entry-key": card }, h("div", { "data-testid": "assistant-message" }, "Pick one", decision)))),
+        h("div", { "data-testid": "transcript-row", "data-perf-row": "assistant", "data-index": "1" }, h("div", { "data-entry-key": card }, h("div", { "data-testid": "assistant-message" }, ...words.map((w) => typeof w === "function" ? w(h) : w), decision)))),
       h("div", { "data-testid": "rail-composer-dock" }, h("div", { "data-testid": "code-prompt-input" }), stop ? h("button", { "data-testid": "code-prompt-stop" }) : null)),
   ];
 }
@@ -215,6 +215,16 @@ const cases = {
     env.say({ kind: "snapshot" });
     const card = env.events("rows")[0].rows.find((r) => r.key === "cmsg_K");
     eq(card.options, ["Red — This thread replies with exactly Red and stops.", "Blue — This thread replies with exactly Blue."], "label — consequence, no letter, no badge");
+  },
+
+  async a_reply_keeps_its_links() {
+    const env = page({ url: "https://claude.ai/code/project/chan_A?thread=cmsg_T", name: "fjord:chan_A:cmsg_T", frame: true,
+      build: (h) => threadView(h, { words: ["Published ", (h) => h("a", { href: "https://github.com/a/b/releases/tag/v1" }, "v1"), " and ",
+        (h) => h("a", { href: "https://example.com/x" }, "https://example.com/x"), " and ", (h) => h("a", { href: "/code/project/chan_B" }, "a project")] }) });
+    env.say({ kind: "snapshot" });
+    const row = env.events("rows")[0].rows.find((r) => r.key === "cmsg_K");
+    eq(row.text, "Published [v1](https://github.com/a/b/releases/tag/v1) and https://example.com/x and a project",
+       "a link's address kept as markdown; one whose words are its address once; the page's own links as their words");
   },
 
   async answer_clicks_the_nth_option() {
