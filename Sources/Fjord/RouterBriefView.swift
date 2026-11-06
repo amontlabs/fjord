@@ -265,21 +265,22 @@ struct BriefProse: View {
 
     var body: some View {
         BriefFlow(spacing: size * 0.27, lineSpacing: 5) {
-            ForEach(Array(BriefMarkup.tokens(markup).enumerated()), id: \.offset) { _, token in
+            ForEach(Array(BriefMarkup.tokens(markup).enumerated()), id: \.offset) { index, token in
                 switch token {
                 case .word(let word, let tight):
                     Text(RouterText.inline(word)).font(CDS.sans(size)).foregroundStyle(CDS.Text.secondary)
                         .layoutValue(key: TightKey.self, value: tight)
                 case .link(let url, let text, let tight):
                     if let destination = URL(string: url) {
-                        let linkKey = key + "#link:" + url
+                        let linkKey = key + "#link:\(index):" + url
                         BriefLink(store: store, destination: destination, text: text, size: size, key: linkKey)
                             .layoutValue(key: TightKey.self, value: tight)
                             .zIndex(store.routerBriefs.raised(linkKey) ? 1 : 0)
                     }
                 case .thread(let id, let text, let tight):
                     if let target = target(id) {
-                        let spanKey = BriefSpan.key(key, target)
+                        // Its place in the text too: a thread named twice in a paragraph is two highlights, one panel each.
+                        let spanKey = BriefSpan.key(key, target, at: index)
                         BriefSpan(store: store, target: target, key: spanKey, text: text, size: size, showsProject: project == nil)
                             .layoutValue(key: TightKey.self, value: tight)
                             .zIndex(store.routerBriefs.raised(spanKey) ? 1 : 0)
@@ -408,7 +409,7 @@ struct BriefSpan: View {
     @State private var frame: CGRect = .zero
     @State private var panelHeight: CGFloat = 0
 
-    static func key(_ place: String, _ t: BriefTarget) -> String { place + "#" + t.key }
+    static func key(_ place: String, _ t: BriefTarget, at index: Int = 0) -> String { place + "#" + t.key + "@\(index)" }
     static let gap: CGFloat = 6
 
     var body: some View {
@@ -533,7 +534,7 @@ struct BriefAnswerPanel: View {
                     formQuestions(form)
                 } else {
                     question(entry)
-                    if !entry.options.isEmpty { options(entry) }
+                    if entry.options.count > 1 { options(entry) }
                 }
             }
             status
@@ -653,7 +654,7 @@ struct BriefAnswerPanel: View {
         return HStack(spacing: 8) {
             if let entry, entry.kind == .permission || entry.kind == .stranded {
                 Text("Open it to go on").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
-            } else if entry?.options.isEmpty == false {
+            } else if (entry?.options.count ?? 0) > 1 {
                 Text("Click an option, or 1–\(min(entry!.options.count, 9)) and Return").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
             }
             Spacer(minLength: 0)

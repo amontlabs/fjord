@@ -162,4 +162,19 @@ import Testing
         #expect(RouterDrawer.place("claude-project:chan_a").project == "chan_a")
         #expect(RouterDrawer.place(nil).thread == nil)
     }
+
+    @Test func aThreadNamedTwiceIsTwoHighlightsWithTheirOwnPanel() {
+        let t = BriefTarget(project: "p", thread: "coordinator")
+        #expect(BriefSpan.key("lead-you", t, at: 3) != BriefSpan.key("lead-you", t, at: 9))
+        #expect(BriefSpan.key("lead-you", t, at: 3).hasPrefix("lead-you#"))
+    }
+
+    @Test func oneWrittenOptionIsNoChoice() {
+        var doc = BriefDoc(project: "chan_p")
+        doc.threads = [briefThread("t1", .needsYou)]
+        let one = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Repair it?","options":["repair keychain"]}],"decisions":[],"loose_ends":[]}"#)
+        #expect(doc.checked(one, known: [], cards: [:], at: 1).needsYou.first?.options == [])
+        let two = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Which?","options":["a","b"]}],"decisions":[],"loose_ends":[]}"#)
+        #expect(doc.checked(two, known: [], cards: [:], at: 1).needsYou.first?.options == ["a", "b"])
+    }
 }

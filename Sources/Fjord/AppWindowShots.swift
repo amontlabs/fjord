@@ -255,11 +255,11 @@ enum AppWindowShots {
         briefShot("brief-drawer-narrow", .aqua, width: 900, drawer: true), briefShot("brief-drawer-narrow-dark", .darkAqua, width: 900, drawer: true),
         // A highlight hovered, its panel live: a question in the lead, a plan, a question with an option picked (and
         // mentioned), a form of two questions, a finished thread's (a line to message it).
-        briefShot("brief-hover", .aqua, hover: "lead-you#chan_demo_fjord/th_settings"),
-        briefShot("brief-hover-plan", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_migrate"),
-        briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings"),
-        briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)", twoQuestions: true),
-        briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide"),
+        briefShot("brief-hover", .aqua, hover: "lead-you#chan_demo_fjord/th_settings@3"),
+        briefShot("brief-hover-plan", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_migrate@6"),
+        briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
+        briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", twoQuestions: true),
+        briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide@0"),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
         Shot(name: "palette-search", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot(query: "fix")),
         Shot(name: "palette-actions", destination: { $0.shownCategories[0].id.asCategory },
@@ -416,7 +416,8 @@ enum AppWindowShots {
                      briefs.focus(t)
                      briefs.pick(t, 2, store: store)
                  }
-                 if let hover, let slash = hover.firstIndex(of: "#"), let t = BriefTarget(key: String(hover[hover.index(after: slash)...])) {
+                 if let hover, let slash = hover.firstIndex(of: "#"), let at = hover.lastIndex(of: "@"),
+                    let t = BriefTarget(key: String(hover[hover.index(after: slash)..<at])) {
                      briefs.hover(hover, t, inside: true)
                  }
                  if twoQuestions, var form = store.pendingForms["cli-demo-lcu"] {

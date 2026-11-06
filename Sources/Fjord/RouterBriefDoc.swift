@@ -209,7 +209,9 @@ struct BriefDoc: Codable, Equatable, Sendable {
             if let th, th.status == .working || (kind != .stranded && th.status == .done) { return nil }
             guard seen.insert(raw.thread + "/" + raw.kind).inserted else { return nil }
             let old = needsYou.first { $0.thread == raw.thread && $0.kind == kind }
-            let options = cards[raw.thread] ?? raw.options ?? []
+            // A card's options are the card's; the model's own are choices only when it gives two or more (one is no choice).
+            let written = raw.options ?? []
+            let options = cards[raw.thread] ?? (written.count > 1 ? written : [])
             return BriefEntry(project: project, thread: raw.thread, kind: kind, state: th?.status ?? .needsYou,
                               since: old?.since ?? now, source: th?.source ?? .cloud, asOf: th?.asOf,
                               question: raw.question, options: options, card: old?.card, form: old?.form, sent: old?.sent ?? [])
