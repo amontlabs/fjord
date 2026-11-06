@@ -75,9 +75,14 @@ extension FjordHub {
             start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - Self.peekPad, 0)
             let short = bar - (start + length)
             if short >= 0, short < Self.peekSnap { length = bar - start }
+            // Kept on screen: one that would run past the screen's bottom moves up until it fits (past the bar's top if it
+            // must), and one taller than the screen is cut to it.
+            let room = hub.room
+            if start + length > room.after { start = max(room.after - length, -room.before) }
+            length = min(length, room.before + room.after)
         }
         let end = start + length
-        return Placement(start: start, length: length, atStart: start <= 0.5, atEnd: end >= bar - 0.5, pastEnd: end > bar + 0.5)
+        return Placement(start: start, length: length, atStart: abs(start) <= 0.5, atEnd: end >= bar - 0.5, pastEnd: end > bar + 0.5)
     }
 
     /// The panel for the hovered section, placed beside (or under) its cells in the bar.

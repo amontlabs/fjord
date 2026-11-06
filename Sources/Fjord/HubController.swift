@@ -101,7 +101,7 @@ struct HubRoot: View {
     var chrome: Chrome = .shared
 
     var body: some View {
-        GeometryReader { _ in content }
+        GeometryReader { proxy in content(proxy.size) }
             .coordinateSpace(.named(FjordHub.rootSpace))
             .environment(chrome)
             .environment(\.openApp, openApp)
@@ -115,11 +115,15 @@ struct HubRoot: View {
             .tipSpace()
     }
 
-    @ViewBuilder private var content: some View {
+    @ViewBuilder private func content(_ screen: CGSize) -> some View {
         let view = FjordHub(store: store, ui: ui, hub: hub)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(FjordHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Fjord hub frame \(frame)") }
                 layout.frame = frame
+                let inset = Theme.Metrics.inset
+                let room = ui.edge.isHorizontal ? HubRoom(before: frame.minX - inset, after: screen.width - frame.minX - inset)
+                                                : HubRoom(before: frame.minY - inset, after: screen.height - frame.minY - inset)
+                if hub.room != room { hub.room = room }
                 layout.restLength = ui.edge.isHorizontal ? frame.width : frame.height
                 layout.restSize = frame.size
             }

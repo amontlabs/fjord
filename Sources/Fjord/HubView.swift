@@ -37,6 +37,9 @@ extension EnvironmentValues {
 @MainActor
 final class HubState {
     var hovering = false
+    /// The room on screen from the bar's start up (or left) and down (or right) to the screen's edges, less their inset: a
+    /// panel beside the bar is kept within it.
+    var room = HubRoom()
     /// No hover panels until the pointer has left the bar (set when the bar comes back under a still pointer).
     var quiet = false
     /// The bar is away while the app window is open (the playground draws it, the app orders its panel out).
@@ -545,4 +548,11 @@ struct IslandRule: View {
             .frame(width: axis == .vertical ? CDS.hairline : nil, height: axis == .horizontal ? CDS.hairline : nil)
             .padding(axis == .horizontal ? .horizontal : .vertical, inset)
     }
+}
+
+/// The room on screen around the bar, along its edge: `before` its start (above, or to its left), `after` its start (below,
+/// or to its right, the bar included).
+struct HubRoom: Equatable {
+    var before: CGFloat = .infinity
+    var after: CGFloat = .infinity
 }

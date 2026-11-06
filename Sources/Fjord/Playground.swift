@@ -25,6 +25,7 @@ struct PlaygroundView: View {
     @State private var leaveTask: Task<Void, Never>?
 
     private let menuBar: CGFloat = 26
+    private static let space = "playground"
 
     var body: some View {
         GeometryReader { geo in
@@ -37,7 +38,7 @@ struct PlaygroundView: View {
                                       y: geo.size.height / 2 + (ui.edge == .top ? 120 : ui.edge == .bottom ? -120 : 0))
                 }
                 fakeMenuBar.frame(maxHeight: .infinity, alignment: .top)
-                if !hub.barHidden { docked }
+                if !hub.barHidden { docked(geo.size) }
                 if let toast = hub.toast {
                     Text(toast).font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -47,6 +48,7 @@ struct PlaygroundView: View {
                 }
             }
         }
+        .coordinateSpace(.named(Self.space))
         .frame(minWidth: minSize.width, minHeight: minSize.height)
         .environment(chrome)
         .environment(\.pickBriefEntry) { entry in pickBriefEntry?(entry) }
@@ -65,8 +67,15 @@ struct PlaygroundView: View {
         }
     }
 
-    @ViewBuilder private var docked: some View {
+    @ViewBuilder private func docked(_ screen: CGSize) -> some View {
+        // The room on the screen around the bar, as the app's `HubRoot` measures it, so a panel is kept on it here too.
         let hubView = FjordHub(store: store, ui: ui, hub: hub).environment(\.hubPointer, hover)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [hub, ui] frame in
+                let inset = Theme.Metrics.inset
+                let room = ui.edge.isHorizontal ? HubRoom(before: frame.minX - inset, after: screen.width - frame.minX - inset)
+                                                : HubRoom(before: frame.minY - inset, after: screen.height - frame.minY - inset)
+                if hub.room != room { hub.room = room }
+            }
         switch ui.edge {
         case .right: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.top, menuBar + 40)
         case .left: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.top, menuBar + 40)
@@ -376,6 +385,8 @@ enum PlaygroundShots {
     private static let routerShots: [Shot] = {
         var shots = Shot.edges("rest-router") { $0.scenario = .router }
         shots += Shot.edges("peek-router") { $0.scenario = .router; $0.section = .router }
+        // A screen too short for the Router's peek under its cell: it moves up to stay on it.
+        shots += Shot.edges("peek-router-short", on: [.right]) { $0.scenario = .router; $0.section = .router; $0.size = CGSize(width: 1280, height: 560) }
         let window = { (name: String, configure: (inout Shot) -> Void) -> Shot in
             var shot = Shot(name: "right-router-window\(name)", scenario: .router, routerWindow: RouterWindowShot())
             configure(&shot)

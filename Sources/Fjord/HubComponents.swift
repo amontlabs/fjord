@@ -1094,7 +1094,8 @@ private struct RouterCellLabel: View {
             .foregroundStyle(BarGlass.ink(hover ? .primary : .secondary, glass: glass, opaque: hover ? Theme.text : Theme.secondary))
             .frame(width: 28, height: 28)
             .background(RoundedRectangle(cornerRadius: CDS.Tile.radius, style: .continuous)
-                .fill(hover ? BarGlass.fill(.hover, glass: glass, scheme: scheme, opaque: Theme.Fill.hover) : Theme.Fill.rest))
+                // Clear at rest, as every cell of the bar: on glass an opaque rest fill takes the glyph's vibrant ink with it.
+                .fill(hover ? BarGlass.fill(.hover, glass: glass, scheme: scheme, opaque: Theme.Fill.hover) : .clear))
             // Awaiting yellow while one needs you.
             .cornerBadge(needsYou, fill: CDS.Fill.warning, ink: CDS.Text.onPrimary)
             .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
