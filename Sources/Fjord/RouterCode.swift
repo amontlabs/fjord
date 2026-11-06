@@ -36,7 +36,30 @@ struct RouterMain: View {
     @Bindable var model: RouterModel
     var leadingInset: CGFloat = 0
 
-    var body: some View { page }
+    /// The page's width, which puts the history at the right (wide) or across the bottom (narrow).
+    @State private var width: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    /// The width from which the history sits beside the brief: the brief's column, its margins and the panel.
+    static let sideFrom: CGFloat = RouterCodeView.column + 64 + RouterDrawer.width + WindowChrome.inset
+    static func historyAtSide(_ width: CGFloat) -> Bool { width >= sideFrom }
+
+    private var open: Bool { store.routerBriefs.drawerOpen }
+    private var side: Bool { Self.historyAtSide(width) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            page.frame(maxWidth: .infinity)
+            if open && side {
+                RouterDrawer(store: store)
+                    .frame(width: RouterDrawer.width)
+                    .padding(.top, CDS.TitleBar.header)
+                    .padding([.trailing, .bottom], WindowChrome.inset)
+                    .transition(AnyTransition.slide(from: .trailing, reduce: reduce))
+            }
+        }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+    }
 
     @ViewBuilder private var page: some View {
         if #available(macOS 26, *) {
@@ -71,15 +94,20 @@ struct RouterMain: View {
         }
     }
 
-    /// The composer, and under it the history's drawer (RouterDrawer.swift).
+    /// The composer, and under it the history across the window's bottom when the window is narrow (RouterDrawer.swift).
     private var composer: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 10) {
             RouterComposer(store: store, model: model)
-            RouterDrawer(store: store)
+                .frame(maxWidth: RouterCodeView.column)
+                .padding(.horizontal, 32)
+                .padding(.bottom, open && !side ? 0 : 10)
+            if open && !side {
+                RouterDrawer(store: store)
+                    .frame(height: RouterDrawer.height)
+                    .padding([.trailing, .bottom], WindowChrome.inset)
+                    .transition(AnyTransition.slide(from: .bottom, reduce: reduce))
+            }
         }
-        .frame(maxWidth: RouterCodeView.column)
-        .padding(.horizontal, 32)
-        .padding(.bottom, 10)
     }
 
     /// §3: a 48pt header holding the 32pt session bar: the title (13pt, wght 460, primary), and when the brief was last
@@ -95,6 +123,7 @@ struct RouterMain: View {
                     .accessibilityAddTraits(.isHeader)
                 BriefUpdated(store: store)
                 Spacer(minLength: 24)
+                HistoryToggle(store: store, side: side)
                 // The palette's trigger, where the Router's own search field was.
                 PaletteTrigger()
             }
@@ -104,5 +133,33 @@ struct RouterMain: View {
         .frame(maxWidth: .infinity)
         // The page's ground behind its title line, so nothing scrolled under it shows through the title.
         .background(CDS.Surface.s1)
+    }
+}
+
+/// The header's history button: the right sidebar's symbol when the history sits there, the bottom one's when it is across
+/// the bottom; lit while it is shown. View ▸ Show History (⌥⌘B) does the same.
+private struct HistoryToggle: View {
+    let store: Store
+    let side: Bool
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        let open = store.routerBriefs.drawerOpen
+        Button {
+            withAnimation(Motion.spatial.resolved(reduce: reduce)) { store.routerBriefs.drawerOpen.toggle() }
+        } label: {
+            Image(systemName: side ? "sidebar.right" : "rectangle.bottomthird.inset.filled")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(open ? CDS.Text.primary : CDS.Text.muted)
+                .frame(width: 28, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(open || hovered ? CDS.Surface.s3 : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(open ? "Hide the history (⌥⌘B)" : "Show the history (⌥⌘B)")
+        .accessibilityLabel(open ? "Hide the history" : "Show the history")
     }
 }

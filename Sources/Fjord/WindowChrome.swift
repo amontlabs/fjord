@@ -100,6 +100,7 @@ struct InsetWindowLayout: View {
         let glass = chrome.mode == .glass
         ZStack(alignment: .topLeading) {
             page(start: WindowChrome.pageLeading(collapsed: collapsed), collapsed: collapsed)
+                .environment(\.windowGlass, glass)
             panel(collapsed: collapsed, glass: glass)
             // The sidebar toggle, back and forward: plain buttons on the title line right after the window's three, at the
             // same place out and folded, on the sidebar's glass when it is out and over the page's line as a rail.
@@ -167,7 +168,7 @@ struct InsetWindowLayout: View {
 /// that `standsIn` draws its fill instead of glass while the window is captured for the morph (`GlassCapture`); one that
 /// doesn't never reads the flag, so a capture never redraws it.
 @available(macOS 26, *)
-private struct PanelMaterial<S: Shape>: ViewModifier {
+struct PanelMaterial<S: Shape>: ViewModifier {
     let shape: S
     let glass: Bool
     let fill: Color
