@@ -407,7 +407,6 @@ struct BriefSpan: View {
     @Environment(\.briefReply) private var reply
     /// Where it is in the page's visible area, to put its panel where it fits.
     @State private var frame: CGRect = .zero
-    @State private var panelHeight: CGFloat = 0
 
     static func key(_ place: String, _ t: BriefTarget, at index: Int = 0) -> String { place + "#" + t.key + "@\(index)" }
     static let gap: CGFloat = 6
@@ -454,16 +453,19 @@ struct BriefSpan: View {
         .onHover { briefs.hover(key, target, inside: $0) }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(RouterBriefView.space)) } action: { frame = $0 }
         .overlay(alignment: .topLeading) {
-            if hovered {
-                BriefAnswerPanel(store: store, target: target) { briefs.unhover() }
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CDS.Surface.s3))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(CDS.borderStrong, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
-                    .fixedSize()
-                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { panelHeight = $0 }
-                    .offset(x: shift, y: below ? frame.height + Self.gap : -(panelHeight + Self.gap))
-                    .onHover { briefs.hover(key, target, inside: $0) }
-                    .transition(.opacity)
+            // Placed by a layout, not an offset: an offset moves what you see but not where the pointer counts as on it, so
+            // the panel's unmoved frame, over the highlight's own line, kept it open while you moved along that line to the
+            // next highlight.
+            BriefPanelPlacement(dx: shift, gap: Self.gap, below: below) {
+                if hovered {
+                    BriefAnswerPanel(store: store, target: target) { briefs.unhover() }
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CDS.Surface.s3))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(CDS.borderStrong, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
+                        .fixedSize()
+                        .onHover { briefs.hover(key, target, inside: $0) }
+                        .transition(.opacity)
+                }
             }
         }
         .accessibilityLabel(state.label.isEmpty ? text : "\(text), \(state.label)")
@@ -847,4 +849,24 @@ enum BriefAction: String, Codable, Hashable, Sendable {
 extension EnvironmentValues {
     /// Puts the keyboard in the composer to write to the mentioned thread (`RouterModel.reply`).
     @Entry var briefReply: () -> Void = {}
+}
+
+/// A highlight's panel, placed at its ideal size under the highlight (or above it), moved `dx` sideways; it takes the
+/// highlight's own size, so it never changes the line's layout.
+struct BriefPanelPlacement: Layout {
+    var dx: CGFloat
+    var gap: CGFloat
+    var below: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: .zero)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            let y = below ? bounds.maxY + gap : bounds.minY - gap - size.height
+            view.place(at: CGPoint(x: bounds.minX + dx, y: y), proposal: ProposedViewSize(size))
+        }
+    }
 }
