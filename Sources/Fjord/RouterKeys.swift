@@ -56,7 +56,7 @@ final class RouterKeys {
                 return true
             }
             if let action = BriefKeys.action(code: code, characters: event.charactersIgnoringModifiers, flags: flags,
-                                             focused: briefs.focused != nil, composerEmpty: true, inComposer: inComposer),
+                                             focused: briefs.focused != nil || briefs.hoveredTarget != nil, composerEmpty: true, inComposer: inComposer),
                briefs.key(action, model: model, store: store) { return true }
             if briefs.focused == nil, walk, !inComposer {
                 briefs.move(down: code == kVK_DownArrow)

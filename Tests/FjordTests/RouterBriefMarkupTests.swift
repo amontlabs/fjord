@@ -121,4 +121,28 @@ import Testing
         third.start(); await third.idle()
         #expect(model.contexts.count == calls + 1)
     }
+
+    @Test func aHoveredPanelStaysWhileThePointerIsOnItOrYouType() async throws {
+        let briefs = RouterBriefs()
+        let t = BriefTarget(project: "p", thread: "t1")
+        briefs.hover("k", t, inside: true)
+        #expect(briefs.hovered == "k" && briefs.hoveredTarget == t)
+        // Off the highlight and onto its panel: it stays.
+        briefs.hover("k", t, inside: false)
+        briefs.hover("k", t, inside: true)
+        try await Task.sleep(for: .milliseconds(RouterBriefs.hoverGrace + 120))
+        #expect(briefs.hovered == "k")
+        // Typing holds it with the pointer away; done typing, it goes.
+        briefs.hold(true)
+        briefs.hover("k", t, inside: false)
+        try await Task.sleep(for: .milliseconds(RouterBriefs.hoverGrace + 120))
+        #expect(briefs.hovered == "k")
+        briefs.hold(false)
+        #expect(briefs.hovered == nil && briefs.hoveredTarget == nil)
+        // Left for good: gone after the grace.
+        briefs.hover("k", t, inside: true)
+        briefs.hover("k", t, inside: false)
+        try await Task.sleep(for: .milliseconds(RouterBriefs.hoverGrace + 120))
+        #expect(briefs.hovered == nil)
+    }
 }

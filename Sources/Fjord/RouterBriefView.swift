@@ -15,6 +15,8 @@ struct RouterBriefView: View {
     var edges = RouterEdges.standalone
 
     static let column: CGFloat = 720
+    /// The visible area's coordinates, which a highlight reads its place in to put its panel where it fits.
+    static let space = "brief-visible"
     /// The room each side of the column when the page is narrower than it with it.
     static let gutter: CGFloat = 32
     static let bottom: CGFloat = 150
@@ -58,6 +60,9 @@ struct RouterBriefView: View {
             .padding(.bottom, Self.bottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .coordinateSpace(.named(Self.space))
+        .onGeometryChange(for: CGSize.self, of: \.size) { if briefs.viewport != $0 { briefs.viewport = $0 } }
+        .environment(\.briefReply) { [model] in model.reply() }
         .onAppear { briefs.shown(page) }
         .onChange(of: page.sections.map(\.finished)) { briefs.shown(page) }
         // The told rule: what the page told of finished threads leaves it once you leave it.
@@ -383,7 +388,9 @@ struct BriefSpanState: Equatable {
 }
 
 /// A highlight: its state's mark, its words on a ground of its state's colour (underlined when quiet), and in the lead its
-/// project's name after them. Hovered, a peek of its thread floats under it; clicked, its popover answers it.
+/// project's name after them. Hovered, its thread's panel floats beside it, live: its question and options, a line to type
+/// in, Mark read and Open, as long as the pointer is on the highlight or the panel (or you are typing in it). Clicked, the
+/// thread goes in the composer as its mention, so what you write next goes to it; nothing is pinned.
 struct BriefSpan: View {
     let store: Store
     let target: BriefTarget
@@ -391,24 +398,23 @@ struct BriefSpan: View {
     let text: String
     let size: CGFloat
     var showsProject = false
-
-    /// Shots draw the popover under the highlight, in the window: an offscreen render has no popover window.
-    @MainActor static var popoverInline = false
+    @Environment(\.briefReply) private var reply
+    /// Where it is in the page's visible area, to put its panel where it fits.
+    @State private var frame: CGRect = .zero
+    @State private var panelHeight: CGFloat = 0
 
     static func key(_ place: String, _ t: BriefTarget) -> String { place + "#" + t.key }
+    static let gap: CGFloat = 6
 
     var body: some View {
         let briefs = store.routerBriefs
         let state = BriefSpanState.of(target, store: store)
         let hovered = briefs.hovered == key
-        let open = briefs.opened == key
+        let mentioned = briefs.focused == target
         let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
         Button {
-            briefs.hovered = nil
-            if open { briefs.opened = nil } else {
-                briefs.opened = key
-                briefs.focus(target)
-            }
+            briefs.focus(target)
+            reply()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: state.symbol)
@@ -419,7 +425,7 @@ struct BriefSpan: View {
                     .foregroundStyle(state.quiet ? CDS.Text.primary : state.tint)
                     .overlay(alignment: .bottom) {
                         if state.quiet {
-                            Rectangle().fill(CDS.Text.muted.opacity(hovered || open ? 0.9 : 0.4)).frame(height: 1).offset(y: 1)
+                            Rectangle().fill(CDS.Text.muted.opacity(hovered || mentioned ? 0.9 : 0.4)).frame(height: 1).offset(y: 1)
                         }
                     }
                 if showsProject {
@@ -432,71 +438,39 @@ struct BriefSpan: View {
             .padding(.horizontal, state.quiet ? 0 : 5)
             .padding(.vertical, 1)
             .background {
-                if !state.quiet { shape.fill(state.tint.opacity(hovered || open ? 0.24 : 0.12)) }
+                if !state.quiet { shape.fill(state.tint.opacity(hovered ? 0.24 : 0.12)) }
             }
-            .overlay { if open { shape.strokeBorder(state.tint.opacity(0.7), lineWidth: 1) } }
+            // The thread your next words go to (the composer's chip names it too).
+            .overlay { if mentioned { shape.strokeBorder(state.tint.opacity(0.7), lineWidth: 1) } }
             .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .onHover { inside in
-            if inside { briefs.hovered = key } else if briefs.hovered == key { briefs.hovered = nil }
-        }
+        .onHover { briefs.hover(key, target, inside: $0) }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(RouterBriefView.space)) } action: { frame = $0 }
         .overlay(alignment: .topLeading) {
-            if hovered, !open {
-                BriefPeek(store: store, target: target, state: state)
-                    .frame(width: 380, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .offset(y: size + 14)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            } else if open, Self.popoverInline {
-                BriefAnswerPanel(store: store, target: target, close: {})
+            if hovered {
+                BriefAnswerPanel(store: store, target: target) { briefs.unhover() }
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CDS.Surface.s3))
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(CDS.borderStrong, lineWidth: 1))
                     .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
                     .fixedSize()
-                    .offset(y: size + 14)
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { panelHeight = $0 }
+                    .offset(x: shift, y: below ? frame.height + Self.gap : -(panelHeight + Self.gap))
+                    .onHover { briefs.hover(key, target, inside: $0) }
+                    .transition(.opacity)
             }
-        }
-        .popover(isPresented: Binding(get: { open && !Self.popoverInline }, set: { if !$0, briefs.opened == key { briefs.opened = nil } }),
-                 arrowEdge: .bottom) {
-            BriefAnswerPanel(store: store, target: target) { if briefs.opened == key { briefs.opened = nil } }
         }
         .accessibilityLabel(state.label.isEmpty ? text : "\(text), \(state.label)")
-        .accessibilityHint("Opens it to answer")
+        .accessibilityHint("Puts it in the composer: what you write next goes to it")
     }
-}
 
-/// What a highlight points at, floating over the text while hovered: the thread, what it's at, and what it asks.
-private struct BriefPeek: View {
-    let store: Store
-    let target: BriefTarget
-    let state: BriefSpanState
+    /// Under the highlight while it is in the top half of what's visible, above it in the bottom half.
+    private var below: Bool { frame.midY < store.routerBriefs.viewport.height / 2 }
 
-    var body: some View {
-        let briefs = store.routerBriefs
-        let entry = briefs.entry(target, store: store)
-        let now = briefs.clock().timeIntervalSince1970
-        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        VStack(alignment: .leading, spacing: 7) {
-            BriefThreadHeader(store: store, target: target, state: state, now: now)
-            if let entry {
-                Text(RouterText.inline(BriefEntryText.question(entry))).font(CDS.sans(12.5)).foregroundStyle(CDS.Text.primary)
-                    .lineLimit(4).fixedSize(horizontal: false, vertical: true)
-                if !entry.options.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(entry.options.enumerated()), id: \.offset) { n, option in
-                            Text("\(n + 1). \(option)").font(CDS.sans(12)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
-                        }
-                    }
-                }
-            }
-            Text(entry == nil ? "Click to message it or open it" : "Click to answer").font(CDS.sans(11)).foregroundStyle(CDS.Text.muted)
-        }
-        .padding(12)
-        .background(shape.fill(CDS.Surface.s3))
-        .overlay(shape.strokeBorder(CDS.borderStrong, lineWidth: 1))
-        .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
+    /// Moved left so it never runs past the page's right edge.
+    private var shift: CGFloat {
+        let room = store.routerBriefs.viewport.width - 16
+        return min(0, room - (frame.minX + BriefAnswerPanel.width))
     }
 }
 
@@ -526,10 +500,11 @@ private struct BriefThreadHeader: View {
 
 // MARK: - Answering
 
-/// A highlight's popover. A thread that waits on you: its question, and its options, one click sending one (an answer
+/// A highlight's panel, shown while it is hovered. A thread that waits on you: its question, and its options, one click sending one (an answer
 /// can't be unsent, but it is the one click the thread's own card asks); a form of several questions shows each with its
 /// options and sends them together with Send; a plan, its buttons. Then a line to type an answer (or, for a thread that
-/// doesn't wait on you, a message to it), Mark read and Open. 1–9 pick an option and Return sends it, as on the page.
+/// doesn't wait on you, a message to it), Mark read and Open. 1–9 pick an option and Return sends it (the window's keys, on
+/// the hovered thread).
 struct BriefAnswerPanel: View {
     let store: Store
     let target: BriefTarget
@@ -537,7 +512,6 @@ struct BriefAnswerPanel: View {
     @State private var words = ""
     /// A form's choices so far: each question's picked option labels.
     @State private var choices: [String: [String]] = [:]
-    @State private var keys: Any?
     @FocusState private var typing: Bool
 
     static let width: CGFloat = 400
@@ -563,8 +537,9 @@ struct BriefAnswerPanel: View {
         }
         .padding(14)
         .frame(width: Self.width, alignment: .leading)
-        .onAppear { watchKeys() }
-        .onDisappear { if let keys { NSEvent.removeMonitor(keys) }; keys = nil }
+        // Kept while you type in it, wherever the pointer goes.
+        .onChange(of: typing) { _, on in store.routerBriefs.hold(on) }
+        .onDisappear { if typing { store.routerBriefs.hold(false) } }
     }
 
     private func question(_ e: BriefEntry) -> some View {
@@ -686,27 +661,6 @@ struct BriefAnswerPanel: View {
         }
     }
 
-    /// 1–9 (by key position, as on the page) pick an option and Return sends it, while the line to type in isn't focused.
-    private func watchKeys() {
-        guard keys == nil else { return }
-        keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainActor.assumeIsolated {
-                let briefs = store.routerBriefs
-                guard !typing, briefs.opened != nil, event.window?.firstResponder is NSText == false,
-                      event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
-                let code = Int(event.keyCode)
-                if let i = BriefKeys.digits.firstIndex(of: code), let e = briefs.entry(target, store: store), i < e.options.count {
-                    briefs.pick(target, i + 1, store: store)
-                    return nil
-                }
-                if code == 36 || code == 76, briefs.picked[target] != nil {
-                    if briefs.confirm(target, store: store) { close() }
-                    return nil
-                }
-                return event
-            }
-        }
-    }
 }
 
 // MARK: - An entry's words
@@ -851,4 +805,9 @@ enum BriefAction: String, Codable, Hashable, Sendable {
         case .read: "checkmark.circle"
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Puts the keyboard in the composer to write to the mentioned thread (`RouterModel.reply`).
+    @Entry var briefReply: () -> Void = {}
 }

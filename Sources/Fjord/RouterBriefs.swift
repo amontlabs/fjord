@@ -158,10 +158,48 @@ enum BriefKeys {
     var picked: [BriefTarget: Int] = [:]
     /// Projects folded or opened against how they start (open with something for you, folded with nothing).
     var toggled: Set<String> = []
-    /// The highlight under the pointer (`BriefSpan.key`), whose peek shows.
+    /// The highlight whose panel shows (`BriefSpan.key`: where it is on the page, and its thread): under the pointer, or
+    /// held while you type in it.
     var hovered: String?
-    /// The highlight whose answer popover is open (`BriefSpan.key`: where it is on the page, and its thread).
-    var opened: String?
+    /// Its thread: what 1–9, Return, O and R act on while it shows.
+    private(set) var hoveredTarget: BriefTarget?
+    /// The page's visible area.
+    var viewport: CGSize = .zero
+    @ObservationIgnored private var pointerIn = false
+    @ObservationIgnored private var holding = false
+    @ObservationIgnored private var leaving: Task<Void, Never>?
+
+    /// The pointer on a highlight or its panel, or off it: it shows at once, and goes a moment after the pointer leaves
+    /// both, so crossing from one to the other keeps it.
+    func hover(_ key: String, _ t: BriefTarget, inside: Bool) {
+        leaving?.cancel()
+        pointerIn = inside
+        if inside {
+            if hovered != key { hovered = key; hoveredTarget = t }
+            return
+        }
+        guard !holding, hovered == key else { return }
+        leaving = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(Self.hoverGrace))
+            guard let self, !Task.isCancelled, !self.pointerIn, !self.holding, self.hovered == key else { return }
+            self.unhover()
+        }
+    }
+
+    static let hoverGrace = 220
+
+    func unhover() {
+        leaving?.cancel()
+        hovered = nil
+        hoveredTarget = nil
+        holding = false
+    }
+
+    /// Typing in the panel keeps it, wherever the pointer is; done typing with the pointer away, it goes.
+    func hold(_ on: Bool) {
+        holding = on
+        if !on, !pointerIn { unhover() }
+    }
     var drawerOpen = false
     /// Why an answer didn't go (refused, failed), on its entry until it changes.
     var trouble: [BriefTarget: String] = [:]
@@ -313,7 +351,7 @@ enum BriefKeys {
     /// Whether what floats over the page (a peek, a popover drawn in the window) belongs to the highlight `prefix` starts:
     /// its paragraph and section are drawn over what comes after them.
     func raised(_ prefix: String) -> Bool {
-        hovered?.hasPrefix(prefix) == true || (BriefSpan.popoverInline && opened?.hasPrefix(prefix) == true)
+        hovered?.hasPrefix(prefix) == true
     }
 
     /// Whether a project shows its paragraph: one with something for you starts open, one with nothing folded.
@@ -585,12 +623,12 @@ enum BriefKeys {
             move(down: down)
             return true
         }
-        guard let f = focused else { return false }
+        guard let f = hoveredTarget ?? focused else { return false }
         switch action {
         case .move:
             return true
         case .back:
-            if picked[f] != nil { picked[f] = nil } else { focus(nil) }
+            if picked[f] != nil { picked[f] = nil } else if hoveredTarget != nil { unhover() } else { focus(nil) }
         case .pick(let n):
             guard !answering.contains(f), let e = entry(f, store: store), n <= e.options.count else { return false }
             pick(f, n, store: store)

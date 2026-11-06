@@ -253,13 +253,13 @@ enum AppWindowShots {
         // The history at the right on a wide window, across the bottom on a narrow one.
         briefShot("brief-drawer", .aqua, drawer: true), briefShot("brief-drawer-dark", .darkAqua, drawer: true),
         briefShot("brief-drawer-narrow", .aqua, width: 900, drawer: true), briefShot("brief-drawer-narrow-dark", .darkAqua, width: 900, drawer: true),
-        // A highlight hovered (its peek), and opened: a plan's popover, a question's with an option picked, a form of two
-        // questions, a finished thread's (a line to message it).
+        // A highlight hovered, its panel live: a question in the lead, a plan, a question with an option picked (and
+        // mentioned), a form of two questions, a finished thread's (a line to message it).
         briefShot("brief-hover", .aqua, hover: "lead-you#chan_demo_fjord/th_settings"),
-        briefShot("brief-open-plan", .darkAqua, open: "chan_demo_fjord#chan_demo_fjord/th_migrate"),
-        briefShot("brief-open-question", .aqua, focus: true, open: "chan_demo_fjord#chan_demo_fjord/th_settings"),
-        briefShot("brief-open-form", .aqua, open: "local:lcu#local:lcu/\(Demo.briefLocalThread)", twoQuestions: true),
-        briefShot("brief-open-finished", .darkAqua, open: "chan_demo_docs#chan_demo_docs/th_guide"),
+        briefShot("brief-hover-plan", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_migrate"),
+        briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings"),
+        briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)", twoQuestions: true),
+        briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide"),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
         Shot(name: "palette-search", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot(query: "fix")),
         Shot(name: "palette-actions", destination: { $0.shownCategories[0].id.asCategory },
@@ -406,7 +406,7 @@ enum AppWindowShots {
     }
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
-                                  focus: Bool = false, drawer: Bool = false, hover: String? = nil, open: String? = nil,
+                                  focus: Bool = false, drawer: Bool = false, hover: String? = nil,
                                   twoQuestions: Bool = false) -> Shot {
         Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
              compose: { _, store in
@@ -416,10 +416,8 @@ enum AppWindowShots {
                      briefs.focus(t)
                      briefs.pick(t, 2, store: store)
                  }
-                 briefs.hovered = hover
-                 if let open {
-                     BriefSpan.popoverInline = true
-                     briefs.opened = open
+                 if let hover, let slash = hover.firstIndex(of: "#"), let t = BriefTarget(key: String(hover[hover.index(after: slash)...])) {
+                     briefs.hover(hover, t, inside: true)
                  }
                  if twoQuestions, var form = store.pendingForms["cli-demo-lcu"] {
                      form.questions.append(PendingForm.Question(question: "Which channel should it follow?", header: "Channel", multiSelect: false,
