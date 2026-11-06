@@ -151,9 +151,15 @@ enum BriefKeys {
     var sessions: [String: String] = [:]
     var clis: [String: String] = [:]
 
-    /// The one thread your words go to: the entry focused on the brief, or a thread you picked Reply on (the palette's).
-    /// The composer's chip shows it; Esc or Backspace at the composer's start takes it off.
-    var focused: BriefTarget?
+    /// The threads your words go to, in the order picked: a click on the brief (or Reply in the palette) picks one alone,
+    /// a ⌘-click adds one or takes it off. The composer's chips show them; Backspace at its start takes the last off, Esc
+    /// all of them.
+    var mentioned: [BriefTarget] = []
+    /// The last one picked: what the keys act on.
+    var focused: BriefTarget? {
+        get { mentioned.last }
+        set { focus(newValue) }
+    }
     /// Option N picked on an entry, shown live until Return sends it.
     var picked: [BriefTarget: Int] = [:]
     /// Projects folded or opened against how they start (open with something for you, folded with nothing).
@@ -387,9 +393,18 @@ enum BriefKeys {
         docs[t.project]?.needsYou.first { $0.target == t }.map { resolved($0, store: store) }
     }
 
+    /// Picks `t` alone (nil: none).
     func focus(_ t: BriefTarget?) {
-        if focused != t { focused = t }
+        let next = t.map { [$0] } ?? []
+        if mentioned != next { mentioned = next }
     }
+
+    /// Adds `t` to the threads your words go to, or takes it off.
+    func toggleMention(_ t: BriefTarget) {
+        if let i = mentioned.firstIndex(of: t) { mentioned.remove(at: i) } else { mentioned.append(t) }
+    }
+
+    func unmention(_ t: BriefTarget) { mentioned.removeAll { $0 == t } }
 
     /// ↑↓ over the entries in page order.
     func move(down: Bool) {
@@ -607,7 +622,7 @@ enum BriefKeys {
     /// The entry your words went to left the brief: they go nowhere now (never on to another entry unasked).
     private func leave(_ t: BriefTarget) {
         picked[t] = nil
-        if focused == t { focus(nil) }
+        unmention(t)
     }
 
     func record(_ t: BriefTarget, _ words: String) {

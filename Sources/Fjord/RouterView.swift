@@ -228,7 +228,7 @@ enum RouterText {
 // MARK: - Window model
 
 /// What the window remembers while it is closed (the draft and its chips), and what the keys act on. The thread it replies to
-/// is the brief's (`RouterBriefs.focused`): one target, whoever set it.
+/// is the brief's (`RouterBriefs.mentioned`): one or more, whoever set them.
 @Observable
 @MainActor
 final class RouterModel {
@@ -308,11 +308,16 @@ final class RouterModel {
     func send(store: Store) {
         // A proposed project takes the words (and an empty composer creates it).
         if answerProposal(store: store) { return }
-        // A thread to reply to: your words go to it, no model.
-        if let target = store.routerBriefs.focused, pointers.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if store.routerBriefs.send(draft, to: target, store: store) {
+        // Threads to reply to: your words go to each, no model. One that refuses them stays picked, with the words, so
+        // sending again reaches only it.
+        let briefs = store.routerBriefs
+        if !briefs.mentioned.isEmpty, pointers.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let refused = briefs.mentioned.filter { !briefs.send(draft, to: $0, store: store) }
+            if refused.isEmpty {
                 caret = nil
                 draft = ""
+            } else if refused != briefs.mentioned {
+                briefs.mentioned = refused
             }
             return
         }
@@ -334,11 +339,11 @@ final class RouterModel {
 
     // MARK: Chips and @
 
-    /// Backspace at the start of the composer: the reply chip goes.
+    /// Backspace at the start of the composer: the last reply chip goes.
     @discardableResult
     func removeLastChip(store: Store) -> Bool {
-        guard store.routerBriefs.focused != nil else { return false }
-        store.routerBriefs.focus(nil)
+        guard !store.routerBriefs.mentioned.isEmpty else { return false }
+        store.routerBriefs.mentioned.removeLast()
         return true
     }
 

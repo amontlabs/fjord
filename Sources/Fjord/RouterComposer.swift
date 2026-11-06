@@ -128,11 +128,11 @@ struct RouterComposer: View {
     /// The thread the message replies to, removable.
     private var strip: some View {
         FlowLayout(spacing: C.stripGap) {
-            // The thread your words go to.
-            if let target = store.routerBriefs.focused {
+            // The threads your words go to.
+            ForEach(store.routerBriefs.mentioned, id: \.self) { target in
                 let title = store.routerBriefs.title(target)
                 ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.warning,
-                             removeLabel: "Stop replying to \(title)") { store.routerBriefs.focus(nil) }
+                             removeLabel: "Stop replying to \(title)") { store.routerBriefs.unmention(target) }
             }
         }
         .padding(CDS.Density.compact.pad.md)
@@ -175,7 +175,8 @@ struct RouterComposer: View {
         // `min(24rem, 40svh)` less the card's padding, in 20 pt lines.
         let limit = min(C.maxHeight, windowHeight > 0 ? windowHeight * C.maxHeightShare : C.maxHeight)
         let lines = max(1, Int((limit - 2 * C.pad - (C.row - 20)) / 20))
-        let placeholder = store.routerBriefs.focused != nil ? "Reply to this thread" : "Tell the Router what to pass on, or ask"
+        let mentions = store.routerBriefs.mentioned.count
+        let placeholder = mentions > 1 ? "Reply to these \(mentions) threads" : mentions == 1 ? "Reply to this thread" : "Tell the Router what to pass on, or ask"
         // Told on every change of the text view's first responder, not on a change of `focused`: the kept composer given the
         // keyboard again after a close may still read focused, and the model must hear it has the keyboard again.
         return MentionField(store: store, model: model, maxHeight: CGFloat(lines) * 20, editable: on, focusTick: focusTick) { now in

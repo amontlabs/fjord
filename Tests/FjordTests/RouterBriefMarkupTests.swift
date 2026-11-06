@@ -177,4 +177,26 @@ import Testing
         let two = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Which?","options":["a","b"]}],"decisions":[],"loose_ends":[]}"#)
         #expect(doc.checked(two, known: [], cards: [:], at: 1).needsYou.first?.options == ["a", "b"])
     }
+
+    @Test func aCommandClickAddsAThreadYourWordsGoToAndAClickPicksOneAlone() {
+        let store = Store()
+        let briefs = store.routerBriefs
+        let a = BriefTarget(project: "p", thread: "a"), b = BriefTarget(project: "p", thread: "b"), c = BriefTarget(project: "q", thread: "c")
+        briefs.focus(a)
+        briefs.toggleMention(b)
+        briefs.toggleMention(c)
+        #expect(briefs.mentioned == [a, b, c] && briefs.focused == c)
+        // ⌘-click on one already there takes it off.
+        briefs.toggleMention(b)
+        #expect(briefs.mentioned == [a, c])
+        // Backspace at the composer's start: the last one goes.
+        let model = RouterModel()
+        #expect(model.removeLastChip(store: store) && briefs.mentioned == [a])
+        // A plain click: that one alone.
+        briefs.toggleMention(b)
+        briefs.focus(c)
+        #expect(briefs.mentioned == [c])
+        briefs.focus(nil)
+        #expect(briefs.mentioned.isEmpty && !model.removeLastChip(store: store))
+    }
 }

@@ -415,10 +415,11 @@ struct BriefSpan: View {
         let briefs = store.routerBriefs
         let state = BriefSpanState.of(target, store: store)
         let hovered = briefs.hovered == key
-        let mentioned = briefs.focused == target
+        let mentioned = briefs.mentioned.contains(target)
         let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
         Button {
-            briefs.focus(target)
+            // ⌘-click: one more thread your words go to (or one less); a click: this one alone.
+            if NSEvent.modifierFlags.contains(.command) { briefs.toggleMention(target) } else { briefs.focus(target) }
             reply()
         } label: {
             HStack(spacing: 4) {
@@ -469,7 +470,7 @@ struct BriefSpan: View {
             }
         }
         .accessibilityLabel(state.label.isEmpty ? text : "\(text), \(state.label)")
-        .accessibilityHint("Puts it in the composer: what you write next goes to it")
+        .accessibilityHint("Puts it in the composer: what you write next goes to it. With Command, adds it to the threads already there")
     }
 
     /// Under the highlight while it is in the top half of what's visible, above it in the bottom half.

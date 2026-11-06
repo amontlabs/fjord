@@ -256,6 +256,8 @@ enum AppWindowShots {
         // A highlight hovered, its panel live: a question in the lead, a plan, a question with an option picked (and
         // mentioned), a form of two questions, a finished thread's (a line to message it).
         briefShot("brief-hover", .aqua, hover: "lead-you#chan_demo_fjord/th_settings@3"),
+        briefShot("brief-mentions", .aqua, mentions: [BriefTarget(project: "chan_demo_fjord", thread: "th_settings"),
+                                                      BriefTarget(project: "chan_demo_fjord", thread: "th_migrate")]),
         briefShot("brief-hover-plan", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_migrate@6"),
         briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
         briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", twoQuestions: true),
@@ -408,7 +410,7 @@ enum AppWindowShots {
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,
-                                  twoQuestions: Bool = false, stranded: Bool = false) -> Shot {
+                                  twoQuestions: Bool = false, stranded: Bool = false, mentions: [BriefTarget] = []) -> Shot {
         Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
              compose: { _, store in
                  let briefs = store.routerBriefs
@@ -417,6 +419,8 @@ enum AppWindowShots {
                      briefs.focus(t)
                      briefs.pick(t, 2, store: store)
                  }
+                 // ⌘-clicked: several threads your words go to.
+                 for t in mentions { briefs.toggleMention(t) }
                  if let hover, let slash = hover.firstIndex(of: "#"), let at = hover.lastIndex(of: "@"),
                     let t = BriefTarget(key: String(hover[hover.index(after: slash)..<at])) {
                      briefs.hover(hover, t, inside: true)
