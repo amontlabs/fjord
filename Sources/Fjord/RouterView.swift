@@ -659,14 +659,14 @@ struct BriefEntryLine: View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Image(systemName: BriefEntryCard.symbol(entry.kind)).font(.system(size: 10, weight: .medium))
+                    Image(systemName: BriefEntryText.symbol(entry.kind)).font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.amber)
                     Text(title).font(Theme.Typography.bodyMedium).foregroundStyle(Theme.text).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(BriefAge.text(briefs.clock().timeIntervalSince1970 - entry.since))
                         .font(Theme.Typography.caption.monospacedDigit()).foregroundStyle(Theme.tertiary)
                 }
-                Text("\(BriefEntryCard.kindLabel(entry)) · \(project)" + (entry.question.map { " · " + $0 } ?? ""))
+                Text("\(BriefEntryText.kindLabel(entry)) · \(project)" + (entry.question.map { " · " + $0 } ?? ""))
                     .font(Theme.Typography.meta).foregroundStyle(Theme.secondary).lineLimit(1).truncationMode(.tail)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -675,7 +675,7 @@ struct BriefEntryLine: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .accessibilityLabel(title)
-        .accessibilityValue("\(BriefEntryCard.kindLabel(entry)), \(project)")
+        .accessibilityValue("\(BriefEntryText.kindLabel(entry)), \(project)")
         .accessibilityHint("Opens the Router on it")
     }
 }

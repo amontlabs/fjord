@@ -667,9 +667,9 @@ final class RouterMCPServer: @unchecked Sendable {
     /// The brief as the board shows it: the general brief's lead, then each project's Now lines, bounded as a whole and fenced.
     static func briefText(_ store: Store) -> String {
         let page = store.routerBriefs.page()
-        var parts = page.lead
+        var parts = [page.lead.forYou, page.lead.worthALook].map(BriefMarkup.plain).filter { !$0.isEmpty }
         for section in page.sections where !section.doc.now.isEmpty {
-            parts.append("\(section.name): " + section.doc.now.joined(separator: " "))
+            parts.append("\(section.name): " + section.doc.now.map(BriefMarkup.plain).joined(separator: " "))
         }
         return fenced(parts.joined(separator: "\n"), 2000)
     }

@@ -160,10 +160,10 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
             "newNeed": doc("newNeed", entries: [entry("newNeed", "n", .question, since: now - 10)]),
             "oldNeed": doc("oldNeed", entries: [entry("oldNeed", "o", .plan, since: now - 900)]),
         ]
-        let page = BriefPage.make(docs: docs, names: [:], lead: [], read: [], told: [], now: now)
+        let page = BriefPage.make(docs: docs, names: [:], lead: GeneralBrief(), read: [], told: [], now: now)
         #expect(page.sections.map(\.id) == ["oldNeed", "newNeed", "strand", "finB", "finA", "work", "quiet"])
         #expect(page.needsYou == 3)
-        let told = BriefPage.make(docs: docs, names: [:], lead: [], read: [BriefPage.entryKey(entry("oldNeed", "o", .plan, since: now - 900))],
+        let told = BriefPage.make(docs: docs, names: [:], lead: GeneralBrief(), read: [BriefPage.entryKey(entry("oldNeed", "o", .plan, since: now - 900))],
                                   told: [BriefPage.finishKey(BriefThread(id: "f2", title: "", status: .done, age: now - 50))], now: now)
         #expect(told.needsYou == 2)
         #expect(told.sections.first?.id == "newNeed")
@@ -174,7 +174,7 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         var docs: [String: BriefDoc] = [:]
         for i in 0..<15 { docs["p\(i)"] = doc("p\(i)") }
         let page = BriefPage.make(docs: docs, names: Dictionary(uniqueKeysWithValues: (0..<15).map { ("p\($0)", String(format: "n%02d", $0)) }),
-                                  lead: [], read: [], told: [], now: 0)
+                                  lead: GeneralBrief(), read: [], told: [], now: 0)
         #expect(page.sections.count == 12 && page.folded == ["n12", "n13", "n14"])
     }
 
@@ -182,7 +182,7 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         let now = 200_000.0
         let d = doc("p", threads: [BriefThread(id: "a", title: "", status: .paused, age: now - 100),
                                    BriefThread(id: "b", title: "", status: .paused, age: now - 90_000)])
-        let page = BriefPage.make(docs: ["p": d], names: [:], lead: [], read: [], told: [], now: now)
+        let page = BriefPage.make(docs: ["p": d], names: [:], lead: GeneralBrief(), read: [], told: [], now: now)
         #expect(page.sections[0].recent.map(\.id) == ["a"])
     }
 }

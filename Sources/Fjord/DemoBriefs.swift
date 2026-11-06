@@ -21,8 +21,8 @@ extension Demo {
 
         var fjord = BriefDoc(project: "chan_demo_fjord")
         fjord.purpose = "A Mac app that keeps your Claude threads, local and on claude.ai, in one place."
-        fjord.now = ["The Settings redesign waits on your pick of a layout.",
-                     "The briefs migration has a plan ready; the frame handover is being built."]
+        fjord.now = ["<t id=\"th_settings\">The Settings layout</t> waits on your pick, and <t id=\"th_migrate\">the briefs migration plan</t> is ready to approve.",
+                     "<t id=\"th_handover\">The tab handover</t> is being built; <t id=\"th_bar\">the bar's needs-you count</t> landed."]
         fjord.threads = [
             BriefThread(id: "th_settings", title: "Redesign the Settings window", status: .needsYou, age: t - 240),
             BriefThread(id: "th_migrate", title: "Move the briefs into router.db", status: .needsYou, age: t - 1_500),
@@ -44,13 +44,13 @@ extension Demo {
         fjord.watch = "live"
 
         var lcu = BriefDoc(project: "local:lcu")
-        lcu.now = ["The updater asks how updates should install."]
+        lcu.now = ["<t id=\"\(briefLocalThread)\">The updater</t> asks how updates should install."]
         lcu.threads = [BriefThread(id: briefLocalThread, title: "Ship the updater", status: .needsYou, age: t - 120, source: .local)]
         lcu.needsYou = [BriefEntry(project: lcu.project, thread: briefLocalThread, kind: .question, state: .needsYou, since: t - 120,
                                    source: .local)]
 
         var silo = BriefDoc(project: "chan_demo_silo")
-        silo.now = ["Two threads are building the snapshot API; nothing waits on you."]
+        silo.now = ["<t id=\"th_snap\">The snapshot API</t> and <t id=\"th_vm\">booting from a checkpoint</t> are being built; <t id=\"th_flaky\">the flaky disk test</t> stopped."]
         silo.threads = [
             BriefThread(id: "th_snap", title: "Snapshot API: restore by id", status: .working, age: t - 300),
             BriefThread(id: "th_vm", title: "Boot the Linux VM from a checkpoint", status: .working, age: t - 900),
@@ -59,13 +59,13 @@ extension Demo {
         silo.watch = "live"
 
         var docs = BriefDoc(project: "chan_demo_docs")
-        docs.now = ["The install guide was rewritten for the new setup; the PR is open."]
+        docs.now = ["<t id=\"th_guide\">The install guide</t> was rewritten for the new setup; the PR is open."]
         docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 600)]
         docs.sent = [SentLine(intent: "39", words: "rewrite the install guide for the Chrome setup", state: "delivered")]
         docs.watch = "live"
 
         var evals = BriefDoc(project: "chan_demo_evals")
-        evals.now = ["Nothing new since yesterday's run."]
+        evals.now = ["Nothing new since <t id=\"th_eval\">yesterday's scoring run</t>."]
         evals.threads = [BriefThread(id: "th_eval", title: "Score the decider on last week's moments", status: .done, age: t - 2 * 86_400)]
         evals.watch = "live"
 
@@ -81,26 +81,27 @@ extension Demo {
             fjord.proseStale = true
         case .quiet:
             fjord.needsYou = []
-            fjord.now = ["Everything here is finished; the last thread landed yesterday."]
+            fjord.now = ["Everything here is finished; <t id=\"th_old\">the canvas removal</t> landed yesterday."]
             fjord.threads = [BriefThread(id: "th_old", title: "Drop the canvas layout", status: .done, age: t - 30 * 3_600)]
             fjord.sent = []
             lcu.needsYou = []
-            lcu.now = ["The updater shipped."]
+            lcu.now = ["<t id=\"\(briefLocalThread)\">The updater</t> shipped."]
             lcu.threads = [BriefThread(id: briefLocalThread, title: "Ship the updater", status: .done, age: t - 2 * 86_400, source: .local)]
-            silo.now = ["Quiet since the snapshot API merged."]
+            silo.now = ["Quiet since <t id=\"th_snap\">the snapshot API</t> merged."]
             silo.threads = [BriefThread(id: "th_snap", title: "Snapshot API: restore by id", status: .done, age: t - 3 * 86_400)]
             docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 4 * 86_400)]
             docs.sent = []
         }
 
         briefs.demoDocs = [fjord.project: fjord, lcu.project: lcu, silo.project: silo, docs.project: docs, evals.project: evals]
-        briefs.demoGeneral = GeneralBrief(lead: variant == .quiet
-            ? ["Nothing needs you. Every project is quiet; the last finish was yesterday in fjord."]
-            : ["Three threads wait on you: a layout pick and a plan in fjord, and the updater's question on this Mac.",
-               "silo is building the snapshot API; docs-site finished the install guide."], at: t - 60)
+        briefs.demoGeneral = variant == .quiet
+            ? GeneralBrief(worthALook: "Every project is quiet; <t id=\"chan_demo_fjord/th_old\">the canvas removal</t> landed yesterday.", at: t - 60)
+            : GeneralBrief(forYou: "Three things first: <t id=\"chan_demo_fjord/th_settings\">the Settings layout</t>, <t id=\"chan_demo_fjord/th_migrate\">the migration plan</t> and <t id=\"local:lcu/\(briefLocalThread)\">how updates install</t>.",
+                           worthALook: "<t id=\"chan_demo_docs/th_guide\">The install guide</t> is rewritten, and <t id=\"chan_demo_fjord/th_bar\">the bar's count</t> landed.",
+                           at: t - 60)
         briefs.demoVersions = [
             fjord.project: [
-                BriefVersion(project: fjord.project, version: 1, at: t - 1_500, prose: BriefDoc.Prose(), diff: "+ now: The briefs migration has a plan ready.", items: [], cursor: 0),
+                BriefVersion(project: fjord.project, version: 1, at: t - 1_500, prose: BriefDoc.Prose(), diff: "+ now: <t id=\"th_migrate\">The briefs migration plan</t> is ready to approve.", items: [], cursor: 0),
                 BriefVersion(project: fjord.project, version: 2, at: t - 240, prose: BriefDoc.Prose(), diff: "+ now: The Settings redesign waits on your pick of a layout.", items: [], cursor: 0),
             ],
             docs.project: [BriefVersion(project: docs.project, version: 1, at: t - 600, prose: BriefDoc.Prose(), diff: "+ now: The install guide was rewritten for the new setup; the PR is open.", items: [], cursor: 0)],

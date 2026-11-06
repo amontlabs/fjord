@@ -41,7 +41,7 @@ final class FakeBriefModel: @unchecked Sendable {
             if let gate { await gate() }
             if schema == RouterBriefEngine.leadSchema {
                 lock.withLock { leadContexts.append(context) }
-                return #"{"lead":["Two things need you."]}"#
+                return #"{"for_you":"Two things need you.","worth_a_look":""}"#
             }
             lock.withLock { contexts.append(context) }
             if failing { throw RouterTools.Failure("no answer") }

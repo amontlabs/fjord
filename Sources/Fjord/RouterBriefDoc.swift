@@ -187,13 +187,16 @@ struct BriefDoc: Codable, Equatable, Sendable {
         do { return try JSONDecoder().decode(Answer.self, from: Data(s.utf8)) } catch { throw Rejected(description: "not the brief's JSON") }
     }
 
-    /// The checked prose: thread ids must exist (in the Board's list or in the new items), a card's options are the card
+    /// The checked prose: thread ids must exist (in the Board's list or in the new items), and so must a `now` line's tagged
+    /// ones (an unknown tag is dropped, its words kept), a card's options are the card
     /// item's, `now` is cut at three lines, a decision names a thread or your send, an entry whose thread no longer waits on
     /// you is dropped, and every list is capped. `cards` maps a thread to the options of its latest card item.
     func checked(_ answer: Answer, known: Set<String>, cards: [String: [String]], at now: Double) -> Prose {
         let exists = known.union(threads.map(\.id))
         var out = prose
-        let lines = answer.now.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // A thread's tag stays only on a thread of the project (or its coordinator's question); its words stay either way.
+        let tagged: (String) -> Bool = { exists.contains($0) || $0 == Self.coordinator }
+        let lines = answer.now.map { BriefMarkup.checked($0, known: tagged) }.filter { !BriefMarkup.plain($0).isEmpty }
         out.now = Array(lines.prefix(Self.maxNow))
         var seen = Set<String>()
         out.needsYou = answer.needsYou.compactMap { raw in

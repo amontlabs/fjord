@@ -43,7 +43,7 @@ extension PaletteRouterSource {
         let store = context.store
         let briefs = store.routerBriefs
         let t = e.target
-        let label = BriefEntryCard.kindLabel(e)
+        let label = BriefEntryText.kindLabel(e)
         var keywords = [label, section.name]
         if let q = e.question, !q.isEmpty { keywords.append(String(q.prefix(200))) }
         let actions = [
@@ -63,7 +63,7 @@ extension PaletteRouterSource {
             PaletteAction(id: "archive", title: "Archive", symbol: "archivebox", destructive: true) { briefs.archive(t, store: store) },
         ]
         return PaletteItem(id: "thread:" + t.key, kind: .thread, title: briefs.title(t), subtitle: label + " · " + section.name,
-                           keywords: keywords, icon: .symbol(BriefEntryCard.symbol(e.kind)), dot: .attention,
+                           keywords: keywords, icon: .symbol(BriefEntryText.symbol(e.kind)), dot: .attention,
                            date: Date(timeIntervalSince1970: e.since), weight: Weight.needsYou, actions: actions)
     }
 

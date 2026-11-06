@@ -86,7 +86,7 @@ struct RouterDrawer: View {
         for (project, versions) in briefs.versions() {
             let name = briefs.names[project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(project)
             for v in versions.suffix(10) where !v.diff.isEmpty {
-                let added = v.diff.split(separator: "\n").filter { $0.hasPrefix("+ now: ") }.map { String($0.dropFirst(7)) }
+                let added = v.diff.split(separator: "\n").filter { $0.hasPrefix("+ now: ") }.map { BriefMarkup.plain(String($0.dropFirst(7))) }
                 out.append(Line(id: "\(project)#\(v.version)", at: Date(timeIntervalSince1970: v.at), kind: .version,
                                 text: "\(name)'s brief changed", detail: added.first ?? ""))
             }

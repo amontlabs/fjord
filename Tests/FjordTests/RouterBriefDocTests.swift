@@ -103,7 +103,7 @@ enum FakeBriefModelRead {
         engine.itemsChanged("a"); engine.itemsChanged("b"); await engine.idle()
         #expect(model.leadContexts.count == 1)
         #expect(model.leadContexts[0].contains("Which one?") && model.leadContexts[0].contains("Busy."))
-        #expect(engine.general.lead == ["Two things need you."])
+        #expect(engine.general.forYou == "Two things need you.")
         // A change that moves neither what needs you nor what finished: no lead.
         src.post("b", id: "m2", kind: .message, thread: "t2", text: "more")
         engine.itemsChanged("b"); await engine.idle()

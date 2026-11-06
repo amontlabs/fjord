@@ -237,12 +237,12 @@ import Testing
         let dir = TempDir()
         let db = try SQLiteBriefStore(path: dir.path("briefs.db").path)
         #expect(db.lead() == nil)
-        db.setLead(GeneralBrief(lead: ["One needs you."], at: 5))
+        db.setLead(GeneralBrief(forYou: "One needs you.", worthALook: "A look.", at: 5))
         let again = try SQLiteBriefStore(path: dir.path("briefs.db").path)
-        #expect(again.lead() == GeneralBrief(lead: ["One needs you."], at: 5))
+        #expect(again.lead() == GeneralBrief(forYou: "One needs you.", worthALook: "A look.", at: 5))
         let engine = RouterBriefEngine(source: FakeBriefSource(), store: again, model: FakeBriefModel().runner)
         engine.start(); await engine.idle()
-        #expect(engine.general.lead == ["One needs you."])
+        #expect(engine.general.forYou == "One needs you.")
     }
 
     @Test func aReadMarkHoldsWhateverTheThreadIsTouched() {

@@ -41,7 +41,7 @@ struct BriefPage: Equatable {
     static let cap = 12
     static let recent = 86_400.0
 
-    var lead: [String] = []
+    var lead = GeneralBrief()
     var sections: [Section] = []
     /// The names of the sections past the cap.
     var folded: [String] = []
@@ -57,7 +57,7 @@ struct BriefPage: Equatable {
         return Double(w.dropFirst(6))
     }
 
-    static func make(docs: [String: BriefDoc], names: [String: String], lead: [String], read: Set<String>, told: Set<String>,
+    static func make(docs: [String: BriefDoc], names: [String: String], lead: GeneralBrief, read: Set<String>, told: Set<String>,
                      archived: Set<String> = [], now: Double) -> BriefPage {
         var sections: [(Section, Double)] = []
         var count = 0
@@ -158,6 +158,10 @@ enum BriefKeys {
     var picked: [BriefTarget: Int] = [:]
     /// Sections open to the full document.
     var expanded: Set<String> = []
+    /// The highlight under the pointer (`BriefSpan.key`), whose peek shows.
+    var hovered: String?
+    /// The highlight whose answer popover is open (`BriefSpan.key`: where it is on the page, and its thread).
+    var opened: String?
     var drawerOpen = false
     /// Why an answer didn't go (refused, failed), on its entry until it changes.
     var trouble: [BriefTarget: String] = [:]
@@ -185,7 +189,7 @@ enum BriefKeys {
     var general: GeneralBrief { engine?.general ?? demoGeneral }
 
     func page() -> BriefPage {
-        BriefPage.make(docs: docs, names: names, lead: general.lead, read: read, told: told, archived: archived,
+        BriefPage.make(docs: docs, names: names, lead: general, read: read, told: told, archived: archived,
                        now: clock().timeIntervalSince1970)
     }
 
@@ -259,7 +263,7 @@ enum BriefKeys {
         for f in fresh {
             let e = f.entry
             store.notifyRouter(id: Self.notificationPrefix + e.target.key, title: "\(f.name) · needs you", subtitle: title(e.target),
-                               body: e.question ?? BriefEntryCard.kindLabel(e))
+                               body: e.question ?? BriefEntryText.kindLabel(e))
         }
     }
 
@@ -304,6 +308,17 @@ enum BriefKeys {
             e.options = form.questions.count == 1 && !q.multiSelect ? q.options.map(\.label) : []
         }
         return e
+    }
+
+    /// Whether what floats over the page (a peek, a popover drawn in the window) belongs to the highlight `prefix` starts:
+    /// its paragraph and section are drawn over what comes after them.
+    func raised(_ prefix: String) -> Bool {
+        hovered?.hasPrefix(prefix) == true || (BriefSpan.popoverInline && opened?.hasPrefix(prefix) == true)
+    }
+
+    /// A project's name as the page shows it.
+    func projectName(_ project: String) -> String {
+        names[project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(project)
     }
 
     func title(_ t: BriefTarget) -> String {
@@ -426,6 +441,25 @@ enum BriefKeys {
         } else if done != nil, let words {
             record(t, words)
         }
+    }
+
+    /// A local form with several questions, one choice each (a multi-select's labels joined): every answer goes at once, as
+    /// the form in the Claude app sends them, never a thread left half-answered.
+    @discardableResult
+    func answerAll(_ t: BriefTarget, _ answers: [String: String], store: Store) -> Bool {
+        guard !answering.contains(t), let e = entry(t, store: store), let form = form(e, store: store), !form.isPlan,
+              form.questions.allSatisfy({ !(answers[$0.question] ?? "").isEmpty }) else { return false }
+        trouble[t] = nil
+        let snapshot = FormSnapshot(target: t, form: form)
+        let shown = form.questions.compactMap { answers[$0.question] }.joined(separator: "; ")
+        begin(t) { [weak self, weak store] in
+            guard let store else { return }
+            switch await store.answerForm(form, answers, target: t, snapshot: snapshot) {
+            case .success: self?.record(t, shown)
+            case .failure(let error): self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't written."
+            }
+        }
+        return true
     }
 
     /// A local form: an option picked (a plan's first approves), or your words read by Jev, written for the hook (on this Mac
