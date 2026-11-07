@@ -224,7 +224,7 @@ import Testing
         var opened: [String] = []
         store.interceptOpen = { opened.append($0) }
         try #require(entry.actions.first { $0.title == "Open its session" }).run()
-        #expect(opened == ["Open in Claude · Fix 9"])
+        #expect(opened == ["Open in T3 · Fix 9"])
         #expect(visits.calls.isEmpty)
     }
 

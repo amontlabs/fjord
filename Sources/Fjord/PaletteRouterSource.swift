@@ -56,7 +56,7 @@ extension PaletteRouterSource {
                 context.routerModel.reply()
                 context.go(.router)
             },
-            PaletteAction(id: "open", title: "Open in Claude", symbol: ClaudeMark.openSymbol) {
+            PaletteAction(id: "open", title: "Open in T3", symbol: ThreadMark.openSymbol) {
                 briefs.open(t, store: store)
             },
             PaletteAction(id: "read", title: "Mark read", symbol: "checkmark.circle") { briefs.markRead(t, store: store) },
@@ -73,7 +73,7 @@ extension PaletteRouterSource {
         let t = BriefTarget(project: section.id, thread: th.id)
         let word = BriefThreadWord.word(th.status)
         let actions = [
-            PaletteAction(id: "open", title: "Open in Claude", symbol: ClaudeMark.openSymbol) {
+            PaletteAction(id: "open", title: "Open in T3", symbol: ThreadMark.openSymbol) {
                 briefs.open(t, store: store)
             },
             PaletteAction(id: "reply", title: "Reply", symbol: "arrowshape.turn.up.left") {
@@ -103,7 +103,7 @@ extension PaletteRouterSource {
         let thing = links.thing(session: id)
         if let thing { keywords += links.keywords(thing) }
 
-        var actions = [PaletteAction(id: "open", title: "Open in Claude", symbol: ClaudeMark.openSymbol) { store.openThread(id) }]
+        var actions = [PaletteAction(id: "open", title: "Open in T3", symbol: ThreadMark.openSymbol) { store.openThread(id) }]
         if let thing { actions.append(linkAction(thing, context)) }
 
         var subtitle = project

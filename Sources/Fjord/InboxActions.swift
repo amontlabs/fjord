@@ -790,7 +790,7 @@ enum InboxActions {
                         help: "The Router isn't sure where it goes. Open the Router to pick", message: run.message)
         case .running where run.sessionID != nil:
             return Chip(id: action.id, label: "session started", tint: .neutral, target: run.sessionID.map { .session($0) },
-                        help: "Its first message goes once the Claude app runs the session. Open the session in Claude")
+                        help: "Open the thread in T3 Code")
         case .running, .baselined:
             return Chip(id: action.id, label: "running…", tint: .neutral, target: nil, help: action.title)
         case .failed:
@@ -803,11 +803,11 @@ enum InboxActions {
                 if let session = run.sessionID, run.detail.hasPrefix("sent to ") {
                     let label = run.detail.count > 48 ? String(run.detail.prefix(47)) + "…" : run.detail
                     return Chip(id: action.id, label: label, tint: .neutral, target: .session(session),
-                                help: "Sent \(ago(run.at, now: now)). Open the session in Claude")
+                                help: "Sent \(ago(run.at, now: now)). Open the thread in T3 Code")
                 }
                 if let session = run.sessionID {
                     return Chip(id: action.id, label: "session started \(ago(run.at, now: now))", tint: .neutral,
-                                target: .session(session), help: "Open the session in Claude")
+                                target: .session(session), help: "Open the thread in T3 Code")
                 }
                 return Chip(id: action.id, label: "sent to the Router", tint: .neutral, target: .router,
                             help: "Sent to the Router \(ago(run.at, now: now)). Open the Router", message: run.message)

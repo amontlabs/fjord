@@ -543,9 +543,11 @@ final class Store {
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     /// Ends an icon pause (`iconPickFailed`).
     @ObservationIgnored var iconRetry: Timer?
+    /// What you first asked each thread (for its icon), read once from T3 and kept.
+    @ObservationIgnored var firstMessages: [String: String] = [:]
     /// Where icons get their input and their answer (a thread's first message by thread id; Jev's choice from
     /// options, hints, state and instructions). Tests swap them for the disk and the network.
-    @ObservationIgnored var iconFirstMessage: (@Sendable (String) -> String?)?
+    @ObservationIgnored var iconFirstMessage: (@Sendable (String) async -> String?)?
     @ObservationIgnored var iconChooser: (([String], [String: String], [String: String], String) async throws -> JevClient.Choice)?
     @ObservationIgnored var typesafeKeyCache: String?
     /// Jev's reading of the inbox (InboxJev.swift): tests answer for TypeSafe.
@@ -596,7 +598,6 @@ final class Store {
     /// Keychain's read.
     func startServices() {
         if !UnderTest.isRunning {
-            ClaudeMark.warm()
             // The icons this Mac can draw (some thousand symbol lookups), worked out before an icon is first picked.
             SessionIcons.warm()
         }

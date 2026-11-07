@@ -508,7 +508,7 @@ enum RouterSender {
                 isUp: { [weak store] in await store?.pluginUp(cli) ?? false },
                 open: { [weak store] in
                     tools.stage?("opening \(title)")
-                    if let intercept = store?.interceptOpen { intercept("Open in Claude · \(title)") } else { Claude.open(local) }
+                    if let intercept = store?.interceptOpen { intercept("Open in T3 · \(title)") } else { store?.openThread(local) }
                 },
                 gate: gate,
                 update: { [weak store] update in

@@ -411,8 +411,8 @@ private struct PaletteActionRow: View, Equatable {
         HStack(spacing: M.rowGap) {
             HStack(spacing: M.contentGap) {
                 Group {
-                    if action.symbol == ClaudeMark.openSymbol {
-                        OpenInClaudeGlyph(size: 14)
+                    if action.symbol == ThreadMark.openSymbol {
+                        OpenInT3Glyph(size: 14).foregroundStyle(action.destructive ? CDS.Text.danger : (selected ? CDS.Text.primary : CDS.Text.muted))
                     } else {
                         Image(systemName: action.symbol ?? "circle.fill")
                             .font(.system(size: action.symbol == nil ? 4 : 14, weight: .medium))

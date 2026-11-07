@@ -355,6 +355,38 @@ extension Store {
     func wireThreads() {
         t3.store.onShell = { [weak self] item in self?.shellChanged(item) }
         t3.store.onConnection = { [weak self] state in self?.t3ConnectionChanged(state) }
+        t3.store.onThread = { [weak self] id in self?.threadDetailChanged(id) }
+        iconFirstMessage = { [weak self] id in await self?.firstUserMessage(id) }
+    }
+
+    /// What you first asked a thread, for its icon: from its projection when one is open, else read once through a
+    /// subscription that closes at its snapshot. Kept per thread (the first message never changes).
+    func firstUserMessage(_ id: String) async -> String? {
+        if let kept = firstMessages[id] { return kept }
+        let text: String?
+        if let p = t3.store.projections[id] { text = T3Store.firstUserMessage(in: p) } else { text = await t3.store.readFirstUserMessage(id) }
+        if let text { firstMessages[id] = text }
+        return text
+    }
+
+    /// The threads whose detail Fjord holds open: the listed ones that work (or wait on you mid-turn), which are the ones
+    /// the Router shows an activity line for. A thread that settles drops out, and its subscription closes.
+    func syncThreadDetail() {
+        let wanted = Set(allAgentRows.lazy.filter { $0.session.running }.map(\.id))
+        t3.store.watch(wanted)
+        let gone = threadWork.keys.filter { !wanted.contains($0) }
+        if !gone.isEmpty {
+            var work = threadWork
+            for id in gone { work[id] = nil }
+            threadWork = work
+        }
+    }
+
+    /// A subscribed thread's projection changed: its activity is read again, and assigned only if it differs.
+    func threadDetailChanged(_ id: String) {
+        guard agents.enabled, let projection = t3.store.projections[id] else { return }
+        let work = ThreadWork(projection)
+        if threadWork[id] != work { threadWork[id] = work }
     }
 
     /// A shell change, taken in at once; while the window's morph plays (`MotionGate`) it waits for the motion to end, and
@@ -419,6 +451,7 @@ extension Store {
         for s in next.values.sorted(by: { $0.lastActivity > $1.lastActivity }) { state.assignColor(s.folderKey) }
         if state.entries != agents.entries || state.folderColors != agents.folderColors { agents = state }
         threadsRead()
+        syncThreadDetail()
         pickIcons()
     }
 
@@ -450,9 +483,18 @@ extension Store {
         }
     }
 
-    /// Opening a thread is T3's, in a later step: until then only a test's intercept sees it.
-    func openThread(_ id: String) {
-        interceptOpen?("Open in Claude · \(threads[id]?.title ?? id)")
+    /// Opens the thread in T3 Code (its deep link) and tells T3 it was opened, so it reads as seen everywhere. A test's
+    /// intercept sees the open instead. Whether there was a link to open.
+    @discardableResult
+    func openThread(_ id: String) -> Bool {
+        if let interceptOpen {
+            interceptOpen("Open in T3 · \(threads[id]?.title ?? id)")
+            return true
+        }
+        guard let url = t3.store.deepLink(id) else { return false }
+        Link.open(url)
+        t3.store.markOpened(id)
+        return true
     }
 
     // MARK: Icons (Jev)
@@ -498,7 +540,7 @@ extension Store {
         let readFirst = iconFirstMessage
         iconTask = Task { [weak self] in
             let id = session.id
-            let first = await Task.detached(priority: .utility) { readFirst?(id) }.value
+            let first = await readFirst?(id)
             guard let self else { return }
             // Nothing to go on yet (a brand-new thread T3 hasn't named): skip it until it changes, and carry on.
             if first == nil, Self.placeholderTitles.contains(session.title) {

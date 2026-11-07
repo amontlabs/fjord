@@ -125,12 +125,16 @@ final class T3Store {
     private(set) var shell = T3ShellState()
     private(set) var projections: [String: T3Projection] = [:]
     private(set) var connection: T3ConnectionState = .connecting
+    /// This T3's environment id (from its descriptor, read once connected): the middle of a thread's deep link.
+    private(set) var environmentID: String?
 
     /// Called on the main actor after every shell item is applied (nil: a whole new shell, `seed`), so what is built from the
     /// shell follows each change as it lands, with no polling.
     @ObservationIgnored var onShell: ((T3ShellItem?) -> Void)?
     /// Called when the connection's state changes.
     @ObservationIgnored var onConnection: ((T3ConnectionState) -> Void)?
+    /// Called on the main actor after a subscribed thread's projection changed (a snapshot or an event).
+    @ObservationIgnored var onThread: ((String) -> Void)?
 
     @ObservationIgnored private var client: T3Client?
     @ObservationIgnored private var shellTask: Task<Void, Never>?
@@ -154,6 +158,7 @@ final class T3Store {
             for await s in await client.connectionStates() {
                 guard let self else { return }
                 self.connection = s
+                if s == .connected, let env = await client.environmentId { self.environmentID = env }
                 self.onConnection?(s)
             }
         }
@@ -164,6 +169,14 @@ final class T3Store {
         self.shell = shell
         if notify { onShell?(nil) }
     }
+
+    /// A projection with no server behind it: shots and tests.
+    func seed(_ projection: T3Projection, for id: String) {
+        projections[id] = projection
+        onThread?(id)
+    }
+
+    func setEnvironment(_ id: String?) { environmentID = id }
 
     func stop() {
         shellTask?.cancel(); statusTask?.cancel()
@@ -180,15 +193,55 @@ final class T3Store {
                 switch item {
                 case .snapshot(_, let projection): self.projections[id] = projection
                 case .event(let e): self.projections[id]?.apply(e)
-                case .unknown: break
+                case .unknown: continue
                 }
+                self.onThread?(id)
             }
+            // The stream ended by itself (the link closed): a later `watch` may open it again.
+            if !Task.isCancelled { self?.threadTasks[id] = nil }
         }
+    }
+
+    /// The first thing you asked, from a projection (capped for a prompt).
+    nonisolated static func firstUserMessage(in p: T3Projection) -> String? {
+        let text = p.messages.first { $0.role == "user" && !$0.text.isEmpty }?.text
+            ?? p.turnItems.lazy.compactMap { i -> String? in if case .userMessage(_, let t) = i.detail, !t.isEmpty { t } else { nil } }.first
+        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Reads a thread's first message through a subscription held only until its snapshot arrives.
+    func readFirstUserMessage(_ id: String) async -> String? {
+        guard let client else { return nil }
+        for await item in await client.subscribeThread(id) {
+            if case .snapshot(_, let p) = item { return Self.firstUserMessage(in: p) }
+        }
+        return nil
     }
 
     func closeThread(_ id: String) {
         threadTasks.removeValue(forKey: id)?.cancel()
         projections[id] = nil
+    }
+
+    /// Holds a subscription for exactly these threads: opens the ones not yet open, closes the rest. Subscriptions cost the
+    /// server a stream each, so they live only as long as someone needs the thread's detail.
+    func watch(_ wanted: Set<String>) {
+        for id in wanted.subtracting(threadTasks.keys) { openThread(id) }
+        for id in Set(threadTasks.keys).subtracting(wanted) { closeThread(id) }
+        for id in Set(projections.keys).subtracting(wanted) where threadTasks[id] == nil { projections[id] = nil }
+    }
+    var watchedThreads: Set<String> { Set(threadTasks.keys) }
+
+    /// `t3code://threads/<environment>/<thread>`, which T3 maps to the thread's page; nil until the environment is known.
+    func deepLink(_ thread: String) -> URL? {
+        guard let environmentID, !environmentID.isEmpty else { return nil }
+        return URL(string: "t3code://threads/\(environmentID)/\(thread)")
+    }
+
+    /// Tells T3 the thread was opened, so its sidebar and phone app show it read. Nothing without a link.
+    func markOpened(_ id: String) {
+        guard client != nil else { return }
+        Task { _ = try? await send(.threadVisit(threadId: id, visitedAt: T3Timestamp(date: Date()), opened: true)) }
     }
 
     @discardableResult

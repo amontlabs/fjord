@@ -314,25 +314,3 @@ struct JevClient {
         return Choice(choice: option, confidence: confidence, probabilities: probabilities)
     }
 }
-
-extension Claude {
-    /// The first thing you asked in a session (skipping commands and system notes), from the transcript's head.
-    static func firstMessage(head: Data) -> String? {
-        for line in head.split(separator: UInt8(ascii: "\n")) {
-            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                  obj["type"] as? String == "user", obj["isMeta"] as? Bool != true else { continue }
-            let content = (obj["message"] as? [String: Any])?["content"]
-            let text: String? = (content as? String)
-                ?? (content as? [[String: Any]])?.first { $0["type"] as? String == "text" }?["text"] as? String
-            guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, !text.hasPrefix("<") else { continue }
-            return String(text.prefix(2000))
-        }
-        return nil
-    }
-
-    static func head(of url: URL, bytes: Int = 256 * 1024) -> Data {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
-        defer { try? handle.close() }
-        return (try? handle.read(upToCount: bytes)) ?? Data()
-    }
-}

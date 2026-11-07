@@ -101,7 +101,8 @@ extension AgentThread {
     nonisolated(unsafe) private static let whole = ISO8601DateFormatter()
 }
 
-/// What a working thread is on right now, and since when (filled from the thread's projection in a later step).
+/// What a working thread is on right now, and since when: read from the thread's projection, which Fjord holds open only
+/// while the thread works (see `Store.syncThreadDetail`).
 struct ThreadWork: Hashable {
     var text: String
     var since: Date
@@ -109,12 +110,71 @@ struct ThreadWork: Hashable {
     var todo: Todo? = nil
     /// The agent's latest words between tool calls in this turn; at a turn's end, its final message.
     var narration: String? = nil
+    /// How many files this turn has changed.
+    var files = 0
 
     struct Todo: Hashable {
         var done: Int
         var total: Int
         /// The in-progress item, in the present tense.
         var active: String?
+    }
+}
+
+extension ThreadWork {
+    /// What the live turn is doing, from its items by type (never by a tool's name, so it reads the same for any agent):
+    /// the item still running (else the last tool-like one), the task list, the last words and the files changed.
+    init?(_ p: T3Projection, now: Date = Date()) {
+        guard let run = p.activeRun ?? p.runs.last(where: { $0.status.isLive }) else { return nil }
+        let items = p.turnItems.filter { $0.runId == nil || $0.runId == run.id }
+        func live(_ i: T3TurnItem) -> Bool { i.status == "running" || i.status == "waiting" }
+        func tool(_ i: T3TurnItem) -> Bool {
+            switch i.detail {
+            case .commandExecution, .fileChange, .dynamicTool, .reasoning: true
+            default: [T3ItemType.webSearch, .fileSearch].contains(i.type) || i.type.rawValue == "subagent"
+            }
+        }
+        let current = items.last { tool($0) && live($0) } ?? items.last(where: tool)
+        text = current.map(Self.describe) ?? "Working"
+        since = (run.startedAt ?? run.requestedAt).flatMap(AgentThread.date) ?? now
+        if let list = items.last(where: { if case .todoList = $0.detail { true } else { false } }),
+           case .todoList(_, let steps) = list.detail, !steps.isEmpty {
+            todo = Todo(done: steps.filter { $0.status == "completed" }.count, total: steps.count,
+                        active: steps.first { $0.status == "running" }?.text)
+        }
+        narration = items.reversed().lazy.compactMap { i -> String? in
+            if case .assistantMessage(_, let t, _) = i.detail, !t.isEmpty { t } else { nil }
+        }.first
+        files = Set(items.compactMap { i -> String? in if case .fileChange(let name, _, _) = i.detail { name } else { nil } }).count
+    }
+
+    /// An item in a few words: a command is its input, a file change its file, a search its query.
+    private static func describe(_ i: T3TurnItem) -> String {
+        func line(_ s: String, _ cap: Int = 120) -> String {
+            let one = s.split(whereSeparator: \.isNewline).first.map(String.init) ?? s
+            let t = one.trimmingCharacters(in: .whitespaces)
+            return t.count > cap ? String(t.prefix(cap)) + "…" : t
+        }
+        switch i.detail {
+        case .commandExecution(let input, _, _): return input.isEmpty ? "Running a command" : line(input)
+        case .fileChange(let name, _, _): return name.isEmpty ? "Editing files" : "Editing " + (name as NSString).lastPathComponent
+        case .dynamicTool(let name): return name.isEmpty ? "Working" : name
+        case .reasoning: return "Thinking"
+        default:
+            if i.type == .webSearch { return (i.raw.str("query") ?? i.title).map { line($0) } ?? "Searching the web" }
+            if i.type == .fileSearch { return (i.raw.str("query") ?? i.title).map { line($0) } ?? "Searching files" }
+            return i.title.map { line($0) } ?? "Working on a subagent"
+        }
+    }
+
+    /// The tooltip on a working row: the task in hand, the files changed and where the work lives.
+    func detail(branch: String?, pullRequests: [T3PullRequest]) -> String? {
+        var lines: [String] = []
+        if let todo { lines.append("\(todo.done) of \(todo.total) done" + (todo.active.map { " · " + $0 } ?? "")) }
+        if files > 0 { lines.append(files == 1 ? "1 file changed" : "\(files) files changed") }
+        if let branch, !branch.isEmpty { lines.append("Branch " + branch) }
+        for pr in pullRequests { lines.append(pr.number.map { "PR #\($0)" } ?? "Pull request") }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 }
 

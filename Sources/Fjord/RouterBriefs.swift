@@ -570,13 +570,10 @@ enum BriefKeys {
         }
     }
 
-    /// Opens the thread: a cloud thread in a new active tab, a local one in the Claude app. Whether there was one to open.
+    /// Opens the thread: a cloud thread in a new active tab, a local one in T3 Code. Whether there was one to open.
     @discardableResult
     func open(_ t: BriefTarget, store: Store) -> Bool {
-        if let session = desktopSession(t, store: store) {
-            Claude.open(session)
-            return true
-        }
+        if let session = desktopSession(t, store: store) { return store.openThread(session) }
         let page = "https://claude.ai/code/project/\(t.project)" + (t.thread == BriefDoc.coordinator ? "" : "?thread=\(t.thread)")
         guard !t.project.hasPrefix("local:"), let url = URL(string: page)
         else { return false }

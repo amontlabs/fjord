@@ -728,7 +728,7 @@ import Testing
             try await RouterSender.send(store: t, to: "Target", text: text2, tools: tools2, session: "local_t",
                                         waits: .init(taken: 0.2, running: 0.5, cold: 0.5, opened: 0.3, interval: 0.01))
         }
-        #expect(opened == ["Open in Claude · Target"] && stages == ["opening Target"])
+        #expect(opened == ["Open in T3 · Target"] && stages == ["opening Target"])
         #expect(t.router.operations.first?.state == .needsYou && t.router.operations.first?.route == .opened)
     }
 

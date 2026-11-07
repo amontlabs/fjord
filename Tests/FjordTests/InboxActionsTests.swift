@@ -1337,7 +1337,7 @@ final class DiskCheckingPerformer: ActionPerformer {
                                          help: "The Router isn't sure where it goes. Open the Router to pick", message: run.message)
             case .running where run.sessionID != nil:
                 return InboxActions.Chip(id: action.id, label: "session started", tint: .neutral, target: run.sessionID.map { .session($0) },
-                                         help: "Its first message goes once the Claude app runs the session. Open the session in Claude")
+                                         help: "Open the thread in T3 Code")
             case .running, .baselined:
                 return InboxActions.Chip(id: action.id, label: "running…", tint: .neutral, target: nil, help: action.title)
             case .failed:
@@ -1349,11 +1349,11 @@ final class DiskCheckingPerformer: ActionPerformer {
                 case .askRouter:
                     if let session = run.sessionID, run.detail.hasPrefix("sent to ") {
                         return InboxActions.Chip(id: action.id, label: run.detail, tint: .neutral, target: .session(session),
-                                                 help: "Sent \(ago(run.at)). Open the session in Claude")
+                                                 help: "Sent \(ago(run.at)). Open the thread in T3 Code")
                     }
                     if let session = run.sessionID {
                         return InboxActions.Chip(id: action.id, label: "session started \(ago(run.at))", tint: .neutral,
-                                                 target: .session(session), help: "Open the session in Claude")
+                                                 target: .session(session), help: "Open the thread in T3 Code")
                     }
                     return InboxActions.Chip(id: action.id, label: "sent to the Router", tint: .neutral, target: .router,
                                              help: "Sent to the Router \(ago(run.at)). Open the Router", message: run.message)

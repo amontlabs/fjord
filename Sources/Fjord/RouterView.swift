@@ -584,15 +584,24 @@ private struct WorkingLine: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .contextMenu {
-            Button("Open in Claude") { store.openThread(row.id) }
+            Button("Open in T3") { store.openThread(row.id) }
             if store.canPickIcons && row.entry.label == nil {
                 Button(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") { store.repickIcon(row.id) }
             }
         }
         .modifier(RunningTip(tasks: row.tasks))
+        .modifier(WorkTip(detail: row.session.running ? row.activity?.detail(branch: row.session.branch, pullRequests: row.session.pullRequests) : nil))
         .accessibilityLabel(row.session.title)
         .accessibilityValue("working, \(row.projectName), \(doing), \(since)")
-        .accessibilityHint("Opens it in Claude")
+        .accessibilityHint("Opens it in T3")
+    }
+}
+
+/// A working thread's task list, files changed, branch and pull requests, in a tooltip (nothing when it has none).
+private struct WorkTip: ViewModifier {
+    let detail: String?
+    func body(content: Content) -> some View {
+        if let detail { content.tip("Progress", detail) } else { content }
     }
 }
 

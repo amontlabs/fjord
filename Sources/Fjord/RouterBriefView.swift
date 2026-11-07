@@ -685,10 +685,10 @@ struct BriefAnswerPanel: View {
                     }
                     .help("It leaves the brief; Revert in the history")
                 }
-                ClaudeButton("Open in Claude", variant: .secondary, size: .sm, icon: ClaudeMark.openSymbol) {
+                ClaudeButton("Open in T3", variant: .secondary, size: .sm, icon: ThreadMark.openSymbol) {
                     briefs.open(target, store: store); close()
                 }
-                .help(target.project.hasPrefix("local:") ? "Open the session in the Claude app" : "Open the thread in Claude")
+                .help("Open the thread in T3 Code")
             }
         }
     }

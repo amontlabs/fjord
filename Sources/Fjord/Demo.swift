@@ -703,6 +703,7 @@ enum T3Check {
             fflush(stdout)
             if !watching { exit(0) }
         }
+        store.t3.store.onThread = { store.threadDetailChanged($0) }
         store.t3.store.onConnection = { state in
             store.t3ConnectionChanged(state)
             if store.t3.status.isProblem || store.t3.status == .notLinked {

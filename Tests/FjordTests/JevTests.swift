@@ -190,16 +190,4 @@ final class StubProtocol: URLProtocol {
         #expect(!rest.contains { $0.category.key == "debug" })
         #expect(SessionIcons.shortlist(rest, probabilities: ["debug": 1]).count <= SessionIcons.maxOptions)
     }
-
-    @Test func firstMessageSkipsCommandsAndNotes() {
-        func line(_ obj: [String: Any]) -> String { String(data: try! JSONSerialization.data(withJSONObject: obj), encoding: .utf8)! }
-        let head = [
-            line(["type": "system"]),
-            line(["type": "user", "isMeta": true, "message": ["content": "Caveat: …"]]),
-            line(["type": "user", "message": ["content": "<command-name>/clear</command-name>"]]),
-            line(["type": "user", "message": ["content": [["type": "text", "text": "  Fix the flaky CI on main  "]]]]),
-            line(["type": "user", "message": ["content": "second message"]]),
-        ].joined(separator: "\n")
-        #expect(Claude.firstMessage(head: Data(head.utf8)) == "Fix the flaky CI on main")
-    }
 }
