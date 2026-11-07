@@ -339,8 +339,6 @@ struct Prepared: Equatable, Sendable {
     /// What the session gets as your words, when `text` is that signed for its plugin (the chat shows this, never the
     /// header).
     var body: String? = nil
-    /// A guest-delivered message never falls back to the controller's Claude peer channel.
-    var guestLocation: SessionLocation? = nil
     /// The Claude app's id for the target (`local_<uuid>`), which the app's send tool takes.
     var local: String? = nil
     /// The target has no process now: the app starts it with the message (its plugin comes up with it), so there is no plugin

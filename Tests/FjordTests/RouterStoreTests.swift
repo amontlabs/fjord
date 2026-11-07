@@ -21,7 +21,6 @@ import Testing
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
         s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.interceptOpen = { _ in }
-        s.claudeLink = .ok
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         s.ingest(sessions, appUnread: [], claudeFrontmost: false, now: now)

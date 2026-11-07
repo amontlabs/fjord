@@ -823,7 +823,7 @@ struct T3DispatchResult: Equatable, Sendable {
 
 /// A failed command: the server's typed error (`OrchestrationV2DispatchCommandError`) or a transport problem.
 struct T3Error: Error, Equatable, Sendable, CustomStringConvertible {
-    enum Kind: Equatable, Sendable { case server, disconnected, timedOut, incompatible, noToken, noServer, interrupted, malformed }
+    enum Kind: Equatable, Sendable { case server, disconnected, timedOut, incompatible, noToken, noServer, tokenRejected, interrupted, malformed }
     var kind: Kind
     var message: String
     var detail: String? = nil

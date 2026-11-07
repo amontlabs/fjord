@@ -3,7 +3,7 @@ import Testing
 @testable import Fjord
 
 @MainActor
-@Suite(.ownGuestRuntime) struct ComputersTests {
+@Suite struct ComputersTests {
     @Test func quitPromptNamesOnlyRunningComputers() throws {
         let prompt = try #require(ComputerQuitPrompt.make(inventory: MockEngineClient.demoInventory))
         #expect(prompt.runningComputers.map(\.name) == ["dev", "linux-1"])
@@ -435,25 +435,6 @@ import Testing
         #expect(AppTermination.shouldInspectComputers(computersEnabled: true, engineAvailable: true))
     }
 
-    @Test func placementInventoriesKeepDuplicateComputerIdsScopedToTheirOwners() async throws {
-        let client = MockEngineClient()
-        let inventory = client.inventory
-        client.connectedDevices = [
-            SiloWireDevice(address: "alice@example.test", id: "owner-a", name: "Alice's Mac"),
-            SiloWireDevice(address: "bob@example.test", id: "owner-b", name: "Bob's Mac"),
-        ]
-        client.ownerInventories = ["owner-a": inventory, "owner-b": inventory]
-        let model = ComputersModel(client: client, initialInventory: inventory)
-
-        await model.refreshPlacementInventories()
-
-        let computerId = try #require(inventory.allComputers.first?.id)
-        let options = model.placementOptions.filter { $0.computer.id == computerId }
-        #expect(Set(options.map(\.id)) == ["local/\(computerId)", "owner-a/\(computerId)", "owner-b/\(computerId)"])
-        #expect(options.first { $0.deviceId == "owner-a" }?.ownerName == "Alice's Mac")
-        #expect(options.first { $0.deviceId == "owner-b" }?.ownerName == "Bob's Mac")
-    }
-
     @Test func platformOnlyComputerEventsMergeWithoutReplacingOtherPlatform() throws {
         let original = MockEngineClient.demoInventory
         let linuxJSON = Data("""
@@ -487,20 +468,6 @@ import Testing
 
         await model.delete(.thisMac(MockEngineClient.failedID))
         #expect(client.deleteRequests.last?.expected == configuration)
-        #expect(model.actionError == nil)
-    }
-
-    @Test func computerDeletionCleansRouterAliasesBeforeDeleteAndFinalizesAfterSuccess() async {
-        let client = MockEngineClient()
-        let model = ComputersModel(client: client, initialInventory: client.inventory)
-        var steps: [String] = []
-        model.prepareComputerRemoval = { _ in steps.append("cleanup") }
-        model.computerRemovalCompleted = { _ in steps.append("removed") }
-
-        await model.delete(.thisMac(MockEngineClient.failedID))
-
-        #expect(steps == ["cleanup", "removed"])
-        #expect(client.deleteRequests.count == 1)
         #expect(model.actionError == nil)
     }
 

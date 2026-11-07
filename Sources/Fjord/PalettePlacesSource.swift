@@ -125,7 +125,7 @@ enum PalettePlacesSource {
             if store.agents.iconsEnabled {
                 rows.append(SettingsRowSpec(slug: "key", title: "TypeSafe API key", keywords: ["key", "api", "jev", "typesafe", "keychain"]))
             }
-            sections.append(SettingsSectionSpec(anchor: SettingsView.claudeID, title: "Claude", keywords: ["router"], rows: rows))
+            sections.append(SettingsSectionSpec(anchor: SettingsView.claudeID, title: "T3 Code", keywords: ["router", "t3", "link"], rows: rows))
         }
         if store.triageOn || store.routerOn {
             var rows = [SettingsRowSpec(slug: "clones", title: "Where your clones are", keywords: ["code folders", "repos", "add folder", "git", "projects", "directories"])]

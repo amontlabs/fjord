@@ -145,7 +145,6 @@ final class ComputersModel {
     var placementOwners: [ComputerOwnerInventory] {
         (inventory.map { [ComputerOwnerInventory.local($0)] } ?? []) + remoteOwnerInventories
     }
-    var placementOptions: [ComputerPlacementOption] { placementOwners.flatMap(\.options) }
     /// Checkpoint usage by `GuestReference.key`.
     var checkpointUsage: [String: CheckpointUsage] = [:]
     private(set) var isLoading = false
@@ -230,8 +229,6 @@ final class ComputersModel {
     @ObservationIgnored private var isRecovering = false
     @ObservationIgnored private var wantsConnection = false
     @ObservationIgnored private var ownerRefreshID: UUID?
-    @ObservationIgnored var prepareComputerRemoval: (@MainActor (GuestReference) async throws -> Void)?
-    @ObservationIgnored var computerRemovalCompleted: (@MainActor (GuestReference) -> Void)?
 
     init(client: any EngineClient, initialInventory: ComputerInventory? = nil) {
         self.client = client
@@ -622,18 +619,11 @@ final class ComputersModel {
             actionError = EngineClientError.notFound("This computer no longer exists.").localizedDescription
             return
         }
-        // The removal hooks get the owner-scoped reference: a deleted computer never matches a same-id computer
-        // that another device owns.
-        if let prepareComputerRemoval {
-            do { try await prepareComputerRemoval(target) }
-            catch { actionError = error.localizedDescription; return }
-        }
         let expected: ComputerConfiguration? = if case .linux(let computer) = row { computer.configuration } else { nil }
-        let deleted = await perform("Delete", on: target.deviceId, computer: target) {
+        await perform("Delete", on: target.deviceId, computer: target) {
             try await self.client.computersDelete(ComputerDeleteRequest(computerId: target.computerId,
                                                                         deviceId: target.deviceId, expected: expected))
         }
-        if deleted { computerRemovalCompleted?(target) }
     }
     func showDisplay(_ target: GuestReference) async {
         actionError = nil

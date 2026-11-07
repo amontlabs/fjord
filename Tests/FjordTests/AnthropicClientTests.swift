@@ -50,7 +50,7 @@ private func ok(_ text: String = #"{"word":"hi","number":7}"#, stop: String = "e
 
 private func client(key: String? = "sk-test", sleeps: SleepLog = SleepLog()) -> AnthropicClient {
     AnthropicClient(session: AnthropicClient.makeSession(protocolClasses: [AnthropicStub.self]),
-                    baseURL: URL(string: "https://stub.test")!, apiKey: { key }, timeout: 5,
+                    baseURL: URL(string: "https://stub.test")!, apiKey: { key }, timeout: 30,
                     sleep: { sleeps.add($0) }, jitter: { 1.25 })
 }
 

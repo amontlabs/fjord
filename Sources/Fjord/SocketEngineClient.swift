@@ -556,48 +556,12 @@ final class SocketEngineClient: EngineClient {
         }
     }
 
-    func guestAccount(_ params: SiloWireGuestAccountParams) async throws -> SiloWireGuestAccount {
-        try await invokeGuest(SiloGeneratedMethods.guestAccount(params))
-    }
-
-    func guestExec(_ params: SiloWireGuestExecParams) async throws -> SiloWireGuestExecResult {
-        try await invokeGuest(SiloGeneratedMethods.guestExec(params))
-    }
-
-    func guestExecStart(_ params: SiloWireGuestExecStartParams) async throws -> SiloWireJobStartResult {
-        try await invokeGuest(SiloGeneratedMethods.guestExecStart(params))
-    }
-
-    func guestExecGet(_ params: SiloWireGuestExecGetParams) async throws -> SiloWireGuestExecGetResult {
-        try await invokeGuest(SiloGeneratedMethods.guestExecGet(params))
-    }
-
     func guestFilesList(_ params: SiloWireGuestFilesListParams) async throws -> SiloWireGuestFilesListResult {
         try await invokeGuest(SiloGeneratedMethods.guestFilesList(params), path: params.path)
     }
 
     func guestFilesRead(_ params: SiloWireGuestFilesReadParams) async throws -> SiloWireGuestFilesReadResult {
         try await invokeGuest(SiloGeneratedMethods.guestFilesRead(params), path: params.path)
-    }
-
-    func guestFilesRemove(_ params: SiloWireGuestFilesRemoveParams) async throws -> SiloWireGuestFilesRemoveResult {
-        try await invokeGuest(SiloGeneratedMethods.guestFilesRemove(params), path: params.paths.first)
-    }
-
-    func guestFilesWatch(_ params: SiloWireGuestFilesWatchParams) async throws -> SiloWireGuestFilesWatchResult {
-        try await invokeGuest(SiloGeneratedMethods.guestFilesWatch(params), path: params.paths.first)
-    }
-
-    func guestFilesWrite(_ params: SiloWireGuestFilesWriteParams) async throws -> SiloWireGuestFilesWriteResult {
-        try await invokeGuest(SiloGeneratedMethods.guestFilesWrite(params), path: params.path)
-    }
-
-    func guestSSHAliasEnsure(_ params: SiloWireGuestSshAliasEnsureParams) async throws -> SiloWireGuestSshAliasEnsureResult {
-        try await invokeGuest(SiloGeneratedMethods.guestSshAliasEnsure(params))
-    }
-
-    func guestSSHAliasRemove(_ params: SiloWireComputerTargetParams) async throws {
-        let _: SiloNull = try await invokeGuest(SiloGeneratedMethods.guestSshAliasRemove(params))
     }
 
     func invoke<Params: Encodable & Sendable, Result: Decodable & Sendable>(
@@ -633,8 +597,6 @@ final class SocketEngineClient: EngineClient {
                 switch code {
                 case "not_found": throw GuestClientFailure.notFound(path ?? message)
                 case "not_a_file": throw GuestClientFailure.notAFile(path ?? message)
-                case "exists": throw GuestClientFailure.exists(path ?? message)
-                case "changed": throw GuestClientFailure.changed(path ?? message)
                 case "permission_denied": throw GuestClientFailure.permissionDenied(path ?? message)
                 case "not_running": throw GuestClientFailure.notRunning(message)
                 default: throw GuestClientFailure.unavailable(message)

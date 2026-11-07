@@ -107,7 +107,7 @@ enum T3ConnectionState: Equatable, Sendable {
     case connecting, connected
     case reconnecting(attempt: Int)
     case incompatible(String)
-    case noToken, noServer
+    case noToken, noServer, tokenRejected
     case idle
 }
 
@@ -137,15 +137,25 @@ enum T3Discovery {
     }
 
     /// Checks `/.well-known/t3/environment` and builds the `/ws` upgrade request.
-    static func endpoint(origin: URL, token: String, session: URLSession = .shared) async throws -> T3Endpoint {
+    static func endpoint(origin: URL, token: String, session: URLSession = .shared, timeout: TimeInterval = 4) async throws -> T3Endpoint {
         var req = URLRequest(url: origin.appendingPathComponent(".well-known/t3/environment"))
-        req.timeoutInterval = 4
+        req.timeoutInterval = timeout
         let data: Data
         do { (data, _) = try await session.data(for: req) }
         catch { throw T3Error(kind: .noServer, message: "T3 isn't answering at \(origin.host ?? "?")") }
         let env = T3JSON.parse(data)
         guard let v = env?["orchestrationProtocolVersion"]?.int, v == protocolVersion else {
             throw T3Error(kind: .incompatible, message: "T3 speaks orchestration protocol \(env?["orchestrationProtocolVersion"]?.int.map(String.init) ?? "?"), Fjord needs \(protocolVersion)")
+        }
+        // The upgrade would only answer 401 with no reason: ask the session endpoint whether the token still counts.
+        var auth = URLRequest(url: origin.appendingPathComponent("api/auth/session"))
+        auth.timeoutInterval = timeout
+        auth.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let answer: Data
+        do { (answer, _) = try await session.data(for: auth) }
+        catch { throw T3Error(kind: .noServer, message: "T3 isn't answering at \(origin.host ?? "?")") }
+        guard T3JSON.parse(answer)?["authenticated"]?.bool == true else {
+            throw T3Error(kind: .tokenRejected, message: "T3 doesn't accept Fjord's token")
         }
         var c = URLComponents(url: origin.appendingPathComponent("ws"), resolvingAgainstBaseURL: false)!
         c.scheme = origin.scheme == "https" ? "wss" : "ws"
@@ -331,6 +341,7 @@ actor T3Client {
                 case .incompatible: terminal = .incompatible(e.message)
                 case .noToken: terminal = .noToken
                 case .noServer: terminal = .noServer
+                case .tokenRejected: terminal = .tokenRejected
                 default: break
                 }
             } catch {}
@@ -352,7 +363,7 @@ actor T3Client {
     }
 
     private func terminalKind(_ s: T3ConnectionState) -> T3Error.Kind {
-        switch s { case .incompatible: .incompatible; case .noToken: .noToken; case .noServer: .noServer; default: .disconnected }
+        switch s { case .incompatible: .incompatible; case .noToken: .noToken; case .noServer: .noServer; case .tokenRejected: .tokenRejected; default: .disconnected }
     }
 
     /// One socket's life: requests go out at once, a reader acks and routes, a pinger declares the socket dead.

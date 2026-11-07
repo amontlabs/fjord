@@ -292,6 +292,9 @@ enum AppWindowShots {
         setupShot("courier-setup-done-dark", .darkAqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
                   health: .init(tabConnected: true, signedIn: true)),
         Shot(name: "settings") { _ in .settings },
+        Shot(name: "settings-t3-not-linked", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .notLinked }),
+        Shot(name: "settings-t3-refused", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .tokenRejected }),
+        Shot(name: "settings-t3-not-installed", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .notInstalled }),
         Shot(name: "categories") { _ in .categories },
         Shot(name: "snippets") { _ in .snippets },
         // Two sections, one folded: its row with the counts added up and its caret turned, its categories gone from the sidebar.

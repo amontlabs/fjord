@@ -437,7 +437,7 @@ struct RouterRunStream {
 
 /// One send of a prepared, signed message, through the same gate as the Router's own: every send asks first, and Fjord answers
 /// (`RouterTools.approveSend`): only exactly the prepared text to the prepared target, once. No Claude Code process and no model
-/// is run for it: a local session gets it through a carrier (`RouterCarry`); a session on a computer through its guest inbox.
+/// is run for it: a session gets it through a carrier (`RouterCarry`).
 enum RouterSender {
     /// Sends `text` to `to` through `tools`' gate. Throws why it wasn't delivered. Returns the target plugin's answer (what it
     /// applied of the message's settings), else nil.
@@ -451,36 +451,6 @@ enum RouterSender {
     static func send(store: Store, to: String, text: String, tools: RouterTools, session: String? = nil,
                      kind: DeliveryOperation.Kind = .message, decisionID: UUID? = nil, hostSessionID: String? = nil,
                      body: String? = nil, waits: RouterCarry.Waits = RouterCarry.Waits()) async throws -> String? {
-        if let ready = tools.prepared[to], let location = ready.guestLocation {
-            guard case .computer(let deviceId, let computerId) = location,
-                  let target = RelayInbox.header(of: text)?.target else {
-                throw RouterTools.Failure("The guest delivery isn't signed for a known computer session")
-            }
-            let guestClient: (any GuestClient)? = if let injected = tools.guestClient { injected } else { await GuestRouterRuntime.shared.connectedGuestClient(for: location) }
-            guard guestClient != nil else {
-                throw RouterTools.Failure("The guest file client isn't connected for this computer yet")
-            }
-            let ticket = tools.ticket()
-            if let refusal = tools.approveSend(["to": to, "message": text], otherFields: []) { throw RouterTools.Failure(refusal) }
-            let gate: @MainActor @Sendable () -> String? = {
-                do { try tools.live(ticket) } catch { return error.localizedDescription }
-                return tools.deliveryCheck?()
-            }
-            do {
-                return try await GuestRouterRuntime.shared.deliver(text, to: target,
-                    computer: GuestReference(deviceId: deviceId, computerId: computerId), decisionID: decisionID,
-                    hostSessionID: hostSessionID, body: body ?? ready.body ?? ready.text, gate: gate)
-            } catch is CancellationError {
-                tools.prepared[to] = ready
-                throw CancellationError()
-            } catch let failure as GuestRelayInbox.Failure {
-                tools.prepared[to] = ready
-                throw RouterTools.Failure(failure.localizedDescription)
-            } catch {
-                // A guest timeout or refusal is the guest's to settle, never another way.
-                throw RouterTools.Failure(error.localizedDescription)
-            }
-        }
         guard let header = RelayInbox.header(of: text), let paths = store.routerFiles else {
             throw RouterTools.Failure("Fjord isn't ready: nothing was sent")
         }

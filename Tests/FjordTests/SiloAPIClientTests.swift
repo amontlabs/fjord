@@ -43,21 +43,13 @@ import Testing
         })
     }
 
-    @Test func generatedGuestClientAdaptsGuestCallsAndWatches() async throws {
+    @Test func generatedGuestClientAdaptsFileReadsAndLists() async throws {
         let server = try FakeSiloUnixServer { request, socket in
             let params = (try? JSONSerialization.jsonObject(with: request.params)) as? [String: Any] ?? [:]
             switch request.method {
             case "engine.handshake":
                 try? socket.write(["id": request.id, "result": ["deviceId": "controller", "name": "Fake",
-                                                                     "protocol": 6, "capabilities": ["guest.*", "events.*"]]])
-            case "guest.account":
-                try? socket.write(["id": request.id, "result": ["home": "/home/g", "uid": 1000, "user": "g"]])
-            case "guest.exec":
-                let argv = params["argv"] as? [String] ?? []
-                let stdout = argv.contains(where: { $0.contains("fjord-account-probe") })
-                    ? Data("node=/opt/node/bin/node\nclaude=/home/g/.local/bin/claude\nos=Linux\narch=aarch64\n".utf8)
-                    : Data("x".utf8)
-                try? socket.write(["id": request.id, "result": ["exitCode": 0, "stdout": Array(stdout), "stderr": [Int]()]])
+                                                                     "protocol": 6, "capabilities": ["guest.*"]]])
             case "guest.files.read":
                 if params["path"] as? String == "/missing" {
                     try? socket.write(["id": request.id, "error": ["code": "not_found", "message": "missing"]])
@@ -68,20 +60,6 @@ import Testing
             case "guest.files.list":
                 try? socket.write(["id": request.id, "result": ["entries": [["name": "file", "type": "file", "size": 2, "mtimeMs": 1234],
                                                                                  ["name": "folder", "type": "dir", "size": 0, "mtimeMs": 0]]]])
-            case "guest.files.write":
-                try? socket.write(["id": request.id, "result": ["inode": 10, "mtimeMs": 1235, "size": 2]])
-            case "guest.files.remove":
-                try? socket.write(["id": request.id, "result": ["removed": params["paths"] ?? []]])
-            case "guest.files.watch":
-                try? socket.write(["id": request.id, "result": ["subscriptionId": "guest-watch"]])
-            case "events.subscribe":
-                try? socket.write(["id": request.id, "result": ["subscription": "events-watch"]])
-                try? socket.write(["event": "guest.files.changed", "subscription": "events-watch", "deviceId": "owner-1", "seq": 1,
-                                   "payload": ["subscriptionId": "guest-watch", "path": "/watch/path"]])
-            case "guest.sshAlias.ensure":
-                try? socket.write(["id": request.id, "result": ["alias": "ssh-computer-1", "configPath": "/home/g/.ssh/config",
-                                                                      "home": "/home/g", "includeInstalled": true,
-                                                                      "includeLine": "Include config.d/*", "user": "g"]])
             default:
                 try? socket.write(["id": request.id, "result": NSNull()])
             }
@@ -91,24 +69,9 @@ import Testing
         let client = SiloGuestClient(engine: engine)
         let computer = GuestReference(deviceId: "owner-1", computerId: "computer-1")
 
-        let account = try await client.account(for: computer)
-        #expect(account == GuestAccount(home: "/home/g", uid: 1000, operatingSystem: .linux, architecture: "aarch64",
-                                        nodeExecutable: "/opt/node/bin/node", claudeExecutable: "/home/g/.local/bin/claude"))
-        let execution = try await client.exec(GuestExecRequest(computer: computer, argv: ["printf", "x"], cwd: "/home/g", timeoutSeconds: 2))
-        #expect(execution == GuestExecResult(exitCode: 0, stdout: Data("x".utf8), stderr: Data()))
         let read = try await client.filesRead(computer: computer, path: "/file", offset: 0, length: 2)
         #expect(read == GuestFileReadResult(data: Data("AB".utf8), size: 2, mtimeMs: 1234, inode: 9, mode: 0o644))
         #expect(try await client.filesList(computer: computer, path: "/watch").map(\.type) == [.file, .directory])
-        let write = try await client.filesWrite(.init(computer: computer, path: "/write", data: Data("AB".utf8), mode: 0o600,
-                                                       replace: .ifSHA256("deadbeef")))
-        #expect(write == GuestFileWriteResult(size: 2, mtimeMs: 1235, inode: 10))
-        #expect(try await client.filesRemove(computer: computer, paths: ["/write"]) == ["/write"])
-        #expect(try await client.sshAliasEnsure(computer: computer, installInclude: true)
-                == GuestSSHAlias(alias: "ssh-computer-1", ownerName: "g", home: "/home/g"))
-        try await client.sshAliasRemove(computer: computer)
-        let watch = try await client.filesWatch(computer: computer, paths: ["/watch"])
-        var iterator = watch.events.makeAsyncIterator()
-        #expect(await iterator.next() == GuestFileEvent(subscriptionId: "guest-watch", path: "/watch/path"))
         do {
             _ = try await client.filesRead(computer: computer, path: "/missing", offset: nil, length: nil)
             Issue.record("The generated not_found error must stay a GuestClientFailure.")
@@ -118,52 +81,13 @@ import Testing
 
         try await engine.engineDisconnect()
         let requests = await server.requestLog.requests
-        #expect(requests.map(\.method) == ["engine.handshake", "guest.account", "guest.exec", "guest.exec", "guest.files.read",
-                                             "guest.files.list", "guest.files.write", "guest.files.remove", "guest.sshAlias.ensure",
-                                             "guest.sshAlias.remove", "guest.files.watch", "events.subscribe", "guest.files.read",
+        #expect(requests.map(\.method) == ["engine.handshake", "guest.files.read", "guest.files.list", "guest.files.read",
                                              "engine.disconnect"])
-        let writeParams = try #require(requests.first(where: { $0.method == "guest.files.write" }))
-        let writeJSON = try #require(try JSONSerialization.jsonObject(with: writeParams.params) as? [String: Any])
-        #expect(writeJSON["deviceId"] as? String == "owner-1")
-        #expect(writeJSON["computerId"] as? String == "computer-1")
-        #expect(writeJSON["expectedSha256"] as? String == "deadbeef")
-        #expect(writeJSON["replace"] as? String == "ifSha256")
         for request in requests where request.method.hasPrefix("guest.") {
             let params = try #require(try JSONSerialization.jsonObject(with: request.params) as? [String: Any])
             #expect(params["deviceId"] as? String == "owner-1")
             #expect(params["computerId"] as? String == "computer-1")
         }
-    }
-
-    @Test func guestExecGetCarriesTheOwnerDeviceId() async throws {
-        let server = try FakeSiloUnixServer { request, socket in
-            switch request.method {
-            case "engine.handshake":
-                try? socket.write(["id": request.id, "result": ["deviceId": "controller", "name": "Fake",
-                                                                     "protocol": 6, "capabilities": ["guest.*"]]])
-            case "guest.exec.get":
-                try? socket.write(["id": request.id, "result": ["firstRetainedSeq": 0, "output": [], "state": "running"]])
-            default:
-                try? socket.write(["id": request.id, "result": NSNull()])
-            }
-        }
-        defer { server.stop() }
-        let engine = SocketEngineClient(path: server.path)
-        let client = SiloGuestClient(engine: engine)
-
-        _ = try await client.execGet(computer: GuestReference(deviceId: "owner-1", computerId: "computer-1"),
-                                     jobId: "job:7", sinceSequence: 0)
-        _ = try await client.execGet(computer: GuestReference(deviceId: nil, computerId: "computer-1"),
-                                     jobId: "job:8", sinceSequence: 0)
-
-        let gets = await server.requestLog.requests.filter { $0.method == "guest.exec.get" }
-        #expect(gets.count == 2)
-        let first = try #require(try JSONSerialization.jsonObject(with: gets[0].params) as? [String: Any])
-        #expect(first["deviceId"] as? String == "owner-1")
-        #expect(first["jobId"] as? String == "job:7")
-        let second = try #require(try JSONSerialization.jsonObject(with: gets[1].params) as? [String: Any])
-        #expect(second["deviceId"] == nil || second["deviceId"] is NSNull)
-        try await engine.engineDisconnect()
     }
 
     @Test func execInputAndDisplayResizeParamsCarryTheOwnerDeviceId() throws {

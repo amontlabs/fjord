@@ -383,7 +383,9 @@ private struct RouterSettings: View {
     }
 
     private var claude: some View {
-        SettingsSection("Claude") {
+        SettingsSection("T3 Code") {
+            T3SettingsRows(store: store)
+            SettingsDivider()
             routerStyle
             SettingsDivider()
             mutedFolders
@@ -399,9 +401,9 @@ private struct RouterSettings: View {
     /// The Router, which reads your Claude Code sessions (never writing to the desktop app's files): its switch, then what it
     /// needs and how each part is doing (the hook, Claude Code, routing).
     @ViewBuilder private var router: some View {
-        let needsClaude = !store.router.enabled && !Claude.isInstalled
+        let needsClaude = !store.router.enabled && !store.t3.installed
         SettingsRow("Router",
-                    description: needsClaude ? "Needs the Claude desktop app" : nil,
+                    description: needsClaude ? "Needs T3 Code" : nil,
                     adornment: SettingsView.toolMark(.router),
                     info: ("Router", "Shows what your Claude Code sessions are doing, what is waiting on you and what is done, and answers their forms here. Each message you send runs on its own: rules first, then Jev (TypeSafe's classifier, if a key is set) picks where it goes, and a short Haiku run only changes Fjord or answers a question. Messages reach your sessions through Fjord's Claude Code plugin. Every run is logged in the Router's history. The Router never acts on GitHub. Forms need a hook in Claude Code's settings (`~/.claude/settings.json`); turning the Router off removes the hook and the plugin. \(store.shortcut(.router).display) opens it.")) {
             SettingsSwitch("Router", isOn: Binding(get: { store.router.enabled }, set: { store.setTool(.router, on: $0) }))
@@ -496,7 +498,7 @@ private struct RouterSettings: View {
         let muted = store.agents.mutedFolders
         let unmuted = store.knownFolders.filter { !muted.contains($0) }
         let name = { (folder: String) in
-            folder.isEmpty ? "Scratch chats" : folder.hasPrefix("guest-project:") ? store.routerProjectGroupName(folder) : store.folderName(folder)
+            folder.isEmpty ? "Scratch chats" : store.folderName(folder)
         }
         SettingsRow("Muted folders", info: ("Muted folders", "The Router ignores their sessions: no cards, nothing listed"),
                     below: AnyView(Group {

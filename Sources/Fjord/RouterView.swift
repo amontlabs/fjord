@@ -8,31 +8,9 @@ import SwiftUI
 // MARK: - Store
 
 extension Store {
-    /// A session's visible project keeps its execution owner and guest root separate from the host folder mirror.
     func routerSessionProject(_ sessionID: String) -> (name: String, color: Color?) {
-        guard let start = router.pendingDesktopStarts.first(where: { $0.desktopSessionID == sessionID && $0.state == .matched }),
-              let project = router.runsOnProjects.first(where: { $0.id == start.projectID }) else {
-            let folder = threads[sessionID]?.folderKey ?? ""
-            return (folderName(folder), projectColor(folder))
-        }
-        let owner = start.location.key
-        return ("\(project.name) · \(start.alias) @ \(owner):\(start.folder)", projectColor(project.sourceFolder))
-    }
-
-    /// A project's key: local projects keep their folder key; guest folders include project and owner identity.
-    func routerProjectGroupKey(sessionID: String, folder: String) -> String {
-        guard let start = router.pendingDesktopStarts.first(where: { $0.desktopSessionID == sessionID && $0.state == .matched }) else {
-            return folder
-        }
-        return "guest-project:\(start.projectID.uuidString):\(start.location.key):\(start.folder)"
-    }
-
-    func routerProjectGroupName(_ key: String) -> String {
-        guard key.hasPrefix("guest-project:"),
-              let start = router.pendingDesktopStarts.first(where: {
-                  $0.state == .matched && routerProjectGroupKey(sessionID: $0.desktopSessionID ?? "", folder: $0.folder) == key
-              }) else { return folderName(key) }
-        return routerSessionProject(start.desktopSessionID ?? "").name
+        let folder = threads[sessionID]?.folderKey ?? ""
+        return (folderName(folder), projectColor(folder))
     }
 
     /// The Router's switch: it turns the reading of Claude's sessions, which it works on, on and off with it.
@@ -40,7 +18,6 @@ extension Store {
         if on { setAgentsEnabled(true) }
         setRouterEnabled(on)
         if !on {
-            GuestRouterRuntime.shared.disableAll()
             setAgentsEnabled(false)
         }
     }
@@ -78,17 +55,9 @@ extension Store {
         return routerDispatcher.submit(text, context: context) != nil
     }
 
-    /// The form Fjord's hook holds for a thread now: on this Mac, or on the remote computer its Desktop session runs on.
+    /// The form Fjord's hook holds for a thread now.
     func heldForm(_ target: BriefTarget) -> PendingForm? {
-        guestPendingForm(for: target)?.form ?? routerBriefs.localForm(target, store: self)
-    }
-
-    /// A remote computer's form for a thread: its Desktop session matched to the guest session the form is of.
-    func guestPendingForm(for target: BriefTarget) -> GuestPendingForm? {
-        guard let desktop = routerBriefs.desktopSession(target, store: self),
-              let start = router.pendingDesktopStarts.first(where: { $0.desktopSessionID == desktop && $0.state == .matched })
-        else { return nil }
-        return router.guestPendingForms.first { $0.location == start.location && $0.form.cliSessionID == start.guestSessionID }
+        routerBriefs.localForm(target, store: self)
     }
 
     /// The last check before a form's answer is written: the Router is on, the thread still holds that very form and, for an
@@ -106,13 +75,6 @@ extension Store {
                     snapshot: FormSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         if let snapshot, !snapshot.holds(self) { return .failure(FormWriter.Cancelled()) }
         if routerIsPretend { return Result { _ = try FormBridge.validate(form, answers) } }
-        if let guestForm = guestPendingForm(for: target), guestForm.form.id == form.id {
-            do {
-                try await GuestRouterRuntime.shared.answer(guestForm, answers: answers, target: target, snapshot: snapshot)
-                logEntryAction("Answered the form", target: target)
-                return .success(())
-            } catch { return .failure(error) }
-        }
         guard let dir = formBridge.dir else { return .failure(FormWriter.Cancelled()) }
         do {
             try await FormWriter.write(form, answers: answers, dir: dir, stillValid: { [weak self] in
@@ -132,13 +94,6 @@ extension Store {
         if let snapshot, !snapshot.holds(self) { return .failure(FormWriter.Cancelled()) }
         if routerIsPretend { return Result { _ = try FormBridge.answerData(form, plan: decision) } }
         let words = decision.approve ? "Approved the plan" : "Sent the plan back"
-        if let guestForm = guestPendingForm(for: target), guestForm.form.id == form.id {
-            do {
-                try await GuestRouterRuntime.shared.answer(guestForm, plan: decision, target: target, snapshot: snapshot)
-                logEntryAction(words, target: target)
-                return .success(())
-            } catch { return .failure(error) }
-        }
         guard let dir = formBridge.dir else { return .failure(FormWriter.Cancelled()) }
         do {
             try await FormWriter.write(form, plan: decision, dir: dir, stillValid: { [weak self] in

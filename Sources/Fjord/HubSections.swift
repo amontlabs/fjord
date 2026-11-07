@@ -259,10 +259,10 @@ extension FjordHub {
         routerFooter
     }
 
-    /// What is working, under the entries, and Claude's files failing to read: a broken read never goes silent.
+    /// What is working, under the entries, and the T3 link when it needs a look.
     var routerWorking: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ClaudeNotice(store: store).padding(.horizontal, Theme.Space.md)
+            T3Notice(store: store).padding(.horizontal, Theme.Space.md)
             RouterWorkingList(store: store)
         }
     }

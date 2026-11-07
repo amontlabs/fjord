@@ -509,12 +509,6 @@ final class RouterMCPServer: @unchecked Sendable {
     var transcriptsRoot: URL = Claude.transcriptsDir
     /// Claude Code's bundled binary, as `RouterStatus` found it.
     var claudePath: () -> String? = { nil }
-    /// Guest transport is injected separately until the generated engine client owns the guest.* surface.
-    var guestClient: (any GuestClient)?
-    /// App-lifetime watcher state belongs to the app's shared runtime; tests supply an isolated runtime per tools instance.
-    var guestRuntime = GuestRouterRuntime.shared
-    /// Tests provide a temporary HOME; the app uses the current user's Claude settings file.
-    var guestSSHSettings: ClaudeSSHSettings?
 
     /// The decision-log entry of the run this instance serves (a typed run of the dispatcher, see RouterDispatcher): its
     /// changes join that entry.
@@ -644,10 +638,7 @@ final class RouterMCPServer: @unchecked Sendable {
     /// The sessions that live processes have registered, read off the main thread.
     private func peers(_ store: Store) async -> [String: ClaudePeers.Peer] {
         guard let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true) else { return [:] }
-        let guestIDs = Set(store.router.pendingDesktopStarts.compactMap { start in
-            start.state == .matched ? start.desktopSessionID : nil
-        })
-        return await OffMain.run { Self.localPeers(dir: dir, excluding: guestIDs) }
+        return await OffMain.run { Self.localPeers(dir: dir) }
     }
 
     /// Dates read from disk may be anything: bounded before they're turned into whole seconds.
@@ -676,17 +667,9 @@ final class RouterMCPServer: @unchecked Sendable {
 
     private func sessionFields(_ store: Store, _ session: AgentThread, _ peers: [String: ClaudePeers.Peer]) -> [String: Any] {
         let peer = peers[session.id]
-        let guest = store.router.pendingDesktopStarts.first { $0.desktopSessionID == session.id && $0.state == .matched }
-        let project = guest.flatMap { start in store.router.runsOnProjects.first(where: { $0.id == start.projectID }) }
-        let projectLabel = project.map { "\($0.name) · \(guest?.alias ?? "") @ \(guest?.location.key ?? ""):\(guest?.folder ?? "")" }
-            ?? store.folderName(session.folderKey)
-        var fields: [String: Any] = ["session": session.id, "title": Self.short(session.title), "project": Self.short(projectLabel, 200),
-                "peer": Self.short(peer?.name.isEmpty == false ? peer!.name : session.title), "reachable": peer != nil || guest != nil]
-        if let guest {
-            fields["location"] = guest.location.key
-            fields["computer"] = guest.alias
-            fields["guestSession"] = guest.guestSessionID ?? ""
-        }
+        let projectLabel = store.folderName(session.folderKey)
+        let fields: [String: Any] = ["session": session.id, "title": Self.short(session.title), "project": Self.short(projectLabel, 200),
+                "peer": Self.short(peer?.name.isEmpty == false ? peer!.name : session.title), "reachable": peer != nil]
         return fields
     }
 
@@ -694,7 +677,7 @@ final class RouterMCPServer: @unchecked Sendable {
     /// `projects`: only sessions in these folders (applied before the limit, so a tagged project's sessions all count).
     func candidates(_ store: Store, projects: Set<String>? = nil) -> (working: [AgentThread], recent: [AgentThread]) {
         let live = store.threads.values.filter {
-            !$0.isArchived && (projects?.contains(store.routerProjectFolder(sessionID: $0.id, fallback: $0.folderKey)) ?? true)
+            !$0.isArchived && (projects?.contains($0.folderKey) ?? true)
         }
             .sorted { $0.lastActivity > $1.lastActivity }
         return (live.filter(\.running), Array(live.filter { !$0.running }.prefix(20)))
@@ -830,27 +813,12 @@ final class RouterMCPServer: @unchecked Sendable {
         -> (session: AgentThread, to: String, reachable: Bool, cli: String?) {
         let titled = store.threads.values.filter { !$0.isArchived && $0.title.lowercased() == query.lowercased() }
         let known = store.threads[query] ?? (titled.count == 1 ? titled[0] : nil)
-        let guestByAlias = store.router.pendingDesktopStarts.filter { $0.state == .matched && $0.alias == query }
-        let aliasedGuest = guestByAlias.count == 1 ? store.threads[guestByAlias[0].desktopSessionID ?? ""] : nil
-
-        // A matched guest target is resolved from Desktop metadata and the guest registry join. Never enumerate local
-        // Claude peer files or call host kill(2) for its guest PID just to prepare a follow-up.
-        if let session = known ?? aliasedGuest,
-           let guestStart = store.router.pendingDesktopStarts.first(where: { $0.desktopSessionID == session.id && $0.state == .matched }) {
-            await afterLookup?()
-            return (session, session.title, true, guestStart.guestSessionID)
-        }
-
         let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true)
-        let guestIDs = Set(store.router.pendingDesktopStarts.compactMap { start in
-            start.state == .matched ? start.desktopSessionID : nil
-        })
         let (peers, clis) = await OffMain.run { () -> ([String: ClaudePeers.Peer], [String: Set<String>]) in
             guard let dir else { return ([:], [:]) }
-            return (Self.localPeers(dir: dir, excluding: guestIDs), Self.cliSessions(dir: dir, excluding: guestIDs))
+            return (Self.localPeers(dir: dir), Self.cliSessions(dir: dir))
         }
         guard let session = known
-            ?? aliasedGuest
             ?? ClaudePeers.session(named: query, peers: peers).flatMap({ store.threads[$0] }) else {
             throw Failure("No session “\(query)”; call board")
         }
@@ -862,14 +830,14 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     /// Claude Code's session ids of the live processes, by desktop session (`hostSessionId` → `sessionId`).
-    nonisolated static func localPeers(dir: URL, excluding guestIDs: Set<String>,
+    nonisolated static func localPeers(dir: URL,
                                        alive: (Int32) -> Bool = FormBridge.processAlive) -> [String: ClaudePeers.Peer] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var peers: [String: ClaudePeers.Peer] = [:]
         for url in files where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let host = object["hostSessionId"] as? String, !host.isEmpty, !guestIDs.contains(host),
+                  let host = object["hostSessionId"] as? String, !host.isEmpty,
                   let pid = (object["pid"] as? NSNumber)?.int32Value ?? Int32(url.deletingPathExtension().lastPathComponent),
                   alive(pid) else { continue }
             peers[host] = ClaudePeers.Peer(name: object["name"] as? String ?? "", pid: pid)
@@ -877,14 +845,14 @@ final class RouterMCPServer: @unchecked Sendable {
         return peers
     }
 
-    nonisolated static func cliSessions(dir: URL, excluding guestIDs: Set<String> = [],
+    nonisolated static func cliSessions(dir: URL,
                                         alive: (Int32) -> Bool = FormBridge.processAlive) -> [String: Set<String>] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var out: [String: Set<String>] = [:]
         for url in files where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let host = obj["hostSessionId"] as? String, !host.isEmpty, !guestIDs.contains(host),
+                  let host = obj["hostSessionId"] as? String, !host.isEmpty,
                   let cli = obj["sessionId"] as? String, !cli.isEmpty,
                   let pid = (obj["pid"] as? NSNumber)?.int32Value ?? Int32(url.deletingPathExtension().lastPathComponent),
                   alive(pid) else { continue }
@@ -945,7 +913,7 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     private func signed(_ store: Store, _ ready: Prepared, title: String, cli: String?, ticket: Ticket,
-                        guestStart: PendingDesktopStart? = nil, asleep: Bool = false,
+                        asleep: Bool = false,
                         local: String? = nil) async throws -> Prepared {
         // What the user says to the Router in an @router aside never goes on: if one is still there, nothing is sent. Text
         // Fjord wrote itself goes as it is.
@@ -956,31 +924,6 @@ final class RouterMCPServer: @unchecked Sendable {
         // What your message tags goes after your words, fenced: Fjord's, never inside them, and never read for an
         // aside (checked above on your words alone).
         let body = verbatim ? ready.text : RouterPointers.attach(tagged, to: ready.text)
-        if let guestStart {
-            let connected: (any GuestClient)? = if let injected = self.guestClient { injected }
-                else { await guestRuntime.connectedGuestClient(for: guestStart.location) }
-            guard case .computer(let deviceId, let computerId) = guestStart.location,
-                  let guestClient = connected else {
-                throw Failure("The guest file client isn't connected for this computer yet")
-            }
-            let computer = GuestReference(deviceId: deviceId, computerId: computerId)
-            try await guestRuntime.startWatching(store: store, client: guestClient, computer: computer)
-            let account = try await guestClient.account(for: computer)
-            let paths = try GuestRouterPaths(home: account.home)
-            let keyFile = try await guestClient.filesRead(computer: computer, path: paths.key, offset: nil, length: nil)
-            guard let key = String(data: keyFile.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  key.count == 64, key.allSatisfy(\.isHexDigit) else { throw Failure("Fjord's guest relay key is unavailable") }
-            let guestNowMs = try await GuestClock.sampleMilliseconds(client: guestClient, computer: computer, account: account)
-            let live = try await GuestSessionObserver(client: guestClient).read(computer: computer, paths: paths, guestNowMs: guestNowMs)
-            guard let session = live.first(where: { $0.cliSessionID == cli && $0.capabilities.contains(ClaudePlugin.inboxCapability) }) else {
-                throw Failure("\(title) has no live guest inbox presence; nothing was sent")
-            }
-            var out = ready
-            out.body = body
-            out.text = RelaySigner.sign(body: body, target: cli, key: key, now: GuestClock.date(milliseconds: guestNowMs))
-            out.guestLocation = guestStart.location
-            return out
-        }
         guard store.routerPluginStatus == .installed else {
             throw Failure("Fjord's plugin isn't installed in Claude Code, so nothing can be sent (Settings → Router)")
         }
@@ -1016,21 +959,20 @@ final class RouterMCPServer: @unchecked Sendable {
         let message = try yourMessage()
         let (session, to, reachable, found) = try await target(store, query)
         var cli = found
-        let guestStart = store.router.pendingDesktopStarts.first { $0.desktopSessionID == session.id && $0.state == .matched }
         // Still this turn's call (a late one from an earlier turn changes nothing), then: a new preparation replaces the old
         // one, which is void even if this one fails.
         try live(ticket)
         // A local session with no process at all (not two claiming it) is asleep: the app starts it with the message, so there is
         // no plugin presence to look for before it goes (`signed`).
         var asleep = false
-        if cli == nil, !reachable, guestStart == nil, session.sshHost == nil, let id = session.cliID {
+        if cli == nil, !reachable, session.sshHost == nil, let id = session.cliID {
             asleep = true
             cli = id
         }
         prepared[to] = nil
         let ready = verbatim ? Prepared(text: message, original: message, rephrased: false) : try edited(message)
-        let sealed = try await signed(store, ready, title: session.title, cli: guestStart?.guestSessionID ?? cli,
-                                      ticket: ticket, guestStart: guestStart, asleep: asleep, local: session.id)
+        let sealed = try await signed(store, ready, title: session.title, cli: cli,
+                                      ticket: ticket, asleep: asleep, local: session.id)
         try live(ticket)
         prepared[to] = sealed
         return Self.json(["to": to, "text": sealed.text, "rephrased": ready.rephrased])

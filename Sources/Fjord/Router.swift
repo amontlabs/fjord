@@ -18,19 +18,6 @@ struct RouterSaved: Codable, Equatable {
     /// (`RouterStyle.defaultText`).
     var style: String?
 
-    /// Projects whose future sessions have an explicit execution location. `sourceFolder` is a local discovery alias used
-    /// only to find the existing project row; `id` is the project identity and is retained when placement changes.
-    var runsOnProjects: [RunsOnProject] = []
-    /// Desktop SSH starts Fjord prepared but cannot observe a session until guest presence and transcript evidence arrive.
-    var pendingDesktopStarts: [PendingDesktopStart] = []
-    /// Signed guest inbox deliveries and their confirmed/uncertain state; a timeout never licenses a new nonce.
-    var guestRelayDeliveries: [GuestRelayRecord] = []
-    /// Current guest forms, watched through the owning computer. Their location accompanies the CLI id on persistence.
-    var guestPendingForms: [GuestPendingForm] = []
-    /// A Router-off removal that could not reach its guest yet; retried on the next guest connection.
-    var pendingGuestDisables: [SessionLocation] = []
-    /// A deleted computer's Desktop SSH entry or engine alias could not be removed yet; retried after reconnect.
-    var pendingGuestRemovals: [SessionLocation] = []
     /// The messages of yours Fjord ordered to sessions, each kept before it was ordered and settled by what the target's plugin
     /// said (RouterCarry.swift).
     var operations: [DeliveryOperation] = []
@@ -38,8 +25,7 @@ struct RouterSaved: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, enabledAt, changes, decisions, style, runsOnProjects, pendingDesktopStarts, guestRelayDeliveries
-        case guestPendingForms, pendingGuestDisables, pendingGuestRemovals, operations
+        case enabled, enabledAt, changes, decisions, style, operations
     }
 
     func encode(to encoder: Encoder) throws {
@@ -49,12 +35,6 @@ struct RouterSaved: Codable, Equatable {
         try c.encode(changes, forKey: .changes)
         try c.encode(decisions, forKey: .decisions)
         try c.encodeIfPresent(style, forKey: .style)
-        try c.encode(runsOnProjects, forKey: .runsOnProjects)
-        try c.encode(pendingDesktopStarts, forKey: .pendingDesktopStarts)
-        try c.encode(guestRelayDeliveries, forKey: .guestRelayDeliveries)
-        try c.encode(guestPendingForms, forKey: .guestPendingForms)
-        try c.encode(pendingGuestDisables, forKey: .pendingGuestDisables)
-        try c.encode(pendingGuestRemovals, forKey: .pendingGuestRemovals)
         try c.encode(operations, forKey: .operations)
     }
 
@@ -80,12 +60,6 @@ struct RouterSaved: Codable, Equatable {
         changes = list(.changes)
         decisions = list(.decisions)
         style = value(.style)
-        runsOnProjects = list(.runsOnProjects)
-        pendingDesktopStarts = list(.pendingDesktopStarts)
-        guestRelayDeliveries = list(.guestRelayDeliveries)
-        guestPendingForms = list(.guestPendingForms)
-        pendingGuestDisables = list(.pendingGuestDisables)
-        pendingGuestRemovals = list(.pendingGuestRemovals)
         operations = list(.operations)
         linkUnlinkedChanges()
         dropped = lost
@@ -147,10 +121,6 @@ extension Store {
     /// At launch: the forms folder and its watcher, and the hook again if the app moved since it was installed.
     func startRouter() {
         if router.enabled { applyRouterSwitch(install: false) }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await GuestRouterRuntime.shared.rehydrate(store: self)
-        }
     }
 
     /// Where the Router's files are, when they may be touched at all: never in a demo, and in a test only where the test said.

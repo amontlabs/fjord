@@ -501,27 +501,6 @@ struct FjordHub: View {
     }
 }
 
-/// Under the Router's header: Claude's session files missing or unreadable (nothing when all is well).
-struct ClaudeNotice: View {
-    let store: Store
-
-    var body: some View {
-        switch store.claudeLink {
-        case .missing, .unreadable:
-            HStack(spacing: 6) { ClaudeLinkStatus(store: store) }
-                // One element for VoiceOver: what is wrong, said as shown.
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(store.claudeLink == .missing ? "Claude's sessions not found" : "Can't read Claude's sessions")
-                .font(Theme.Typography.meta)
-                .foregroundStyle(Theme.red)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, Theme.Space.xs)
-        default:
-            EmptyView()
-        }
-    }
-}
-
 /// Beside the sync status, on every edge: the GitHub rate limit running low (nothing otherwise).
 struct RateNotice: View {
     let store: Store

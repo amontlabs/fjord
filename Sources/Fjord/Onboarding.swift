@@ -43,10 +43,10 @@ struct OnboardingView: View {
     /// A tool: its switch, and once it is on, what it needs, folding away when it is switched off.
     private func tool(_ tool: Tool) -> some View {
         let on = store.isOn(tool)
-        // The Router reads the Claude app's sessions: without the app it can't be switched on (as in Settings).
-        let needsClaude = tool == .router && !on && !Claude.isInstalled
+        // The Router works through T3 Code: without it the Router can't be switched on (as in Settings).
+        let needsClaude = tool == .router && !on && !store.t3.installed
         return SettingsNest {
-            SettingsRow(tool.name, description: needsClaude ? "Needs the Claude desktop app" : tool.summary,
+            SettingsRow(tool.name, description: needsClaude ? "Needs T3 Code" : tool.summary,
                         adornment: SettingsView.toolMark(tool)) {
                 SettingsSwitch(tool.name, isOn: Binding(get: { on }, set: { store.setTool(tool, on: $0) }))
                     .disabled(needsClaude)

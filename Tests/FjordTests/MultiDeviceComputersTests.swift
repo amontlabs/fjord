@@ -5,7 +5,7 @@ import Testing
 /// The Computers tool as a controller: This Mac and every connected device are listed, and every action, job and event is
 /// scoped by the device that owns the computer. The demo remote device reuses the ids of This Mac's `dev` and `linux-1`.
 @MainActor
-@Suite(.serialized, .ownGuestRuntime) struct MultiDeviceComputersTests {
+@Suite(.serialized) struct MultiDeviceComputersTests {
     private let device = MockEngineClient.demoRemoteDevice
     private var remoteMac: GuestReference { GuestReference(deviceId: device.id, computerId: MockEngineClient.devID) }
     private var localMac: GuestReference { .thisMac(MockEngineClient.devID) }
@@ -81,13 +81,9 @@ import Testing
 
     @Test func deletingTheRemoteComputerNamesItsOwnerAndKeepsTheLocalOne() async throws {
         let (model, local, remote) = try await rig()
-        var hooks: [GuestReference] = []
-        model.prepareComputerRemoval = { hooks.append($0) }
-        model.computerRemovalCompleted = { hooks.append($0) }
         await model.delete(remoteMac)
         #expect(remote.deleteRequests.map(\.deviceId) == [device.id])
         #expect(local.deleteRequests.isEmpty)
-        #expect(hooks == [remoteMac, remoteMac])
         #expect(model.row(localMac) != nil)
         #expect(model.row(remoteMac) == nil)
     }

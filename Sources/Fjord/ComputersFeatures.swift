@@ -713,58 +713,6 @@ extension ComputersModel {
         } catch { agentToolsError[target.key] = error.localizedDescription }
     }
 
-    /// The gate for a Router session start: ready tools pass; otherwise they are set up first, with progress shown in Computers.
-    /// A computer in the inventory of the device that owns it (`nil` is This Mac). Computer ids are owner-local.
-    func placementRow(deviceId: String?, computerId: String) -> ComputerRow? {
-        placementOwners.first { $0.deviceId == deviceId }?.inventory.computer(computerId)
-    }
-
-    /// Reads a remote owner's current row for a computer, starts it there when it is stopped, and returns the running row.
-    /// Everything goes to the owner by `deviceId`; the local inventory is never consulted.
-    func ensureRemoteRunning(deviceId: String, computerId: String) async throws -> ComputerRow {
-        let reference = ComputerReference(computerId: computerId, deviceId: deviceId)
-        func read() async throws -> ComputerRow {
-            let latest = try await client.computersList(deviceId: deviceId)
-            guard let row = latest.computer(computerId) else {
-                throw EngineClientError.notFound("This computer is no longer in its owner's inventory. Choose a computer again.")
-            }
-            return row
-        }
-        let row = try await read()
-        switch row.displayState {
-        case .running: return row
-        case .stopped, .failed:
-            let job = try await client.computersStart(reference)
-            for _ in 0..<2_400 {
-                let snapshot = try await client.operationsJobGet(jobId: job.jobId, deviceId: deviceId)
-                if snapshot.state == .finished {
-                    try? await client.operationsJobAcknowledge(jobId: job.jobId, deviceId: deviceId)
-                    if let error = snapshot.outcome?.error { throw EngineClientError.invalidAction(error.userMessage) }
-                    break
-                }
-                try await Task.sleep(for: .milliseconds(250))
-            }
-            let started = try await read()
-            guard started.displayState == .running else {
-                throw EngineClientError.invalidAction("\(started.name) did not reach Running. Check its state on its owner and retry.")
-            }
-            return started
-        default:
-            throw EngineClientError.invalidAction("\(row.name) is \(row.displayState.title). Wait until it is stopped or running before starting a Router session.")
-        }
-    }
-
-    func ensureAgentTools(_ target: GuestReference, kind: ComputerKind, computerName: String) async throws {
-        guard !isSettingUpAgentTools(target) else {
-            throw AgentToolsFailure.setupFailed("\(computerName)'s agent tools are already being set up. Try again when that finishes.")
-        }
-        defer { agentToolsSetupMessage[target.key] = nil }
-        try await AgentToolsSetup(engine: client).ensureReady(target, kind: kind, computerName: computerName) { [weak self] message in
-            self?.agentToolsSetupMessage[target.key] = message
-        }
-        await loadAgentTools(target)
-    }
-
     func loadLogs(_ target: GuestReference, query: String? = nil, cursor: String? = nil,
                   source: SiloWireLogSource? = nil, since: String? = nil, until: String? = nil,
                   aroundId: String? = nil, follow: String? = nil) async {

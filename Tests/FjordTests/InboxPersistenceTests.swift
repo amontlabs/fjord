@@ -401,9 +401,7 @@ import Testing
         let state = try dec.decode(RouterSaved.self, from: old)
         #expect(state.dropped.isEmpty && state.enabled && state.decisions == [decision])
         let saved = try JSONSerialization.jsonObject(with: try enc.encode(state)) as? [String: Any] ?? [:]
-        #expect(Set(saved.keys) == ["enabled", "changes", "decisions", "runsOnProjects", "pendingDesktopStarts",
-                                    "guestRelayDeliveries", "guestPendingForms", "pendingGuestDisables", "pendingGuestRemovals",
-                                    "operations"])
+        #expect(Set(saved.keys) == ["enabled", "changes", "decisions", "operations"])
     }
 
     @Test func aChangeWhoseEntryIsLostGetsAnEntryOfItsOwn() throws {

@@ -186,9 +186,8 @@ import Testing
     }
 
     /// Tools in a turn of the user's (side effects need one).
-    private func tools(_ s: Store, turn: String? = "do it", guestRuntime runtime: GuestRouterRuntime? = nil) -> RouterTools {
+    private func tools(_ s: Store, turn: String? = "do it") -> RouterTools {
         let tools = RouterTools(store: s)
-        tools.guestRuntime = runtime ?? GuestRouterRuntime()
         tools.keyReloadRace = { work in await work() }
         // "@lookout" at the start is the pill the composer put there.
         if let turn { tools.beginTurn(turn, pills: turn.hasPrefix("@lookout") ? [0..<8] : []) }

@@ -3,7 +3,7 @@ import Testing
 @testable import Fjord
 
 @MainActor
-@Suite(.serialized, .ownGuestRuntime) struct AgentToolsTests {
+@Suite(.serialized) struct AgentToolsTests {
     private let computerID = MockEngineClient.linuxID
     private var target: GuestReference { GuestReference(deviceId: nil, computerId: computerID) }
 
@@ -13,18 +13,15 @@ import Testing
         return engine
     }
 
-    @Test func statusWordsNameTheMissingToolsAndTheButton() {
+    @Test func statusWordsNameTheStateAndTheButton() {
         let missing = MockEngineClient.agentTools(.missing)
         #expect(AgentToolsAdvice.actionTitle(missing) == "Set up")
-        #expect(AgentToolsAdvice.detail(missing) == "Node.js and Claude Code aren't installed in this computer.")
+        #expect(AgentToolsAdvice.detail(missing) == "The agent tools aren't installed in this computer.")
         let outdated = MockEngineClient.agentTools(.outdated)
         #expect(AgentToolsAdvice.actionTitle(outdated) == "Update")
         #expect(AgentToolsAdvice.headline(outdated) == "Update available")
-        #expect(AgentToolsAdvice.detail(outdated).contains("Node.js 24.18.0"))
+        #expect(AgentToolsAdvice.detail(outdated) == "The agent tools in this computer can be updated.")
         #expect(!AgentToolsAdvice.needsSetup(MockEngineClient.readyAgentTools))
-        var onlyClaude = missing
-        onlyClaude.missing = ["claude"]
-        #expect(AgentToolsAdvice.detail(onlyClaude) == "Claude Code isn't installed in this computer.")
     }
 
     @Test func computersShowsTheStatusAndSetUpRunsTheActionAsAJob() async {
@@ -59,47 +56,13 @@ import Testing
         #expect(model.agentToolsError[target.key]?.contains("download failed") == true)
     }
 
-    @Test func readyToolsPassTheGateWithoutASetupJob() async throws {
-        let engine = engine(.ready)
-        var messages: [String] = []
-        try await AgentToolsSetup(engine: engine).ensureReady(target, kind: .linux, computerName: "linux-1") { messages.append($0) }
-        #expect(engine.agentToolsSetupRequests.isEmpty)
-        #expect(messages.isEmpty)
-    }
-
-    @Test func missingToolsAreSetUpFirstWithProgress() async throws {
+    @Test func setUpReportsProgressAndEndsReady() async throws {
         let engine = engine(.missing)
         var messages: [String] = []
-        try await AgentToolsSetup(engine: engine).ensureReady(target, kind: .linux, computerName: "linux-1") { messages.append($0) }
+        try await AgentToolsSetup(engine: engine).setUp(target, computerName: "linux-1") { messages.append($0) }
         #expect(engine.agentToolsSetupRequests == [computerID])
-        #expect(messages.first == "Setting up Node.js and Claude Code in linux-1")
+        #expect(messages.first == "Setting up the agent tools in linux-1")
         #expect(try await AgentToolsSetup(engine: engine).status(target)?.state == .ready)
-    }
-
-    @Test func aMacComputerIsRefusedWithTheWayForwardNotSetUp() async {
-        let engine = engine(.missing)
-        do {
-            try await AgentToolsSetup(engine: engine).ensureReady(target, kind: .macos, computerName: "dev")
-            Issue.record("a Mac computer without agent tools passed the gate")
-        } catch {
-            #expect(error as? AgentToolsFailure == .macOSNeedsSetup("dev"))
-        }
-        #expect(engine.agentToolsSetupRequests.isEmpty)
-    }
-
-    @Test func routerSessionStartSetsToolsUpThroughTheComputersModel() async throws {
-        let engine = engine(.outdated)
-        let model = ComputersModel(client: engine, initialInventory: engine.inventory)
-        try await model.ensureAgentTools(target, kind: .linux, computerName: "linux-1")
-        #expect(engine.agentToolsSetupRequests == [computerID])
-        #expect(model.agentTools(for: target)?.state == .ready)
-        #expect(model.agentToolsSetupMessage[target.key] == nil)
-
-        let mac = engine
-        mac.mockAgentTools[computerID] = MockEngineClient.agentTools(.missing)
-        await #expect(throws: AgentToolsFailure.macOSNeedsSetup("dev")) {
-            try await model.ensureAgentTools(target, kind: .macos, computerName: "dev")
-        }
     }
 
     @Test func credentialAccessDeniedHasAClearMessage() {

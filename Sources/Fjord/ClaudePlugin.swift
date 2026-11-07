@@ -13,7 +13,6 @@ enum ClaudePlugin {
     /// Debug and E2E builds (`AppIdentity`) have names of their own, so a dev build never re-points the installed app's
     /// marketplace or plugin in Claude Code.
     static func pluginName(development: Bool) -> String { development ? "fjord-dev" : "fjord" }
-    static func guestPluginName(development: Bool) -> String { development ? "fjord-guest-dev" : "fjord-guest" }
     static var name: String { pluginName(development: AppIdentity.isDevelopment()) }
     /// `<plugin>@<marketplace>`: the folder is its own marketplace, of the same name.
     static var id: String { "\(name)@\(name)" }
@@ -25,15 +24,6 @@ enum ClaudePlugin {
         let short = digest.prefix(4).map { String(format: "%02x", $0) }.joined()
         return app + (app.contains("-") ? "." : "-") + "r" + short
     }
-
-    /// The guest's copy has a name of its own. Claude Desktop copies the Mac's local `fjord` plugin into an SSH session as
-    /// a `--plugin-dir` without its hooks, and a `--plugin-dir` plugin overrides an installed one of the same name: a guest
-    /// plugin called `fjord` would never run its module (live check, probes/guest-plugin.md).
-    static var guestName: String { guestPluginName(development: AppIdentity.isDevelopment()) }
-    static var guestID: String { "\(guestName)@\(guestName)" }
-    /// What the guest installer used to install (same name as the Mac's plugin); it is uninstalled when found.
-    static let legacyGuestID = "fjord@fjord"
-    static let legacyGuestMarketplace = "fjord"
 
     static func pluginJSON(version: String, name: String = ClaudePlugin.name) -> String {
         let manifest: [String: Any] = ["name": name, "version": version, "description": description, "author": ["name": "Fjord"]]
@@ -983,12 +973,6 @@ export const register: Register = (on) => {
 { "modules": ["./register.ts"] }
 
 """#
-
-    static var guestMarketplaceJSON: String { guestMarketplaceJSON(development: AppIdentity.isDevelopment()) }
-
-    static func guestMarketplaceJSON(development: Bool) -> String {
-        marketplaceTemplate.replacingOccurrences(of: #""name": "fjord""#, with: #""name": "\#(guestPluginName(development: development))""#)
-    }
 
     static var marketplaceJSON: String { marketplaceJSON(development: AppIdentity.isDevelopment()) }
 

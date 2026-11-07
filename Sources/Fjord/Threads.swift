@@ -73,10 +73,6 @@ struct ThreadsState: Codable {
     }
 }
 
-enum ClaudeLink: Equatable {
-    case off, ok, missing, unreadable
-}
-
 // MARK: - Rows
 
 /// What a session is doing for the Router: needs you, finished, working, or quiet (listed for `Store.recentWindow` after its
@@ -365,7 +361,6 @@ extension Store {
     }
 
     private func applyClaudeRead(_ snapshot: ClaudeSnapshot) {
-        if let link = snapshot.link, claudeLink != link { claudeLink = link }
         if let sessions = snapshot.sessions {
             ingesting = true
             ingest(sessions, appUnread: snapshot.appUnread, claudeFrontmost: snapshot.frontmost)
@@ -373,27 +368,15 @@ extension Store {
         }
         // A read that found the sessions, or found them missing or unreadable (no Claude app): either way, what routing will
         // know of them is known, and the actions waiting for it go.
-        if !claudeReadOnce, snapshot.sessions != nil || snapshot.link == .missing || snapshot.link == .unreadable {
+        if !claudeReadOnce, snapshot.sessions != nil || snapshot.failed {
             claudeReadOnce = true
             routingMayBeReady()
         }
         if let next = snapshot.activity {
-            var merged = next
-            for (id, guest) in guestExecutionStates {
-                if guest.availability == .inaccessible {
-                    merged[id] = threadWork[id]
-                } else {
-                    merged[id] = guest.activity
-                }
-            }
-            if merged != threadWork { threadWork = merged }
+            if next != threadWork { threadWork = next }
         }
         if let next = snapshot.tasks {
-            var merged = next
-            for (id, guest) in guestExecutionStates {
-                merged[id] = guest.availability == .dead ? nil : backgroundWork[id]
-            }
-            if merged != backgroundWork { backgroundWork = merged }
+            if next != backgroundWork { backgroundWork = next }
         }
         if snapshot.sessions != nil { pickIcons() }
         scheduleClaudeTick()
@@ -403,14 +386,7 @@ extension Store {
     func ingest(_ sessions: [AgentThread], appUnread: Set<String>?, claudeFrontmost: Bool, now: Date = Date()) {
         var state = agents
         let live = sessions.filter { !$0.isArchived }
-        let byID = Dictionary(live.map { incoming -> (String, AgentThread) in
-            var session = incoming
-            if let guest = guestExecutionStates[session.id] {
-                session.cliID = guest.cliSessionID
-                if let isRunning = guest.isRunning { session.running = isRunning }
-            }
-            return (session.id, session)
-        }, uniquingKeysWith: { a, _ in a })
+        let byID = Dictionary(live.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let muted = mutedSessionIDs(state.mutedFolders, among: live)
         let previousDots = state.appUnread.map(Set.init)
         // The session shown in the app right now: the most recently focused one, if the app is in front.
@@ -654,11 +630,11 @@ extension Store {
         pickIcons()
     }
 
-    /// The sessions of muted projects: a guest session goes by its project's key (`routerProjectGroupKey`).
+    /// The sessions of muted projects.
     func mutedSessionIDs(_ muted: [String], among sessions: [AgentThread]) -> Set<String> {
         guard !muted.isEmpty else { return [] }
         let set = Set(muted)
-        return Set(sessions.filter { set.contains(routerProjectGroupKey(sessionID: $0.id, folder: $0.folderKey)) }.map(\.id))
+        return Set(sessions.filter { set.contains($0.folderKey) }.map(\.id))
     }
 
     func setFolderMuted(_ folder: String, _ muted: Bool) {
@@ -676,8 +652,6 @@ extension Store {
         } else {
             if persists { watchClaude() }
             threads = [:]
-            claudeLink = .off
-            claudeSessionsRead = false
         }
     }
 }

@@ -9,12 +9,6 @@ struct ComputerOwnerInventory: Equatable, Identifiable {
 
     var id: String { deviceId.map { "owner/\($0)" } ?? "local" }
 
-    var options: [ComputerPlacementOption] {
-        inventory.allComputers.map {
-            ComputerPlacementOption(deviceId: deviceId, ownerName: name, computer: $0)
-        }
-    }
-
     static func local(_ inventory: ComputerInventory) -> ComputerOwnerInventory {
         ComputerOwnerInventory(deviceId: nil, name: "This Mac", inventory: inventory)
     }
@@ -22,15 +16,6 @@ struct ComputerOwnerInventory: Equatable, Identifiable {
     static func remote(_ device: SiloWireDevice, inventory: ComputerInventory) -> ComputerOwnerInventory {
         ComputerOwnerInventory(deviceId: device.id, name: device.name, inventory: inventory)
     }
-}
-
-struct ComputerPlacementOption: Equatable, Identifiable {
-    var deviceId: String?
-    var ownerName: String
-    var computer: ComputerRow
-
-    var id: String { "\(deviceId ?? "local")/\(computer.id)" }
-    var location: SessionLocation { .computer(deviceId: deviceId, computerId: computer.id) }
 }
 
 /// A connected device whose computers could not be read.

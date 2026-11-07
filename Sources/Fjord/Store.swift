@@ -27,16 +27,6 @@ final class Store {
         self.engineLauncher = engineLauncher ?? (offlineContext ? nil : EngineLauncher(socketPath: socketPath))
         let computers = ComputersModel(client: selectedClient, initialInventory: (selectedClient as? MockEngineClient)?.inventory)
         self.computers = computers
-        if selectedClient is SocketEngineClient {
-            computers.prepareComputerRemoval = { [weak self] computer in
-                guard let self else { return }
-                try await GuestRouterRuntime.shared.prepareComputerRemoval(store: self, computer: computer)
-            }
-            computers.computerRemovalCompleted = { [weak self] computer in
-                guard let self else { return }
-                GuestRouterRuntime.shared.computerRemoved(store: self, computer: computer)
-            }
-        }
     }
 
     var computersEngineReady: Bool { hasEngineConnection }
@@ -360,9 +350,6 @@ final class Store {
             refreshFolderNames()
         }
     }
-    /// Guest execution observations keyed by the Desktop session that owns the SSH mirror. Local reads can refresh
-    /// title, folder, and timestamps, but must not replace this guest-owned execution state.
-    @ObservationIgnored var guestExecutionStates: [String: GuestExecutionState] = [:]
     /// Bumped on every change to `threads`: a cheap memo key for what is worked out from them (unobserved).
     @ObservationIgnored private(set) var claudeSessionsRevision = 0
     /// Bumped when what the open palette lists changes besides the inbox and the Router (`inboxRevision`, `routerRevision`):
@@ -397,14 +384,8 @@ final class Store {
     /// Filled in right after launch (see `start`): the Keychain read stays off the main thread.
     var hasTypesafeKey = false
     var iconError: String?
-    var claudeLink: ClaudeLink = .off {
-        didSet {
-            if claudeLink == .ok { claudeSessionsRead = true }
-        }
-    }
-    /// Claude's sessions have been read since Fjord started reading them: a read failing after that leaves the
-    /// last ones known (`threads`), not nothing known.
-    var claudeSessionsRead = false
+    /// The link to this Mac's T3 Code: its client, its token and what Settings and the hub say about it.
+    let t3 = T3Link()
 
     var me: GHUser? {
         didSet {
@@ -652,6 +633,7 @@ final class Store {
             if router.enabled { agents.enabledAt = agents.enabledAt ?? Date() }
         }
         watchClaude()
+        if !UnderTest.isRunning, !Store.isDemo { t3.start() }
         startRouter()
         if !Store.isDemo { codeFolders.start() }
         Task.detached(priority: .utility) {

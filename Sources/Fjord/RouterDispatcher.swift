@@ -800,43 +800,6 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Retries an uncertain guest delivery with its persisted signed payload and original nonce.
-    func retryGuestDelivery(_ record: GuestRelayRecord) {
-        guard let store, store.routerOn, let id = record.decisionID, let hostSessionID = record.hostSessionID,
-              record.signedPayload != nil, progress[id] == nil,
-              store.router.guestRelayDeliveries.contains(where: {
-                  $0.decisionID == id && $0.nonce == record.nonce && ($0.state == .inFlight || $0.state == .unconfirmed)
-              }) else { return }
-        progress[id] = "reconciling guest delivery"
-        tasks[id] = Task { [weak self, weak store] in
-            guard let self, let store else { return }
-            defer {
-                self.progress[id] = nil
-                self.tasks[id] = nil
-                self.onFinish?(id)
-            }
-            do {
-                _ = try await GuestRouterRuntime.shared.retry(record)
-                let previous = store.threads[hostSessionID]
-                store.updateDecision(id) { entry in
-                    entry.done.removeAll { if case .failed = $0 { true } else { false } }
-                    entry.add(.sent(to: hostSessionID, text: record.body ?? "", original: nil), session: hostSessionID)
-                    entry.delivered = .init(session: hostSessionID, cli: record.sessionID, nonce: record.nonce,
-                        at: record.createdAt, turns: previous?.completedTurns ?? 0, busy: previous?.running ?? false,
-                        abortable: false)
-                    entry.outcome = .done
-                }
-            } catch {
-                let reason = error.localizedDescription.split(separator: "\n").first.map(String.init) ?? "failed"
-                store.updateDecision(id) { entry in
-                    entry.done.removeAll { if case .failed(let text) = $0 { text.hasPrefix("retry: ") } else { false } }
-                    entry.add(.failed("retry: " + RouterDecision.clip(reason, 100)))
-                    entry.outcome = .done
-                }
-            }
-        }
-    }
-
     /// A wrong send to a claude.ai place: asked again with that place left out. What was sent there stays (claude.ai has no
     /// take-back); the place you pick gets the words, and the pick is a correction of where it went, with who decided it (the
     /// engine's intent keeps it too).
@@ -1087,9 +1050,6 @@ extension RouterDispatcher.Effects {
             },
             abortable: { [weak dispatcher] cli in
                 guard let store = dispatcher?.storeForEffects else { return false }
-                if GuestRouterRuntime.shared.location(forGuestSessionID: cli) != nil {
-                    return GuestRouterRuntime.shared.supportsAbort(forGuestSessionID: cli)
-                }
                 return await store.supportsAbort(cli)
             },
             cancel: { [weak dispatcher] sent in

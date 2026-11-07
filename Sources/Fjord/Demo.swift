@@ -572,7 +572,7 @@ enum Demo {
                                  tasks: [String: [BackgroundWork]] = [:], colors: [String: Int] = [:],
                                  unlisted: [AgentThread] = []) {
         store.threads = Dictionary(uniqueKeysWithValues: (listed.map(\.session) + unlisted).map { ($0.id, $0) })
-        store.claudeLink = .ok
+        store.t3.demoStatus = .connected(threads: store.threads.count)
         store.threadWork = activity
         store.backgroundWork = tasks
         var state = ThreadsState()

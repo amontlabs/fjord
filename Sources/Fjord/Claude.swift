@@ -1050,7 +1050,8 @@ struct FolderStamp: Equatable {
 
 /// Everything one read of the app produced. `sessions` is nil for an activity-only refresh.
 struct ClaudeSnapshot {
-    var link: ClaudeLink?
+    /// The sessions folder couldn't be read.
+    var failed = false
     var sessions: [AgentThread]?
     var appUnread: Set<String>?
     var frontmost = false
@@ -1309,7 +1310,6 @@ final class ClaudeFeed: @unchecked Sendable {
     private func readUnread() -> ClaudeSnapshot {
         guard let sessions = allSessions else { return read(full: true) }
         var snapshot = ClaudeSnapshot()
-        snapshot.link = .ok
         snapshot.sessions = sessions
         snapshot.appUnread = Claude.unreadIDs()
         snapshot.frontmost = Claude.isFrontmost
@@ -1322,15 +1322,14 @@ final class ClaudeFeed: @unchecked Sendable {
             switch sessionReader.read() {
             case .failure(.missing):
                 allSessions = nil
-                snapshot.link = .missing
+                snapshot.failed = true
                 return snapshot
             case .failure:
                 allSessions = nil
-                snapshot.link = .unreadable
+                snapshot.failed = true
                 return snapshot
             case .success(let read):
                 let sessions = applyingPresence(to: read)
-                snapshot.link = .ok
                 snapshot.sessions = sessions
                 snapshot.appUnread = Claude.unreadIDs()
                 snapshot.frontmost = Claude.isFrontmost

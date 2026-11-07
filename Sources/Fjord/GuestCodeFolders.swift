@@ -38,7 +38,7 @@ struct GuestCodeFolders: Sendable {
             }
             guard depth < maxDepth else { continue }
             for child in entries where child.type == .directory && !child.name.hasPrefix(".") && !CodeFolders.skipped.contains(child.name) {
-                queue.append((GuestRouterPaths.join(folder, child.name), depth + 1))
+                queue.append((GuestFolderPath.join(folder, child.name), depth + 1))
             }
         }
         return result
@@ -50,7 +50,7 @@ struct GuestCodeFolders: Sendable {
     }
 
     private func gitConfigDirectory(computer: GuestReference, folder: String, marker: GuestFileEntry) async throws -> String? {
-        let dotGit = GuestRouterPaths.join(folder, ".git")
+        let dotGit = GuestFolderPath.join(folder, ".git")
         if marker.type == .directory { return dotGit }
         guard marker.type == .file,
               let contents = try? await client.filesRead(computer: computer, path: dotGit, offset: nil, length: nil),
@@ -58,7 +58,7 @@ struct GuestCodeFolders: Sendable {
               let line = text.split(whereSeparator: \.isNewline).first(where: { $0.hasPrefix("gitdir:") }) else { return nil }
         let raw = line.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespaces)
         let gitDir = Self.resolveGuest(raw, from: folder)
-        let commonPath = GuestRouterPaths.join(gitDir, "commondir")
+        let commonPath = GuestFolderPath.join(gitDir, "commondir")
         if let common = try? await client.filesRead(computer: computer, path: commonPath, offset: nil, length: nil),
            let text = String(data: common.data, encoding: .utf8) {
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,7 +69,7 @@ struct GuestCodeFolders: Sendable {
 
     private func remotes(computer: GuestReference, gitDir: String?) async throws -> [String] {
         guard let gitDir,
-              let read = try? await client.filesRead(computer: computer, path: GuestRouterPaths.join(gitDir, "config"), offset: nil, length: nil),
+              let read = try? await client.filesRead(computer: computer, path: GuestFolderPath.join(gitDir, "config"), offset: nil, length: nil),
               let config = String(data: read.data, encoding: .utf8) else { return [] }
         return CodeFolders.remotes(config: config)
     }
@@ -77,7 +77,7 @@ struct GuestCodeFolders: Sendable {
     /// Resolves only a gitdir/commondir relative string according to POSIX guest path semantics. It performs no I/O,
     /// tilde expansion, symlink lookup, or host filesystem normalization.
     static func resolveGuest(_ path: String, from base: String) -> String {
-        let joined = path.hasPrefix("/") ? path : GuestRouterPaths.join(base, path)
+        let joined = path.hasPrefix("/") ? path : GuestFolderPath.join(base, path)
         var parts: [Substring] = []
         for component in joined.split(separator: "/") {
             if component == "." { continue }

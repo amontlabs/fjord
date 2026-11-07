@@ -424,17 +424,17 @@ import UserNotifications
 
     // MARK: What works
 
-    @Test func aBrokenReadOfClaudesFilesIsSaidOnTheBar() async throws {
-        func says(_ link: ClaudeLink, _ configure: @escaping (HubState) -> Void) async throws -> Bool {
+    @Test func aT3LinkNeedingALookIsSaidOnTheBar() async throws {
+        func says(_ status: T3LinkStatus, _ configure: @escaping (HubState) -> Void) async throws -> Bool {
             let tree = try await AccessibilityTree.render(edge: .top, scenario: .router, configure: { store, hub in
-                store.claudeLink = link
+                store.t3.demoStatus = status
                 configure(hub)
             })
-            return tree.all.contains { ($0.label + $0.value).contains("Claude's sessions") }
+            return tree.all.contains { ($0.label + $0.value).contains("T3 Code") }
         }
         let state = { (hub: HubState) in hub.section = .router }
-        #expect(try await says(.missing, state))
-        #expect(try await !says(.ok, state))
+        #expect(try await says(.serverNotRunning, state))
+        #expect(try await !says(.connected(threads: 3), state))
     }
 
     @Test func theBarNamesTheRouterAtRestAndPeeking() async throws {

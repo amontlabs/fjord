@@ -66,10 +66,28 @@ final class AnthropicClient: Sendable {
     static let sharedSession = makeSession()
 
     /// Reads the key from the Keychain once and remembers it (a missing key is looked up again next time).
-    static let keychainKey: @Sendable () -> String? = {
-        let cache = KeyCache()
-        return { cache.value() }
-    }()
+    static let keychainKey: @Sendable () -> String? = { keyCache.value() }
+    private static let keyCache = KeyCache()
+
+    /// Keeps `key` in the Keychain (updating an item already there) and forgets the remembered one. False when it refused.
+    @discardableResult
+    static func saveKey(_ key: String) -> Bool {
+        guard !UnderTest.refuses("the Keychain, writing the Anthropic key") else { return false }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: keychainService]
+        defer { keyCache.forget() }
+        let data = Data(key.utf8)
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        guard status == errSecItemNotFound else { return status == errSecSuccess }
+        var add = query
+        add[kSecValueData as String] = data
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func deleteKey() {
+        guard !UnderTest.refuses("the Keychain, deleting the Anthropic key") else { return }
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: keychainService] as CFDictionary)
+        keyCache.forget()
+    }
 
     private final class KeyCache: @unchecked Sendable {
         private let lock = NSLock()
@@ -80,6 +98,7 @@ final class AnthropicClient: Sendable {
             key = AnthropicClient.readKeychain()
             return key
         }
+        func forget() { lock.lock(); key = nil; lock.unlock() }
     }
 
     static func readKeychain(service: String = keychainService) -> String? {

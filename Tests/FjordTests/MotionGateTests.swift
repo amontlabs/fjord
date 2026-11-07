@@ -115,7 +115,6 @@ import Testing
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
         s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.interceptOpen = { _ in }
-        s.claudeLink = .ok
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-7200)
         s.ingest(sessions, appUnread: dots, claudeFrontmost: false)
@@ -125,7 +124,6 @@ import Testing
 
     private func read(_ sessions: [AgentThread], dots: Set<String> = []) -> ClaudeSnapshot {
         var read = ClaudeSnapshot()
-        read.link = .ok
         read.sessions = sessions
         read.appUnread = dots
         read.activity = [:]
@@ -174,7 +172,6 @@ import Testing
             return read
         }
         var full = ClaudeSnapshot()
-        full.link = .ok
         full.sessions = []
         gate.began()
         // Every read in its place, activity reads in a row too (each may say a question began, or ended).
