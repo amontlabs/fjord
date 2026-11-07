@@ -1,5 +1,7 @@
 # Reaching a session that isn't running
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 Status: proposal, 2026-10-22. Research notes (app code excerpts, logs, timelines): `/tmp/claude-app-research/notes/`
 (`lifecycle.md`, `channels.md`, `cli.md`, `fjord-history.md`).
 

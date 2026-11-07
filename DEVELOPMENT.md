@@ -35,7 +35,7 @@ Without `SIGN_IDENTITY`, local builds are signed with the release certificate (d
 
 The debug flags below run the debug binary: `swift build`, then `.build/debug/Fjord …`.
 
-**Credentials.** GitHub access comes from `gh auth token`, `GH_TOKEN` / `GITHUB_TOKEN`, or a token pasted in Settings, which is stored in the Keychain. The optional TypeSafe key (for Jev, TypeSafe's classifier) is kept in the Keychain too. Demo, snapshot and playground runs never touch the Keychain, so a new build doesn't stop on an access prompt.
+**Credentials.** GitHub access comes from `gh auth token`, `GH_TOKEN` / `GITHUB_TOKEN`, or a token pasted in Settings, which is stored in the Keychain. The Anthropic API key (the Router's decider, set in Settings, Keychain service `fjord-anthropic-key`) and the optional TypeSafe key (for Jev, TypeSafe's classifier) are kept in the Keychain too. Fjord's T3 token (minted with `t3 auth session issue`) is stored there as well. Demo, snapshot and playground runs never touch the Keychain, so a new build doesn't stop on an access prompt.
 
 **State** lives in `~/Library/Application Support/Fjord/state.json`.
 
@@ -68,8 +68,7 @@ Mock data with Triage on (and the Router, in its scenarios). Nothing is saved. `
 | Updates | `updateAvailable` `updateDownloading` `updateReady` |
 | Router | `router` `routerOff` |
 
-`router` is the brief over demo projects (DemoBriefs.swift): entries that need you (a claude.ai question and plan, a local
-form the hook holds), working and finished threads, a decision log and an ask waiting for its pick.
+`router` is the brief over demo projects (DemoBriefs.swift): entries that need you (a question and a plan from T3 threads), working and finished threads, a decision log and an ask waiting for its pick.
 For release window timings, run `scripts/morph-timings.sh --scenario router --steps "open,close x6"`.
 
 ### Window, bar and screenshots
@@ -89,11 +88,9 @@ FJORD_THEME=dark .build/debug/Fjord --window
 
 ### The Router's routing
 
-Every message goes to a claude.ai project or thread through the delivery engine (`CourierHost`), which starts at launch
-(never in `--demo`, the shots or tests). A reply armed on a brief entry (or one focused) goes to that
-thread: its session on this Mac through the signed plugin, else its claude.ai thread; a tagged claude.ai project or
-thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Jev first at 0.7, else
-Sonnet through `claude -p`), whose stage shows on the message's pill. A project that fits nothing is proposed under the
+Every message goes to a T3 thread as one `message.dispatch` over T3's WebSocket API (`T3Link`, `T3Client`). A reply armed on a brief entry (or one focused) goes to that
+thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Jev first at 0.7, else
+Sonnet over the Anthropic API, `AnthropicClient`), whose stage shows on the message's pill. A project that fits nothing is proposed under the
 composer (`RouterProjectProposal`, revised by Sonnet). The brief's entries are the one model of what needs you (no cards):
 mark read and archive are Fjord changes with a Revert in the history drawer, kept with the Told marks in briefs.db. Each history entry keeps who decided (`decision.decider`) and a
 correction (Send elsewhere, a different pick on an ask, a proposal you changed) as its outcome, for measurement.
@@ -106,6 +103,17 @@ correction (Send elsewhere, a different pick on an ask, a proposal you changed) 
 | `--check owner/repo` | Headless live sync of one repo; prints the inbox. |
 | `--check-inbox` | Headless live sync with sample categories; prints every entry. |
 
+### Live read-only checks
+
+The T3 and Anthropic tests are skipped unless you opt in; run one suite at a time.
+
+```sh
+FJORD_T3_LIVE=1 swift test --filter T3Live            # reads your real T3 server's shell; prints counts only
+FJORD_ANTHROPIC_LIVE=1 swift test --filter AnthropicLive   # a few tiny real API calls with your Keychain key
+```
+
+`FJORD_ANTHROPIC_LIVE=1` also enables the live decider smoke in `RouterProjectDecideTests`. Everything else in the T3 tests runs on stubs (`T3HTTPStub`, fixtures in `T3Fixtures.swift`) and never touches your T3 or the network.
+
 ### Updater
 
 ```sh
@@ -116,9 +124,8 @@ Pretends to be version 0.1.0: checks for, downloads and verifies the latest rele
 
 ### Tooling-only flags
 
-- `--lifecycle` prints the app's idle state (sessions, how many are working, whether a window shows, Reduce Motion) for `scripts/idle-cpu.sh`.
+- `--lifecycle` prints the app's idle state (threads, how many are working, whether a window shows, Reduce Motion) for `scripts/idle-cpu.sh`.
 - `--motion-script <steps> --quit-after` plays a scripted sequence of motions and quits, for `scripts/motion-trace.sh`.
-- `--form-hook` is what Claude Code runs through `~/.claude/hooks/fjord-form.sh` when a session asks a question, wants a plan approved, or opens a permission prompt for any other tool (it only notes that one, prints nothing and leaves at once). Not for direct use.
 
 ## Tooling scripts
 
@@ -174,6 +181,6 @@ Global shortcut actions run before their callback returns. Carbon hot keys targe
 
 ### What the Router reads and writes
 
-The Router reads the Claude desktop app's sessions, `~/.claude/projects` for what a working session is doing, and Claude Code's task list in `/private/tmp/claude-<uid>` for what a session left running. None of these is a public API; when a Claude update changes them, the Router says so and Triage keeps working.
+The Router reads T3 through its WebSocket API: the shell stream (projects, threads, what waits on you) and the thread details Fjord asks for. It finds the server through `~/.t3` (`server-runtime.json`) and the `t3` CLI at `~/.t3/bin/t3`. T3's API isn't versioned for us; when it changes, the Router says so and Triage keeps working.
 
-Switching the Router on writes nothing into `~/.claude`: your words reach a thread as one `message.dispatch` to T3 (steering a running thread, ⌥Return queues; an unattended action always queues), and a queued message can be cancelled or edited in place.
+Switching the Router on writes nothing into any agent's config, `~/.claude` included: your words reach a thread as one `message.dispatch` to T3 (steering a running thread, ⌥Return queues; an unattended action always queues), and a queued message can be cancelled or edited in place.

@@ -1,5 +1,7 @@
 # One channel into Claude
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 Status: agreed and tested live, 2026-10-23. From independent proposals and cross-critiques by Fable and GPT-6.1 Sol
 (`/tmp/claude-app-research/notes/{fable,sol}/{proposal,critique}.md`), then live spikes. Research: `session-wake.md`.
 Supersedes the relay session in `session-wake.md`.

@@ -1,5 +1,7 @@
 # Router redesign: projects, a manager, and what it knows
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 Status: proposal for discussion, 2026-11-02. Nothing here is built. Facts checked against CLI 2.1.311 and Claude desktop
 4.4212.0 by reading the binaries, docs and local files; no live runs. Unverified items are listed at the end.
 

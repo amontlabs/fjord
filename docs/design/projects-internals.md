@@ -1,5 +1,7 @@
 # Claude Code Projects: how it really works
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 Working reference for the Router POC, started 2026-11-02. Everything here is private and can change. "Tested" means seen
 working on this account. "Code" means read in the claude.ai client, not run yet.
 

@@ -1,5 +1,7 @@
 # Router: the Swift port of the delivery engine
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 Plan, 2026-11-04. The source is `poc/router` (contract: [EVENTS.md](../../poc/router/EVENTS.md); design:
 [router-data-design.md](router-data-design.md)). What the owner agreed:
 

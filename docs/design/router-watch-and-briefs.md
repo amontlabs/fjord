@@ -1,5 +1,7 @@
 # Router: watching every project, and the briefs
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 Design, 2026-11-04, revised after an Opus review of the code it touches. Builds on the measurements in
 [router-data-design.md](router-data-design.md), the project-state proposal in [router-redesign.md](router-redesign.md), the engine
 in [router-swift-port.md](router-swift-port.md) and the page protocol in [poc/router/EVENTS.md](../../poc/router/EVENTS.md).

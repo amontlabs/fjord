@@ -1,5 +1,7 @@
 # Router routing research (2026-10-11)
 
+> Superseded: Fjord now runs on T3 Code instead of Claude Code and claude.ai. See [t3-code-map.md](t3-code-map.md).
+
 What we learned making the Router decide where a typed message goes: what was measured, what shipped, what was not
 enough, what was a dead end, and the mistakes made on the way. The code and data live in `evals/router/` (README.md
 has the per-round tables, EXPLORE.md the protocol for explorers); the decision itself is in
