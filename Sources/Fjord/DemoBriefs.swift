@@ -15,7 +15,9 @@ extension Demo {
         let briefs = store.routerBriefs
         briefs.clock = { now }
         briefs.names = ["chan_demo_fjord": "fjord", "local:lcu": "lcu", "chan_demo_silo": "silo",
-                        "chan_demo_docs": "docs-site", "chan_demo_evals": "router-evals"]
+                        "chan_demo_docs": "docs-site", "chan_demo_evals": "router-evals",
+                        "demo-project-lcu": "lcu", "demo-project-microsandbox": "microsandbox", "demo-project-lookout": "lookout",
+                        "demo-project-lcu-research": "lcu-research"]
 
         var fjord = BriefDoc(project: "chan_demo_fjord")
         fjord.purpose = "A Mac app that keeps your agent threads in one place."
@@ -23,14 +25,14 @@ extension Demo {
                      "<t id=\"th_handover\">The tab handover</t> is being built; <t id=\"th_bar\">the bar's needs-you count</t> landed."]
         fjord.threads = [
             BriefThread(id: "th_settings", title: "Redesign the Settings window", status: .needsYou, age: t - 240),
-            BriefThread(id: "th_migrate", title: "Move the briefs into router.db", status: .needsYou, age: t - 1_500),
+            BriefThread(id: "th_migrate", title: "Move the briefs into BriefLog", status: .needsYou, age: t - 1_500),
             BriefThread(id: "th_handover", title: "Hand the tab over without a gap", status: .working, age: t - 90),
             BriefThread(id: "th_bar", title: "Count untold needs-you on the bar", status: .done, age: t - 3_000),
             BriefThread(id: "th_old", title: "Drop the canvas layout", status: .done, age: t - 3 * 86_400),
         ]
         fjord.needsYou = [
             BriefEntry(project: fjord.project, thread: "th_migrate", kind: .plan, state: .needsYou, since: t - 1_500,
-                       question: "Add a `briefs` table, copy the digest's rows over once at launch, then drop the old table.",
+                       question: "Keep each brief in Fjord's own BriefLog, copy the old rows over once at launch, then drop the old file.",
                        options: ["Yes, and auto-accept edits", "Yes, and manually approve edits", "No, keep planning"]),
             BriefEntry(project: fjord.project, thread: "th_settings", kind: .question, state: .needsYou, since: t - 240,
                        question: "Which layout should the Settings window use?",
@@ -38,7 +40,7 @@ extension Demo {
         ]
         fjord.decisions = [BriefDecision(thread: BriefDoc.yourSend, text: "Keep the composer at the bottom of every page.")]
         fjord.looseEnds = ["The old Now page is still compiled; a later step deletes it."]
-        fjord.sent = [SentLine(intent: "41", words: "keep the composer where it is, and match Claude's spacing", state: "delivered")]
+        fjord.sent = [SentLine(intent: "41", words: "keep the composer where it is, and match T3's spacing", state: "delivered")]
         fjord.watch = "live"
 
         var lcu = BriefDoc(project: "local:lcu")

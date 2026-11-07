@@ -140,9 +140,9 @@ struct RouterDrawer: View {
         var out: [Line] = []
         for d in store.router.decisions.suffix(80) {
             guard case .you(let words) = d.trigger, !words.isEmpty, d.decision.intent != "answer" else { continue }
-            let target = d.links.threads.lazy.compactMap(BriefTarget.init(key:)).first ?? place(d.decision.targetID).thread
+            let target = d.links.threads.lazy.compactMap(BriefTarget.init(key:)).first ?? place(d.decision.targetID, store: store).thread
             out.append(Line(id: d.id.uuidString, at: d.at, kind: .message(status(d, store: store)), text: words, target: target,
-                            project: target == nil ? place(d.decision.targetID).project : nil, decision: d.id))
+                            project: target == nil ? place(d.decision.targetID, store: store).project : nil, decision: d.id))
         }
         for c in store.router.changes.suffix(80) {
             out.append(Line(id: c.id.uuidString, at: c.date, kind: .change(c), text: c.title))
@@ -154,10 +154,11 @@ struct RouterDrawer: View {
     }
 
     /// Where a decision's target sends: a thread, or a project.
-    static func place(_ targetID: String?) -> (thread: BriefTarget?, project: String?) {
+    static func place(_ targetID: String?, store: Store) -> (thread: BriefTarget?, project: String?) {
         switch targetID.flatMap(RouteTarget.init) {
         case .newThread(let project)?: (nil, project)
-        // A thread's project isn't in its target: the entry's links name it.
+        // A thread's project isn't in its target: T3's shell has it.
+        case .thread(let id)?: store.threads[id].map { (BriefTarget(project: $0.projectID, thread: id), nil) } ?? (nil, nil)
         default: (nil, nil)
         }
     }
@@ -274,7 +275,7 @@ private struct HistoryLine: View {
                     if let target = line.target {
                         let state = BriefSpanState.of(target, store: store)
                         Image(systemName: state.symbol).font(.system(size: 8, weight: .semibold)).foregroundStyle(state.tint)
-                        Text(briefs.docs[target.project]?.thread(target.thread)?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
+                        Text(briefs.docs[target.project]?.thread(target.thread)?.title.nonEmpty ?? store.threads[target.thread]?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
                             .lineLimit(1)
                         Text(briefs.projectName(target.project)).font(CDS.sans(11)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
                     } else if let project = line.project {

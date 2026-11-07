@@ -515,13 +515,13 @@ enum Demo {
 
     /// A thread as T3's shell reports it: a finished run with its last message, waiting on a question (`blocked`), or mid-run.
     private static func session(_ id: String, _ title: String, _ folder: String?, minutes: Double,
-                                blocked: Bool = false, detail: String = "", running: Bool = false) -> T3ThreadShell {
+                                blocked: Bool = false, detail: String = "", running: Bool = false, provider: String = "claudeAgent") -> T3ThreadShell {
         let at = Date().addingTimeInterval(-minutes * 60)
         let stamp = T3JSON.string(T3Timestamp.format(at))
         let pending: T3JSON = blocked ? ["id": .string("demo-request-\(id)"), "kind": "user_input", "createdAt": stamp, "blocking": true] : .null
         let message: T3JSON = detail.isEmpty ? .null : ["id": .string("demo-message-\(id)"), "role": "assistant", "text": .string(detail), "updatedAt": stamp]
         return T3ThreadShell(json: [
-            "id": .string(id), "projectId": .string(projectID(folder)), "title": .string(title), "providerInstanceId": "claudeAgent",
+            "id": .string(id), "projectId": .string(projectID(folder)), "title": .string(title), "providerInstanceId": .string(provider),
             "status": running || blocked ? "running" : "completed", "activityRunStatus": running || blocked ? "running" : .null,
             "pendingRuntimeRequest": pending, "latestVisibleMessage": message,
             "latestUserMessageAt": .string(T3Timestamp.format(at.addingTimeInterval(-90))),
@@ -593,15 +593,15 @@ enum Demo {
                            detail: "Should updates install silently, or ask first each time?"), unread: true, icon: "bell.badge"),
             Listed(session("local_demo-ci", "CI failure diagnosis", "microsandbox", minutes: 4,
                            detail: "Fixed the flaky sandbox test; CI is green on the branch."), unread: true, icon: "ladybug"),
-            Listed(session("local_demo-lookout", "Agent completion notifications", "lookout", minutes: 1, running: true)),
+            Listed(session("local_demo-lookout", "Agent completion notifications", "lookout", minutes: 1, running: true, provider: "codex")),
             Listed(session("local_demo-transfer", "Repository ownership transfer setup", "microsandbox", minutes: 180,
-                           detail: "Transfer is done; both remotes point at the new org."), icon: "key"),
+                           detail: "Transfer is done; both remotes point at the new org.", provider: "codex"), icon: "key"),
             Listed(session("local_demo-linux", "LCU JavaScript sandbox on Linux", "microsandbox", minutes: 1500,
                            detail: "Sandbox runs on Linux; two follow-ups listed."), label: "\u{1F427}"),
             Listed(session("local_demo-calc", "Calculator display reading", "lcu-research", minutes: 1,
-                           detail: "The display reads 1,234.5; the screenshot is attached."), unread: true),
+                           detail: "The display reads 1,234.5; the screenshot is attached.", provider: "codex"), unread: true),
             Listed(session("local_demo-games", "Game recommendations", nil, minutes: 25,
-                           detail: "Single-player immersion or online squads?")),
+                           detail: "Single-player immersion or online squads?", provider: "codex")),
         ]
         let hidden = session("local_demo-storage", "Sandbox storage directory customization", "microsandbox", minutes: 2900,
                              detail: "Storage path is configurable through the CLI and the env.")

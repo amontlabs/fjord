@@ -264,6 +264,14 @@ enum AppWindowShots {
         briefShot("brief-permission", .aqua, hover: "local:lcu#local:lcu/local_demo-ci@6", permission: true),
         briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide@0"),
         briefShot("brief-hover-stranded", .aqua, hover: "chan_demo_silo#chan_demo_silo/th_flaky@6", stranded: true),
+        // Your words queued behind a running thread: its history line offers Edit and Cancel while the run waits.
+        briefShot("router-queued", .aqua, drawer: true, queued: true),
+        // The brief's panel on a question: Mark read, Snooze, Settle, Rename and Open in T3.
+        briefShot("brief-panel-actions", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
+        // A question that T3 can no longer take an answer for, after a T3 restart: it is only shown.
+        briefShot("brief-expired", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", expired: true),
+        Shot(name: "settings-t3-linked", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000),
+             compose: { _, store in store.t3.demoStatus = .connected(threads: store.threads.count) }),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
         Shot(name: "palette-search", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot(query: "fix")),
         Shot(name: "palette-actions", destination: { $0.shownCategories[0].id.asCategory },
@@ -312,7 +320,7 @@ enum AppWindowShots {
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,
-                                  twoQuestions: Bool = false, permission: Bool = false, stranded: Bool = false, mentions: [BriefTarget] = []) -> Shot {
+                                  twoQuestions: Bool = false, permission: Bool = false, stranded: Bool = false, queued: Bool = false, expired: Bool = false, mentions: [BriefTarget] = []) -> Shot {
         Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
              compose: { _, store in
                  let briefs = store.routerBriefs
@@ -345,6 +353,11 @@ enum AppWindowShots {
                                                     since: Date().timeIntervalSince1970 - 240))
                      briefs.demoDocs["local:lcu"] = lcu
                  }
+                 if expired, var request = store.requests[Demo.briefLocalSession] {
+                     request.live = false
+                     store.requests[Demo.briefLocalSession] = request
+                 }
+                 if queued { Self.queueWords(store) }
                  if drawer {
                      briefs.drawerOpen = true
                      store.threadAct(.read, on: BriefTarget(project: "chan_demo_docs", thread: "th_guide"),
@@ -495,4 +508,30 @@ enum AppWindowShots {
 
 private extension UUID {
     var asCategory: AppDestination { .category(self) }
+}
+
+@MainActor extension AppWindowShots {
+    /// A sent line waiting in a running thread's queue (T3's `queued` run), so its history line shows Edit and Cancel.
+    static func queueWords(_ store: Store) {
+        let thread = "local_demo-lookout"
+        let words = "when the tests pass, bump the version"
+        let message = "demo-queued-message"
+        var entry = RouterDecision(at: Date().addingTimeInterval(-40), trigger: .you(words), decision: .init(intent: "message"))
+        entry.decision.targetID = RouteTarget.thread(thread).targetID
+        entry.add(.sent(to: "lookout · Agent completion notifications", text: words, original: nil))
+        entry.outcome = .done
+        entry.delivered = .init(thread: thread, messageID: message, commandID: "demo-queued-command", outcome: .queued, note: nil,
+                                at: Date().addingTimeInterval(-40))
+        store.router.decisions.append(entry)
+        let at = T3JSON.string(T3Timestamp.format(Date().addingTimeInterval(-40)))
+        let runs: [T3JSON] = [
+            ["id": "demo-run-1", "ordinal": 1, "status": "running", "userMessageId": "demo-earlier", "requestedAt": at],
+            ["id": "demo-run-2", "ordinal": 2, "status": "queued", "queuePosition": 1, "userMessageId": .string(message), "requestedAt": at],
+        ]
+        let shell = store.t3.store.shell.threads[thread]
+        store.t3.store.seed(T3Projection(json: [
+            "thread": ["id": .string(thread), "projectId": .string(shell?.projectId ?? "")], "runs": .array(runs), "messages": [],
+            "runtimeRequests": [], "plans": [], "turnItems": [], "providerSessions": [],
+        ]), for: thread)
+    }
 }

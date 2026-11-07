@@ -158,10 +158,15 @@ import Testing
     }
 
     @Test func aMessagesPlaceIsItsThreadOrItsProject() {
-        // A thread's project isn't in its target (the entry's links name it); only a new thread names its project.
-        #expect(RouterDrawer.place("t3-thread:th_1").thread == nil)
-        #expect(RouterDrawer.place(RouterAskBack.newThread + "chan_a").project == "chan_a")
-        #expect(RouterDrawer.place(nil).thread == nil)
+        let store = Store()
+        Demo.populate(store, .router)
+        let id = Demo.blockedAgentID
+        let project = store.threads[id]!.projectID
+        // A thread's project isn't in its target: the store's T3 shell has it, so the history keeps its colour.
+        #expect(RouterDrawer.place(RouteTarget.thread(id).targetID, store: store).thread == BriefTarget(project: project, thread: id))
+        #expect(RouterDrawer.place(RouteTarget.thread("gone").targetID, store: store).thread == nil)
+        #expect(RouterDrawer.place(RouterAskBack.newThread + "chan_a", store: store).project == "chan_a")
+        #expect(RouterDrawer.place(nil, store: store).thread == nil)
     }
 
     @Test func aThreadNamedTwiceIsTwoHighlightsWithTheirOwnPanel() {

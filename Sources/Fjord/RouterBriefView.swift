@@ -699,6 +699,12 @@ struct BriefAnswerPanel: View {
                         briefs.settle(target, store: store); close()
                     }
                     .help("T3's settled: it leaves the brief until it needs you again. Revert in the history")
+                }
+                // Five labelled buttons don't fit the panel's width on one line.
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                if entry != nil {
                     ClaudeButton("Rename", variant: .secondary, size: .sm, icon: "pencil") {
                         let old = briefs.title(target)
                         close()
