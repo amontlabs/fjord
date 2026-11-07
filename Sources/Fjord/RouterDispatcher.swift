@@ -139,7 +139,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     @ObservationIgnored weak var store: Store?
     @ObservationIgnored var effects: Effects
-    /// Claude Code's binary, as `RouterStatus` found it.
+    /// Claude Code's binary, as `RouterStatus` found it on the login shell's PATH.
     @ObservationIgnored var claudePath: () -> String? = { nil }
     /// Set up each run's tools before it starts (tests).
     @ObservationIgnored var configure: ((RouterTools) -> Void)?

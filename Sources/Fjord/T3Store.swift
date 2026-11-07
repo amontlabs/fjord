@@ -234,6 +234,22 @@ final class T3Store {
         return nil
     }
 
+    /// `orchestration.searchThreads`: matches by title and message text, best first.
+    func search(_ query: String, limit: Int) async throws -> [ThreadMatch] {
+        let result = try await call(tag: "orchestration.searchThreads", payload: ["query": .string(query), "limit": .number(Double(limit))])
+        return (result["matches"]?.array ?? []).map(ThreadMatch.init).filter { !$0.threadId.isEmpty }
+    }
+
+    /// A thread's projection: the one held for the screen, else its snapshot through a subscription held only until it arrives.
+    func readProjection(_ id: String) async -> T3Projection? {
+        if let held = projections[id] { return held }
+        guard let client else { return nil }
+        for await item in await client.subscribeThread(id) {
+            if case .snapshot(_, let p) = item { return p }
+        }
+        return nil
+    }
+
     func closeThread(_ id: String) {
         threadTasks.removeValue(forKey: id)?.cancel()
         projections[id] = nil

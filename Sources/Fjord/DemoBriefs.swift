@@ -18,7 +18,7 @@ extension Demo {
                         "chan_demo_docs": "docs-site", "chan_demo_evals": "router-evals"]
 
         var fjord = BriefDoc(project: "chan_demo_fjord")
-        fjord.purpose = "A Mac app that keeps your Claude threads, local and on claude.ai, in one place."
+        fjord.purpose = "A Mac app that keeps your agent threads in one place."
         fjord.now = ["<t id=\"th_settings\">The Settings layout</t> waits on your pick, and <t id=\"th_migrate\">the briefs migration plan</t> is ready to approve.",
                      "<t id=\"th_handover\">The tab handover</t> is being built; <t id=\"th_bar\">the bar's needs-you count</t> landed."]
         fjord.threads = [

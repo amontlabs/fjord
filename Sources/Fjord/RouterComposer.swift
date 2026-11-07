@@ -44,9 +44,6 @@ struct RouterComposer: View {
         let on = model.canSend(store)
         let suggestions = model.suggestions(store)
         VStack(alignment: .leading, spacing: 0) {
-            // What the engine is doing for claude.ai, over your messages still finding where they go.
-            RouterCourierStack(pills: store.routerCourier)
-                .padding(.bottom, store.routerCourier.items.isEmpty ? 0 : C.dockGap)
             // A message of yours waiting for you to say where it goes.
             if let ask = store.routerDispatcher.askBacks.last {
                 RouterAskPill(store: store, ask: ask).padding(.bottom, C.dockGap).transition(.opacity)
@@ -497,7 +494,8 @@ struct RouterAskPill: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .frame(maxWidth: 560, alignment: .leading)
-        .pillGround()
+        .background(CDS.Surface.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(CDS.border))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Where should “\(ask.message)” go?")
     }

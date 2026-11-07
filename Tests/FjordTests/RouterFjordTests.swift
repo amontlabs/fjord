@@ -1095,10 +1095,10 @@ import Testing
             #expect(RouterRun.role(intent).contains("don't act on GitHub"), "\(intent)")
         }
         #expect(RouterRun.role(.changeFjord).contains("Revert"))
-        #expect(RouterRun.toolNames(.changeFjord, triage: true) == FjordTools.names.union(["board", "answer"]))
+        #expect(RouterRun.toolNames(.changeFjord, triage: true) == FjordTools.names.union(["board", "answer", "search_threads", "read_thread"]))
         // A question only reads; the board and Fjord's own tools are all a run is offered.
-        #expect(RouterRun.toolNames(.question, triage: true).isSubset(of: FjordTools.names.union(["board"])))
-        #expect(RouterRun.specs(.changeFjord, triage: true).count == FjordTools.names.count + 2)
-        #expect(Set(RouterTools.specs.compactMap { $0["name"] as? String }) == FjordTools.names.union(["board", "answer"]))
+        #expect(RouterRun.toolNames(.question, triage: true).isSubset(of: FjordTools.names.union(["board", "search_threads", "read_thread"])))
+        #expect(RouterRun.specs(.changeFjord, triage: true).count == FjordTools.names.count + 4)
+        #expect(Set(RouterTools.specs.compactMap { $0["name"] as? String }) == FjordTools.names.union(["board", "answer", "search_threads", "read_thread"]))
     }
 }

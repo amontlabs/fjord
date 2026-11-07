@@ -291,17 +291,6 @@ enum AppWindowShots {
             store.routerBriefs.mentioned = [target]
             model.draft = "use the staging database instead of production"
         }),
-        // The claude.ai delivery setup: nothing done, partway (Chrome and the host, no tab yet), and everything done.
-        setupShot("courier-setup-missing", .aqua, facts: .init(extensionFolder: "/Applications/Fjord.app/Contents/Resources/extension"), health: .init()),
-        setupShot("courier-setup-missing-dark", .darkAqua, facts: .init(extensionFolder: "/Applications/Fjord.app/Contents/Resources/extension"), health: .init()),
-        setupShot("courier-setup-partway", .aqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
-                  health: .init(tabConnected: true, signedIn: false)),
-        setupShot("courier-setup-partway-dark", .darkAqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
-                  health: .init(tabConnected: true, signedIn: false)),
-        setupShot("courier-setup-done", .aqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
-                  health: .init(tabConnected: true, signedIn: true)),
-        setupShot("courier-setup-done-dark", .darkAqua, facts: .init(chromePath: "/Applications/Google Chrome.app", extensionLoaded: true, manifestWritten: true),
-                  health: .init(tabConnected: true, signedIn: true)),
         Shot(name: "settings") { _ in .settings },
         Shot(name: "settings-t3-not-linked", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .notLinked }),
         Shot(name: "settings-t3-refused", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .tokenRejected }),
@@ -319,75 +308,7 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ] + courierShots
-
-    // MARK: The engine's pills
-
-    private typealias CourierStep = (work: RouterCourierPills.Item.Work, updates: [(CourierState, String?, JSON?)])
-
-    /// A pause as the engine reports it: its code, and its cause in the engine's words.
-    private static func paused(_ pause: CourierPause) -> (CourierState, String?, JSON?) { (.paused, CourierDo.sentence(pause), .string(pause.rawValue)) }
-
-    /// The engine's pills over the composer, one shot per state, light and dark (`router-courier-<state>[-dark]`).
-    private static var courierShots: [Shot] {
-        let send = { (words: String, thread: String?) in RouterCourierPills.Item.Work.send(words: words, project: "lookout", thread: thread) }
-        let goal: RouterCourierPills.Item.Work = .tool(.setGoal, args: ["project": "lookout", "text": "Ship the Swift engine by Friday"])
-        let scenes: [(String, [CourierStep])] = [
-            ("sending", [(send("run the release checklist again", nil), [(.taken, nil, nil)])]),
-            ("sending-thread", [(send("yes, merge it once CI is green", "Fix the login redirect"), [(.sending, nil, nil)])]),
-            ("delivered", [(send("run the release checklist again", nil), [(.taken, nil, nil), (.delivered, nil, nil)])]),
-            ("answered", [(.answer(option: "A sidebar with sections", project: "fjord", thread: "Redesign the Settings window"),
-                           [(.taken, nil, nil), (.delivered, nil, nil)])]),
-            ("failed", [(send("run the release checklist again", nil), [(.taken, nil, nil), (.failed, CourierCore.went, nil)])]),
-            ("late", [(send("run the release checklist again", nil), [(.failed, CourierCore.went, nil), (.deliveredLate, "confirmed late by a later row", nil)])]),
-            ("paused-signedout", [(send("run the release checklist again", nil), [paused(.signedOut)])]),
-            ("paused-chrome", [(send("run the release checklist again", nil), [paused(.chromeClosed)])]),
-            ("paused-tab", [(send("run the release checklist again", nil), [paused(.away)])]),
-            ("paused-app", [(send("yes, merge it once CI is green", "Fix the login redirect"), [paused(.appClosed)])]),
-            ("awaiting", [(.tool(.preapproveFolder, args: ["project": "lookout", "path": "~/code/projects/lookout"]), [(.awaiting, nil, nil)])]),
-            ("tool-revert", [(goal, [(.taken, nil, nil), (.toolDone, nil, .string("Port the board and the store"))])]),
-            ("tool-already", [(goal, [(.toolDone, "it was already so, as far as Fjord's tab knows", nil)])]),
-            ("refused", [(.tool(.addRepo, args: ["project": "lookout", "repo": "amontlabs/x"]), [(.refused, "no repo option amontlabs/x", nil)])]),
-            ("unconfirmed", [(.tool(.createProject, args: ["name": "fjord-site"]),
-                              [(.toolUnconfirmed, "the projects page didn't list it after the create; a later read may still show it", nil)])]),
-            // Several at once: a delivery settling, one waiting for the tab, a refusal, a grant to allow.
-            ("stack", [(send("run the release checklist again", nil), [(.delivered, nil, nil)]),
-                       (.tool(.createProject, args: ["name": "lookout"]), [(.refused, "a project named lookout already exists", nil)]),
-                       (send("yes, merge it once CI is green", "Fix the login redirect"), [paused(.signedOut)]),
-                       (.tool(.preapproveFolder, args: ["project": "lookout", "path": "~/code/x"]), [(.awaiting, nil, nil)])]),
-        ]
-        return scenes.flatMap { name, steps in
-            [(name, NSAppearance.Name.aqua), (name + "-dark", .darkAqua)].map { shot, look in
-                Shot(name: "router-courier-\(shot)", destination: { _ in .router }, compose: { model, store in
-                    courier(model, store, steps)
-                }, appearance: look)
-            }
-        }
-    }
-
-    /// The engine's intents as `steps` left them: each tracked, then each update applied, nothing settling away.
-    private static func courier(_ model: RouterModel, _ store: Store, _ steps: [CourierStep]) {
-        let pills = store.routerCourier
-        pills.settleAfter = nil
-        for (i, step) in steps.enumerated() {
-            pills.track(i + 1, step.work)
-            for (state, cause, before) in step.updates {
-                // A pause carries its code where a setting carries what it was (`paused`).
-                let pause = state == .paused ? before?.asString.flatMap(CourierPause.init(rawValue:)) : nil
-                pills.apply(CourierUpdate(intentID: i + 1, state: state, cause: cause, before: pause == nil ? before : nil, at: Date(), pause: pause))
-            }
-        }
-    }
-
-    private static func setupShot(_ name: String, _ look: NSAppearance.Name, facts: CourierSetupFacts, health: CourierSetupHealth) -> Shot {
-        Shot(name: name, destination: { _ in .router }, size: CGSize(width: 680, height: 460), appearance: look, standalone: { _, _ in
-            AnyView(RouterCourierSetupView(setup: RouterCourierSetup(facts: facts, health: health, read: { facts }))
-                .padding(24)
-                .frame(width: 680, alignment: .topLeading)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .background(CDS.Surface.s1))
-        })
-    }
+    ]
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,

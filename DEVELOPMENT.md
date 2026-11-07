@@ -131,7 +131,6 @@ Pretends to be version 0.1.0: checks for, downloads and verifies the latest rele
 | `scripts/idle-cpu.sh` | Checks the release build's CPU stays under its limit at rest and with the window kept open, on the right edge and along the top, on demo data. Puts the bar on screen for minutes. |
 | `scripts/motion-trace.sh` | Records the release build with `xctrace` while it plays a motion script, then reports hitches and signpost latencies; `--baseline FILE` stores or compares against a baseline. Takes the screen while it runs. Options are documented at the top of the script. |
 | `swift scripts/make-icon.swift [--preview DIR]` | Draws `Resources/AppIcon.icns` and the layers of `Resources/AppIcon.icon`. |
-| `scripts/migrate-to-fjord.sh` | A one-off for the owner's machine: moves Lookout's data, preferences, Keychain items and Claude Code setup over to Fjord. Not for users. |
 
 ### Regenerate the Silo client
 
@@ -166,7 +165,6 @@ Run `scripts/make-signing-cert.sh` once. It makes a self-signed `Fjord Dev` code
 
 With the certificate in your keychain, `build-app.sh` signs local builds with it too.
 
-**One-time transition from Fjord Computer.** Quit Fjord Computer. Run `scripts/make-signing-cert.sh`. Run `scripts/build-app.sh`, move `build/Fjord.app` to `/Applications/Fjord.app`, then run `scripts/migrate-to-fjord.sh` before launching Fjord and follow its output.
 
 ## Implementation notes
 

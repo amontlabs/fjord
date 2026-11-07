@@ -1477,7 +1477,7 @@ final class DiskCheckingPerformer: ActionPerformer {
                                                performer: performer)
         let shown = lines.joined(separator: "\n")
         #expect(shown.contains("Sends to the Router, as yours from Mine: Look at @o/r#12"))
-        #expect(shown.contains("The Router sends it to the claude.ai project or thread it is for"))
+        #expect(shown.contains("The Router sends it to the thread or project it is for"))
         #expect(shown.contains("- Title: Warm pool") && shown.contains("Greptile 3/5"))
         #expect(performer.asked.isEmpty)
     }

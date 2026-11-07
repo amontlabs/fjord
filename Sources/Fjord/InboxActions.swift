@@ -906,8 +906,8 @@ extension InboxActions {
             }
             lines.append("Sends to the Router, as yours from \(category): \(words)")
             let addressed = prompt.pointers.contains { $0.addresses }
-            lines.append(addressed ? "It goes to the claude.ai project or thread its pill names."
-                         : "The Router sends it to the claude.ai project or thread it is for; if unsure, it asks you.")
+            lines.append(addressed ? "It goes to the thread or project its pill names."
+                         : "The Router sends it to the thread or project it is for; if unsure, it asks you.")
             lines.append("With what Fjord knows of \(reference), marked as written by others:")
             lines.append(RouterPointers.notification(name: reference, thing: thing, category: category, facts: facts, done: false))
         case .comment(let text):

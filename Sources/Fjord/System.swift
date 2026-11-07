@@ -616,10 +616,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.wireNotifications()
         }
         let demo = CommandLine.arguments.contains("--demo")
-        // Chrome's host manifest, kept pointing at this app (only from a bundle; see `NativeHostManifest`).
-        if !demo && NativeHostManifest.enabled { NativeHostManifest.install() }
-        // The claude.ai delivery engine: every message the Router sends goes through it. Never in a demo.
-        if !demo && !UnderTest.isRunning { startCourier() }
         let window = AppWindowController(store: store)
         appWindow = window
         let hub = HubController(store: store, demo: demo)
@@ -814,26 +810,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() { showWindow(.settings) }
 
-    /// Starts the delivery engine: its updates go to the pills, a pause's setup button opens Settings, and a change of the
-    /// claude.ai places drops the picks Jev made without them.
-    private func startCourier() {
-        guard let store else { return }
-        let pills = store.routerCourier
-        pills.open = { [weak self] action in
-            if action == .openSetup { self?.showWindow(.settings) } else { RouterCourierPills.openOutside(action) }
-        }
-        let link = store.routerCourierLink
-        Task { await link.start(pills: pills) }
-    }
-
-    /// The engine's socket goes with the app: waited for briefly, since nothing runs after this returns.
-    private func stopCourier() {
-        guard let link = store?.routerCourierLink, link.running, let host = link.host else { return }
-        let done = DispatchSemaphore(value: 0)
-        Task.detached { await host.stop(); done.signal() }
-        _ = done.wait(timeout: .now() + 1)
-    }
-
     /// SIGTERM would skip `applicationWillTerminate` and lose a pending save.
     private func handleSigterm() {
         signal(SIGTERM, SIG_IGN)
@@ -846,7 +822,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // The Router's runs go with the app, the actions' too (a send's `claude` process is ended, not left behind).
         store?.routerDispatcher.stopAll(actions: true)
-        stopCourier()
         // What was typed into a category's fields and still waits for its pause goes into the store before its last save.
         PendingEdits.flushAll()
         store?.flushSave()

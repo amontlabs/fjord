@@ -1,13 +1,8 @@
 import AppKit
 
-// Chrome runs it as the Router extension's native messaging host (see `NativeHost`): the same, nothing else started.
-if CommandLine.arguments.dropFirst().contains("--native-host") { NativeHost.main() }
-// The Router's conformance bridge (see `CourierTestMode`): JSON lines on stdin and stdout, no window.
-if CommandLine.arguments.dropFirst().contains("--courier-test") { CourierTestMode.main() }
 
 // The saved state is read and decoded in the background meanwhile: `Store.load` takes it.
 if !Store.isDemo { Store.readSavedStateEarly() }
-ClaudeFonts.load()
 Brand.loadFonts()
 // Text drawn as Claude's web view draws it (`-webkit-font-smoothing: antialiased`): no stem thickening. For this process
 // only, as if launched with `-AppleFontSmoothing 0`.

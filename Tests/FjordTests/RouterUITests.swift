@@ -86,9 +86,10 @@ import UserNotifications
     @Test func claudeCodeMissingIsSaidOnceLookedForAndSendWaits() async {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-ui-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // A store of a real Router (not a demo's), the app's folder of Claude Code in `dir`.
+        let bin = dir.appendingPathComponent("claude")
+        // A store of a real Router (not a demo's), the login shell's lookup standing in as the binary in `dir`.
         let store = writing(nil)
-        store.routerStatus.codeRoot = dir
+        store.routerStatus.lookup = { FileManager.default.isExecutableFile(atPath: bin.path) ? bin.path : nil }
         defer { store.persists = false; try? FileManager.default.removeItem(at: dir) }
         let model = RouterModel()
         #expect(model.claudeCodeMissing == nil && model.canSend(store))
@@ -97,16 +98,13 @@ import UserNotifications
         model.draft = "hello"
         model.send(store: store)
         #expect(model.draft == "hello")
-        // The app's copy appears: looking again finds it.
-        let bin = dir.appendingPathComponent("2.1.293/abc/claude.app/Contents/MacOS")
-        try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: bin.appendingPathComponent("claude").path, contents: Data(),
-                                       attributes: [.posixPermissions: 0o755])
+        // The binary appears: looking again finds it.
+        FileManager.default.createFile(atPath: bin.path, contents: Data(), attributes: [.posixPermissions: 0o755])
         await model.checkClaudeCode(store)
         #expect(model.claudeCodeMissing == false && model.canSend(store))
-        // The app's copy taken away: the window showing again sees it is gone.
+        // The binary taken away: the window showing again sees it is gone.
         #expect(store.routerStatus.claudeCode != nil, "the Router's runs take the path found")
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("2.1.293"))
+        try? FileManager.default.removeItem(at: bin)
         await model.checkClaudeCode(store)
         #expect(model.claudeCodeMissing == true && !model.canSend(store))
         #expect(store.routerStatus.claudeCode == nil, "no run is given the path gone")

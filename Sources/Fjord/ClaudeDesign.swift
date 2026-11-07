@@ -275,7 +275,7 @@ enum CDS {
         case regular = 360, medium = 460, semibold = 540, bold = 560
     }
 
-    /// Anthropic Sans (read from the Claude app, `ClaudeFonts`) at a size and Claude's dark weight; the system font
+    /// Fjord's own sans (`Brand.sans`) at a size and Claude's dark weight; the system font
     /// without it. Cached: one NSFont per size and weight.
     static func sans(_ size: CGFloat, _ weight: Weight = .regular) -> Font {
         let key = FaceKey(size: size, weight: weight)
@@ -291,9 +291,6 @@ enum CDS {
         let font: NSFont
         if let fjord = Brand.sans(size, weight) {
             font = fjord
-        } else if ClaudeFonts.available, let base = NSFont(name: ClaudeFonts.name("Regular"), size: size) {
-            let axis = NSNumber(value: 0x7767_6874) // 'wght'
-            font = NSFont(descriptor: base.fontDescriptor.addingAttributes([.variation: [axis: weight.rawValue]]), size: size) ?? base
         } else {
             let w: NSFont.Weight = switch weight { case .regular: .regular; case .medium: .medium; case .semibold: .semibold; case .bold: .bold }
             font = .systemFont(ofSize: size, weight: w)

@@ -38,6 +38,7 @@ extension RouterCapability {
               needsTriage: true, scope: "Triage's inbox (what is archived or seen)"),
         // The brief and its entries are read before a change too ("the docs thread" is named by what the board shows).
         .init(id: "change-board", intent: .changeFjord, tools: ["board"], roleSentence: nil),
+        .init(id: "change-threads", intent: .changeFjord, tools: ["search_threads", "read_thread"], roleSentence: nil),
         .init(id: "answer-entry", intent: .changeFjord, tools: ["answer"],
               roleSentence: "What waits on the user is the board's entries: when the user's message gives the answer to one, you "
                   + "answer it with `answer` (one of its options, or the user's words), as the brief's own buttons do.",
@@ -45,6 +46,10 @@ extension RouterCapability {
         .init(id: "question-board", intent: .question, tools: ["board", "get_settings"],
               roleSentence: "The Brief is the short written summary of what needs the user, per project: you can read it through `board`.",
               reads: "the brief's entries, working sessions, the Brief, settings"),
+        .init(id: "question-threads", intent: .question, tools: ["search_threads", "read_thread"],
+              roleSentence: "What the agents did is in T3's threads, whatever their provider: `search_threads` finds them by what was said "
+                  + "and `read_thread` reads a thread's latest messages. Both only read.",
+              reads: "T3's threads (search and read)"),
         .init(id: "question-triage", intent: .question,
               tools: ["list_categories", "get_category", "list_groups", "list_inbox", "explain_entry", "list_known"],
               roleSentence: nil, needsTriage: true, reads: "the inbox, categories"),

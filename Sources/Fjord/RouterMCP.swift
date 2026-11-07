@@ -500,6 +500,9 @@ final class RouterMCPServer: @unchecked Sendable {
     var stage: ((String) -> Void)?
     /// Told what a Haiku run has shown so far as it streams (`RouterRunLive`), from the reader's thread; the dispatcher sets it.
     var watch: (@Sendable (RouterRunLive) -> Void)?
+    /// The T3 reads behind `search_threads` and `read_thread`; tests answer for them (else the T3 link).
+    var threadSearch: ( (String, Int) async throws -> [ThreadMatch])?
+    var threadRead: ( (String) async -> T3Projection?)?
     /// Claude Code's bundled binary, as `RouterStatus` found it.
     var claudePath: () -> String? = { nil }
 
@@ -572,7 +575,7 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     /// Every tool a run may be offered: the board, answering an entry, and Fjord's own (RouterFjord.swift).
-    static let specs: [[String: Any]] = [boardSpec, answerSpec] + FjordTools.specs
+    static let specs: [[String: Any]] = [boardSpec, answerSpec, searchThreadsSpec, readThreadSpec] + FjordTools.specs
 
     private static let boardSpec: [String: Any] = [
         "name": "board",
@@ -600,6 +603,13 @@ final class RouterMCPServer: @unchecked Sendable {
         }
         if name == "answer" {
             do { return RouterRPC.ToolResult(text: try answer(store, args, ticket: ticket)) } catch { return .error(error.localizedDescription) }
+        }
+        if name == "search_threads" || name == "read_thread" {
+            do {
+                let text = name == "search_threads" ? try await searchThreads(store, args) : try await readThread(store, args)
+                try live(ticket, acting: false)
+                return RouterRPC.ToolResult(text: text)
+            } catch { return .error(error.localizedDescription) }
         }
         return await fjord(name, args, store: store, ticket: ticket)
     }
@@ -631,7 +641,7 @@ final class RouterMCPServer: @unchecked Sendable {
     private func age(_ date: Date) -> String { ThreadRow.duration(Self.bounded(Date().timeIntervalSince(date))) }
 
     /// Session text for the board: cleaned, bounded and fenced as data (what a session wrote is never an instruction).
-    private static func fenced(_ text: String, _ limit: Int) -> String {
+    static func fenced(_ text: String, _ limit: Int) -> String {
         SessionFence.fence(UntrustedText.clean(text, limit: limit, oneLine: false))
     }
 

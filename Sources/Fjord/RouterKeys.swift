@@ -109,8 +109,6 @@ final class RouterKeys {
                 // colour); the others are ⌘1–⌘4. No modal: the ask sits over the composer while you decide.
                 if model.draft.isEmpty, let ask = store.routerDispatcher.askBacks.last, let guess = ask.suggestion,
                    store.routerDispatcher.pick(ask.id, target: guess) { return true }
-                // Nothing typed and a grant waiting: Return allows it.
-                if model.draft.isEmpty, store.routerCourier.allowNewest() { return true }
                 model.send(store: store)
                 return true
             }

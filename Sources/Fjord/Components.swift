@@ -61,7 +61,7 @@ extension Theme {
         static let pressed = CDS.alpha(0.15)
     }
 
-    /// Claude's type: Anthropic Sans (read from the Claude app, see `ClaudeFonts`) on the CDS compact scale, at Claude's
+    /// Claude's type: Fjord's sans (`Brand.sans`, the system font without it) on the CDS compact scale, at Claude's
     /// dark weights; the system font when it isn't there.
     enum Typography {
         /// Page and field titles: CDS heading 14, medium.

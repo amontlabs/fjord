@@ -477,14 +477,6 @@ final class Store {
         dispatcher.claudePath = { [weak self] in self?.routerStatus.latestPath() }
         return dispatcher
     }()
-    /// The claude.ai deliveries and tools the engine runs, as pills over the composer (`RouterCourier`).
-    @ObservationIgnored lazy var routerCourier: RouterCourierPills = {
-        let pills = RouterCourierPills()
-        pills.threadTitle = { [weak self] in self?.routerCourierLink.title($0) }
-        return pills
-    }()
-    /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.
-    @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
     @ObservationIgnored lazy var routerBriefs: RouterBriefs = {
         let briefs = RouterBriefs()
@@ -497,7 +489,7 @@ final class Store {
     @ObservationIgnored var routerRunReverted: (UUID) -> Void = { _ in }
     /// Where the Router's files go, in a test (see `routerFiles`).
     @ObservationIgnored var routerPaths: RouterPaths?
-    /// Where Claude Code's binary is; the newest copy the Claude app bundles unless a test says otherwise.
+    /// Where Claude Code's binary is; the login shell's `claude` unless a test says otherwise.
     @ObservationIgnored var routerClaudeBinary: (@Sendable () -> String?)?
     /// Derived rows, rebuilt after any change to the threads or Fjord's entries (see Threads.swift).
     @ObservationIgnored var agentCache: ThreadCache?

@@ -280,7 +280,7 @@ final class RouterModel {
         store.routerOn && !(claudeCodeMissing == true && store.routerStatus.claudeCode == nil)
     }
 
-    /// Looks for Claude Code once the window shows (the app updates its copy now and then): until the search has finished
+    /// Looks for Claude Code once the window shows: until the search has finished
     /// nothing is said, and Send waits. In a demo it is never missing. The binary known (`RouterStatus`, which every run
     /// takes its path from) is only checked to be still there, one stat; gone, or none known, it is looked for again.
     func checkClaudeCode(_ store: Store) async {
@@ -288,7 +288,7 @@ final class RouterModel {
             if claudeCodeMissing != false { claudeCodeMissing = false }
             return
         }
-        guard store.routerStatus.codeRoot != nil || store.routerStatus.claudeCode != nil else {
+        guard store.routerStatus.lookup != nil || store.routerStatus.claudeCode != nil else {
             if claudeCodeMissing != false { claudeCodeMissing = false }
             return
         }
