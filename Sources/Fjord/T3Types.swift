@@ -55,7 +55,22 @@ enum T3JSON: Equatable, Hashable, Sendable, Codable {
         e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try e.encode(self)
     }
-    static func parse(_ data: Data) -> T3JSON? { try? JSONDecoder().decode(T3JSON.self, from: data) }
+    /// JSONSerialization, not Codable: the shell snapshot is ~1 MB, and the `try?` chain in `init(from:)` took ~30 s on it in a debug build.
+    static func parse(_ data: Data) -> T3JSON? {
+        guard let any = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { return nil }
+        return T3JSON(foundation: any)
+    }
+
+    init(foundation any: Any) {
+        switch any {
+        case let s as String: self = .string(s)
+        case let n as NSNumber:
+            self = CFGetTypeID(n) == CFBooleanGetTypeID() ? .bool(n.boolValue) : .number(n.doubleValue)
+        case let a as [Any]: self = .array(a.map(T3JSON.init(foundation:)))
+        case let o as [String: Any]: self = .object(o.mapValues(T3JSON.init(foundation:)))
+        default: self = .null
+        }
+    }
     static func parse(_ text: String) -> T3JSON? { parse(Data(text.utf8)) }
 }
 
