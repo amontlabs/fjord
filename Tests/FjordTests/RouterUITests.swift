@@ -328,33 +328,6 @@ import UserNotifications
         #expect(!keys.key(key(kVK_Delete), responder: editor) && store.routerBriefs.focused != nil)
     }
 
-    @Test func aFailedRemovalStaysInSightWithTheRouterOffAndCanBeTriedAgain() async throws {
-        let dir = TempDir(), cli = FakeClaudeCLI()
-        cli.folderVersion = ClaudePlugin.version(app: "1.0.0")
-        let s = Store()
-        s.persists = false
-        s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
-        s.routerPluginRunner = cli.runner
-        s.routerClaudeBinary = { "/fake/claude" }
-        s.routerAppVersion = "1.0.0"
-        s.agents.enabled = true
-        s.setRouterEnabled(true)
-        await s.routerInstallWork?.value
-        cli.failing = "plugin uninstall"
-        s.setRouterEnabled(false)
-        await s.routerInstallWork?.value
-        let error = try #require(s.routerRemovalError)
-        #expect(error.contains("boom"))
-        // Settings shows it, and the button that tries again, though the Router's own lines are hidden while it is off.
-        let tree = try await AccessibilityTree.render(SettingsView(store: s, hub: HubState()).frame(width: 440, height: 2400),
-                                                      size: CGSize(width: 440, height: 2400))
-        #expect(tree.all.contains { $0.role == "AXButton" && $0.label == "Try again" })
-        cli.failing = nil
-        s.retryRouterRemoval()
-        await s.routerInstallWork?.value
-        #expect(s.routerRemovalError == nil && s.routerPluginStatus == .notInstalled && cli.plugins.isEmpty)
-    }
-
     @Test func fuzzyMentionsRankPrefixesFirst() {
         let ranked = RouterMentions.rank([("/a", "microsandbox"), ("/b", "lcu"), ("/c", "lcu-research"), ("/d", "lookout")],
                                          query: "lc", limit: 6).map(\.name)
@@ -376,7 +349,7 @@ import UserNotifications
     /// A demo store whose commands to T3 are collected, not sent.
     private func sending(_ sent: Sent) -> Store {
         let store = demo()
-        store.requestSender = { sent.commands.append($0) }
+        store.requestSender = { command, _ in sent.commands.append(command) }
         return store
     }
 

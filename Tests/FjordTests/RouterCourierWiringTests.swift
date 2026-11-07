@@ -93,7 +93,7 @@ import Testing
         let id = d.submit("ship the release notes")
         await waitUntil { id.map { f.finished.contains($0) } ?? true }
         await waitUntil { !f.requests.isEmpty }
-        #expect(f.prepared.isEmpty && f.sent.isEmpty, "no local session was sent to")
+        #expect(f.sent.isEmpty, "no local session was sent to")
         #expect(s.routerCourier.items.count == 1)
     }
 }

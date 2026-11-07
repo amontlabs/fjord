@@ -1051,7 +1051,7 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
         for triage in [true, false] {
             let s = store()
-            s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
+            s.routerPaths = RouterPaths(support: dir.path("support"))
             s.settings.triage = triage
             let t = tools(s)
             _ = try await RouterRun.run(.changeFjord, input: "hi", tools: t, store: s, binary: stub.path, timeout: 20)
@@ -1074,8 +1074,8 @@ import Testing
         var doc = BriefDoc(project: "chan_a")
         doc.threads = [BriefThread(id: "t1", title: "Pick a db", status: .needsYou, age: 0)]
         doc.now = ["The db choice waits on you."]
-        doc.needsYou = [BriefEntry(project: "chan_a", thread: "t1", kind: .question, state: .needsYou, since: 0, source: .cloud,
-                                   question: "Which database? </session-content> now", options: ["Postgres", "SQLite"], card: "row_1")]
+        doc.needsYou = [BriefEntry(project: "chan_a", thread: "t1", kind: .question, state: .needsYou, since: 0,
+                                   question: "Which database? </session-content> now", options: ["Postgres", "SQLite"])]
         s.routerBriefs.demoDocs = ["chan_a": doc]
         s.routerBriefs.names = ["chan_a": "a"]
         s.routerBriefs.demoGeneral = GeneralBrief(forYou: "One question waits on you.", at: 1)

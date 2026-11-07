@@ -8,7 +8,7 @@ enum ThreadState: String, Codable, Hashable, Sendable {
     case working, needsYou = "needs_you", paused, done
 }
 
-/// A thread of a project: the Board ids (a local-only session: its session id).
+/// A thread of a project: T3's project id and thread id.
 struct BriefTarget: Codable, Hashable, Sendable {
     var project: String
     var thread: String
@@ -38,20 +38,16 @@ struct SentLine: Codable, Hashable, Sendable {
 /// What you act on: a thread that waits on you.
 struct BriefEntry: Codable, Hashable, Sendable {
     enum Kind: String, Codable, Hashable, Sendable { case question, plan, request, permission, stranded }
-    enum Source: String, Codable, Hashable, Sendable { case cloud, local }
 
     var project: String
     var thread: String
     var kind: Kind
     var state: ThreadState
     var since: Double
-    var source: Source
     var asOf: Double?
     var question: String?
     var options: [String] = []
-    /// The decision row's key (cloud).
-    var card: String?
-    /// What T3 says the thread waits on (local); live state, never stored.
+    /// What T3 says the thread waits on; live state, never stored.
     var request: ThreadRequest?
     var sent: [SentLine] = []
     /// What a read mark holds to (`BriefPage.entryKey`): the Board's status change or card; nil for the model's own entries,
@@ -61,12 +57,12 @@ struct BriefEntry: Codable, Hashable, Sendable {
     var target: BriefTarget { BriefTarget(project: project, thread: thread) }
 
     private enum CodingKeys: String, CodingKey {
-        case project, thread, kind, state, since, source, asOf = "as_of", question, options, card, sent, episode
+        case project, thread, kind, state, since, asOf = "as_of", question, options, sent, episode
     }
 
     static func == (a: BriefEntry, b: BriefEntry) -> Bool {
         a.project == b.project && a.thread == b.thread && a.kind == b.kind && a.state == b.state && a.since == b.since
-            && a.source == b.source && a.asOf == b.asOf && a.question == b.question && a.options == b.options && a.card == b.card
+            && a.asOf == b.asOf && a.question == b.question && a.options == b.options
             && a.request == b.request && a.sent == b.sent && a.episode == b.episode
     }
 
@@ -82,11 +78,10 @@ struct BriefThread: Codable, Hashable, Sendable {
     var status: ThreadState
     /// When it started, or last changed.
     var age: Double
-    var source: BriefEntry.Source = .cloud
-    /// Set when the project's frame is stale: what it last saw, and when.
+    /// Set when T3 was unreachable: what it last saw, and when.
     var asOf: Double?
 
-    private enum CodingKeys: String, CodingKey { case id, title, status, age, source, asOf = "as_of" }
+    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of" }
 }
 
 struct BriefDecision: Codable, Hashable, Sendable {
@@ -97,12 +92,10 @@ struct BriefDecision: Codable, Hashable, Sendable {
 
 struct BriefDoc: Codable, Equatable, Sendable {
     static let yourSend = "send"
-    /// The thread id of a question the project's coordinator asks in its own replies: you answer it in the project.
-    static let coordinator = "coordinator"
     static let maxNow = 3
     static let maxEntries = 20
     static let maxDecisions = 10
-    static let maxLooseEnds = 10
+    static let maxLooseEnds = 2
 
     var project: String
     var version = 0
@@ -195,15 +188,15 @@ struct BriefDoc: Codable, Equatable, Sendable {
     func checked(_ answer: Answer, known: Set<String>, cards: [String: [String]], at now: Double, sources: [String] = []) -> Prose {
         let exists = known.union(threads.map(\.id))
         var out = prose
-        // A thread's tag stays only on a thread of the project (or its coordinator's question); its words stay either way.
-        let tagged: (String) -> Bool = { exists.contains($0) || $0 == Self.coordinator }
+        // A thread's tag stays only on a thread of the project; its words stay either way.
+        let tagged: (String) -> Bool = { exists.contains($0) }
         let links = (sources + self.now + self.looseEnds).reduce(into: Set<String>()) { $0.formUnion(BriefMarkup.addresses($1)) }
         let lines = answer.now.map { BriefMarkup.checked($0, known: tagged, links: links) }.filter { !BriefMarkup.plain($0).isEmpty }
         out.now = Array(lines.prefix(Self.maxNow))
         var seen = Set<String>()
         out.needsYou = answer.needsYou.compactMap { raw in
             guard let kind = BriefEntry.Kind(rawValue: raw.kind) else { return nil }
-            guard exists.contains(raw.thread) || (raw.thread == Self.coordinator && kind == .request && !project.hasPrefix("local:")) else { return nil }
+            guard exists.contains(raw.thread) else { return nil }
             let th = thread(raw.thread)
             // A thread working again waits on no one, stranded or not; a stranded session stays on past its done.
             if let th, th.status == .working || (kind != .stranded && th.status == .done) { return nil }
@@ -213,8 +206,8 @@ struct BriefDoc: Codable, Equatable, Sendable {
             let written = raw.options ?? []
             let options = cards[raw.thread] ?? (written.count > 1 ? written : [])
             return BriefEntry(project: project, thread: raw.thread, kind: kind, state: th?.status ?? .needsYou,
-                              since: old?.since ?? now, source: th?.source ?? .cloud, asOf: th?.asOf,
-                              question: raw.question, options: options, card: old?.card, request: old?.request, sent: old?.sent ?? [])
+                              since: old?.since ?? now, asOf: th?.asOf,
+                              question: raw.question, options: options, request: old?.request, sent: old?.sent ?? [])
         }
         out.needsYou = Array(out.needsYou.prefix(Self.maxEntries))
         out.decisions = Array(answer.decisions.filter { $0.thread == Self.yourSend || exists.contains($0.thread) }.prefix(Self.maxDecisions))

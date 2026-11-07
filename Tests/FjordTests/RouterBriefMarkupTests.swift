@@ -27,12 +27,12 @@ import Testing
         let src = FakeBriefSource(), model = FakeBriefModel()
         src.setThreads("p", [briefThread("t1", .needsYou)])
         model.answer = { _ in
-            #"{"now":["<t id=\"t1\">The pick</t> waits; <t id=\"ghost\">a ghost</t> too; <t id=\"coordinator\">its question</t>."],"needs_you":[],"decisions":[],"loose_ends":[]}"#
+            #"{"now":["<t id=\"t1\">The pick</t> waits; <t id=\"ghost\">a ghost</t> too; its question."],"needs_you":[],"decisions":[],"loose_ends":[]}"#
         }
         let engine = makeEngine(src, model)
         src.post("p", id: "c", kind: .card, thread: "t1", text: "Which?", options: ["a"])
         engine.itemsChanged("p"); await engine.idle()
-        #expect(engine.docs["p"]?.now == [#"<t id="t1">The pick</t> waits; a ghost too; <t id="coordinator">its question</t>."#])
+        #expect(engine.docs["p"]?.now == [#"<t id="t1">The pick</t> waits; a ghost too; its question."#])
     }
 
     @Test func theLeadKeepsTagsOfThreadsTheBriefsHold() {
@@ -56,8 +56,8 @@ import Testing
     @Test func aSectionNamesEveryThreadThatWaitsOnYou() {
         var doc = BriefDoc(project: "p")
         doc.now = [#"<t id="t1">The pick</t> waits."#]
-        let e1 = BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 0, source: .cloud, question: "Which?")
-        let e2 = BriefEntry(project: "p", thread: "t2", kind: .plan, state: .needsYou, since: 0, source: .cloud, question: "Approve the <b>plan</b>?")
+        let e1 = BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 0, question: "Which?")
+        let e2 = BriefEntry(project: "p", thread: "t2", kind: .plan, state: .needsYou, since: 0, question: "Approve the <b>plan</b>?")
         let section = BriefPage.Section(name: "p", group: .needsYou, doc: doc, entries: [e1, e2], recent: [], finished: [])
         #expect(BriefSectionView.markup(section) == #"<t id="t1">The pick</t> waits. <t id="t2">Approve the plan?</t>"#)
         // With a title, the title: a few words, not the whole question.
@@ -67,8 +67,8 @@ import Testing
     }
 
     @Test func forYouNamesEveryThreadThatWaitsOnYou() {
-        let e1 = BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 0, source: .cloud, question: "Which?")
-        let e2 = BriefEntry(project: "q", thread: "t2", kind: .plan, state: .needsYou, since: 0, source: .cloud, question: "Approve?")
+        let e1 = BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 0, question: "Which?")
+        let e2 = BriefEntry(project: "q", thread: "t2", kind: .plan, state: .needsYou, since: 0, question: "Approve?")
         var dq = BriefDoc(project: "q")
         dq.threads = [briefThread("t2", .needsYou, title: "Ship it")]
         var page = BriefPage()

@@ -220,7 +220,7 @@ Run it alone, because it touches almost everything.
   fencing stays only for Fjord's own model prompts.
 - Delivery is confirmed by `message.updated` for that message id, so the "unsure" state goes.
 - The entry says "steered" or "queued (n)" from the resulting run: the server queues for providers that can't steer.
-- Unattended category actions always queue and never steer (Q4).
+- Unattended category actions always queue and never steer (Q4, decided by the owner 2026-11-07: only your typed words steer).
 - Composer (`RouterComposer`, `RouterKeys`): the live pick reads "steer <thread> (running)" in its own colour.
 - `RouterDispatcher.plan`'s `.reply` goes to the `ThreadKey`.
 - Deleted:

@@ -59,10 +59,25 @@ import Testing
 
     // MARK: Answers (P2-1, P2-2, P3 drawer)
 
+    /// The Settings question, held by T3 as a live request, with the commands that would go to T3 collected (and, if asked, held).
+    private func asked(_ store: Store, hold: Bool = false) -> (sent: Sent, release: () -> Void) {
+        store.requests["th_settings"] = ThreadRequest(id: "r1", threadID: "th_settings", body: .question([
+            T3Question(demo: "", "Which layout?", options: [("A sidebar with sections", "sidebar"), ("One scrolling page", "page"),
+                                                              ("Tabs across the top", "tabs")])]))
+        let sent = Sent()
+        var held: CheckedContinuation<Void, Never>?
+        store.requestSender = { command, _ in
+            sent.commands.append(command)
+            if hold { await withCheckedContinuation { held = $0 } }
+        }
+        return (sent, { held?.resume(); held = nil })
+    }
+
+    @MainActor final class Sent { var commands: [T3Command] = [] }
+
     @Test func oneAnswerAtATimeAndItsLineOnlyOnceDelivered() async {
         let store = demo()
-        let (updates, feed) = AsyncStream<CourierUpdate>.makeStream()
-        store.routerCourier.attach(RouterCourierSource(submit: { _ in 7 }, updates: updates))
+        let (sent, release) = asked(store, hold: true)
         let briefs = store.routerBriefs
         let t = settings(store)
         briefs.pick(t, 1, store: store)
@@ -73,22 +88,23 @@ import Testing
         #expect(briefs.picked[t] == nil && !briefs.confirm(t, store: store))
         #expect(!briefs.answer(t, option: 2, store: store))
         #expect(briefs.answers.isEmpty, "no line before it is delivered")
-        for _ in 0..<50 where briefs.sending[t] == nil { await Task.yield() }
-        feed.yield(CourierUpdate(intentID: 7, state: .delivered, cause: nil, before: nil, at: Date()))
+        for _ in 0..<50 where sent.commands.isEmpty { await Task.yield() }
+        #expect(sent.commands.count == 1)
+        release()
         await briefs.settled()
         #expect(briefs.answers.map(\.words) == ["A sidebar with sections"] && briefs.answering.isEmpty)
     }
 
     @Test func anAnswerByOptionKeepsItsOptionWhateverWasPicked() async {
         let store = demo()
-        store.routerCourier.attach(RouterCourierSource(submit: { _ in 0 }, updates: AsyncStream { _ in }))
+        let (sent, _) = asked(store)
         let briefs = store.routerBriefs
         let t = settings(store)
-        briefs.pick(t, 2, store: store)
-        // Picking 2 again would take it back; answering 2 doesn't.
+        briefs.pick(t, 3, store: store)
+        // Answering 2 sends 2, whatever was picked, and doesn't toggle.
         #expect(briefs.answer(t, option: 2, store: store))
         await briefs.settled()
-        #expect(briefs.trouble[t] != nil && briefs.answers.isEmpty, "not handed over: no line")
+        #expect(sent.commands.count == 1 && briefs.answers.map(\.words) == ["One scrolling page"] && briefs.picked[t] == nil)
     }
 
     // MARK: One reply target (P3)
@@ -118,73 +134,13 @@ import Testing
     // MARK: Stranded (P2-4)
 
     @Test func aStrandedEntryLeavesOnceItsThreadWorksAgain() {
-        let stranded = [BriefEntry(project: "p", thread: "t1", kind: .stranded, state: .needsYou, since: 1, source: .local)]
+        let stranded = [BriefEntry(project: "p", thread: "t1", kind: .stranded, state: .needsYou, since: 1)]
         #expect(RouterBriefEngine.entries(model: stranded, board: BriefBoard(threads: [briefThread("t1", .working)])).isEmpty)
         #expect(RouterBriefEngine.entries(model: stranded, board: BriefBoard(threads: [briefThread("t1", .done)])).count == 1)
         var doc = BriefDoc(project: "p")
         doc.threads = [briefThread("t1", .working)]
         let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"stranded","question":"","options":[]}],"decisions":[],"loose_ends":[]}"#)
         #expect(doc.checked(answer, known: [], cards: [:], at: 1).needsYou.isEmpty)
-    }
-
-    // MARK: The coordinator's own question
-
-    /// Live 2026-11-05: a coordinator with no question tool asked in its own reply; the brief said so but had no entry to answer.
-    @Test func theCoordinatorsQuestionIsAnEntryWhileTheModelKeepsIt() {
-        let ask = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"coordinator","kind":"request","question":"Which fruit?","options":[]}],"decisions":[],"loose_ends":[]}"#)
-        let doc = BriefDoc(project: "chan_p")
-        let prose = doc.checked(ask, known: [], cards: [:], at: 1)
-        #expect(prose.needsYou.map(\.thread) == ["coordinator"] && prose.needsYou.first?.question == "Which fruit?")
-        #expect(RouterBriefEngine.entries(model: prose.needsYou, board: BriefBoard()).count == 1)  // no board thread needed
-        let asQuestion = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"coordinator","kind":"question","question":"?","options":[]}],"decisions":[],"loose_ends":[]}"#)
-        #expect(doc.checked(asQuestion, known: [], cards: [:], at: 1).needsYou.isEmpty)  // only a request in words
-        #expect(BriefDoc(project: "local:p").checked(ask, known: [], cards: [:], at: 1).needsYou.isEmpty)  // a local project has none
-        let dropped = try! BriefDoc.parse(#"{"now":[],"needs_you":[],"decisions":[],"loose_ends":[]}"#)
-        #expect(doc.checked(dropped, known: [], cards: [:], at: 2).needsYou.isEmpty)
-    }
-
-    /// Picking an option of the coordinator's question sends the option's words to the project, not to a thread.
-    @Test func aPickedOptionOfTheCoordinatorsQuestionIsSentToTheProject() async {
-        let store = demo()
-        var sent: [CourierRequest] = []
-        let (updates, _) = AsyncStream<CourierUpdate>.makeStream()
-        store.routerCourier.attach(RouterCourierSource(submit: { sent.append($0); return 9 }, updates: updates))
-        let briefs = store.routerBriefs
-        let project = briefs.demoDocs.keys.sorted().first!
-        var doc = briefs.demoDocs[project]!
-        doc.needsYou.append(BriefEntry(project: project, thread: BriefDoc.coordinator, kind: .request, state: .needsYou, since: 1,
-                                       source: .cloud, question: "Which number?", options: ["1", "2", "3"]))
-        briefs.demoDocs[project] = doc
-        let t = BriefTarget(project: project, thread: BriefDoc.coordinator)
-        briefs.pick(t, 2, store: store)
-        #expect(briefs.confirm(t, store: store))
-        for _ in 0..<50 where sent.isEmpty { await Task.yield() }
-        guard case .send(let words, let to, let thread, _, _)? = sent.first else { Issue.record("\(sent)"); return }
-        #expect(words == "2" && to == project && thread == nil)
-        #expect(briefs.title(t) == "The project's coordinator")
-    }
-
-    // MARK: Purpose (P2-5)
-
-    @Test func aSettingsReadWritesThePurposeAndACallUnderWayKeepsIt() async {
-        let src = FakeBriefSource()
-        let (release, go) = AsyncStream<Void>.makeStream()
-        let runner: RouterBriefEngine.Model = { _, context, _ in
-            if context.contains("Goal:") { return #"{"purpose":"Ship the engine"}"# }
-            for await _ in release { break }
-            return #"{"now":["Building."],"needs_you":[],"decisions":[],"loose_ends":[]}"#
-        }
-        let engine = RouterBriefEngine(source: src, store: MemoryBriefStore(), model: runner, clock: { 100 })
-        src.post("p", id: "m1", kind: .message, text: "working")
-        engine.itemsChanged("p")
-        for _ in 0..<50 { await Task.yield() }
-        src.boards["p", default: BriefBoard()].goal = "Goal: ship the engine"
-        engine.boardChanged("p")
-        for _ in 0..<200 where engine.docs["p"]?.purpose == nil { await Task.yield() }
-        #expect(engine.docs["p"]?.purpose == "Ship the engine")
-        go.yield(())
-        await engine.idle()
-        #expect(engine.docs["p"]?.now == ["Building."] && engine.docs["p"]?.purpose == "Ship the engine")
     }
 
     // MARK: The Router's switch (P2-6)
@@ -245,14 +201,14 @@ import Testing
         #expect(engine.general.forYou == "One needs you.")
     }
 
-    @Test func aReadMarkHoldsWhateverTheThreadIsTouched() {
-        func key(touched: Double, statusAt: Double?) -> String {
-            let f = CourierBriefFacts(project: "chan_p", threads: [.init(id: "t1", title: "T", state: "needs_you", touched: touched,
-                                                                          status: "needs you", statusAt: statusAt)])
-            return BriefPage.entryKey(CourierBriefSource.board(f).entries[0])
+    @Test func aReadMarkHoldsToTheRequestNotToTheThreadsTouches() {
+        func key(request: String?, since: Double) -> String {
+            var t = AgentThread(id: "t1", title: "T", lastActivity: Date(timeIntervalSince1970: since), running: true)
+            t.pendingRequest = request.flatMap { T3PendingRequest(json: T3JSON.parse(#"{"id":"\#($0)","kind":"user_input","blocking":true}"#)) }
+            return BriefPage.entryKey(T3BriefSource.entry(t, project: "p", request: nil, since: since, asOf: nil))
         }
-        #expect(key(touched: 5, statusAt: nil) == key(touched: 9, statusAt: nil))
-        #expect(key(touched: 5, statusAt: 3) == key(touched: 9, statusAt: 3) && key(touched: 5, statusAt: 3) != key(touched: 5, statusAt: 4))
+        #expect(key(request: "r1", since: 5) == key(request: "r1", since: 9))
+        #expect(key(request: "r1", since: 5) != key(request: "r2", since: 5))
     }
 
     @Test func theCountFollowsTheMarks() {
@@ -262,14 +218,6 @@ import Testing
         #expect(before == briefs.page().needsYou && before > 0)
         briefs.markRead(settings(store), store: store)
         #expect(briefs.untoldNeedsYou == before - 1)
-    }
-
-    @Test func settingsGoalAndInstructionsAreThePurposesSource() {
-        let read = JSON.object(JSONObject([("goal", .string("Ship")), ("instructions", .string("Keep CI green"))]))
-        #expect(CourierHost.goal(read) == "Goal: Ship\nInstructions: Keep CI green")
-        #expect(CourierHost.goal(nil) == nil)
-        let f = CourierBriefFacts(project: "chan_p", goal: "Goal: Ship")
-        #expect(CourierBriefSource.board(f).goal == "Goal: Ship")
     }
 
     @Test func anOldAnsweredCardKeepsItsTitle() throws {

@@ -1,10 +1,14 @@
 import Foundation
 
-// The Claude Code runs the dispatcher (RouterDispatcher.swift) makes for your messages. Each is a fresh `claude -p` with
-// Haiku: nothing resumed, no transcript, no tools but the ones it needs. Two kinds:
-// - a run for judgment (change Fjord, answer a question about its state): a typed result, tools served by a server of its
-//   own that offers only what the intent needs;
-// - a delivery: one SendMessage, behind the same gate as before (the text was prepared, signed and only exactly it goes).
+// The Claude Code runs the dispatcher (RouterDispatcher.swift) makes for your messages that need judgment (change Fjord,
+// answer a question about its state). Each is a fresh `claude -p` with Haiku: nothing resumed, no transcript, no tools but the
+// ones it needs, a typed result, tools served by a server of its own that offers only what the intent needs. Your words to a
+// thread are not a run: they are one message to T3 (`Store.sendToThread`).
+
+/// The version the Router's MCP server reports.
+enum RouterAgent {
+    static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1" }
+}
 
 // MARK: - What a run is told
 
@@ -429,102 +433,6 @@ struct RouterRunStream {
 
         func feed(_ data: Data) -> RouterRunLive? {
             lock.withLock { stream.feed(data) ? stream.live : nil }
-        }
-    }
-}
-
-// MARK: - A delivery
-
-/// One send of a prepared, signed message, through the same gate as the Router's own: every send asks first, and Fjord answers
-/// (`RouterTools.approveSend`): only exactly the prepared text to the prepared target, once. No Claude Code process and no model
-/// is run for it: a session gets it through a carrier (`RouterCarry`).
-enum RouterSender {
-    /// Sends `text` to `to` through `tools`' gate. Throws why it wasn't delivered. Returns the target plugin's answer (what it
-    /// applied of the message's settings), else nil.
-    ///
-    /// - `session`: the Claude app's id for the target (`local_<uuid>`), which its send tool takes.
-    /// - `kind`: whether it is a session's first message.
-    ///
-    /// Each local message is kept as an operation before anything is ordered (`DeliveryOperation`) and settled by what the
-    /// target's plugin says; a failure carries the state it ended in in its words.
-    @MainActor @discardableResult
-    static func send(store: Store, to: String, text: String, tools: RouterTools, session: String? = nil,
-                     kind: DeliveryOperation.Kind = .message, decisionID: UUID? = nil, hostSessionID: String? = nil,
-                     body: String? = nil, waits: RouterCarry.Waits = RouterCarry.Waits()) async throws -> String? {
-        guard let header = RelayInbox.header(of: text), let paths = store.routerFiles else {
-            throw RouterTools.Failure("Fjord isn't ready: nothing was sent")
-        }
-        let ready = tools.prepared[to]
-        let ticket = tools.ticket()
-        if let refusal = tools.approveSend(["to": to, "message": text], otherFields: []) { throw RouterTools.Failure(refusal) }
-        // Asked again right before each order is written, every send alike: still its turn (Stop ends it), the Router on, the
-        // send not cancelled, and what it was for not over.
-        let gate: @MainActor () -> String? = {
-            do { try tools.live(ticket) } catch { return error.localizedDescription }
-            return tools.deliveryCheck?()
-        }
-        guard let local = session ?? ready?.local, local.hasPrefix("local_") else {
-            throw RouterTools.Failure("That session isn't one of the Claude app's, so Fjord can't send to it")
-        }
-        let words = body ?? ready?.body ?? text
-        let began = Date()
-        let title = store.threads[local]?.title ?? local
-        store.noteOperation(DeliveryOperation(nonce: header.nonce, target: header.target, kind: kind,
-                                              bodyHash: DeliveryOperation.hash(of: words), state: .waiting, decisionID: decisionID,
-                                              session: local, to: title, createdAt: began, updatedAt: began))
-        func settle(_ state: DeliveryOperation.State, _ reason: String? = nil) {
-            store.updateOperation(header.nonce) { $0.state = state; $0.reason = reason }
-        }
-        // Kept on disk before anything is ordered: a crash after the order goes must find the operation, and a message that
-        // can't be recorded isn't sent.
-        if let why = await store.persistNow() {
-            let message = "Fjord couldn't save a record of this message before sending it, so nothing was sent: \(why)"
-            settle(.refused, message)
-            throw RouterTools.Failure(message)
-        }
-        let inbox = RelayInbox(root: paths.relay)
-        /// The outcome is kept on disk, and only then is the target's answer (the evidence of it) removed.
-        func finish(_ state: DeliveryOperation.State, _ reason: String? = nil) async {
-            settle(state, reason)
-            if await store.persistNow() == nil { RouterCarry.discardAnswer(inbox: inbox, target: header.target, nonce: header.nonce) }
-        }
-        let (plan, up) = await store.carryPlan(target: header.target)
-        // A session with a process but no plugin up reads the message as a peer's: it never goes to one.
-        if ready?.asleep != true, !up {
-            let why = "Fjord's plugin isn't running in that session: restart it or run /reload-plugins in it; nothing was sent"
-            await finish(.refused, why)
-            throw RouterTools.Failure(why)
-        }
-        let cli = header.target
-        do {
-            let ack = try await RouterCarry.deliver(
-                signed: text, plan: plan, asleep: !up, inbox: inbox, waits: waits,
-                sign: { [weak store] carrier in
-                    guard let store else { throw RouterTools.Failure("Fjord isn't ready") }
-                    return try await store.localSigned { key in
-                        RelaySigner.signCarry(message: text, local: local, carrier: carrier, key: key)
-                    }
-                },
-                isUp: { [weak store] in await store?.pluginUp(cli) ?? false },
-                open: { [weak store] in
-                    tools.stage?("opening \(title)")
-                    if let intercept = store?.interceptOpen { intercept("Open in T3 · \(title)") } else { store?.openThread(local) }
-                },
-                gate: gate,
-                update: { [weak store] update in
-                    store?.updateOperation(header.nonce) { $0.route = update.route; $0.carrier = update.carrier }
-                })
-            await finish(.sent)
-            return ack
-        } catch let failure as RouterCarry.Failure {
-            await finish(failure.state, failure.message)
-            throw RouterTools.Failure(failure.message)
-        } catch is CancellationError {
-            await finish(.refused, "Stopped; nothing was sent")
-            throw CancellationError()
-        } catch {
-            await finish(.refused, error.localizedDescription)
-            throw error
         }
     }
 }

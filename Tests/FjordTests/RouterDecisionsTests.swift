@@ -50,7 +50,7 @@ import Testing
     @Test func answersFromTheBriefAreLogged() {
         let s = store()
         var doc = BriefDoc(project: "local:app")
-        doc.threads = [BriefThread(id: "local_a", title: "Fix the login bug", status: .needsYou, age: 0, source: .local)]
+        doc.threads = [BriefThread(id: "local_a", title: "Fix the login bug", status: .needsYou, age: 0)]
         s.routerBriefs.demoDocs = ["local:app": doc]
         s.logEntryAction("Answered the form", target: BriefTarget(project: "local:app", thread: "local_a"))
         let d = s.router.decisions[0]

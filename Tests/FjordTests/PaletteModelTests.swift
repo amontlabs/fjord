@@ -414,7 +414,7 @@ import Testing
         #expect(renamed != withSnippet)
         // A brief entry, the same entry of another kind, a session, the action runs, the Router's switch.
         var doc = BriefDoc(project: "p")
-        var entry = BriefEntry(project: "p", thread: "t", kind: .question, state: .needsYou, since: 1, source: .cloud, question: "?")
+        var entry = BriefEntry(project: "p", thread: "t", kind: .question, state: .needsYou, since: 1, question: "?")
         doc.needsYou = [entry]
         store.routerBriefs.demoDocs = ["p": doc]
         let carded = model.sourceStamp

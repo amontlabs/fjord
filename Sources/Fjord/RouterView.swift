@@ -70,10 +70,7 @@ extension Store {
 
     /// Sends commands to T3 in order; in a demo nothing is sent.
     private func sendCommands(_ commands: [T3Command]) async throws {
-        if requestSender == nil, routerIsPretend { return }
-        for command in commands {
-            if let requestSender { try await requestSender(command) } else { _ = try await t3.store.send(command) }
-        }
+        for command in commands { try await dispatch(command) }
     }
 
     /// The answer to a question (`runtime-request.respond`): an option's value, several for a multiple choice, or the
@@ -301,14 +298,15 @@ final class RouterModel {
 
     /// Sends the draft with its reply, its @pills (written as "@name" where they stand, their projects going with it) and the
     /// target you pinned; the composer keeps the focus for the next one.
-    func send(store: Store) {
+    /// `queue` (⌥Return): the words wait for the turn under way instead of steering it.
+    func send(store: Store, queue: Bool = false) {
         // A proposed project takes the words (and an empty composer creates it).
         if answerProposal(store: store) { return }
         // Threads to reply to: your words go to each, no model. One that refuses them stays picked, with the words, so
         // sending again reaches only it.
         let briefs = store.routerBriefs
         if !briefs.mentioned.isEmpty, pointers.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let refused = briefs.mentioned.filter { !briefs.send(draft, to: $0, store: store) }
+            let refused = briefs.mentioned.filter { !briefs.send(draft, to: $0, store: store, queue: queue) }
             if refused.isEmpty {
                 caret = nil
                 draft = ""
@@ -319,7 +317,9 @@ final class RouterModel {
         }
         let (text, _) = sentDraft(store)
         guard !text.isEmpty, canSend(store) else { return }
-        guard store.sendToRouter(text, context: context(store)) else {
+        var context = context(store)
+        context.queue = queue
+        guard store.sendToRouter(text, context: context) else {
             sendRefused = Self.goneTarget
             Announce.say(Self.goneTarget)
             return

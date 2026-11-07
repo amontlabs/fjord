@@ -13,7 +13,7 @@ import Testing
         #expect(src.count("p") == 2)
     }
 
-    @Test func aCoordinatorRepeatOfAFinishAddsNoEntry() async {
+    @Test func aRepeatOfAFinishAddsNoEntry() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         src.setThreads("p", [briefThread("t1", .done)])
         // The brief already covers the finish: the canned answer leaves it as it was.
@@ -23,7 +23,7 @@ import Testing
         src.post("p", id: "s1", kind: .status, thread: "t1", status: .done)
         engine.itemsChanged("p"); await engine.idle()
         let version = engine.docs["p"]?.version
-        src.post("p", id: "c1", kind: .coordinator, text: "t1 is done!")
+        src.post("p", id: "c1", kind: .message, text: "t1 is done!")
         engine.itemsChanged("p"); await engine.idle()
         #expect(engine.docs["p"]?.needsYou.isEmpty == true)
         #expect(engine.docs["p"]?.version == version)  // no new version

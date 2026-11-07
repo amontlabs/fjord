@@ -396,7 +396,10 @@ extension Store {
         if threadWork[id] != work { threadWork[id] = work }
         // Whatever waits on you: the newest pending request, else the proposed plan; nothing once it is answered.
         let request = ThreadRequest(projection)
-        if requests[id] != request { requests[id] = request }
+        if requests[id] != request {
+            requests[id] = request
+            if let request { routerBriefs.requestAppeared(request, store: self) }
+        }
     }
 
     /// A shell change, taken in at once; while the window's morph plays (`MotionGate`) it waits for the motion to end, and
@@ -463,6 +466,7 @@ extension Store {
         threadsRead()
         syncThreadDetail()
         pickIcons()
+        routerBriefs.threadsChanged(store: self)
     }
 
     /// The first word from T3 came (its shell, or why there is none): what routing knows of threads is known, and the actions
@@ -474,6 +478,7 @@ extension Store {
     }
 
     func t3ConnectionChanged(_ state: T3ConnectionState) {
+        routerBriefs.connectionChanged(state, store: self)
         switch state {
         case .noToken, .noServer, .incompatible, .tokenRejected: threadsRead()
         default: break

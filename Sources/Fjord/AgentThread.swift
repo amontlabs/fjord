@@ -27,6 +27,8 @@ struct AgentThread: Identifiable, Hashable {
     var lastRunEndedAt: Date?
     /// The latest words the thread shows (the agent's last message), as T3's shell carries them.
     var latestMessage: String?
+    /// The latest words you sent it, when that is its latest message.
+    var lastUserText: String?
     var lastError: String?
     /// The run stopped on a usage limit and won't pick up again by itself.
     var limitStopped = false
@@ -34,6 +36,8 @@ struct AgentThread: Identifiable, Hashable {
     var branch: String?
     var pullRequests: [T3PullRequest] = []
     var tags: [String] = []
+    /// The agent's provider instance (`claudeAgent`, `codex`…): what tells whether it can be steered before a session says.
+    var provider = ""
 
     var folderName: String { folder.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Scratch" }
     /// Mute and colour key: the folder path, or "" for scratch threads.
@@ -68,10 +72,11 @@ extension AgentThread {
             lastActivity: t.updatedAt.flatMap(Self.date) ?? t.createdAt.flatMap(Self.date) ?? .distantPast,
             lastUserMessage: t.latestUserMessageAt.flatMap(Self.date), lastRunEndedAt: t.latestRunCompletedAt.flatMap(Self.date),
             latestMessage: t.latestVisibleMessage.flatMap { $0.role == "assistant" && !$0.text.isEmpty ? $0.text : nil },
+            lastUserText: t.latestVisibleMessage.flatMap { $0.role == "user" && !$0.text.isEmpty ? $0.text : nil },
             lastError: t.lastError,
             limitStopped: t.status == .failed && raw.str("lastErrorClass") == "usage_limit" && recovery?["autoResume"]?.bool != true,
             limitResetAt: (raw.ts("usageLimitResetAt") ?? recovery?.ts("resetAt")).flatMap(Self.date),
-            branch: t.branch, pullRequests: t.pullRequests, tags: t.tags)
+            branch: t.branch, pullRequests: t.pullRequests, tags: t.tags, provider: t.providerInstanceId)
     }
 
     /// What it left running after its turn that it picks up again from (`pendingBackgroundTasks`, by T3's own rule

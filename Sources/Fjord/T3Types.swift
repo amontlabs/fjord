@@ -730,7 +730,8 @@ struct T3LaunchRequest: Equatable, Sendable {
 /// (the payload IS the command, S1 #1); `launchThread` has its own RPC and payload.
 enum T3Command: Equatable, Sendable {
     case messageDispatch(threadId: String, messageId: String, text: String, dispatch: T3Dispatch,
-                         attachments: [T3Attachment] = [], sourcePlan: (threadId: String, planId: String)? = nil)
+                         attachments: [T3Attachment] = [], sourcePlan: (threadId: String, planId: String)? = nil,
+                         context: [T3JSON] = [])
     case respondDecision(threadId: String, requestId: String, decision: T3Decision, feedback: String? = nil)
     case respondAnswers(threadId: String, requestId: String, answers: [String: T3Answer])
     case runInterrupt(threadId: String, runId: String, reason: String? = nil, holdQueue: Bool = false)
@@ -760,7 +761,7 @@ enum T3Command: Equatable, Sendable {
             .object(extra.merging(["commandId": .string(commandId), "type": .string(type), "threadId": .string(thread)]) { a, _ in a })
         }
         switch self {
-        case .messageDispatch(let thread, let messageId, let text, let dispatch, let attachments, let plan):
+        case .messageDispatch(let thread, let messageId, let text, let dispatch, let attachments, let plan, let records):
             var e: [String: T3JSON] = [
                 "createdBy": "user", "creationSource": "mcp", "messageId": .string(messageId), "text": .string(text),
                 "attachments": .array(attachments.map(\.json)),
@@ -772,6 +773,8 @@ enum T3Command: Equatable, Sendable {
             case .steerActive(let run): e["dispatchMode"] = ["type": "steer_active", "targetRunId": .string(run)]
             }
             if let plan { e["sourcePlanRef"] = ["threadId": .string(plan.threadId), "planId": .string(plan.planId)] }
+            // Typed context the text points at with `t3-context://` links (`ThreadMessage`).
+            if !records.isEmpty { e["context"] = ["version": 1, "records": .array(records)] }
             return cmd("message.dispatch", thread, e)
         case .respondDecision(let thread, let request, let decision, let feedback):
             var e: [String: T3JSON] = ["requestId": .string(request), "decision": .string(decision.rawValue)]

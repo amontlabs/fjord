@@ -323,11 +323,7 @@ final class Store {
         didSet { shownRevision &+= 1 }
     }
     /// Sends a command to T3; a test stands one in.
-    @ObservationIgnored var requestSender: (@MainActor (T3Command) async throws -> Void)?
-    /// Fjord's Claude Code plugin as last checked (nil until the Router has been switched on in this run, or
-    /// in a test that stands in no CLI), and why installing or removing it failed, if it did.
-    var routerPluginStatus: ClaudePluginInstaller.Status?
-    var routerPluginError: String?
+    @ObservationIgnored var requestSender: (@MainActor (T3Command, _ commandId: String) async throws -> Void)?
     /// Every project's name, with as much of its path as tells it from another of the same name (`customer-a/app`): worked
     /// out when the folders change, not by each view that names a project. Only a change in it redraws what reads it.
     var folderNames: [String: String] = [:] {
@@ -513,20 +509,8 @@ final class Store {
     @ObservationIgnored var routerRunReverted: (UUID) -> Void = { _ in }
     /// Where the Router's files go, in a test (see `routerFiles`).
     @ObservationIgnored var routerPaths: RouterPaths?
-    /// The latest install or removal of the plugin (each waits for the one before).
-    @ObservationIgnored var routerInstallWork: Task<Void, Never>?
-    /// Runs Claude Code's CLI for the plugin; a test stands one in (without one, a test run leaves the plugin alone).
-    @ObservationIgnored var routerPluginRunner: ClaudePluginInstaller.Runner?
-    /// Who may make the relay key (see `RelayKeyFence`), and the key as last read (see `signRelay`).
-    @ObservationIgnored let relayKeyFence = RelayKeyFence()
-    @ObservationIgnored var relayKeyCache: RelayKeyCache?
-    /// Takes back a delivery through its session's plugin ; tests answer for it. Nil: `cancelDelivery`.
-    @ObservationIgnored var deliveryCanceller: ((RouterDecision.Delivered, @escaping @MainActor @Sendable () -> String?) async throws -> RouterDecision.Cancelled)?
-    @ObservationIgnored var pluginQuitObserver: NSObjectProtocol?
     /// Where Claude Code's binary is; the newest copy the Claude app bundles unless a test says otherwise.
     @ObservationIgnored var routerClaudeBinary: (@Sendable () -> String?)?
-    /// The app's version, which the plugin's is stamped with.
-    @ObservationIgnored var routerAppVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0-dev"
     /// Derived rows, rebuilt after any change to the threads or Fjord's entries (see Threads.swift).
     @ObservationIgnored var agentCache: ThreadCache?
     @ObservationIgnored var iconTask: Task<Void, Never>?
@@ -610,7 +594,6 @@ final class Store {
             // Routing waits for T3's first word, unless there is no T3 to hear from.
             if t3.installed { threadsReadAsked = true }
         }
-        startRouter()
         if !Store.isDemo { codeFolders.start() }
         Task.detached(priority: .utility) {
             let key = Keychain.read(Keychain.typesafe) ?? ""

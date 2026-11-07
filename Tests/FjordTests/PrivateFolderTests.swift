@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import Fjord
 
-/// The folder the Router's runs of Claude Code start in is made off the main thread. A message is delivered with no run of Claude
-/// Code (`RouterCarry`), so the send paths make no folder of it at all.
+/// The folder the Router's runs of Claude Code start in is made off the main thread. A message is delivered over T3 (`ThreadSender`),
+/// so the send paths make no folder of it at all.
 @MainActor @Suite struct PrivateFolderTests {
     @Test func theFolderIsMadeForYouAloneWithItsParents() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("private-folder-\(UUID().uuidString)")
@@ -19,7 +19,7 @@ import Testing
     @Test func theSendAndPreparePathsDontMakeItOnTheMainThread() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/Fjord")
-        for file in ["RouterDispatcher.swift", "RouterMCP.swift", "RouterRun.swift", "RouterCarry.swift"] {
+        for file in ["RouterDispatcher.swift", "RouterMCP.swift", "RouterRun.swift", "ThreadSender.swift"] {
             let text = try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8)
             #expect(!text.contains("FileManager.default.createDirectory(at: home"), "\(file) makes the Router's folder on the main thread")
         }

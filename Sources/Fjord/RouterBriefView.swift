@@ -709,7 +709,7 @@ enum BriefEntryText {
 
     static func kindLabel(_ e: BriefEntry) -> String {
         switch e.kind {
-        case .question: e.source == .local ? "asks (on this Mac)" : "asks"
+        case .question: "asks"
         case .plan: "proposes a plan"
         case .request: "asks in words"
         case .permission: "waits for a permission"

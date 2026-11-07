@@ -178,4 +178,4 @@ Global shortcut actions run before their callback returns. Carbon hot keys targe
 
 The Router reads the Claude desktop app's sessions, `~/.claude/projects` for what a working session is doing, and Claude Code's task list in `/private/tmp/claude-<uid>` for what a session left running. None of these is a public API; when a Claude update changes them, the Router says so and Triage keeps working.
 
-Switching the Router on writes `~/.claude/hooks/fjord-form.sh` and registers it in `~/.claude/settings.json` (backed up first), so forms can be answered from the app. It also installs the signed Claude Code plugin `fjord@fjord`, so a message arrives in a session as the user's own rather than as a note from another session. Sessions already open pick the plugin up once restarted, or after `/reload-plugins`. Switching the Router off removes both.
+Switching the Router on writes nothing into `~/.claude`: your words reach a thread as one `message.dispatch` to T3 (steering a running thread, ⌥Return queues; an unattended action always queues), and a queued message can be cancelled or edited in place.

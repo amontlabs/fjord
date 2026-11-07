@@ -30,6 +30,8 @@ struct RouterContext: Equatable {
     /// (never the Router's own runs: an incoming PR must never change settings), and when where isn't clear it waits for your
     /// pick, with no fallback.
     var action: RouterActionSource?
+    /// Your words wait for the turn under way instead of steering it (⌥Return). An action's message never steers.
+    var queue = false
 
     init(replyTo: BriefTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
         self.replyTo = replyTo
@@ -87,16 +89,18 @@ struct RouterAskBack: Identifiable, Equatable {
         case decide
     }
 
-    /// A message ready to go, as the session will get it.
+    /// A message ready to go to a thread: the T3 thread, what T3 gets (`ThreadMessage`) and what the entry shows of it.
     struct Delivery: Equatable {
-        var to: String
-        /// What is sent (signed for the session's plugin).
-        var text: String
-        /// Your words as the session reads them, and as you wrote them.
+        /// T3's thread id.
+        var thread: String
+        var message: ThreadMessage
+        /// Your words as the thread reads them (addressing taken out), and as you wrote them.
         var body: String
         var original: String
         var rephrased: Bool
-        var session: String?
+        var mode: ThreadSendMode
+        /// An action's message: it queues behind a turn under way, never steering it.
+        var unattended: Bool
     }
 
     /// Everything a run does outside Fjord's own state, so a test stands in for each. The defaults are the real ones.
@@ -105,10 +109,8 @@ struct RouterAskBack: Identifiable, Equatable {
         /// an action's message, read by Jev only as an inbox action may be.
         var decide: @MainActor (RouterTools, _ message: String, _ unattended: Bool,
                                 _ stage: @escaping @MainActor (RouterProjectDecider.Stage) -> Void) async throws -> RouterProjectDecision
-        /// The message for a thread's session with its addressing taken out (`Addressing`), and its signature.
-        var prepare: @MainActor (RouterTools, _ session: String) async throws -> Delivery
-        /// The signed send, through the gate: the plugin's ack when it went through the inbox.
-        var send: @MainActor (RouterTools, Delivery) async throws -> String?
+        /// The `message.dispatch` to the thread, through the gate: what T3 took and what it did with it.
+        var send: @MainActor (RouterTools, Delivery) async throws -> RouterDecision.Delivered
         /// A question, permission or plan answered for a thread: what was done.
         /// Only while the thread still holds the request it was judged on (`RequestSnapshot`).
         var answer: @MainActor (RouterTools, BriefTarget, RequestAnswer, RequestSnapshot) async throws -> String
@@ -116,12 +118,6 @@ struct RouterAskBack: Identifiable, Equatable {
         var run: @MainActor (RouterTools, RouterRun.Intent, _ input: String) async throws -> RouterRun.Answer
         /// What revises a proposed project from your words (the app's asks Sonnet).
         var reviser: @MainActor () -> RouterProjectReviser = { RouterProjectFakeReviser() }
-        /// Whether the plugin of the session (by Claude Code's id) takes back a delivery (`abort-v1`).
-        var abortable: @MainActor (_ cli: String) async -> Bool = { _ in false }
-        /// Takes a delivery back through the session's inbox: how far it had gone, as its plugin answered.
-        var cancel: @MainActor (RouterDecision.Delivered) async throws -> RouterDecision.Cancelled = { _ in
-            throw RouterTools.Failure("The Router isn't ready")
-        }
     }
 
     /// What a message to a thread's waiting request does: answers to its questions, a plan decided, or a permission declined
@@ -142,8 +138,6 @@ struct RouterAskBack: Identifiable, Equatable {
     static let waitingTurn = "waiting its turn"
     /// The entries of actions' messages under way or waiting their turn (`submit`, `launch`), until they end.
     @ObservationIgnored private var actionRuns: Set<UUID> = []
-    /// Sends being taken back, by their entry in the log.
-    private(set) var cancelling: Set<UUID> = []
     /// The entries whose message waits on a project proposal under the composer: not done until it is made or dropped.
     @ObservationIgnored private var proposing: Set<UUID> = []
 
@@ -166,7 +160,6 @@ struct RouterAskBack: Identifiable, Equatable {
         effects = Effects.live(self)
         // An entry whose ask-back card is still up is not pruned from the history (its pick needs the record).
         store.decisionsInUse = { [weak self] in Set(self?.askBacks.map(\.id) ?? []).union(self?.proposing ?? []) }
-        store.settleLostOperations()
         store.onProposalsRestored = { [weak self] in self?.reattachProposals() }
         reattachProposals()
     }
@@ -682,8 +675,8 @@ struct RouterAskBack: Identifiable, Equatable {
 
     // MARK: Replies to threads
 
-    /// Passes your words to a thread's session: the form's answer when you gave one, else your words without their
-    /// addressing, signed, through the gate.
+    /// Passes your words to a thread: the form's answer when you gave one, else your words without their addressing, as
+    /// one `message.dispatch` (steering the turn under way, or queued behind it).
     private func reply(_ job: Job, to t: BriefTarget, session: String) async throws {
         guard let store else { return }
         // What the session would get, its addressing taken out ("@router no rush"), is what answers its form.
@@ -731,50 +724,17 @@ struct RouterAskBack: Identifiable, Equatable {
             }
             // The request moved on while it was read: nothing is answered on a read of another one, and the words go on as text.
         }
-        stage(job, "preparing")
-        let delivery = try await effects.prepare(job.tools, session)
         stage(job, "sending")
-        let before = store.threads[session]
-        _ = try await effects.send(job.tools, delivery)
-        note(job, .sent(to: delivery.to, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
+        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store)
+        let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records),
+                                body: words.words, original: words.original, rephrased: words.rephrased,
+                                mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
+        let sent = try await effects.send(job.tools, delivery)
+        note(job, .sent(to: title, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
              session: session, thread: t)
-        await delivered(job, delivery, session: session, turns: 0, busy: before?.running ?? false)
-    }
-
-    /// A send went: what it delivered, for a Cancel (`turns` and `busy`: the session as it was just before).
-    private func delivered(_ job: Job, _ delivery: Delivery, session: String?, turns: Int, busy: Bool) async {
-        guard let session, let header = RelayInbox.header(of: delivery.text) else { return }
-        let at = Date()
-        let abortable = await effects.abortable(header.target)
-        store?.updateDecision(job.id) {
-            $0.delivered = .init(session: session, cli: header.target, nonce: header.nonce, at: at, turns: turns, busy: busy,
-                                 abortable: abortable)
-        }
-    }
-
-    // MARK: Cancel
-
-    /// Takes back what a reply sent: if Claude hadn't started on it, it never will; if it was working on it, its turn stops.
-    /// Anything it already did stays done, and the message stays in the session's history. The entry says how it went; nil
-    /// when there's nothing to take back, or it failed.
-    @discardableResult
-    func cancel(_ id: UUID) async -> RouterDecision.Cancelled? {
-        guard let store, let entry = store.router.record(id), let sent = entry.delivered,
-              sent.cancelled == nil, sent.abortable, !cancelling.contains(id) else { return nil }
-        cancelling.insert(id)
-        defer { cancelling.remove(id) }
-        do {
-            let how = try await effects.cancel(sent)
-            store.updateDecision(id) {
-                guard $0.delivered?.nonce == sent.nonce else { return }
-                $0.delivered?.cancelled = how
-                $0.add(.cancelled(how))
-            }
-            return how
-        } catch {
-            let first = error.localizedDescription.split(separator: "\n").first.map(String.init) ?? "failed"
-            store.updateDecision(id) { $0.add(.failed("couldn't cancel: " + RouterDecision.clip(first, 100))) }
-            return nil
+        store.updateDecision(job.id) {
+            $0.delivered = sent
+            if let why = sent.note { $0.note = why }
         }
     }
 
@@ -955,7 +915,7 @@ extension RouterDispatcher.Effects {
     /// Nothing is available: before the dispatcher has set up its own.
     static var unavailable: Self {
         let no = RouterTools.Failure("The Router isn't ready")
-        return Self(decide: { _, _, _, _ in throw no }, prepare: { _, _ in throw no }, send: { _, _ in throw no },
+        return Self(decide: { _, _, _, _ in throw no }, send: { _, _ in throw no },
                     answer: { _, _, _, _ in throw no }, run: { _, _, _ in throw no })
     }
 
@@ -984,20 +944,15 @@ extension RouterDispatcher.Effects {
                 decider.jev = unattended ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
                 return try await decider.decide(message, in: context, tagged: tools.tagged, stage: stage)
             },
-            prepare: { [weak dispatcher] tools, session in
-                guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
-                let store = try store(dispatcher)
-                let answer = object(try await tools.prepare(store, session: session, ticket: tools.ticket()))
-                guard let to = answer["to"] as? String, let ready = tools.prepared[to] else { throw RouterTools.Failure("Not prepared") }
-                return .init(to: to, text: ready.text, body: ready.body ?? ready.text, original: ready.original,
-                             rephrased: ready.rephrased, session: session)
-            },
             send: { [weak dispatcher] tools, delivery in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
-                return try await RouterSender.send(store: store, to: delivery.to, text: delivery.text, tools: tools,
-                                                   session: delivery.session, kind: .message,
-                                                   decisionID: tools.decision, hostSessionID: delivery.session, body: delivery.body)
+                let ticket = tools.ticket()
+                return try await store.sendToThread(delivery.thread, delivery.message, mode: delivery.mode,
+                                                    unattended: delivery.unattended) {
+                    do { try tools.live(ticket) } catch { return error.localizedDescription }
+                    return tools.deliveryCheck?()
+                }
             },
             answer: { [weak dispatcher] tools, target, answer, snapshot in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
@@ -1041,14 +996,6 @@ extension RouterDispatcher.Effects {
             reviser: { [weak dispatcher] in
                 guard let store = dispatcher?.storeForEffects else { return RouterProjectFakeReviser(failure: "Fjord isn't ready") }
                 return RouterProjectModelReviser.app(store)
-            },
-            abortable: { [weak dispatcher] cli in
-                guard let store = dispatcher?.storeForEffects else { return false }
-                return await store.supportsAbort(cli)
-            },
-            cancel: { [weak dispatcher] sent in
-                guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
-                return try await store(dispatcher).cancelDelivery(sent)
             }
         )
     }

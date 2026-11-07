@@ -57,70 +57,10 @@ struct RouterDecision: Identifiable, Equatable {
         /// The Router asked you which of these.
         case asked([String])
         case failed(String)
-        /// A message sent here taken back (`RouterDispatcher.cancel`): how far it had gone.
+        /// A message taken back while it waited, or its run stopped (`Store.cancelQueued`, `Store.stopRun`).
         case cancelled(Cancelled)
-    }
-
-    /// How a cancel went, as the session's plugin answered it.
-    enum Cancelled: String, Codable, Equatable {
-        /// Claude hadn't started on it: it never will.
-        case beforeStart = "before-start"
-        /// Claude was working on it: the turn was stopped.
-        case aborted
-        /// Its turn was already over.
-        case tooLate = "too-late"
-        /// Claude read it together with words you typed in that session yourself: not stopped, so neither are they.
-        case together
-        /// The session's plugin was reloaded since it took it: it can't tell.
-        case unknown
-
-        /// The plugin's ack ("ok aborted"); nil for anything else.
-        init?(ack: String) {
-            guard ack.hasPrefix("ok "), let how = Self(rawValue: String(ack.dropFirst(3))) else { return nil }
-            self = how
-        }
-
-        /// Whether the message was stopped.
-        var stopped: Bool { self == .beforeStart || self == .aborted }
-
-        var words: String {
-            switch self {
-            case .beforeStart: "cancelled before Claude started on it"
-            case .aborted: "cancelled: Claude stopped working on it; what it already did stays done, and a command it was running finishes unseen"
-            case .tooLate: "too late to cancel: Claude had finished with it"
-            case .together: "not cancelled: Claude read it together with words you typed there, which a cancel would stop too"
-            case .unknown: "couldn't tell whether it was cancelled: Fjord's plugin in the session was reloaded since"
-            }
-        }
-    }
-
-    /// The message a send put in a session, so it can be taken back (`RouterDispatcher.cancel`): the session (Fjord's
-    /// id, and Claude Code's, which its inbox goes by), the delivery's nonce, when, how many turns the session had
-    /// finished then and whether one was running, whether its plugin takes aborts, and how a cancel went. Nil for
-    /// anything else and in entries from before.
-    struct Delivered: Codable, Equatable {
-        var session: String
-        var cli: String
-        var nonce: String
-        var at: Date
-        var turns: Int
-        var busy: Bool
-        var abortable: Bool
-        var cancelled: Cancelled?
-
-        /// How long a Cancel is offered after a send: past it, the turn has nearly always finished.
-        static let window: TimeInterval = 10 * 60
-
-        /// Whether a Cancel can still stop it, as Fjord sees the session (`now`, and its turns finished now): not
-        /// cancelled yet, its plugin takes aborts, sent within `window`, the session not archived, and its turn not
-        /// seen to finish (the one it waited behind, then its own). A session Fjord hasn't read yet (one just started)
-        /// is given the window. The plugin has the last word: a turn over meanwhile is told as too late.
-        func cancellable(session: AgentThread?, now: Date) -> Bool {
-            guard cancelled == nil, abortable, now.timeIntervalSince(at) < Self.window else { return false }
-            guard let session else { return true }
-            // Its run (the one it waited behind, then its own) not seen to finish since.
-            return session.lastRunEndedAt.map { $0 < at } ?? true
-        }
+        /// A queued message's words changed in place (`Store.editQueued`).
+        case edited(String)
     }
 
     enum Outcome: Codable, Equatable {
@@ -158,7 +98,7 @@ struct RouterDecision: Identifiable, Equatable {
     var links = Links()
     var reply: String?
     var note: String?
-    /// The last message it sent to a session, for a Cancel.
+    /// The last message it sent to a thread, for changing your mind (`Store.changeOfMind`).
     var delivered: Delivered?
 
     /// The pills of your message (`.you`), drawn where their "@name" is; nil for anything else and in entries from before.
@@ -170,7 +110,7 @@ struct RouterDecision: Identifiable, Equatable {
     /// Where an action's message came from (`RouterContext.action`): what sending it elsewhere goes with again.
     var actionSource: RouterActionSource? { fromAction.map { RouterActionSource(origin: $0) } }
     /// Its message was stopped where it was sent (a Cancel that wasn't too late).
-    var isCancelled: Bool { delivered?.cancelled?.stopped == true }
+    var isCancelled: Bool { delivered?.stopped == true }
 
     init(id: UUID = UUID(), at: Date = Date(), trigger: Trigger, decision: Decided = Decided(), done: [Done] = [],
          outcome: Outcome = .pending, links: Links = Links()) {
@@ -195,7 +135,7 @@ struct RouterDecision: Identifiable, Equatable {
 
     /// Its last send was stopped by a cancel: one that sent its words again since (to another place) isn't cancelled.
     var endsCancelled: Bool {
-        guard let cancelled = done.lastIndex(where: { if case .cancelled(let how) = $0 { how.stopped } else { false } }) else { return false }
+        guard let cancelled = done.lastIndex(where: { if case .cancelled = $0 { true } else { false } }) else { return false }
         return done.lastIndex(where: \.sendsWords).map { $0 < cancelled } ?? true
     }
 
@@ -224,6 +164,7 @@ struct RouterDecision: Identifiable, Equatable {
             case .asked(let options): "asked which: " + options.joined(separator: " / ")
             case .failed(let reason): "failed: \(reason)"
             case .cancelled(let how): how.words
+            case .edited(let words): "edited while it waited: " + Self.clip(words, 80)
             }
         }
     }
@@ -245,6 +186,7 @@ struct RouterDecision: Identifiable, Equatable {
         case .asked: return "asked you" + more
         case .failed: return "failed" + more
         case .cancelled: return "cancelled" + more
+        case .edited: return "edited" + more
         }
     }
 
@@ -261,6 +203,7 @@ struct RouterDecision: Identifiable, Equatable {
         case .asked: return "questionmark.bubble"
         case .failed: return "exclamationmark.triangle"
         case .cancelled: return "xmark.circle"
+        case .edited: return "pencil"
         case nil: return "text.bubble"
         }
     }
@@ -367,7 +310,8 @@ extension RouterDecision: Codable {
         }
         reply = joined(try c.decodeIfPresent(String.self, forKey: .reply), (parts ?? []).map { ($0.place, $0.reply) })
         note = joined(try c.decodeIfPresent(String.self, forKey: .note), (parts ?? []).map { ($0.place, $0.note) })
-        delivered = try c.decodeIfPresent(Delivered.self, forKey: .delivered) ?? parts?.lazy.compactMap(\.delivered).first
+        // An entry from before T3 kept another shape (a Claude session's nonce): it reads without a delivery.
+        delivered = (try? c.decodeIfPresent(Delivered.self, forKey: .delivered)) ?? parts?.lazy.compactMap(\.delivered).first
         var old = legacyNotes
         if let parts, parts.count > 1 { old.append("divided between: " + parts.map(\.place).joined(separator: ", ")) }
         if !old.isEmpty { note = ([note].compactMap { $0 } + [old.joined(separator: "; ")]).joined(separator: " · ") }

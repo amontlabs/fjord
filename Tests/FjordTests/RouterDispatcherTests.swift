@@ -16,7 +16,6 @@ import Testing
         /// Holds the decider until the test lets it go.
         var holdDecide = false
         var decideHeld: CheckedContinuation<Void, Never>?
-        var prepared: [String] = []
         var sent: [RouterDispatcher.Delivery] = []
         var answered: [(target: BriefTarget, answer: RouterDispatcher.RequestAnswer)] = []
         var runs: [(intent: RouterRun.Intent, input: String)] = []
@@ -37,14 +36,10 @@ import Testing
                     if holdDecide { await withCheckedContinuation { decideHeld = $0 } }
                     return decisions.count > 1 ? decisions.removeFirst() : decisions[0]
                 },
-                prepare: { [self] _, session in
-                    prepared.append(session)
-                    return RouterDispatcher.Delivery(to: "peer-\(session)", text: "⟦signed⟧\nbody-\(session)", body: "body-\(session)",
-                                                     original: "orig", rephrased: true, session: session)
-                },
                 send: { [self] _, delivery in
                     sent.append(delivery)
-                    return nil
+                    return RouterDecision.Delivered(thread: delivery.thread, messageID: delivery.message.messageID,
+                                                    commandID: delivery.message.commandID, outcome: .steered, note: nil, at: Date())
                 },
                 answer: { [self] _, target, answer, snapshot in
                     guard snapshot.holds(store!) else { throw RouterTools.Failure(RequestSnapshot.changedWords) }
@@ -111,12 +106,33 @@ import Testing
         #expect(decision(s, id)?.decision.confirmed == true && decision(s, id)?.decision.decider == nil)
     }
 
-    @Test func aReplyGoesToItsThreadsSessionWithNoModel() async {
+    @Test func aReplyGoesToItsThreadWithNoModelAndSteersIt() async {
         let (s, d, f) = setup()
         let id = d.submit("use postgres and keep the old schema", context: RouterContext(replyTo: BriefTarget(project: "local:lookout", thread: "local_a")))
         await finish(f, id)
-        #expect(f.decided.isEmpty && f.prepared == ["local_a"] && f.sent.count == 1)
+        #expect(f.decided.isEmpty && f.sent.map(\.thread) == ["local_a"] && f.sent.first?.mode == .steer)
+        #expect(decision(s, id)?.delivered?.thread == "local_a")
         #expect(decision(s, id)?.done.contains(where: \.sendsWords) == true)
+    }
+
+    @Test func aReplyWithOptionReturnWaitsForTheTurnUnderWay() async {
+        let (_, d, f) = setup()
+        var context = RouterContext(replyTo: BriefTarget(project: "local:lookout", thread: "local_a"))
+        context.queue = true
+        let id = d.submit("after the tests, please", context: context)
+        await finish(f, id)
+        #expect(f.sent.map(\.mode) == [.queue] && f.sent.first?.unattended == false)
+    }
+
+    @Test func eachThreadRepliedToGetsItsOwnDispatchAndCommandId() async {
+        let (s, d, f) = setup()
+        s.threads["local_b"] = AgentThread(id: "local_b", title: "Write the README", folder: "/code/api", lastActivity: Date())
+        let a = d.submit("ship it", context: RouterContext(replyTo: BriefTarget(project: "local:lookout", thread: "local_a")))
+        let b = d.submit("ship it", context: RouterContext(replyTo: BriefTarget(project: "local:api", thread: "local_b")))
+        await finish(f, a)
+        await finish(f, b)
+        #expect(Set(f.sent.map(\.thread)) == ["local_a", "local_b"])
+        #expect(Set(f.sent.map(\.message.commandID)).count == 2)
     }
 
     @Test func wordsWhollyForTheRouterAreAnsweredHere() async {

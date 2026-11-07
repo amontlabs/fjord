@@ -1,6 +1,0 @@
-{
-  "name": "fjord",
-  "version": "0.0.0-dev",
-  "description": "Delivers what you send from Fjord's Router to this session as your own words.",
-  "author": { "name": "Fjord" }
-}

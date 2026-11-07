@@ -9,97 +9,27 @@ import Testing
     func boardChanged(_ project: String) { calls.append("board " + project) }
 }
 
-private func facts(_ threads: [CourierBriefFacts.Thread], cardItems: [String: CourierBriefFacts.Card] = [:], watch: CourierWatch = .live,
-                   turning: Bool = false) -> CourierBriefFacts {
-    CourierBriefFacts(project: "chan_p", name: "p", threads: threads, watch: watch, turning: turning, cardItems: cardItems)
-}
-
-private func th(_ id: String, _ status: String?, state: String = "idle", session: String? = nil, at: Double = 10, needs: String? = nil) -> CourierBriefFacts.Thread {
-    .init(id: id, title: "T " + id, state: state, touched: 5, session: session, status: status, statusAt: at, needs: needs)
-}
-
-@MainActor @Suite struct BriefAdapter {
-    @Test func newItemsCallTheModelPathABoardChangeOnlyRebuildsAndATurnEndCallsToo() {
-        let events = RecordingBriefEvents()
-        RouterBriefLink.deliver(CourierBriefChange(items: ["a"], board: ["a", "b"], turnEnded: ["c"]), to: events)
-        #expect(events.calls == ["items a", "items c", "board b"])
-    }
-
-    @Test func theHostsChangesDriveTheEngineAsTheyArrive() async {
-        let events = RecordingBriefEvents()
-        var sink: AsyncStream<CourierBriefChange>.Continuation!
-        let stream = AsyncStream<CourierBriefChange> { sink = $0 }
-        let link = RouterBriefLink()
-        var names: [String: String] = [:]
-        link.onChange = { names = $0.names }
-        link.follow(stream, events: events)
-        sink.yield(CourierBriefChange(items: ["chan_p"], names: ["chan_p": "p"]))
-        sink.yield(CourierBriefChange(board: ["chan_q"]))
-        sink.finish()
-        for _ in 0..<50 where events.calls.count < 2 { await Task.yield() }
-        #expect(events.calls == ["items chan_p", "board chan_q"])
-        #expect(names.isEmpty || names == ["chan_p": "p"])
-    }
-
-    @Test func logItemsMapToTheBriefsKinds() {
-        func ci(_ kind: String, thread: String?, _ content: JSON) -> CourierItem {
-            CourierItem(seq: 7, at: 1, project: "chan_p", thread: thread, kind: kind, id: "k", content: content)
-        }
-        #expect(CourierBriefSource.item(ci("row", thread: nil, ["from": "claude", "text": "done"]))?.kind == .coordinator)
-        #expect(CourierBriefSource.item(ci("row", thread: "t", ["from": "claude", "text": "hi"]))?.kind == .message)
-        let answered = CourierBriefSource.item(ci("answer", thread: "t", ["card": "c", "option": 2, "text": "Blue — replies Blue"]))
-        #expect(answered?.kind == .message && answered?.text == "you answered: Blue — replies Blue" && answered?.thread == "t")
-        let card = CourierBriefSource.item(ci("card", thread: "t", ["kind": "plan", "options": ["Yes", "No"], "answered": false]))
-        #expect(card?.kind == .card && card?.options == ["Yes", "No"] && card?.urgent == true)
-        let status = CourierBriefSource.item(ci("status", thread: "t", ["status": "needs you"]))
-        #expect(status?.status == .needsYou && status?.seq == 7)
-        #expect(CourierBriefSource.item(ci("session", thread: "t", ["state": "stranded"]))?.kind == .stranded)
-    }
-
-    @Test func turningOfAStaleProjectReadsFalse() {
-        let b = CourierBriefSource.board(facts([th("t", "working")], watch: .stale(since: 3), turning: true))
-        #expect(!b.coordinatorTurning)
-        #expect(b.watch == "stale:3.0" && b.threads.first?.asOf == 3)
-    }
-}
-
 @MainActor @Suite struct BriefEntryBuilding {
-    @Test func aPendingCardIsAnEntryWithItsRowKeyAndOptionsAsData() {
-        let b = CourierBriefSource.board(facts([th("t1", "needs you"), th("t2", "working")],
-                                               cardItems: ["t1": .init(key: "row_9", kind: "question", options: ["A", "B"], text: "Which?")]))
-        #expect(b.entries.count == 1)
-        let e = b.entries[0]
-        #expect(e.kind == .question && e.card == "row_9" && e.options == ["A", "B"] && e.question == "Which?" && e.since == 10)
-    }
-
-    @Test func aPermissionAStrandedSessionAndPlainWords() {
-        let b = CourierBriefSource.board(facts([th("p", "needs you", needs: "permission"),
-                                                th("s", "needs you", state: "stranded", session: "cse_1", at: 2),
-                                                th("w", "needs you", at: 5)]))
-        #expect(b.entries.map(\.kind) == [.stranded, .request, .permission])
-        #expect(b.entries[0].source == .local)
-    }
-
     @Test func theModelWritesAPlainWordsQuestionButNeverACardsOptions() {
         var board = BriefBoard(threads: [briefThread("t1", .needsYou), briefThread("t2", .needsYou)])
         board.entries = [
-            BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 5, source: .cloud, question: "Page words?", options: ["A", "B"], card: "row_1"),
-            BriefEntry(project: "p", thread: "t2", kind: .request, state: .needsYou, since: 6, source: .cloud),
+            BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 5, question: "Page words?", options: ["A", "B"]),
+            BriefEntry(project: "p", thread: "t2", kind: .request, state: .needsYou, since: 6),
         ]
         let model = [
-            BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 1, source: .cloud, question: "Model words", options: ["x"]),
-            BriefEntry(project: "p", thread: "t2", kind: .request, state: .needsYou, since: 9, source: .cloud, question: "Ship today?"),
-            BriefEntry(project: "p", thread: "gone", kind: .question, state: .needsYou, since: 1, source: .cloud, question: "Old"),
+            BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 1, question: "Model words", options: ["x"]),
+            BriefEntry(project: "p", thread: "t2", kind: .request, state: .needsYou, since: 9, question: "Ship today?"),
+            BriefEntry(project: "p", thread: "gone", kind: .question, state: .needsYou, since: 1, question: "Old"),
         ]
         let out = RouterBriefEngine.entries(model: model, board: board)
         #expect(out.map(\.thread) == ["t1", "t2"])
-        #expect(out[0].options == ["A", "B"] && out[0].card == "row_1" && out[0].question == "Page words?")
+        #expect(out[0].options == ["A", "B"] && out[0].question == "Page words?")
         #expect(out[1].question == "Ship today?")
     }
 
     @Test func anEntryLeavesOnceItsThreadNoLongerNeedsYou() {
         let board = BriefBoard(threads: [briefThread("t1", .working)])
-        let model = [BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 1, source: .cloud)]
+        let model = [BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 1)]
         #expect(RouterBriefEngine.entries(model: model, board: board).isEmpty)
     }
 
@@ -107,10 +37,9 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         let store = Store()
         store.persists = false
         let briefs = store.routerBriefs
-        briefs.sessions = ["local:cli": "th_1"]
         store.requests["th_1"] = ThreadRequest(id: "r1", threadID: "th_1", body: .question([
             T3Question(demo: "", "Silent?", options: [("Yes", ""), ("No", "")])]))
-        let e = BriefEntry(project: "local:x", thread: "local:cli", kind: .request, state: .needsYou, since: 1, source: .local)
+        let e = BriefEntry(project: "local:x", thread: "th_1", kind: .request, state: .needsYou, since: 1)
         let r = briefs.resolved(e, store: store)
         #expect(r.request?.id == "r1")
         #expect(r.kind == .question && r.question == "Silent?" && r.options == ["Yes", "No"])
@@ -121,7 +50,7 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         store.persists = false
         store.requests["th_1"] = ThreadRequest(id: "r1", threadID: "th_1", body: .approval(
             kind: "command", prompt: "rm -rf build", decisions: ThreadRequest.fallbackDecisions))
-        let e = BriefEntry(project: "local:x", thread: "th_1", kind: .question, state: .needsYou, since: 1, source: .local)
+        let e = BriefEntry(project: "local:x", thread: "th_1", kind: .question, state: .needsYou, since: 1)
         let r = store.routerBriefs.resolved(e, store: store)
         #expect(r.kind == .permission && r.question == "rm -rf build")
         #expect(r.options == ["Allow", "Allow for this session", "Always allow", "Decline"])
@@ -133,7 +62,7 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         store.requests["th_1"] = ThreadRequest(id: "p1", threadID: "th_1", body: .plan(markdown: "# Ship"))
         store.requests["th_2"] = ThreadRequest(id: "r2", threadID: "th_2", body: .question([
             T3Question(demo: "", "Silent?", options: [("Yes", ""), ("No", "")])]), live: false)
-        func entry(_ id: String) -> BriefEntry { BriefEntry(project: "local:x", thread: id, kind: .question, state: .needsYou, since: 1, source: .local) }
+        func entry(_ id: String) -> BriefEntry { BriefEntry(project: "local:x", thread: id, kind: .question, state: .needsYou, since: 1) }
         let plan = store.routerBriefs.resolved(entry("th_1"), store: store)
         #expect(plan.kind == .plan && plan.options == ["Yes, auto-accept", "Yes, manually"])
         let gone = store.routerBriefs.resolved(entry("th_2"), store: store)
@@ -168,7 +97,7 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         var d = BriefDoc(project: id); d.threads = threads; d.needsYou = entries; return d
     }
     private func entry(_ p: String, _ t: String, _ kind: BriefEntry.Kind, since: Double) -> BriefEntry {
-        BriefEntry(project: p, thread: t, kind: kind, state: .needsYou, since: since, source: .cloud)
+        BriefEntry(project: p, thread: t, kind: kind, state: .needsYou, since: since)
     }
 
     @Test func needsYouOldestFirstThenStrandedFinishedNewestWorkingQuiet() {

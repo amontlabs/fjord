@@ -4,7 +4,7 @@ import Foundation
 
 /// The Router's keys in the app window. The brief's own (`BriefKeys`), while an entry is focused and the composer is empty:
 /// Return and Esc; ↑↓ walk its entries and put the keyboard on the brief, where 1–9, O, A and R are its keys too (in the
-/// composer, letters and digits are your words). In the composer: Return sends, ⇧Return starts a new line; with @
+/// composer, letters and digits are your words). In the composer: Return sends (steering a thread that runs), ⌥Return sends to wait for the turn under way, ⇧Return starts a new line; with @
 /// suggestions showing, ↑↓ walk them and Return or Tab picks one; Backspace at the very start takes the reply chip off.
 /// ⌘1–⌘4 pick a place on "Where should this go?". Esc dismisses the suggestions, then drops a proposed project, then the reply
 /// chip; it never closes the window: with nothing left to step out of, it goes on to what has the keyboard. ⌘F opens the
@@ -98,6 +98,12 @@ final class RouterKeys {
             }
             if isReturn, flags == .shift {
                 (responder as? NSTextView)?.insertNewlineIgnoringFieldEditor(nil)
+                return true
+            }
+            if isReturn, flags == .option {
+                // ⌥Return: the words wait for the turn under way instead of steering it.
+                if model.draft.isEmpty || model.answerProposal(store: store) { return true }
+                model.send(store: store, queue: true)
                 return true
             }
             if isReturn, flags.isEmpty {

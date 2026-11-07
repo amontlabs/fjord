@@ -361,13 +361,32 @@ enum Addressing {
     /// `message` with its addressing taken out. `pills`: where its @project pills are (`RouterContext.pills`). `envelope`:
     /// false for a message whose request was already taken out: only the asides go.
     static func edit(_ message: String, pills: [Range<Int>] = [], envelope: Bool = true) throws -> Prepared {
+        try editMapped(message, pills: pills, envelope: envelope).prepared
+    }
+
+    /// `edit`, with where each character that stays was in `message` (`origins[i]` for the edited text's i-th character), so
+    /// what points into the words (a pill's range) can follow them.
+    static func editMapped(_ message: String, pills: [Range<Int>] = [], envelope: Bool = true) throws
+        -> (prepared: Prepared, origins: [Int]) {
         var text = message
-        if envelope, let rest = withoutLeadingPills(message, pills) { text = rest }
-        text = withoutAsides(text)
-        guard text != message else { return Prepared(text: message, original: message, rephrased: false) }
-        while let last = text.last, last.isWhitespace { text.removeLast() }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NothingLeft() }
-        return Prepared(text: text, original: message, rephrased: true)
+        var origins = Array(0..<message.count)
+        if envelope, let rest = withoutLeadingPills(message, pills) {
+            text = rest
+            origins.removeFirst(message.count - rest.count)
+        }
+        var chars = Array(text)
+        for range in asides(chars).reversed() {
+            chars.removeSubrange(range)
+            origins.removeSubrange(range)
+        }
+        text = String(chars)
+        guard text != message else { return (Prepared(text: message, original: message, rephrased: false), Array(0..<message.count)) }
+        while let last = chars.last, last.isWhitespace {
+            chars.removeLast()
+            origins.removeLast()
+        }
+        guard !String(chars).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NothingLeft() }
+        return (Prepared(text: String(chars), original: message, rephrased: true), origins)
     }
 
     /// The pills `text` starts with taken out, each with the spaces, or the colon or dash (and one line break), after it; nil

@@ -281,6 +281,16 @@ enum AppWindowShots {
             model.pointers = [.project(folder)]
             model.draft = "check the failing tests in \(MentionText.markString) and tell me what you find"
         }),
+        // A reply to a thread that is running: the pick line reads "steer … (running)" (⌥Return would queue instead).
+        Shot(name: "router-steer", destination: { _ in .router }, compose: { model, store in
+            let target = BriefTarget(project: "local:lookout", thread: "local_demo-lookout")
+            var doc = BriefDoc(project: target.project)
+            doc.threads = [BriefThread(id: target.thread, title: "Agent completion notifications", status: .working,
+                                       age: Date().timeIntervalSince1970 - 60)]
+            store.routerBriefs.demoDocs[target.project] = doc
+            store.routerBriefs.mentioned = [target]
+            model.draft = "use the staging database instead of production"
+        }),
         // The claude.ai delivery setup: nothing done, partway (Chrome and the host, no tab yet), and everything done.
         setupShot("courier-setup-missing", .aqua, facts: .init(extensionFolder: "/Applications/Fjord.app/Contents/Resources/extension"), health: .init()),
         setupShot("courier-setup-missing-dark", .darkAqua, facts: .init(extensionFolder: "/Applications/Fjord.app/Contents/Resources/extension"), health: .init()),
@@ -431,7 +441,7 @@ enum AppWindowShots {
                  }
                  if stranded, var silo = briefs.demoDocs["chan_demo_silo"] {
                      silo.needsYou = [BriefEntry(project: silo.project, thread: "th_flaky", kind: .stranded, state: .paused,
-                                                 since: Date().timeIntervalSince1970 - 7_200, source: .cloud)]
+                                                 since: Date().timeIntervalSince1970 - 7_200)]
                      briefs.demoDocs["chan_demo_silo"] = silo
                  }
                  if twoQuestions, var request = store.requests[Demo.briefLocalSession], case .question(var questions) = request.body {
@@ -442,9 +452,9 @@ enum AppWindowShots {
                  if permission, var lcu = briefs.demoDocs["local:lcu"] {
                      lcu.now.append("<t id=\"local_demo-ci\">The CI diagnosis</t> waits for a permission.")
                      lcu.threads.append(BriefThread(id: "local_demo-ci", title: "CI failure diagnosis", status: .needsYou,
-                                                    age: Date().timeIntervalSince1970 - 240, source: .local))
+                                                    age: Date().timeIntervalSince1970 - 240))
                      lcu.needsYou.append(BriefEntry(project: lcu.project, thread: "local_demo-ci", kind: .permission, state: .needsYou,
-                                                    since: Date().timeIntervalSince1970 - 240, source: .local))
+                                                    since: Date().timeIntervalSince1970 - 240))
                      briefs.demoDocs["local:lcu"] = lcu
                  }
                  if drawer {

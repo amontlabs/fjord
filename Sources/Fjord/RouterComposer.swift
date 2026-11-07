@@ -131,8 +131,13 @@ struct RouterComposer: View {
             // The threads your words go to.
             ForEach(store.routerBriefs.mentioned, id: \.self) { target in
                 let title = store.routerBriefs.title(target)
-                ComposerChip(symbol: "arrow.right", text: title, tint: CDS.Text.warning,
+                // What Return does to it: starts or continues it ("send to"), steers the turn under way, or (an agent that
+                // can't take words while it works) queues behind it. ⌥Return queues instead.
+                let line = store.pickLine(store.routerBriefs.threadID(target), title: title)
+                ComposerChip(symbol: line.steering ? "arrow.triangle.turn.up.right.diamond" : "arrow.right", text: line.text,
+                             tint: line.steering ? CDS.Text.accent : CDS.Text.warning,
                              removeLabel: "Stop replying to \(title)") { store.routerBriefs.unmention(target) }
+                    .help(line.steering ? "Steers it now and interrupts the tool it is running. ⌥Return waits for the turn instead." : "")
             }
         }
         .padding(CDS.Density.compact.pad.md)
@@ -209,7 +214,7 @@ struct RouterComposer: View {
             let empty = !on || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             GhostIcon(symbol: "arrow.turn.down.left", label: "Send") { model.send(store: store) }
                 .disabled(empty)
-                .tip("Send", model.sendRefused ?? "Return · ⇧Return for a new line")
+                .tip("Send", model.sendRefused ?? "Return · ⌥Return to wait for the turn under way · ⇧Return for a new line")
         }
     }
 

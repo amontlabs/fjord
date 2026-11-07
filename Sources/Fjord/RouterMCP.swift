@@ -493,14 +493,9 @@ final class RouterMCPServer: @unchecked Sendable {
         self.store = store
     }
 
-    /// The messages `prepare` (and `start_session`) made, by the `to` they're for: the next SendMessage there must carry
-    /// exactly that text.
-    var prepared: [String: Prepared] = [:]
-    /// Why a send may no longer go, asked at each of its gates right before it is let through (the approval, the inbox's
-    /// write, the fallback process's permission): a reason stops it. Nil for the Router's own turns.
+    /// Why a send may no longer go, asked right before its `message.dispatch`: a reason stops it. Nil for the Router's own
+    /// turns.
     var deliveryCheck: (@MainActor () -> String?)?
-    /// The text goes exactly as given, with nothing taken out (a continuation Fjord wrote itself).
-    var verbatim = false
     /// Tells the pill what is under way ("opening …"); the dispatcher sets it.
     var stage: ((String) -> Void)?
     /// Told what a Haiku run has shown so far as it streams (`RouterRunLive`), from the reader's thread; the dispatcher sets it.
@@ -542,7 +537,6 @@ final class RouterMCPServer: @unchecked Sendable {
         turnChanges = []
         turnMarked = []
         turnNamed = .init()
-        prepared = [:]
         cancelRuns()
     }
 
@@ -633,12 +627,6 @@ final class RouterMCPServer: @unchecked Sendable {
 
     // MARK: board
 
-    /// The sessions that live processes have registered, read off the main thread.
-    private func peers(_ store: Store) async -> [String: ClaudePeers.Peer] {
-        guard let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true) else { return [:] }
-        return await OffMain.run { Self.localPeers(dir: dir) }
-    }
-
     /// Dates read from disk may be anything: bounded before they're turned into whole seconds.
     private func age(_ date: Date) -> String { ThreadRow.duration(Self.bounded(Date().timeIntervalSince(date))) }
 
@@ -663,12 +651,8 @@ final class RouterMCPServer: @unchecked Sendable {
         return fenced(parts.joined(separator: "\n"), 2000)
     }
 
-    private func sessionFields(_ store: Store, _ session: AgentThread, _ peers: [String: ClaudePeers.Peer]) -> [String: Any] {
-        let peer = peers[session.id]
-        let projectLabel = store.folderName(session.folderKey)
-        let fields: [String: Any] = ["session": session.id, "title": Self.short(session.title), "project": Self.short(projectLabel, 200),
-                "peer": Self.short(peer?.name.isEmpty == false ? peer!.name : session.title), "reachable": peer != nil]
-        return fields
+    private func sessionFields(_ store: Store, _ session: AgentThread) -> [String: Any] {
+        ["session": session.id, "title": Self.short(session.title), "project": Self.short(store.folderName(session.folderKey), 200)]
     }
 
     /// The sessions a message could be for: working ones, then the most recent of the rest.
@@ -682,7 +666,6 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     func board(_ store: Store) async -> String {
-        let peers = await peers(store)
         let briefs = store.routerBriefs
         let entries = briefs.page().entries.map { raw -> [String: Any] in
             let e = briefs.resolved(raw, store: store)
@@ -691,7 +674,7 @@ final class RouterMCPServer: @unchecked Sendable {
                                          "question": Self.fenced(e.question ?? "", 1200), "age": age(Date(timeIntervalSince1970: e.since))]
             if !e.options.isEmpty { fields["options"] = e.options.map { Self.short($0, 300) } }
             if let session = briefs.desktopSession(e.target, store: store), let s = store.threads[session] {
-                fields.merge(sessionFields(store, s, peers)) { a, _ in a }
+                fields.merge(sessionFields(store, s)) { a, _ in a }
             }
             if let request = store.heldRequest(e.target) {
                 if !request.live { fields["expired"] = "T3 restarted since it asked: answer it in T3, or send words instead" }
@@ -711,7 +694,7 @@ final class RouterMCPServer: @unchecked Sendable {
         }
         let (working, recent) = candidates(store)
         let workingRows = working.map { s -> [String: Any] in
-            var fields = sessionFields(store, s, peers)
+            var fields = sessionFields(store, s)
             let activity = store.threadWork[s.id]
             fields["doing"] = Self.short(activity?.text ?? "Working", 300)
             if s.waitsForYou { fields["waitingForUser"] = true }
@@ -719,7 +702,7 @@ final class RouterMCPServer: @unchecked Sendable {
             return fields
         }
         let recentRows = recent.map { s -> [String: Any] in
-            var fields = sessionFields(store, s, peers)
+            var fields = sessionFields(store, s)
             fields["lastActivity"] = age(s.lastActivity) + " ago"
             if let summary = s.latestMessage { fields["summary"] = Self.fenced(summary, 600) }
             return fields
@@ -787,241 +770,8 @@ final class RouterMCPServer: @unchecked Sendable {
         !Addressing.asides(Array(text)).isEmpty
     }
 
-    /// Refuses a message that still holds an aside for the Router (what was said to the Router never goes on).
-    private func noAside(_ text: String) throws {
-        guard !Self.hasRouterAside(text) else {
-            throw Failure("The message still has a part for the Router (@router); nothing was sent")
-        }
-    }
-
-    /// Your words with the addressing taken out (`Addressing`): never a model's rewrite.
-    private func edited(_ message: String, envelope: Bool = true) throws -> Prepared {
-        do {
-            return try Addressing.edit(message, pills: envelope ? turnPills : [], envelope: envelope)
-        } catch let nothing as Addressing.NothingLeft {
-            throw Failure(nothing.localizedDescription)
-        }
-    }
-
-    /// Your message of this turn: what `prepare` and `start_session` send, never the model's words.
-    private func yourMessage() throws -> String {
-        guard let text = turnText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw Failure("There's no message of the user's in this turn to send")
-        }
-        return text
-    }
-
-    /// A session by id, peer name or exact title, and the `to` a message to it takes; `cli`: its Claude Code session id by
-    /// the registry of live processes (nil when it has none, or more than one).
-    private func target(_ store: Store, _ query: String) async throws
-        -> (session: AgentThread, to: String, reachable: Bool, cli: String?) {
-        let titled = store.threads.values.filter { $0.title.lowercased() == query.lowercased() }
-        let known = store.threads[query] ?? (titled.count == 1 ? titled[0] : nil)
-        let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true)
-        let (peers, clis) = await OffMain.run { () -> ([String: ClaudePeers.Peer], [String: Set<String>]) in
-            guard let dir else { return ([:], [:]) }
-            return (Self.localPeers(dir: dir), Self.cliSessions(dir: dir))
-        }
-        guard let session = known
-            ?? ClaudePeers.session(named: query, peers: peers).flatMap({ store.threads[$0] }) else {
-            throw Failure("No session “\(query)”; call board")
-        }
-        let peer = peers[session.id].flatMap { $0.name.isEmpty ? nil : $0.name }
-        let ids = clis[session.id] ?? []
-        await afterLookup?()
-        return (session, peer ?? session.title, peer != nil,
-                ids.count == 1 ? ids.first : nil)
-    }
-
-    /// Claude Code's session ids of the live processes, by desktop session (`hostSessionId` → `sessionId`).
-    nonisolated static func localPeers(dir: URL,
-                                       alive: (Int32) -> Bool = ProcessProbe.alive) -> [String: ClaudePeers.Peer] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        var peers: [String: ClaudePeers.Peer] = [:]
-        for url in files where url.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: url),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let host = object["hostSessionId"] as? String, !host.isEmpty,
-                  let pid = (object["pid"] as? NSNumber)?.int32Value ?? Int32(url.deletingPathExtension().lastPathComponent),
-                  alive(pid) else { continue }
-            peers[host] = ClaudePeers.Peer(name: object["name"] as? String ?? "", pid: pid)
-        }
-        return peers
-    }
-
-    nonisolated static func cliSessions(dir: URL,
-                                        alive: (Int32) -> Bool = ProcessProbe.alive) -> [String: Set<String>] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        var out: [String: Set<String>] = [:]
-        for url in files where url.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: url),
-                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let host = obj["hostSessionId"] as? String, !host.isEmpty,
-                  let cli = obj["sessionId"] as? String, !cli.isEmpty,
-                  let pid = (obj["pid"] as? NSNumber)?.int32Value ?? Int32(url.deletingPathExtension().lastPathComponent),
-                  alive(pid) else { continue }
-            out[host, default: []].insert(cli)
-        }
-        return out
-    }
-
-    /// The Claude Code sessions Fjord's plugin runs in now, read off the main thread.
-    private func pluginSessions(_ store: Store) async -> Set<String> { await pluginSessionIDs(store) }
-
-    func pluginSessionIDs(_ store: Store) async -> Set<String> {
-        guard let paths = store.routerFiles else { return [] }
-        let presence = paths.pluginSessions
-        let registry = paths.claudeDir.appendingPathComponent("sessions", isDirectory: true)
-        // On a queue of its own: a poll must not wait behind Swift's pool when that is busy. A presence file counts only
-        // while Claude Code's registry still has its process for that session (as `Store.sessionsWithPlugin`).
-        return await withCheckedContinuation { done in
-            DispatchQueue.global(qos: .userInitiated).async {
-                done.resume(returning: ClaudePlugin.sessions(in: presence, registry: ClaudePeers.registry(dir: registry)))
-            }
-        }
-    }
-
-    /// Your words go to a session only as your own: signed for Fjord's plugin running in it. No plugin, no
-    /// message. How long a sign waits for the key to be read again (it wasn't cached yet, or the file changed).
-    var keyReloadWait: TimeInterval = 2
-    /// Reads the key again (the store's, by default); tests hold it.
-    var keyReload: (@MainActor () async -> Bool)?
-    /// Lets tests drive the wait boundary without a wall-clock deadline.
-    var keyReloadRace: ((@escaping @MainActor () async -> Void) async -> Void)?
-
-    /// Runs `work`, returning when it's done or at `deadline`, whichever comes first: a stalled `work` is left to finish on
-    /// its own (what it does late is only a cache filled for next time), the caller isn't held by it.
-    private static func race(deadline: TimeInterval, _ work: @escaping @MainActor () async -> Void) async {
-        let once = Once()
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.bounded(deadline)) {
-                if once.claim() { done.resume() }
-            }
-            Task { @MainActor in
-                await work()
-                if once.claim() { done.resume() }
-            }
-        }
-    }
-
     /// A span of seconds made safe to compute with: finite, not negative, at most a year.
     nonisolated static func bounded(_ seconds: TimeInterval) -> TimeInterval {
         seconds.isFinite ? min(max(seconds, 0), 365 * 86_400) : 0
-    }
-
-    /// True for the first caller only.
-    private final class Once: @unchecked Sendable {
-        private let lock = NSLock()
-        private var claimed = false
-        func claim() -> Bool { lock.withLock { defer { claimed = true }; return !claimed } }
-    }
-
-    private func signed(_ store: Store, _ ready: Prepared, title: String, cli: String?, ticket: Ticket,
-                        asleep: Bool = false,
-                        local: String? = nil) async throws -> Prepared {
-        // What the user says to the Router in an @router aside never goes on: if one is still there, nothing is sent. Text
-        // Fjord wrote itself goes as it is.
-        if !verbatim { try noAside(ready.text) }
-        // A session with no process at all is asleep (`prepare`): the app starts it with the message. What reaches here without a
-        // Claude Code id is one the app can't start for us: two processes claim it, or the app has no id for it yet.
-        guard let cli else { throw Failure("“\(title)” isn't running in the Claude app, or two processes claim it; nothing was sent") }
-        // What your message tags goes after your words, fenced: Fjord's, never inside them, and never read for an
-        // aside (checked above on your words alone).
-        let body = verbatim ? ready.text : RouterPointers.attach(tagged, to: ready.text)
-        guard store.routerPluginStatus == .installed else {
-            throw Failure("Fjord's plugin isn't installed in Claude Code, so nothing can be sent (Settings → Router)")
-        }
-        // A session that runs must have the plugin up, or it would read the message as a peer's; a sleeping one loads the plugin as
-        // it starts.
-        if !asleep {
-            guard await pluginSessions(store).contains(cli) else {
-                throw Failure("\(title) started before Fjord's plugin was installed: restart it or run /reload-plugins in it")
-            }
-        }
-        var text = store.signRelay(body: body, target: cli)
-        if text == nil {
-            // Not cached yet, or the file changed: read it again (bounded), and sign once more if this is still the turn.
-            let reload = keyReload ?? { [weak store] in await store?.reloadRelayKey() ?? false }
-            let reloadWork: @MainActor () async -> Void = { _ = await reload() }
-            if let keyReloadRace { await keyReloadRace(reloadWork) }
-            else { await Self.race(deadline: keyReloadWait, reloadWork) }
-            try live(ticket)
-            text = store.signRelay(body: body, target: cli)
-        }
-        guard let text else {
-            throw Failure("Fjord couldn't sign the message (its plugin key is missing); nothing was sent")
-        }
-        var out = ready
-        out.body = ready.text
-        out.text = text
-        out.local = local
-        out.asleep = asleep
-        return out
-    }
-
-    func prepare(_ store: Store, session query: String, ticket: Ticket) async throws -> String {
-        let message = try yourMessage()
-        let (session, to, reachable, found) = try await target(store, query)
-        var cli = found
-        // Still this turn's call (a late one from an earlier turn changes nothing), then: a new preparation replaces the old
-        // one, which is void even if this one fails.
-        try live(ticket)
-        // A local session with no process at all (not two claiming it) is asleep: the app starts it with the message, so there is
-        // no plugin presence to look for before it goes (`signed`).
-        var asleep = false
-        // T3's threads have no Claude Code process for the plugin to wake: sending to them is T3's, in a later step.
-        _ = reachable
-        prepared[to] = nil
-        let ready = verbatim ? Prepared(text: message, original: message, rephrased: false) : try edited(message)
-        let sealed = try await signed(store, ready, title: session.title, cli: cli,
-                                      ticket: ticket, asleep: asleep, local: session.id)
-        try live(ticket)
-        prepared[to] = sealed
-        return Self.json(["to": to, "text": sealed.text, "rephrased": ready.rephrased])
-    }
-
-    /// Claude Code asks before a SendMessage runs (the native permission prompt, answered over stdin): only the
-    /// text prepared for that target in this turn goes, once, with no field of its own added. Nil allows; else why not.
-    func approveSend(_ input: [String: String], otherFields: [String]) -> String? {
-        guard !Task.isCancelled else { return "Stopped; nothing was sent" }
-        guard turnText != nil else { return "Only the user's messages are sent" }
-        // Switched off, and the switch not seen yet: nothing goes, nothing is used up.
-        guard let store, store.router.enabled, store.agents.enabled else { return "The Router is off" }
-        // What the send was for may be over by now (a wait handled, the session going on).
-        if let refusal = deliveryCheck?() { return refusal }
-        guard otherFields.isEmpty else { return "Unexpected fields: \(otherFields.joined(separator: ", ")). Send only `to` and `message`" }
-        // What Claude Code adds itself (a preview, the kind of recipient) is checked against the message; nothing else.
-        let known: Set<String> = ["to", "message", "summary", "content", "type", "recipient", "recipient_kind"]
-        let extra = Set(input.keys).subtracting(known).sorted()
-        guard extra.isEmpty else { return "Unexpected fields: \(extra.joined(separator: ", ")). Send only `to` and `message`" }
-        guard let to = input["to"], let message = input["message"] else { return "Send `to` and `message`" }
-        guard let ready = prepared[to] else { return "Not prepared: call prepare for \(to) first" }
-        guard Self.sameBytes(ready.text, message) else {
-            return "That isn't the prepared text: send exactly the `text` prepare returned"
-        }
-        guard input["recipient"].map({ $0 == to }) ?? true, input["type"].map({ $0 == "message" }) ?? true,
-              input["recipient_kind"].map({ ["name", "session", "main", "agent"].contains($0) }) ?? true,
-              input["summary"].map({ Self.preview($0, of: Self.summary(of: message)) }) ?? true,
-              input["content"].map({ Self.preview($0, of: message) }) ?? true else {
-            return "The call doesn't match the prepared message"
-        }
-        prepared[to] = nil
-        return nil
-    }
-
-    /// The summary Claude Code derives from a message (2.1.293): the trimmed message's first line, trimmed. It cuts it at
-    /// 200 characters with "…", which `preview` allows.
-    nonisolated static func summary(of message: String) -> String {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let first = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        return first.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// `given` is `full`, or its start cut with "…" (how Claude Code shortens a preview): nothing of anyone else's.
-    nonisolated static func preview(_ given: String, of full: String) -> Bool {
-        if given == full { return true }
-        guard given.hasSuffix("…") else { return false }
-        let stem = String(given.dropLast())
-        return !stem.isEmpty && stem.count < full.count && full.hasPrefix(stem)
     }
 }

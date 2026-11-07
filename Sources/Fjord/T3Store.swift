@@ -245,8 +245,8 @@ final class T3Store {
     }
 
     @discardableResult
-    func send(_ command: T3Command) async throws -> T3DispatchResult {
+    func send(_ command: T3Command, commandId: String = UUID().uuidString.lowercased()) async throws -> T3DispatchResult {
         guard let client else { throw T3Error(kind: .disconnected, message: "Not connected") }
-        return try await client.dispatch(command)
+        return try await client.dispatch(command, commandId: commandId)
     }
 }

@@ -223,8 +223,47 @@ private struct HistoryLine: View {
     let toggle: () -> Void
     @Environment(\.briefReply) private var reply
     @State private var hover = false
+    /// Editing a queued message's words in place.
+    @State private var editing = false
+    @State private var editText = ""
+    @FocusState private var editFocused: Bool
+
+    /// The decision this line is about, and what changing your mind can do to it now.
+    private var entry: RouterDecision? { line.decision.flatMap { store.router.record($0) } }
+    private var mind: Store.ChangeOfMind { entry.map { store.changeOfMind($0) } ?? .none }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            lineButton
+            if editing, case .cancelAndEdit = mind { editor }
+        }
+        // The message left the queue (it started, or was cancelled) while it was being edited.
+        .onChange(of: mind) { if case .cancelAndEdit = mind {} else { editing = false } }
+    }
+
+    /// The queued message's words, changed in place: Return saves them, Esc leaves them be.
+    private var editor: some View {
+        HStack(spacing: 6) {
+            TextField("Your words", text: $editText)
+                .textFieldStyle(.plain).font(CDS.sans(12.5)).focused($editFocused)
+                .onSubmit { save() }
+                .onExitCommand { editing = false }
+                .padding(.horizontal, 6).frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(CDS.alpha(0.07)))
+            small("Save") { save() }
+            small("Leave") { editing = false }
+        }
+        .padding(.leading, 24).padding(.trailing, 6)
+    }
+
+    private func save() {
+        guard let id = line.decision else { return }
+        let words = editText
+        editing = false
+        Task { await store.editQueued(id, to: words) }
+    }
+
+    @ViewBuilder private var lineButton: some View {
         let briefs = store.routerBriefs
         // A line with nothing to say under it (a change) keeps its button on its one line.
         let sub = line.target != nil || line.project != nil || statusWord != nil
@@ -242,7 +281,7 @@ private struct HistoryLine: View {
                     if let target = line.target {
                         let state = BriefSpanState.of(target, store: store)
                         Image(systemName: state.symbol).font(.system(size: 8, weight: .semibold)).foregroundStyle(state.tint)
-                        Text(briefs.docs[target.project]?.thread(target.thread)?.title.nonEmpty ?? (target.thread == BriefDoc.coordinator ? briefs.title(target) : "a thread")).font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
+                        Text(briefs.docs[target.project]?.thread(target.thread)?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
                             .lineLimit(1)
                         Text(briefs.projectName(target.project)).font(CDS.sans(11)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
                     } else if let project = line.project {
@@ -280,6 +319,18 @@ private struct HistoryLine: View {
             small("Revert") { store.revertFjordChange(change.id) }
         case .change(let change) where change.pending != nil:
             Text("waits for Apply").font(CDS.sans(11)).foregroundStyle(CDS.Text.warning).lineLimit(1).fixedSize()
+        case .message(let status) where !status.failed && mind != .none:
+            switch mind {
+            case .cancelAndEdit:
+                small("Edit") { editText = entry?.delivered?.editedTo ?? line.text; editing = true; editFocused = true }
+                small("Cancel") { if let id = line.decision { Task { await store.cancelQueued(id) } } }
+            case .stop:
+                small("Stop") { if let id = line.decision { Task { await store.stopRun(id) } } }
+            case .none:
+                EmptyView()
+            }
+        case .message(let status) where status == .cancelled && (entry?.delivered).map({ store.queueHeld($0.thread) }) == true:
+            small("Resume queue") { if let thread = entry?.delivered?.thread { Task { await store.resumeQueue(thread) } } }
         case .message(let status) where status.failed:
             small("Send again") {
                 if let target = line.target { store.routerBriefs.send(line.text, to: target, store: store) } else { _ = store.sendToRouter(line.text) }
@@ -301,7 +352,7 @@ private struct HistoryLine: View {
         case .message(let s):
             switch s {
             case .sending: ("sending", CDS.Text.muted)
-            case .delivered: ("delivered", CDS.Text.muted)
+            case .delivered: Self.deliveredWord(entry?.delivered, store: store)
             case .asked: ("asked where", CDS.Text.warning)
             case .failed: ("didn't go", CDS.Text.danger)
             case .cancelled: ("cancelled", CDS.Text.muted)
@@ -309,6 +360,16 @@ private struct HistoryLine: View {
             }
         case .answer: ("answered", CDS.Text.muted)
         case .change(let c): c.isReverted ? ("reverted", CDS.Text.muted) : nil
+        }
+    }
+
+    /// Where a delivered message stands in its thread: waiting its turn (and where), in a turn under way, or delivered.
+    private static func deliveredWord(_ sent: RouterDecision.Delivered?, store: Store) -> (String, Color) {
+        guard let sent else { return ("delivered", CDS.Text.muted) }
+        switch store.delivery(sent) {
+        case .queued(_, let position): return ("queued (\(position))", CDS.Text.warning)
+        case .working: return (sent.outcome == .steered ? "steered · can't be taken back" : "running", CDS.Text.muted)
+        case .over, .unknown: return (sent.outcome == .queued ? "sent after its turn" : "delivered", CDS.Text.muted)
         }
     }
 

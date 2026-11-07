@@ -1,6 +1,0 @@
-{
-  "name": "fjord",
-  "owner": { "name": "Fjord" },
-  "description": "Fjord's own plugin, kept by the Fjord app.",
-  "plugins": [{ "name": "fjord", "source": "./", "description": "Delivers what you send from Fjord's Router to this session as your own words." }]
-}

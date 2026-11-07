@@ -405,46 +405,23 @@ private struct RouterSettings: View {
         SettingsRow("Router",
                     description: needsClaude ? "Needs T3 Code" : nil,
                     adornment: SettingsView.toolMark(.router),
-                    info: ("Router", "Shows what your Claude Code sessions are doing, what is waiting on you and what is done, and answers their questions, permissions and plans here. Each message you send runs on its own: rules first, then Jev (TypeSafe's classifier, if a key is set) picks where it goes, and a short Haiku run only changes Fjord or answers a question. Messages reach your sessions through Fjord's Claude Code plugin. Every run is logged in the Router's history. The Router never acts on GitHub. Turning the Router off removes the plugin. \(store.shortcut(.router).display) opens it.")) {
+                    info: ("Router", "Shows what your Claude Code sessions are doing, what is waiting on you and what is done, and answers their questions, permissions and plans here. Each message you send runs on its own: rules first, then Jev (TypeSafe's classifier, if a key is set) picks where it goes, and a short Haiku run only changes Fjord or answers a question. Your words reach a thread as one message to T3: they steer a running thread (⌥Return queues them instead), and you can cancel or edit one that waits. Every run is logged in the Router's history. The Router never acts on GitHub. \(store.shortcut(.router).display) opens it.")) {
             SettingsSwitch("Router", isOn: Binding(get: { store.router.enabled }, set: { store.setTool(.router, on: $0) }))
                 .disabled(needsClaude)
         }
         .id(SettingsView.routerID)
-        // Off, but taking the plugin out failed: that stays in sight, with a way to try again.
-        if !store.router.enabled, let error = store.routerRemovalError {
-            SettingsRow(nil, description: "Couldn't take the Router out of Claude Code: \(error)", descriptionColor: CDS.Text.danger) {
-                ActionButton("Try again") { store.retryRouterRemoval() }
-            }
-            .onAppear { Announce.say("Couldn't take the Router out of Claude Code") }
-        }
         if store.router.enabled {
             SettingsRail {
                 VStack(alignment: .leading, spacing: 6) {
-                    let plugin = Self.pluginLine(store.routerPluginStatus, error: store.routerPluginError)
-                    SettingsStatusLine(text: plugin.0, color: plugin.1)
-                    SettingsStatusLine(text: claudeCodeStatus.0, color: claudeCodeStatus.1)
+                    if let missing = claudeCodeStatus { SettingsStatusLine(text: missing.0, color: missing.1) }
                 }
             }
         }
     }
 
-    /// Fjord's Claude Code plugin, which makes your words arrive in a session as yours.
-    private static func pluginLine(_ status: ClaudePluginInstaller.Status?, error: String?) -> (String, Color) {
-        if let error { return ("Fjord's Claude Code plugin: \(error)", Theme.red) }
-        return switch status {
-        case .installed: ("Fjord's Claude Code plugin: installed: your messages reach sessions as yours. Sessions already "
-                          + "open pick it up when restarted (or /reload-plugins).", Theme.green)
-        case .outdated: ("Fjord's Claude Code plugin: update needed (Claude Code has an older copy): updating. Sessions already "
-                         + "open pick it up when restarted (or /reload-plugins).", Theme.amber)
-        case .notInstalled: ("Fjord's Claude Code plugin isn't installed: messages can't reach sessions", Theme.amber)
-        case .noClaudeCode: ("Fjord's Claude Code plugin needs Claude Code, which comes with the Claude desktop app", Theme.amber)
-        case nil: ("Fjord's Claude Code plugin will be installed", Theme.tertiary)
-        }
-    }
-
-    private var claudeCodeStatus: (String, Color) {
-        if let found = store.routerStatus.claudeCode { return ("Claude Code \(found.version), from the Claude app", Theme.tertiary) }
-        return ("Claude Code not found: it comes with the Claude desktop app", Theme.amber)
+    /// Said only when it is missing: the briefs and the Router's answers run on the `claude` command.
+    private var claudeCodeStatus: (String, Color)? {
+        store.routerStatus.claudeCode == nil ? ("Claude Code (`claude`) not found: the Router's briefs and answers need it", Theme.amber) : nil
     }
 
     /// Whether Jev labels the inbox's new comments and rates its review requests (InboxJev.swift), which sends them to TypeSafe.
@@ -1135,36 +1112,6 @@ struct SettingsStatusLine: View {
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 2.5 }
                 .accessibilityHidden(true)
             Text(text).cdsText(comfy.footnote, .regular, ink).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-extension Store {
-    /// With the Router off, why taking its hook or plugin out of Claude Code failed (nil when it didn't).
-    var routerRemovalError: String? {
-        guard !router.enabled else { return nil }
-        return routerPluginError
-    }
-
-    /// Takes the plugin out again (after a failure, with the Router off), off the main thread, after any switch
-    /// still under way; the errors clear when it works.
-    func retryRouterRemoval() {
-        guard !router.enabled, let paths = routerFiles else { return }
-        let runner = routerPluginRunner ?? (UnderTest.isRunning ? nil : ClaudePluginInstaller.processRunner)
-        let findBinary = routerClaudeBinary
-            ?? { RouterStatus.findDefault() }
-        let version = ClaudePlugin.version(app: routerAppVersion)
-        let previous = routerInstallWork
-        routerInstallWork = Task { [weak self] in
-            await previous?.value
-            guard let self, !self.router.enabled else { return }
-            guard let runner else { return }
-            let plugin = await Task.detached(priority: .utility) {
-                Store.switchPlugin(on: false, install: true, paths: paths, version: version, binary: findBinary(), run: runner)
-            }.value
-            guard !self.router.enabled else { return }
-            if self.routerPluginStatus != plugin.0 { self.routerPluginStatus = plugin.0 }
-            if self.routerPluginError != plugin.1 { self.routerPluginError = plugin.1 }
         }
     }
 }

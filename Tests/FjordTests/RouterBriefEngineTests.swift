@@ -18,7 +18,6 @@ final class FakeBriefSource: BriefSource, @unchecked Sendable {
         }
     }
 
-    func setTurning(_ project: String, _ on: Bool) { lock.withLock { boards[project, default: BriefBoard()].coordinatorTurning = on } }
     func setThreads(_ project: String, _ t: [BriefThread]) { lock.withLock { boards[project, default: BriefBoard()].threads = t } }
     func count(_ project: String) -> Int { lock.withLock { log[project]?.count ?? 0 } }
 
@@ -79,42 +78,6 @@ let askAnswer = #"{"now":["Waiting on you."],"needs_you":[{"thread":"t1","kind":
         let engine = makeEngine(src, model)
         engine.itemsChanged("p"); await engine.idle()
         #expect(!model.contexts[0].contains("sk-abcdef") && model.contexts[0].contains("[redacted]"))
-    }
-
-    @Test func theTriggerTable() {
-        func item(_ k: BriefItem.Kind, _ s: ThreadState? = nil) -> BriefItem { BriefItem(seq: 1, id: "x", at: 0, kind: k, status: s) }
-        typealias E = RouterBriefEngine
-        #expect(E.trigger([], coordinatorTurning: false) == .none)
-        #expect(E.trigger([item(.status, .needsYou)], coordinatorTurning: true) == .now)
-        #expect(E.trigger([item(.card)], coordinatorTurning: true) == .now)
-        #expect(E.trigger([item(.stranded)], coordinatorTurning: true) == .now)
-        #expect(E.trigger([item(.message)], coordinatorTurning: true) == .wait)
-        #expect(E.trigger([item(.coordinator), item(.status, .done)], coordinatorTurning: true) == .wait)
-        #expect(E.trigger([item(.message)], coordinatorTurning: false) == .now)
-    }
-
-    @Test func otherItemsWaitForTheCoordinatorsTurnAndLandInOneCall() async {
-        let src = FakeBriefSource(), model = FakeBriefModel()
-        let engine = makeEngine(src, model)
-        src.setTurning("p", true)
-        src.post("p", id: "m1", kind: .message, text: "a")
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(model.contexts.isEmpty)
-        src.post("p", id: "c1", kind: .coordinator, text: "b")
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(model.contexts.isEmpty)
-        src.setTurning("p", false)
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(model.contexts.count == 1 && model.contexts[0].contains("a") && model.contexts[0].contains("b"))
-    }
-
-    @Test func aNeedsYouStatusCallsAtOnceEvenMidTurn() async {
-        let src = FakeBriefSource(), model = FakeBriefModel()
-        let engine = makeEngine(src, model)
-        src.setTurning("p", true)
-        src.post("p", id: "s1", kind: .status, thread: "t1", status: .needsYou)
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(model.contexts.count == 1)
     }
 
     @Test func itemsDuringACallMarkItDirtyAndOneCallFollows() async {

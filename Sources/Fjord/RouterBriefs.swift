@@ -4,8 +4,8 @@ import Observation
 
 // The briefs in the app (docs/design/router-watch-and-briefs.md 3.5, 4 and 5): the engine's documents (or a demo's), the
 // page they make (`BriefPage`, ordered as in 4), what you focus and pick, and the acts: an option answered by Return, your
-// words sent to the thread, Open, mark read, archive. A waiting request is answered through T3 (on this Mac or a
-// remote computer). Mark read and archive are Fjord changes with a Revert (`FjordChange.briefAction`); the marks, and which
+// words sent to the thread, Open, mark read, archive. A waiting request is answered through T3. The facts are T3's threads
+// (T3BriefSource.swift) and Fjord's own log of what happened (BriefLog.swift). Mark read and archive are Fjord changes with a Revert (`FjordChange.briefAction`); the marks, and which
 // finished threads were told, are kept in briefs.db.
 
 /// An answer you gave from the brief, one line in the drawer (an answer can't be taken back).
@@ -93,8 +93,8 @@ struct BriefPage: Equatable {
         return BriefPage(lead: lead, sections: Array(shown), folded: sections.dropFirst(cap).map(\.0.name), needsYou: count)
     }
 
-    /// A project with no name on the Board: a local folder's (`local:<name>`), else its id.
-    static func fallbackName(_ id: String) -> String { id.hasPrefix("local:") ? String(id.dropFirst(6)) : id }
+    /// A project T3 has no name for here: its id.
+    static func fallbackName(_ id: String) -> String { id }
 
     /// Every entry in page order: what ↑↓ walk.
     var entries: [BriefEntry] { sections.flatMap(\.entries) }
@@ -147,9 +147,6 @@ enum BriefKeys {
     var demoGeneral = GeneralBrief()
     var demoVersions: [String: [BriefVersion]] = [:]
     var names: [String: String] = [:]
-    /// A local thread's session key on the Board, and that key's Claude Code session id.
-    var sessions: [String: String] = [:]
-    var clis: [String: String] = [:]
 
     /// The threads your words go to, in the order picked: a click on the brief (or Reply in the palette) picks one alone,
     /// a ⌘-click adds one or takes it off. The composer's chips show them; Backspace at its start takes the last off, Esc
@@ -227,7 +224,13 @@ enum BriefKeys {
     /// The page's clock (a shot pins it).
     @ObservationIgnored var clock: () -> Date = Date.init
 
-    @ObservationIgnored let link = RouterBriefLink()
+    /// Fjord's log of what happened, what it last saw of each thread, and the boards the engine was last told of.
+    @ObservationIgnored private var log: BriefLog?
+    @ObservationIgnored private var seen: [String: BriefThreadFacts] = [:]
+    @ObservationIgnored private var lastBoards: [String: BriefBoard] = [:]
+    @ObservationIgnored private var engineStarted = false
+    /// T3 stopped answering at this time (`watch: "stale:"`).
+    @ObservationIgnored private var downSince: Double?
 
     var docs: [String: BriefDoc] { engine?.docs ?? demoDocs }
     var general: GeneralBrief { engine?.general ?? demoGeneral }
@@ -239,37 +242,86 @@ enum BriefKeys {
 
     // MARK: Start
 
-    /// Starts the engine on the link's host, with the Router on: `briefs.db` next to router.db, the host's changes driving it.
+    /// Creates the engine with the Router on: `briefs.db` in Fjord's Application Support. It starts with the first word from T3
+    /// (`threadsChanged`, or `connectionChanged` when T3 gives none), when the threads it reads exist.
     func start(store: Store) {
-        guard engine == nil, store.routerOn, let host = store.routerCourierLink.host else { return }
-        let path = URL(fileURLWithPath: host.dbPath).deletingLastPathComponent().appendingPathComponent("briefs.db").path
-        guard let db = try? SQLiteBriefStore(path: path) else { return }
-        let engine = RouterBriefEngine(source: CourierBriefSource(host: host), store: db, model: RouterBriefer.haiku(store: store),
+        guard engine == nil, store.routerOn, !Store.isDemo, let paths = store.routerFiles else { return }
+        try? FileManager.default.createDirectory(at: paths.support, withIntermediateDirectories: true)
+        let path = paths.support.appendingPathComponent("briefs.db").path
+        guard let db = try? SQLiteBriefStore(path: path), let log = try? BriefLog(path: path) else { return }
+        self.log = log
+        seen = log.seen()
+        let source = T3BriefSource(log: log, boards: { [weak self] in self?.currentBoards() ?? [:] })
+        let engine = RouterBriefEngine(source: source, store: db, model: RouterBriefer.haiku(store: store),
                                        style: { [weak store] in store?.routerStyle ?? RouterStyle.defaultText })
         self.engine = engine
         marks = engine.marks()
         engine.onDocs = { [weak self] in self?.docsChanged() }
-        link.onChange = { [weak self, weak store] change in
-            guard let self else { return }
-            if self.names != change.names { self.names = change.names }
-            if self.sessions != change.sessions { self.sessions = change.sessions }
-            if let clis = store?.routerCourierLink.localCLI, self.clis != clis { self.clis = clis }
-        }
-        link.follow(host.briefChanges, events: engine)
-        Task { [weak self] in
-            let facts = await host.allBriefFacts()
-            self?.names = facts.mapValues(\.name)
-            engine.start()
-        }
+        if !store.threads.isEmpty { threadsChanged(store: store) }
     }
 
     /// The Router switched on or off: the engine runs only while it is on (no model call with it off).
     func switched(store: Store) {
         if store.routerOn {
-            if let engine { engine.start() } else { start(store: store) }
+            if let engine { engine.start(); engineStarted = true } else { start(store: store) }
         } else {
             engine?.stop()
         }
+    }
+
+    // MARK: Feeding from T3
+
+    /// The boards from the threads and requests now.
+    private func currentBoards() -> [String: BriefBoard] {
+        guard let store else { return [:] }
+        return T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince,
+                                    now: clock())
+    }
+
+    /// The shell changed: what happened to each thread since the log last saw it is logged, project names follow, and the
+    /// engine hears of the projects with new items (a call) or another board (the deterministic part only).
+    func threadsChanged(store: Store) {
+        guard let engine, let log else { return }
+        let now = clock()
+        let boards = T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince, now: now)
+        var named = names
+        for t in store.threads.values where boards[t.projectID] != nil { named[t.projectID] = store.folderName(t.folderKey) }
+        if named != names { names = named }
+        var itemProjects = Set<String>()
+        for t in store.threads.values {
+            let facts = BriefThreadFacts(t)
+            let old = seen[t.id]
+            guard facts != old else { continue }
+            for item in BriefLog.events(old: old, thread: t, now: now.timeIntervalSince1970) where log.append(item, project: t.projectID) {
+                itemProjects.insert(t.projectID)
+            }
+            seen[t.id] = facts
+            log.setSeen(t.id, facts)
+        }
+        let before = lastBoards
+        lastBoards = boards
+        guard engineStarted else { engineStarted = true; engine.start(); return }
+        for p in itemProjects.sorted() { engine.itemsChanged(p) }
+        for p in Set(boards.keys).union(before.keys).subtracting(itemProjects).sorted() where boards[p] != before[p] { engine.boardChanged(p) }
+    }
+
+    /// A thread's projection showed a request or plan that waits on you: logged once (by its id), with its words and options.
+    func requestAppeared(_ request: ThreadRequest, store: Store) {
+        guard let log, let thread = store.threads[request.threadID] else { return }
+        if log.append(BriefLog.request(request, title: thread.title, at: clock().timeIntervalSince1970), project: thread.projectID) {
+            engine?.itemsChanged(thread.projectID)
+        }
+    }
+
+    /// T3 answered, or stopped answering: the boards say since when, and the briefs start at the first word either way.
+    func connectionChanged(_ state: T3ConnectionState, store: Store) {
+        switch state {
+        case .connected: downSince = nil
+        case .connecting: return
+        default: if downSince == nil { downSince = clock().timeIntervalSince1970 }
+        }
+        if engine != nil, !engineStarted, state != .connected { engineStarted = true; engine?.start() }
+        threadsChanged(store: store)
     }
 
     // MARK: Count and banners
@@ -313,27 +365,18 @@ enum BriefKeys {
 
     // MARK: Entries
 
-    /// A local thread's Claude Code session id, as the Courier's board knows it (T3's threads carry none).
-    func cli(_ t: BriefTarget, store: Store) -> String? {
-        if let key = sessions[t.thread], let cli = clis[key] { return cli }
-        return nil
-    }
-
-    /// The T3 thread id a brief target stands for: the Courier's session key of a local thread, else the id itself.
-    func threadID(_ t: BriefTarget) -> String { sessions[t.thread] ?? t.thread }
+    /// The T3 thread id a brief target stands for.
+    func threadID(_ t: BriefTarget) -> String { t.thread }
 
     /// The T3 thread a brief entry is about, when Fjord lists it.
     func desktopSession(_ t: BriefTarget, store: Store) -> String? {
         store.threads[threadID(t)] != nil ? threadID(t) : nil
     }
 
-    /// What T3 says a local entry's thread waits on you for.
-    func request(_ e: BriefEntry, store: Store) -> ThreadRequest? {
-        guard e.source == .local else { return nil }
-        return store.heldRequest(e.target)
-    }
+    /// What T3 says an entry's thread waits on you for.
+    func request(_ e: BriefEntry, store: Store) -> ThreadRequest? { store.heldRequest(e.target) }
 
-    /// An entry as acted on: a local one with its request, T3's question and options, a permission's buttons, a plan's two
+    /// An entry as acted on: with its request, T3's question and options, a permission's buttons, a plan's two
     /// yeses. A request T3 can no longer take an answer for says so and offers no buttons.
     func resolved(_ e: BriefEntry, store: Store) -> BriefEntry {
         guard let request = request(e, store: store) else { return e }
@@ -390,7 +433,6 @@ enum BriefKeys {
     }
 
     func title(_ t: BriefTarget) -> String {
-        if t.thread == BriefDoc.coordinator { return "The project's coordinator" }
         return docs[t.project]?.thread(t.thread)?.title.nonEmpty ?? "Untitled thread"
     }
 
@@ -449,45 +491,27 @@ enum BriefKeys {
             answerRequest(request, entry: e, option: n, words: nil, store: store)
             return true
         }
-        guard let card = e.card else {  // a question asked in words: the option's words are your reply
-            picked[t] = nil
-            return send(label, to: t, store: store)
-        }
+        // A question asked in words: the option's words are your reply.
         picked[t] = nil
-        let pills = store.routerCourier
-        let shown = names[t.project]
-        begin(t) { [weak self] in
-            let id = await pills.answer(project: t.project, thread: t.thread, card: card, option: n, label: label, shown: shown)
-            await self?.follow(id, t, pills: pills, words: label)
-        }
-        return true
+        return send(label, to: t, store: store)
     }
 
     /// Your words to the thread: explicit target. A thread whose request T3 can take an answer for gets them as its answer
-    /// (see `answerRequest`); a local thread with none gets them as a reply through the Router's dispatcher, as the
-    /// composer's reply did.
+    /// (see `answerRequest`); a thread with none gets them as a reply through the Router's dispatcher, as the composer's
+    /// reply did.
     @discardableResult
-    func send(_ words: String, to t: BriefTarget, store: Store) -> Bool {
+    func send(_ words: String, to t: BriefTarget, store: Store, queue: Bool = false) -> Bool {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !answering.contains(t) else { return false }
         if let e = entry(t, store: store), let request = request(e, store: store), request.live {
             answerRequest(request, entry: e, option: nil, words: text, store: store)
             return true
         }
-        if t.project.hasPrefix("local:") {
-            guard store.sendToRouter(text, context: RouterContext(replyTo: t)) else {
-                trouble[t] = "This session can't be reached from here: answer it in the Claude app."
-                return false
-            }
-            return true
-        }
-        let pills = store.routerCourier
-        let shown = names[t.project]
-        let entry = docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true
-        begin(t) { [weak self] in
-            let to: RouterCourier.Target = t.thread == BriefDoc.coordinator ? .project(t.project) : .thread(project: t.project, thread: t.thread)
-            let id = await pills.send(text, to: to, shown: shown)
-            await self?.follow(id, t, pills: pills, words: entry ? text : nil)
+        var context = RouterContext(replyTo: t)
+            context.queue = queue
+            guard store.sendToRouter(text, context: context) else {
+            trouble[t] = "This thread can't be reached from here: answer it in T3."
+            return false
         }
         return true
     }
@@ -505,20 +529,6 @@ enum BriefKeys {
     /// Waits for every answer under way (tests).
     func settled() async {
         while let (_, task) = work.first { await task.value }
-    }
-
-    /// Follows an answer handed over until it is delivered or fails: delivered, its line goes in the drawer (`words`).
-    private func follow(_ id: Int, _ t: BriefTarget, pills: RouterCourierPills, words: String?) async {
-        guard id > 0 else { trouble[t] = "The answer couldn't be handed over."; return }
-        sending[t] = id
-        let done = await pills.next(id) { [.delivered, .deliveredLate, .failed, .refused].contains($0) }
-        guard sending[t] == id else { return }
-        sending[t] = nil
-        if let done, done.state == .failed || done.state == .refused {
-            trouble[t] = done.cause ?? "The answer didn't go."
-        } else if done != nil, let words {
-            record(t, words)
-        }
     }
 
     /// A request of several questions, one choice each (a multiple choice's several): every answer goes at once, as T3's own
@@ -599,22 +609,11 @@ enum BriefKeys {
         }
     }
 
-    /// Opens the thread: a cloud thread in a new active tab, a local one in T3 Code. Whether there was one to open.
+    /// Opens the thread in T3 Code. Whether there was one to open.
     @discardableResult
     func open(_ t: BriefTarget, store: Store) -> Bool {
-        if let session = desktopSession(t, store: store) { return store.openThread(session) }
-        let page = "https://claude.ai/code/project/\(t.project)" + (t.thread == BriefDoc.coordinator ? "" : "?thread=\(t.thread)")
-        guard !t.project.hasPrefix("local:"), let url = URL(string: page)
-        else { return false }
-        guard !UnderTest.refuses("Chrome") else { return true }
-        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") {
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: config)
-        } else {
-            NSWorkspace.shared.open(url)
-        }
-        return true
+        guard let session = desktopSession(t, store: store) else { return false }
+        return store.openThread(session)
     }
 
     /// Marks the entry read: a change of Fjord's, with its Revert in the drawer.
@@ -650,6 +649,11 @@ enum BriefKeys {
     }
 
     func record(_ t: BriefTarget, _ words: String) {
+        if let log {
+            let item = BriefItem(seq: 0, id: "answer:\(UUID().uuidString)", at: clock().timeIntervalSince1970, kind: .message, thread: t.thread,
+                                 text: "you answered: " + words)
+            if log.append(item, project: t.project) { engine?.itemsChanged(t.project) }
+        }
         answers.insert(BriefAnswer(target: t, title: title(t), words: words, at: clock()), at: 0)
         if answers.count > 100 { answers.removeLast(answers.count - 100) }
     }

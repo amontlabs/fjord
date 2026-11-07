@@ -7,7 +7,7 @@ import Foundation
 extension Demo {
     enum BriefVariant { case home, stale, quiet }
 
-    static let briefLocalThread = "local:cli-demo-lcu"
+    static let briefLocalThread = Demo.blockedAgentID
     static let briefLocalSession = Demo.blockedAgentID
 
     static func briefs(_ store: Store, now: Date = Date(), _ variant: BriefVariant = .home) {
@@ -16,8 +16,6 @@ extension Demo {
         briefs.clock = { now }
         briefs.names = ["chan_demo_fjord": "fjord", "local:lcu": "lcu", "chan_demo_silo": "silo",
                         "chan_demo_docs": "docs-site", "chan_demo_evals": "router-evals"]
-        // A local entry joins its thread's request (`Store.requests`) by T3's thread id.
-        briefs.sessions = [briefLocalThread: briefLocalSession]
 
         var fjord = BriefDoc(project: "chan_demo_fjord")
         fjord.purpose = "A Mac app that keeps your Claude threads, local and on claude.ai, in one place."
@@ -31,12 +29,12 @@ extension Demo {
             BriefThread(id: "th_old", title: "Drop the canvas layout", status: .done, age: t - 3 * 86_400),
         ]
         fjord.needsYou = [
-            BriefEntry(project: fjord.project, thread: "th_migrate", kind: .plan, state: .needsYou, since: t - 1_500, source: .cloud,
+            BriefEntry(project: fjord.project, thread: "th_migrate", kind: .plan, state: .needsYou, since: t - 1_500,
                        question: "Add a `briefs` table, copy the digest's rows over once at launch, then drop the old table.",
-                       options: ["Yes, and auto-accept edits", "Yes, and manually approve edits", "No, keep planning"], card: "row_plan_1"),
-            BriefEntry(project: fjord.project, thread: "th_settings", kind: .question, state: .needsYou, since: t - 240, source: .cloud,
+                       options: ["Yes, and auto-accept edits", "Yes, and manually approve edits", "No, keep planning"]),
+            BriefEntry(project: fjord.project, thread: "th_settings", kind: .question, state: .needsYou, since: t - 240,
                        question: "Which layout should the Settings window use?",
-                       options: ["A sidebar with sections", "One scrolling page", "Tabs across the top"], card: "row_q_1"),
+                       options: ["A sidebar with sections", "One scrolling page", "Tabs across the top"]),
         ]
         fjord.decisions = [BriefDecision(thread: BriefDoc.yourSend, text: "Keep the composer at the bottom of every page.")]
         fjord.looseEnds = ["The old Now page is still compiled; a later step deletes it."]
@@ -45,9 +43,8 @@ extension Demo {
 
         var lcu = BriefDoc(project: "local:lcu")
         lcu.now = ["<t id=\"\(briefLocalThread)\">The updater</t> asks how updates should install."]
-        lcu.threads = [BriefThread(id: briefLocalThread, title: "Ship the updater", status: .needsYou, age: t - 120, source: .local)]
-        lcu.needsYou = [BriefEntry(project: lcu.project, thread: briefLocalThread, kind: .question, state: .needsYou, since: t - 120,
-                                   source: .local)]
+        lcu.threads = [BriefThread(id: briefLocalThread, title: "Ship the updater", status: .needsYou, age: t - 120)]
+        lcu.needsYou = [BriefEntry(project: lcu.project, thread: briefLocalThread, kind: .question, state: .needsYou, since: t - 120)]
 
         var silo = BriefDoc(project: "chan_demo_silo")
         silo.now = ["<t id=\"th_snap\">The snapshot API</t> and <t id=\"th_vm\">booting from a checkpoint</t> are being built; <t id=\"th_flaky\">the flaky disk test</t> stopped."]
@@ -86,7 +83,7 @@ extension Demo {
             fjord.sent = []
             lcu.needsYou = []
             lcu.now = ["<t id=\"\(briefLocalThread)\">The updater</t> shipped."]
-            lcu.threads = [BriefThread(id: briefLocalThread, title: "Ship the updater", status: .done, age: t - 2 * 86_400, source: .local)]
+            lcu.threads = [BriefThread(id: briefLocalThread, title: "Ship the updater", status: .done, age: t - 2 * 86_400)]
             silo.now = ["Quiet since <t id=\"th_snap\">the snapshot API</t> merged."]
             silo.threads = [BriefThread(id: "th_snap", title: "Snapshot API: restore by id", status: .done, age: t - 3 * 86_400)]
             docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 4 * 86_400)]

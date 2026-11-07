@@ -3,32 +3,22 @@ import Foundation
 
 // MARK: - Paths
 
-/// Where the Router keeps its files, and the Claude Code folder its plugin reads. Tests give their own (see `live`).
+/// Where the Router keeps its files (Fjord's own folder; it writes nothing into `~/.claude`). Tests give their own (see `live`).
 struct RouterPaths: Equatable, Sendable {
     /// `~/Library/Application Support/Fjord`.
     var support: URL
-    /// `~/.claude`.
-    var claudeDir: URL
 
     /// The Router process's working folder.
     var routerHome: URL { support.appendingPathComponent("router", isDirectory: true) }
-    /// Fjord's Claude Code plugin, a folder marketplace Claude Code reads in place (see `ClaudePlugin`).
-    var plugin: URL { support.appendingPathComponent("claude-plugin", isDirectory: true) }
-    /// One file per session the plugin runs in, written by the plugin itself.
-    var pluginSessions: URL { support.appendingPathComponent("plugin-sessions", isDirectory: true) }
-    /// The key Fjord signs relayed messages with. Not in the plugin's folder: Claude Code copies that into its
-    /// cache.
-    var relayKey: URL { support.appendingPathComponent("relay.key") }
 
-    /// The user's own folders; nil in a test run, which is stopped for reaching them (see `UnderTest`).
+    /// The user's own folder; nil in a test run, which is stopped for reaching it (see `UnderTest`).
     static func live() -> RouterPaths? {
-        guard !UnderTest.refuses("the Router's files (Application Support/Fjord and ~/.claude)") else { return nil }
+        guard !UnderTest.refuses("the Router's files (Application Support/Fjord)") else { return nil }
         return unguarded
     }
 
     static var unguarded: RouterPaths {
-        RouterPaths(support: AppIdentity.supportDirectory(),
-                    claudeDir: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true))
+        RouterPaths(support: AppIdentity.supportDirectory())
     }
 }
 
@@ -49,14 +39,10 @@ struct RouterSaved: Codable, Equatable {
     /// (`RouterStyle.defaultText`).
     var style: String?
 
-    /// The messages of yours Fjord ordered to sessions, each kept before it was ordered and settled by what the target's plugin
-    /// said (RouterCarry.swift).
-    var operations: [DeliveryOperation] = []
-
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, enabledAt, changes, decisions, style, operations
+        case enabled, enabledAt, changes, decisions, style
     }
 
     func encode(to encoder: Encoder) throws {
@@ -66,7 +52,6 @@ struct RouterSaved: Codable, Equatable {
         try c.encode(changes, forKey: .changes)
         try c.encode(decisions, forKey: .decisions)
         try c.encodeIfPresent(style, forKey: .style)
-        try c.encode(operations, forKey: .operations)
     }
 
     init(from decoder: Decoder) throws {
@@ -91,7 +76,6 @@ struct RouterSaved: Codable, Equatable {
         changes = list(.changes)
         decisions = list(.decisions)
         style = value(.style)
-        operations = list(.operations)
         linkUnlinkedChanges()
         dropped = lost
     }
@@ -135,7 +119,6 @@ struct SessionOrigin: Codable, Equatable, Hashable {
 extension Store {
     // MARK: Switching it
 
-    /// The plugin follows the toggle, off the main thread; `routerPluginError` says why it failed.
     func setRouterEnabled(_ on: Bool, now: Date = Date()) {
         guard on != router.enabled else { return }
         routerGeneration &+= 1
@@ -145,12 +128,6 @@ extension Store {
         router = state
         // Off: your messages' runs stop.
         if !on { routerDispatcher.stopAll(reason: RouterDispatcher.unlinkedWords, actions: true); routerDispatcher.unlinked() }
-        applyRouterSwitch(install: true)
-    }
-
-    /// At launch: the plugin again if it is outdated or missing.
-    func startRouter() {
-        if router.enabled { applyRouterSwitch(install: false) }
     }
 
     /// Where the Router's files are, when they may be touched at all: never in a demo, and in a test only where the test said.
@@ -158,143 +135,5 @@ extension Store {
         if let routerPaths { return routerPaths }
         guard persists, !Store.isDemo else { return nil }
         return RouterPaths.live()
-    }
-
-    /// `install` true: install or uninstall as the toggle says. False (launch): re-install the
-    /// plugin only when it's outdated or missing.
-    private func applyRouterSwitch(install: Bool) {
-        let on = router.enabled
-        guard let paths = routerFiles else { return }
-        observePluginQuit()
-        // The key goes the moment the Router is switched off, whatever the CLI does next; a switch-on still under way is
-        // fenced off from making it again.
-        let generation: Int
-        if on {
-            generation = relayKeyFence.advance()
-        } else {
-            relayKeyFence.revoke(paths.relayKey, presence: paths.pluginSessions)
-            generation = relayKeyFence.current
-            relayKeyCache = nil
-        }
-        let runner = routerPluginRunner ?? (UnderTest.isRunning ? nil : ClaudePluginInstaller.processRunner)
-        let findBinary = routerClaudeBinary ?? { RouterStatus.findDefault() }
-        let version = ClaudePlugin.version(app: routerAppVersion)
-        let previous = routerInstallWork
-        routerInstallWork = Task { [weak self] in
-            await previous?.value
-            guard let self else { return }
-            guard let runner else { return }
-            let fence = self.relayKeyFence
-            let plugin = await Self.switchPluginNow(on: on, install: install, paths: paths, version: version, findBinary: findBinary,
-                                                    run: runner, fence: fence, generation: generation)
-            if self.routerPluginStatus != plugin.status { self.routerPluginStatus = plugin.status }
-            if self.routerPluginError != plugin.error { self.routerPluginError = plugin.error }
-            if let key = plugin.key, fence.current == generation { self.relayKeyCache = key }
-        }
-    }
-
-    /// Quitting stops the installer's runs of the CLI (each is ended and its exit confirmed).
-    private func observePluginQuit() {
-        guard pluginQuitObserver == nil else { return }
-        pluginQuitObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
-                                                                    queue: .main) { _ in PluginRuns.shared.shutdown() }
-    }
-
-    struct PluginSwitch: Sendable {
-        var status: ClaudePluginInstaller.Status?
-        var error: String?
-        /// The key, read off the main thread, for `signRelay`.
-        var key: RelayKeyCache?
-    }
-
-    /// On (unless a later switch superseded it): the folder is written at this version, the key made once (fenced: see
-    /// `RelayKeyFence`), and Claude Code brought to the folder; at launch only when its plugin is missing or outdated.
-    /// Off: the plugin and its marketplace are taken out (the key went already, at the switch).
-    /// Runs off the main thread, finding Claude Code there too (`findBinary` walks folders).
-    nonisolated static func switchPluginNow(on: Bool, install: Bool, paths: RouterPaths, version: String,
-                                            findBinary: @escaping @Sendable () -> String?,
-                                            run: @escaping ClaudePluginInstaller.Runner, fence: RelayKeyFence,
-                                            generation: Int) async -> PluginSwitch {
-        let installer = ClaudePluginInstaller(folder: paths.plugin, binary: findBinary(), run: run)
-        do {
-            if on {
-                guard fence.current == generation else { return PluginSwitch(status: try? await installer.status(version: version)) }
-                try ClaudePlugin.write(to: paths.plugin, version: version, presence: paths.pluginSessions, key: paths.relayKey,
-                                       registry: paths.claudeDir.appendingPathComponent("sessions", isDirectory: true))
-                try fence.ifCurrent(generation) { try ClaudePlugin.ensureKey(at: paths.relayKey) }
-                let key = RelayKeyCache.load(paths.relayKey)
-                let status = try await installer.status(version: version)
-                if install || status == .notInstalled || status == .outdated {
-                    try await installer.install(version: version)
-                }
-                return PluginSwitch(status: try await installer.status(version: version), key: key)
-            } else if install {
-                try await installer.uninstall()
-            }
-            return PluginSwitch(status: try await installer.status(version: version))
-        } catch {
-            return PluginSwitch(status: try? await installer.status(version: version), error: error.localizedDescription)
-        }
-    }
-
-    /// `switchPluginNow` for a caller that can't wait: blocks its thread until done. Call it off the main thread.
-    nonisolated static func switchPlugin(on: Bool, install: Bool, paths: RouterPaths, version: String, binary: String?,
-                                         run: @escaping ClaudePluginInstaller.Runner) -> (ClaudePluginInstaller.Status?, String?) {
-        final class Box: @unchecked Sendable { var value = PluginSwitch() }
-        let box = Box(), done = DispatchSemaphore(value: 0)
-        let fence = RelayKeyFence()
-        let generation = fence.current
-        Task.detached {
-            box.value = await switchPluginNow(on: on, install: install, paths: paths, version: version, findBinary: { binary },
-                                              run: run, fence: fence, generation: generation)
-            done.signal()
-        }
-        done.wait()
-        return (box.value.status, box.value.error)
-    }
-
-    // MARK: Relaying as the person
-
-    /// The CLI session ids of the sessions Fjord's plugin runs in now (only those can take a message as the person's
-    /// own): its presence files under the current key, each bound to a live process Claude Code still registers for
-    /// that session. Reads the registry and the presence folder: call it off the main thread.
-    nonisolated func sessionsWithPlugin(paths: RouterPaths, keyID: String?) -> Set<String> {
-        ClaudePlugin.sessions(in: paths.pluginSessions,
-                              registry: ClaudePeers.registry(dir: paths.claudeDir.appendingPathComponent("sessions", isDirectory: true)),
-                              keyID: keyID)
-    }
-
-    /// `sessionsWithPlugin(paths:keyID:)` for the Router's own files and the key as last read.
-    func sessionsWithPlugin() -> Set<String> {
-        guard let paths = routerFiles else { return [] }
-        return sessionsWithPlugin(paths: paths, keyID: relayKeyCache?.keyID)
-    }
-
-    /// `body` signed for the session whose CLI session id is `target`, ready to send as it is; nil when there's no key (the
-    /// Router is off, or not set up yet). The key is read off the main thread (by the switch, or `reloadRelayKey`) and used
-    /// while its file is the same; here only a stat is made. A key not read yet, or changed, is read again in the
-    /// background, and nil is returned meanwhile.
-    func signRelay(body: String, target: String) -> String? {
-        guard let paths = routerFiles else { return nil }
-        if let cached = relayKeyCache, cached.matches(paths.relayKey) {
-            return RelaySigner.sign(body: body, target: target, key: cached.key)
-        }
-        relayKeyCache = nil
-        Task { await reloadRelayKey() }
-        return nil
-    }
-
-    /// Reads the key off the main thread; kept only if no switch came meanwhile. True when there is one.
-    @discardableResult
-    func reloadRelayKey() async -> Bool {
-        guard let paths = routerFiles else { return false }
-        let generation = relayKeyFence.current
-        // On a queue of its own, not Swift's pool: a busy pool must not hold a message waiting for its key.
-        let loaded = await withCheckedContinuation { (done: CheckedContinuation<RelayKeyCache?, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async { done.resume(returning: RelayKeyCache.load(paths.relayKey)) }
-        }
-        guard relayKeyFence.current == generation else { return false }
-        if relayKeyCache != loaded { relayKeyCache = loaded }
-        return loaded != nil
     }
 }
