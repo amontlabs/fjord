@@ -242,7 +242,7 @@ import Testing
         let pipe = Pipe()
         let reader = OneShot.PipeReader(pipe.fileHandleForReading)
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
-        let first = FormWriter.Flag()
+        let first = StopFlag()
         // The reader's first read is held in flight.
         reader.aroundRead = {
             guard !first.isSet else { return }

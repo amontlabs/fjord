@@ -18,7 +18,7 @@ import Testing
         var decideHeld: CheckedContinuation<Void, Never>?
         var prepared: [String] = []
         var sent: [RouterDispatcher.Delivery] = []
-        var answered: [(target: BriefTarget, answers: [String: String])] = []
+        var answered: [(target: BriefTarget, answer: RouterDispatcher.RequestAnswer)] = []
         var runs: [(intent: RouterRun.Intent, input: String)] = []
         var answer = RouterRun.Answer(reply: "Done.", done: "set it")
         var finished: [UUID] = []
@@ -46,9 +46,9 @@ import Testing
                     sent.append(delivery)
                     return nil
                 },
-                answer: { [self] _, target, answers, snapshot in
-                    guard snapshot.holds(store!) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
-                    answered.append((target, answers))
+                answer: { [self] _, target, answer, snapshot in
+                    guard snapshot.holds(store!) else { throw RouterTools.Failure(RequestSnapshot.changedWords) }
+                    answered.append((target, answer))
                     return "answered"
                 },
                 run: { [self] _, intent, input in

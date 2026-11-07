@@ -405,12 +405,12 @@ private struct RouterSettings: View {
         SettingsRow("Router",
                     description: needsClaude ? "Needs T3 Code" : nil,
                     adornment: SettingsView.toolMark(.router),
-                    info: ("Router", "Shows what your Claude Code sessions are doing, what is waiting on you and what is done, and answers their forms here. Each message you send runs on its own: rules first, then Jev (TypeSafe's classifier, if a key is set) picks where it goes, and a short Haiku run only changes Fjord or answers a question. Messages reach your sessions through Fjord's Claude Code plugin. Every run is logged in the Router's history. The Router never acts on GitHub. Forms need a hook in Claude Code's settings (`~/.claude/settings.json`); turning the Router off removes the hook and the plugin. \(store.shortcut(.router).display) opens it.")) {
+                    info: ("Router", "Shows what your Claude Code sessions are doing, what is waiting on you and what is done, and answers their questions, permissions and plans here. Each message you send runs on its own: rules first, then Jev (TypeSafe's classifier, if a key is set) picks where it goes, and a short Haiku run only changes Fjord or answers a question. Messages reach your sessions through Fjord's Claude Code plugin. Every run is logged in the Router's history. The Router never acts on GitHub. Turning the Router off removes the plugin. \(store.shortcut(.router).display) opens it.")) {
             SettingsSwitch("Router", isOn: Binding(get: { store.router.enabled }, set: { store.setTool(.router, on: $0) }))
                 .disabled(needsClaude)
         }
         .id(SettingsView.routerID)
-        // Off, but taking the hook or the plugin out failed: that stays in sight, with a way to try again.
+        // Off, but taking the plugin out failed: that stays in sight, with a way to try again.
         if !store.router.enabled, let error = store.routerRemovalError {
             SettingsRow(nil, description: "Couldn't take the Router out of Claude Code: \(error)", descriptionColor: CDS.Text.danger) {
                 ActionButton("Try again") { store.retryRouterRemoval() }
@@ -420,7 +420,6 @@ private struct RouterSettings: View {
         if store.router.enabled {
             SettingsRail {
                 VStack(alignment: .leading, spacing: 6) {
-                    SettingsStatusLine(text: hookStatus.0, color: hookStatus.1)
                     let plugin = Self.pluginLine(store.routerPluginStatus, error: store.routerPluginError)
                     SettingsStatusLine(text: plugin.0, color: plugin.1)
                     SettingsStatusLine(text: claudeCodeStatus.0, color: claudeCodeStatus.1)
@@ -440,16 +439,6 @@ private struct RouterSettings: View {
         case .notInstalled: ("Fjord's Claude Code plugin isn't installed: messages can't reach sessions", Theme.amber)
         case .noClaudeCode: ("Fjord's Claude Code plugin needs Claude Code, which comes with the Claude desktop app", Theme.amber)
         case nil: ("Fjord's Claude Code plugin will be installed", Theme.tertiary)
-        }
-    }
-
-    private var hookStatus: (String, Color) {
-        if let error = store.routerHookError { return ("Form hook: \(error)", Theme.red) }
-        return switch store.routerHookStatus {
-        case .installed: ("Form hook installed", Theme.green)
-        case .outdated: ("Form hook points at another Fjord install: installing it again", Theme.amber)
-        case .notInstalled: ("Form hook not installed", Theme.amber)
-        case nil: ("Form hook will be installed", Theme.tertiary)
         }
     }
 
@@ -1154,34 +1143,21 @@ extension Store {
     /// With the Router off, why taking its hook or plugin out of Claude Code failed (nil when it didn't).
     var routerRemovalError: String? {
         guard !router.enabled else { return nil }
-        return [routerHookError, routerPluginError].compactMap { $0 }.first
+        return routerPluginError
     }
 
-    /// Takes the hook and the plugin out again (after a failure, with the Router off), off the main thread, after any switch
+    /// Takes the plugin out again (after a failure, with the Router off), off the main thread, after any switch
     /// still under way; the errors clear when it works.
     func retryRouterRemoval() {
         guard !router.enabled, let paths = routerFiles else { return }
-        let executable = routerExecutable ?? Bundle.main.executablePath ?? CommandLine.arguments[0]
         let runner = routerPluginRunner ?? (UnderTest.isRunning ? nil : ClaudePluginInstaller.processRunner)
         let findBinary = routerClaudeBinary
             ?? { RouterStatus.findDefault() }
         let version = ClaudePlugin.version(app: routerAppVersion)
-        let previous = routerHookWork
-        routerHookWork = Task { [weak self] in
+        let previous = routerInstallWork
+        routerInstallWork = Task { [weak self] in
             await previous?.value
-            let hook = await Task.detached(priority: .utility) { () -> (FormHookInstaller.Status, String?) in
-                let installer = FormHookInstaller(claudeDir: paths.claudeDir)
-                do {
-                    try FormBridge.setEnabled(false, dir: paths.forms)
-                    try installer.uninstall()
-                    return (installer.status(executable: executable), nil)
-                } catch {
-                    return (installer.status(executable: executable), error.localizedDescription)
-                }
-            }.value
             guard let self, !self.router.enabled else { return }
-            if self.routerHookStatus != hook.0 { self.routerHookStatus = hook.0 }
-            if self.routerHookError != hook.1 { self.routerHookError = hook.1 }
             guard let runner else { return }
             let plugin = await Task.detached(priority: .utility) {
                 Store.switchPlugin(on: false, install: true, paths: paths, version: version, binary: findBinary(), run: runner)

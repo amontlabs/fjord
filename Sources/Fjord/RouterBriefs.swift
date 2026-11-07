@@ -4,7 +4,7 @@ import Observation
 
 // The briefs in the app (docs/design/router-watch-and-briefs.md 3.5, 4 and 5): the engine's documents (or a demo's), the
 // page they make (`BriefPage`, ordered as in 4), what you focus and pick, and the acts: an option answered by Return, your
-// words sent to the thread, Open, mark read, archive. A local thread's form is answered through the hook (on this Mac or a
+// words sent to the thread, Open, mark read, archive. A waiting request is answered through T3 (on this Mac or a
 // remote computer). Mark read and archive are Fjord changes with a Revert (`FjordChange.briefAction`); the marks, and which
 // finished threads were told, are kept in briefs.db.
 
@@ -319,35 +319,42 @@ enum BriefKeys {
         return nil
     }
 
+    /// The T3 thread id a brief target stands for: the Courier's session key of a local thread, else the id itself.
+    func threadID(_ t: BriefTarget) -> String { sessions[t.thread] ?? t.thread }
+
     /// The T3 thread a brief entry is about, when Fjord lists it.
     func desktopSession(_ t: BriefTarget, store: Store) -> String? {
-        store.threads[t.thread] != nil ? t.thread : nil
+        store.threads[threadID(t)] != nil ? threadID(t) : nil
     }
 
-    /// The form Fjord's hook holds on this Mac for a local thread's session.
-    func localForm(_ t: BriefTarget, store: Store) -> PendingForm? {
-        cli(t, store: store).flatMap { store.pendingForms[$0] }
-    }
-
-    /// The form held for a local entry's session, on this Mac or on a remote computer.
-    func form(_ e: BriefEntry, store: Store) -> PendingForm? {
+    /// What T3 says a local entry's thread waits on you for.
+    func request(_ e: BriefEntry, store: Store) -> ThreadRequest? {
         guard e.source == .local else { return nil }
-        return store.heldForm(e.target)
+        return store.heldRequest(e.target)
     }
 
-    /// An entry as acted on: a local one with its form (`FormSnapshot`), the form's question and options.
+    /// An entry as acted on: a local one with its request, T3's question and options, a permission's buttons, a plan's two
+    /// yeses. A request T3 can no longer take an answer for says so and offers no buttons.
     func resolved(_ e: BriefEntry, store: Store) -> BriefEntry {
-        guard let form = form(e, store: store) else { return e }
+        guard let request = request(e, store: store) else { return e }
         var e = e
-        e.form = FormSnapshot(target: e.target, form: form)
-        if form.isPlan {
+        e.request = request
+        let gone = request.live ? "" : "T3 restarted since it asked: answer it in T3, or send words instead.\n"
+        switch request.body {
+        case .plan(let markdown):
             e.kind = .plan
-            e.question = e.question ?? "Approve the plan?"
-            e.options = ["Approve", "Keep planning"]
-        } else if let q = form.questions.first {
+            e.question = gone + (e.question ?? markdown)
+            e.options = request.live ? ThreadRequest.planChoices : []
+        case .approval(let kind, let prompt, let decisions):
+            e.kind = .permission
+            let what = prompt.isEmpty ? "It waits for a permission (\(kind))." : prompt
+            e.question = gone + what
+            e.options = request.live ? decisions.map(ThreadRequest.label) : []
+        case .question(let questions):
             e.kind = .question
-            e.question = form.questions.count == 1 ? q.question : form.questions.map(\.question).joined(separator: "\n")
-            e.options = form.questions.count == 1 && !q.multiSelect ? q.options.map(\.label) : []
+            e.question = gone + (questions.count == 1 ? questions[0].question : questions.map(\.question).joined(separator: "\n"))
+            let q = questions.first
+            e.options = request.live && questions.count == 1 && q?.multiSelect == false ? q?.options.map(\.label) ?? [] : []
         }
         return e
     }
@@ -437,9 +444,9 @@ enum BriefKeys {
     func confirm(_ t: BriefTarget, store: Store) -> Bool {
         guard !answering.contains(t), let n = picked[t], let e = entry(t, store: store), n <= e.options.count else { return false }
         let label = e.options[n - 1]
-        if let form = form(e, store: store) {
+        if let request = request(e, store: store), request.live {
             picked[t] = nil
-            answerForm(form, entry: e, option: n, words: nil, store: store)
+            answerRequest(request, entry: e, option: n, words: nil, store: store)
             return true
         }
         guard let card = e.card else {  // a question asked in words: the option's words are your reply
@@ -456,14 +463,15 @@ enum BriefKeys {
         return true
     }
 
-    /// Your words to the thread: explicit target, no model. A local form takes them through the hook; a local session with
-    /// none gets them as a reply through the Router's dispatcher, as the composer's reply did.
+    /// Your words to the thread: explicit target. A thread whose request T3 can take an answer for gets them as its answer
+    /// (see `answerRequest`); a local thread with none gets them as a reply through the Router's dispatcher, as the
+    /// composer's reply did.
     @discardableResult
     func send(_ words: String, to t: BriefTarget, store: Store) -> Bool {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !answering.contains(t) else { return false }
-        if let e = entry(t, store: store), let form = form(e, store: store) {
-            answerForm(form, entry: e, option: nil, words: text, store: store)
+        if let e = entry(t, store: store), let request = request(e, store: store), request.live {
+            answerRequest(request, entry: e, option: nil, words: text, store: store)
             return true
         }
         if t.project.hasPrefix("local:") {
@@ -513,59 +521,80 @@ enum BriefKeys {
         }
     }
 
-    /// A local form with several questions, one choice each (a multi-select's labels joined): every answer goes at once, as
-    /// the form in the Claude app sends them, never a thread left half-answered.
+    /// A request of several questions, one choice each (a multiple choice's several): every answer goes at once, as T3's own
+    /// form sends them, never a thread left half-answered. Keyed by question id.
     @discardableResult
-    func answerAll(_ t: BriefTarget, _ answers: [String: String], store: Store) -> Bool {
-        guard !answering.contains(t), let e = entry(t, store: store), let form = form(e, store: store), !form.isPlan,
-              form.questions.allSatisfy({ !(answers[$0.question] ?? "").isEmpty }) else { return false }
+    func answerAll(_ t: BriefTarget, _ answers: [String: [String]], store: Store) -> Bool {
+        guard !answering.contains(t), let e = entry(t, store: store), let request = request(e, store: store), request.live,
+              case .question(let questions) = request.body,
+              questions.allSatisfy({ !(answers[$0.id] ?? []).isEmpty }) else { return false }
         trouble[t] = nil
-        let snapshot = FormSnapshot(target: t, form: form)
-        let shown = form.questions.compactMap { answers[$0.question] }.joined(separator: "; ")
+        let snapshot = RequestSnapshot(target: t, request: request)
+        var typed: [String: T3Answer] = [:]
+        for q in questions {
+            let picked = answers[q.id] ?? []
+            typed[q.id] = q.multiSelect ? .many(picked) : .one(picked[0])
+        }
+        let shown = questions.compactMap { answers[$0.id]?.joined(separator: ", ") }.joined(separator: "; ")
+        let sent = typed
         begin(t) { [weak self, weak store] in
             guard let store else { return }
-            switch await store.answerForm(form, answers, target: t, snapshot: snapshot) {
+            switch await store.answerQuestion(request, sent, target: t, snapshot: snapshot) {
             case .success: self?.record(t, shown)
-            case .failure(let error): self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't written."
+            case .failure(let error): self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't sent."
             }
         }
         return true
     }
 
-    /// A local form: an option picked (a plan's first approves), or your words read by Jev, written for the hook (on this Mac
-    /// or the remote computer that holds it). Its line goes in the drawer once written.
-    private func answerForm(_ form: PendingForm, entry e: BriefEntry, option: Int?, words: String?, store: Store) {
+    /// A request T3 holds: an option picked (a question's, a permission's decision, a plan's yes), or your words. Words to a
+    /// question go to Jev to pick an option id, else (a question that takes a custom answer) as they are; to a permission,
+    /// they decline it with your words as the reason, never a yes; to a plan, Jev's yes or no (a no sends them as a message).
+    /// Its line goes in the drawer once sent.
+    private func answerRequest(_ request: ThreadRequest, entry e: BriefEntry, option: Int?, words: String?, store: Store) {
         let t = e.target
-        let snapshot = FormSnapshot(target: t, form: form)
-        let shown = option.map { e.options[$0 - 1] } ?? words ?? ""
+        let snapshot = RequestSnapshot(target: t, request: request)
+        let shown = option.map { e.options.indices.contains($0 - 1) ? e.options[$0 - 1] : "" } ?? words ?? ""
         begin(t) { [weak self, weak store] in
             guard let store else { return }
             let result: Result<Void, Error>
-            if form.isPlan {
-                var decision: PendingForm.PlanDecision
-                if let option { decision = .init(approve: option == 1) } else {
-                    guard let read = await RouterDispatcher.planDecision(form, message: words ?? "", ask: store.jevAsker(.routing)) else {
-                        self?.trouble[t] = "Couldn't tell whether that approves the plan: pick Approve or Keep planning."
-                        return
-                    }
-                    decision = read
-                }
-                result = await store.answerPlan(form, decision, target: t, snapshot: snapshot)
-            } else {
-                var answers: [String: String]
-                if let option, let q = form.questions.first, option <= q.options.count {
-                    answers = [q.question: q.options[option - 1].label]
-                } else if let read = await RouterDispatcher.askFormAnswers(form, message: words ?? "", ask: store.jevAsker(.routing)) {
-                    answers = read
+            switch request.body {
+            case .plan:
+                if let option, ThreadRequest.planModes.indices.contains(option - 1) {
+                    result = await store.implementPlan(request, mode: ThreadRequest.planModes[option - 1], target: t, snapshot: snapshot)
                 } else {
-                    self?.trouble[t] = "Couldn't read an answer to every question: pick an option, or answer in the Claude app."
+                    let text = words ?? ""
+                    // Never a yes unless Jev finds one; otherwise your words go back as they are.
+                    let read = await RouterDispatcher.planDecision(request, message: text, ask: store.jevAsker(.routing))
+                    if read?.approve == true {
+                        result = await store.implementPlan(request, mode: .approvalRequired, target: t, snapshot: snapshot)
+                    } else {
+                        result = await store.sendBackPlan(request, words: text, target: t, snapshot: snapshot)
+                    }
+                }
+            case .approval(_, _, let decisions):
+                if let option, decisions.indices.contains(option - 1) {
+                    result = await store.answerPermission(request, decisions[option - 1], target: t, snapshot: snapshot)
+                } else {
+                    result = await store.answerPermission(request, .decline, feedback: words ?? "", target: t, snapshot: snapshot)
+                }
+            case .question(let questions):
+                var answers: [String: T3Answer]
+                if let option, questions.count == 1, let q = questions.first, option <= q.options.count {
+                    answers = [q.id: .one(q.options[option - 1].value)]
+                } else if let read = await RouterDispatcher.askFormAnswers(request, message: words ?? "", ask: store.jevAsker(.routing)) {
+                    answers = read
+                } else if let text = words, questions.count == 1, questions[0].allowCustomAnswer, !questions[0].multiSelect {
+                    answers = [questions[0].id: .one(text)]
+                } else {
+                    self?.trouble[t] = "Couldn't read an answer to every question: pick an option, or answer in T3."
                     return
                 }
-                result = await store.answerForm(form, answers, target: t, snapshot: snapshot)
+                result = await store.answerQuestion(request, answers, target: t, snapshot: snapshot)
             }
             switch result {
             case .success: self?.record(t, shown)
-            case .failure(let error): self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't written."
+            case .failure(let error): self?.trouble[t] = (error as? LocalizedError)?.errorDescription ?? "The answer wasn't sent."
             }
         }
     }

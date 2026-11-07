@@ -51,8 +51,8 @@ struct BriefEntry: Codable, Hashable, Sendable {
     var options: [String] = []
     /// The decision row's key (cloud).
     var card: String?
-    /// The plugin hook's form (local); live state, never stored.
-    var form: FormSnapshot?
+    /// What T3 says the thread waits on (local); live state, never stored.
+    var request: ThreadRequest?
     var sent: [SentLine] = []
     /// What a read mark holds to (`BriefPage.entryKey`): the Board's status change or card; nil for the model's own entries,
     /// whose `since` stays as first written.
@@ -67,7 +67,7 @@ struct BriefEntry: Codable, Hashable, Sendable {
     static func == (a: BriefEntry, b: BriefEntry) -> Bool {
         a.project == b.project && a.thread == b.thread && a.kind == b.kind && a.state == b.state && a.since == b.since
             && a.source == b.source && a.asOf == b.asOf && a.question == b.question && a.options == b.options && a.card == b.card
-            && a.form == b.form && a.sent == b.sent && a.episode == b.episode
+            && a.request == b.request && a.sent == b.sent && a.episode == b.episode
     }
 
     func hash(into h: inout Hasher) {
@@ -214,7 +214,7 @@ struct BriefDoc: Codable, Equatable, Sendable {
             let options = cards[raw.thread] ?? (written.count > 1 ? written : [])
             return BriefEntry(project: project, thread: raw.thread, kind: kind, state: th?.status ?? .needsYou,
                               since: old?.since ?? now, source: th?.source ?? .cloud, asOf: th?.asOf,
-                              question: raw.question, options: options, card: old?.card, form: old?.form, sent: old?.sent ?? [])
+                              question: raw.question, options: options, card: old?.card, request: old?.request, sent: old?.sent ?? [])
         }
         out.needsYou = Array(out.needsYou.prefix(Self.maxEntries))
         out.decisions = Array(answer.decisions.filter { $0.thread == Self.yourSend || exists.contains($0.thread) }.prefix(Self.maxDecisions))

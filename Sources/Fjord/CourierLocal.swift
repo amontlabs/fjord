@@ -23,7 +23,7 @@ enum CourierLocal {
 
     /// `{"sessions": {bridge id: info}, "processes": {cli: alive}, "statuses": {cli: status}, "app": bool}`.
     static func read(_ places: Places = .app, appRunning: Bool = !NSRunningApplication.runningApplications(withBundleIdentifier: Claude.bundleID).isEmpty, now: Double = Date().timeIntervalSince1970,
-                     alive: (Int32) -> Bool = FormBridge.processAlive) -> JSON {
+                     alive: (Int32) -> Bool = ProcessProbe.alive) -> JSON {
         var found = JSONObject(), processes = JSONObject(), statuses = JSONObject()
         let fm = FileManager.default
         if let users = fm.enumerator(at: places.sessions, includingPropertiesForKeys: nil) {

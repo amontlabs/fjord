@@ -140,7 +140,6 @@ import Testing
         let s = Store()
         s.persists = false
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
-        s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.agents.enabled = true
         s.threads = [
             "local_a": session("local_a", "Fix the login bug", folder: "/code/lookout", running: true),
@@ -150,7 +149,7 @@ import Testing
         s.threadWork = ["local_a": ThreadWork(text: "Which database?", since: Date(timeIntervalSince1970: 0.5))]
         s.threads["local_a"]?.pendingRequest = T3PendingRequest(json: ["id": "rq1", "kind": "user_input", "blocking": true])
         s.setRouterEnabled(true, now: now)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         var doc = BriefDoc(project: "local:lookout")
         doc.threads = [BriefThread(id: "local_a", title: "Fix the login bug", status: .needsYou, age: now.timeIntervalSince1970 - 60,
                                    source: .local)]
@@ -158,16 +157,10 @@ import Testing
                                    since: now.timeIntervalSince1970 - 60, source: .local, question: "Which database?")]
         s.routerBriefs.demoDocs = ["local:lookout": doc]
         s.routerBriefs.names = ["local:lookout": "lookout"]
-        // The form as the hook leaves it, read by the bridge (which replaces whatever is set by hand).
-        let pending = try! JSONSerialization.data(withJSONObject: [
-            "key": "cli-local_a-1-1", "session_id": "cli-local_a", "transcript_path": "/tmp/t.jsonl", "cwd": "/code/lookout",
-            "tool_input": ["questions": [["question": "Which database?", "header": "DB", "multiSelect": false,
-                                          "options": [["label": "Postgres", "description": "Relational"], ["label": "SQLite", "description": ""]]]]],
-            "created_at": 1000, "pid": Int(getpid()), "tool_use_id": "toolu_a",
-        ] as [String: Any])
-        try? pending.write(to: dir.path("support/forms/cli-local_a-1-1.json"))
-        await s.formBridge.refreshAndWait()
-        #expect(!s.pendingForms.isEmpty, "the bridge never read the form")
+        try? FileManager.default.createDirectory(at: dir.path("support"), withIntermediateDirectories: true)
+        // The question T3 holds for the thread.
+        s.requests["local_a"] = ThreadRequest(id: "rq1", threadID: "local_a", body: .question([
+            T3Question(demo: "DB", "Which database?", options: [("Postgres", "Relational"), ("SQLite", "")])]))
         // A live process for one of them.
         let sessions = dir.path("claude/sessions")
         try? FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
@@ -263,50 +256,7 @@ import Testing
         let both = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "option": 2, "words": "SQLite"]))
         #expect(both.isError)
         await s.routerBriefs.settled()
-        #expect(s.routerBriefs.answers.isEmpty && s.pendingForms["cli-local_a"] != nil)
-    }
-
-    @Test func theFormWriterChecksRightBeforeWriting() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let form = try #require(s.pendingForms["cli-local_a"])
-        let forms = dir.path("support/forms")
-        let file = FormBridge.answerURL(form.id, in: forms)
-        // Bad answers are refused at once.
-        await #expect(throws: FormBridge.Failure.self) { try await FormWriter.write(form, answers: [:], dir: forms) }
-        // No longer valid when its turn to write comes: nothing written.
-        var valid = true
-        let writing = Task {
-            try await FormWriter.write(form, answers: ["Which database?": "SQLite"], dir: forms, stillValid: { valid })
-        }
-        valid = false
-        await #expect(throws: FormWriter.Cancelled.self) { try await writing.value }
-        #expect(!FileManager.default.fileExists(atPath: file.path))
-        try await FormWriter.write(form, answers: ["Which database?": "SQLite"], dir: forms)
-        #expect((json(try Data(contentsOf: file)) as? [String: Any])?["answers"] as? [String: String] == ["Which database?": "SQLite"])
-    }
-
-    @Test func theFormWriterAsksWhetherStillValidTogetherWithPuttingTheAnswerInPlace() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let form = try #require(s.pendingForms["cli-local_a"])
-        let forms = dir.path("support/forms")
-        let file = FormBridge.answerURL(form.id, in: forms)
-        // Stopped while the answer was being written aside: asked as it is about to be put in place, it isn't.
-        var seen: [[String]] = []
-        await #expect(throws: FormWriter.Cancelled.self) {
-            try await FormWriter.write(form, answers: ["Which database?": "SQLite"], dir: forms, stillValid: {
-                let names = (try? FileManager.default.contentsOfDirectory(atPath: forms.path)) ?? []
-                seen.append(names)
-                return !names.contains { $0.hasSuffix(".tmp") }
-            })
-        }
-        #expect(seen.last?.contains { $0.hasSuffix(".tmp") } == true)
-        #expect(!FileManager.default.fileExists(atPath: file.path))
-        #expect(((try? FileManager.default.contentsOfDirectory(atPath: forms.path)) ?? []).allSatisfy { !$0.hasSuffix(".tmp") })
-        // Still free for the next answer.
-        try await FormWriter.write(form, answers: ["Which database?": "Postgres"], dir: forms)
-        #expect(try answer(dir) == ["Which database?": "Postgres"])
+        #expect(s.routerBriefs.answers.isEmpty && s.requests["local_a"] != nil)
     }
 
     @Test func batchesAndRepliesAreBounded() async throws {
@@ -649,56 +599,6 @@ import Testing
         // Odd spans are made safe to compute with.
         #expect(RouterTools.bounded(.infinity) == 0 && RouterTools.bounded(-.greatestFiniteMagnitude) == 0)
         #expect(RouterTools.bounded(.greatestFiniteMagnitude) == 365 * 86_400 && RouterTools.bounded(.nan) == 0)
-    }
-
-    // MARK: One answer per form
-
-    private func answer(_ dir: TempDir) throws -> [String: String]? {
-        let file = FormBridge.answerURL("cli-local_a-1-1", in: dir.path("support/forms"))
-        return (json(try Data(contentsOf: file)) as? [String: Any])?["answers"] as? [String: String]
-    }
-
-    @Test func anAnswerFileAlreadyThereIsNeverReplaced() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let form = try #require(s.pendingForms["cli-local_a"])
-        // Written by another path (not through the writer): still not overwritten.
-        try FormBridge.answer(form, answers: ["Which database?": "Postgres"], in: dir.path("support/forms"))
-        await #expect(throws: FormWriter.AlreadyAnswered.self) {
-            try await FormWriter.write(form, answers: ["Which database?": "SQLite"], dir: dir.path("support/forms"))
-        }
-        #expect(try answer(dir) == ["Which database?": "Postgres"])
-        // No temporary file is left behind.
-        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path("support/forms").path).filter { $0.hasSuffix(".tmp") }
-        #expect(left.isEmpty)
-    }
-
-    @Test func aWriteCancelledWhileQueuedWritesNothing() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let form = try #require(s.pendingForms["cli-local_a"])
-        let forms = dir.path("support/forms")
-        // The writer is busy: this answer waits behind it, still valid, and its task is cancelled meanwhile.
-        let hold = DispatchSemaphore(value: 0)
-        let writerHeld = RouterGate()
-        FormWriter.queue.async {
-            Task { @MainActor in writerHeld.open() }
-            hold.wait()
-        }
-        await writerHeld.wait()
-        let queued = RouterGate()
-        let writing = Task {
-            try await FormWriter.write(form, answers: ["Which database?": "SQLite"], dir: forms,
-                                       didQueue: { queued.open() })
-        }
-        await queued.wait()
-        writing.cancel()
-        hold.signal()
-        await #expect(throws: FormWriter.Cancelled.self) { try await writing.value }
-        #expect(!FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: forms).path))
-        // The form is still free for the next answer.
-        try await FormWriter.write(form, answers: ["Which database?": "Postgres"], dir: forms)
-        #expect(try answer(dir) == ["Which database?": "Postgres"])
     }
 
     // MARK: @router asides

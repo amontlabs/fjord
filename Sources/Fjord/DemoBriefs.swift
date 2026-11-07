@@ -1,14 +1,14 @@
 import Foundation
 
 // The briefs on demo data (RouterBriefView.swift's shots): five projects, one with a question card and a plan, a local
-// session whose form Fjord's hook holds (the demo's `cli-demo-lcu`), one working, one that finished, one quiet.
+// session whose question T3 holds (the demo's `Demo.blockedAgentID`), one working, one that finished, one quiet.
 
 @MainActor
 extension Demo {
     enum BriefVariant { case home, stale, quiet }
 
     static let briefLocalThread = "local:cli-demo-lcu"
-    static let briefLocalSession = "cse_demo_lcu"
+    static let briefLocalSession = Demo.blockedAgentID
 
     static func briefs(_ store: Store, now: Date = Date(), _ variant: BriefVariant = .home) {
         let t = now.timeIntervalSince1970
@@ -16,10 +16,8 @@ extension Demo {
         briefs.clock = { now }
         briefs.names = ["chan_demo_fjord": "fjord", "local:lcu": "lcu", "chan_demo_silo": "silo",
                         "chan_demo_docs": "docs-site", "chan_demo_evals": "router-evals"]
-        // The hook's forms join their threads by Claude Code session id, as the Courier's board names them (until T3's
-        // requests replace them).
-        briefs.sessions = [briefLocalThread: briefLocalSession, "local_demo-linux": "cse_demo_linux"]
-        briefs.clis = [briefLocalSession: "cli-demo-lcu", "cse_demo_linux": "cli-demo-linux"]
+        // A local entry joins its thread's request (`Store.requests`) by T3's thread id.
+        briefs.sessions = [briefLocalThread: briefLocalSession]
 
         var fjord = BriefDoc(project: "chan_demo_fjord")
         fjord.purpose = "A Mac app that keeps your Claude threads, local and on claude.ai, in one place."

@@ -337,25 +337,30 @@ extension WindowSeams {
             await waitUntil { closed == 1 && window.window?.contentViewController == nil }
         }
 
-        /// Prepared on the Router out of sight, a notice it would show (the form hook couldn't be installed) is not said to
+        /// Prepared on the Router out of sight, a notice it would show (Claude Code wasn't found) is not said to
         /// VoiceOver; it is once the window opens on it.
         @Test func aPreparedRouterSaysItsNoticeOnlyOnceShown() async {
             await Announced.exclusively {
                 var said: [String] = []
                 Announce.sink = { said.append($0) }
-                let (window, store) = controller()
-                store.routerHookError = "denied"
+                _ = NSApplication.shared
+                let store = Store()
+                store.persists = false
+                Demo.populate(store, .router)
+                let model = RouterModel()
+                model.claudeCodeMissing = true
+                let window = AppWindowController(store: store, routerModel: model, remembers: false, checksClaudeCode: false)
                 var closed = 0
                 window.onClose = { closed += 1 }
                 window.navigator.go(.router)
                 window.prepare()
                 try? await Task.sleep(for: .milliseconds(600))
                 await drainMainQueue()
-                #expect(!said.contains { $0.contains("denied") })
+                #expect(!said.contains { $0.contains("Claude Code wasn't found") })
                 window.show(.router)
                 away(window)
-                await waitUntil { said.contains { $0.contains("denied") } }
-                #expect(said.contains { $0.contains("denied") })
+                await waitUntil { said.contains { $0.contains("Claude Code wasn't found") } }
+                #expect(said.contains { $0.contains("Claude Code wasn't found") })
                 window.close()
                 await waitUntil { closed == 1 && window.window?.contentViewController == nil }
             }
@@ -1145,12 +1150,12 @@ extension WindowSeams {
             }
         }
 
-        /// What the window shows of Claude besides the inbox and the Router (sessions, their activity, forms pending) marks
+        /// What the window shows of Claude besides the inbox and the Router (sessions, their activity, requests waiting) marks
         /// it too; and a picture an opening's handoff faded from is forgiven nothing.
         @Test func claudesSessionsMarkTheWindowAndAFadedHandoffsPictureIsForgivenNothing() {
             morphing { controller, ticks in
                 let before = controller.marks
-                controller.store.pendingForms = [:]
+                controller.store.requests = ["t": ThreadRequest(id: "r", threadID: "t", body: .plan(markdown: "# P"))]
                 #expect(controller.marks != before)
                 let marked = controller.marks
                 controller.store.threadWork = [:]

@@ -1,6 +1,37 @@
 import AppKit
 import Foundation
 
+// MARK: - Paths
+
+/// Where the Router keeps its files, and the Claude Code folder its plugin reads. Tests give their own (see `live`).
+struct RouterPaths: Equatable, Sendable {
+    /// `~/Library/Application Support/Fjord`.
+    var support: URL
+    /// `~/.claude`.
+    var claudeDir: URL
+
+    /// The Router process's working folder.
+    var routerHome: URL { support.appendingPathComponent("router", isDirectory: true) }
+    /// Fjord's Claude Code plugin, a folder marketplace Claude Code reads in place (see `ClaudePlugin`).
+    var plugin: URL { support.appendingPathComponent("claude-plugin", isDirectory: true) }
+    /// One file per session the plugin runs in, written by the plugin itself.
+    var pluginSessions: URL { support.appendingPathComponent("plugin-sessions", isDirectory: true) }
+    /// The key Fjord signs relayed messages with. Not in the plugin's folder: Claude Code copies that into its
+    /// cache.
+    var relayKey: URL { support.appendingPathComponent("relay.key") }
+
+    /// The user's own folders; nil in a test run, which is stopped for reaching them (see `UnderTest`).
+    static func live() -> RouterPaths? {
+        guard !UnderTest.refuses("the Router's files (Application Support/Fjord and ~/.claude)") else { return nil }
+        return unguarded
+    }
+
+    static var unguarded: RouterPaths {
+        RouterPaths(support: AppIdentity.supportDirectory(),
+                    claudeDir: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true))
+    }
+}
+
 // MARK: - Persisted state
 
 /// What the Router keeps across launches: its switch, the log of what it did and changed, where projects run, and the
@@ -104,8 +135,7 @@ struct SessionOrigin: Codable, Equatable, Hashable {
 extension Store {
     // MARK: Switching it
 
-    /// The hook and the forms folder follow the toggle. Installing touches `~/.claude/settings.json`, so it happens off the
-    /// main thread; `routerHookError` says why it failed.
+    /// The plugin follows the toggle, off the main thread; `routerPluginError` says why it failed.
     func setRouterEnabled(_ on: Bool, now: Date = Date()) {
         guard on != router.enabled else { return }
         routerGeneration &+= 1
@@ -118,7 +148,7 @@ extension Store {
         applyRouterSwitch(install: true)
     }
 
-    /// At launch: the forms folder and its watcher, and the hook again if the app moved since it was installed.
+    /// At launch: the plugin again if it is outdated or missing.
     func startRouter() {
         if router.enabled { applyRouterSwitch(install: false) }
     }
@@ -130,8 +160,8 @@ extension Store {
         return RouterPaths.live()
     }
 
-    /// `install` true: install or uninstall as the toggle says. False (launch): re-install only an outdated hook, and the
-    /// plugin when it's outdated or missing.
+    /// `install` true: install or uninstall as the toggle says. False (launch): re-install the
+    /// plugin only when it's outdated or missing.
     private func applyRouterSwitch(install: Bool) {
         let on = router.enabled
         guard let paths = routerFiles else { return }
@@ -146,45 +176,13 @@ extension Store {
             generation = relayKeyFence.current
             relayKeyCache = nil
         }
-        if on {
-            formBridge.start(dir: paths.forms) { [weak self] forms in
-                guard let self, self.router.enabled else { return }
-                let first = !self.routerFormsLoaded
-                self.routerFormsLoaded = true
-                guard first || forms != self.pendingForms else { return }
-                if forms != self.pendingForms { self.pendingForms = forms }
-            }
-        } else {
-            formBridge.stop()
-            routerFormsLoaded = false
-            if !pendingForms.isEmpty { pendingForms = [:] }
-        }
-        let executable = routerExecutable ?? Bundle.main.executablePath ?? CommandLine.arguments[0]
         let runner = routerPluginRunner ?? (UnderTest.isRunning ? nil : ClaudePluginInstaller.processRunner)
         let findBinary = routerClaudeBinary ?? { RouterStatus.findDefault() }
         let version = ClaudePlugin.version(app: routerAppVersion)
-        let previous = routerHookWork
-        routerHookWork = Task { [weak self] in
+        let previous = routerInstallWork
+        routerInstallWork = Task { [weak self] in
             await previous?.value
-            let result = await Task.detached(priority: .utility) { () -> (FormHookInstaller.Status, String?) in
-                let installer = FormHookInstaller(claudeDir: paths.claudeDir)
-                do {
-                    try FormBridge.setEnabled(on, dir: paths.forms)
-                    if on {
-                        if install || installer.status(executable: executable) == .outdated {
-                            try installer.install(executable: executable)
-                        }
-                    } else if install {
-                        try installer.uninstall()
-                    }
-                    return (installer.status(executable: executable), nil)
-                } catch {
-                    return (installer.status(executable: executable), error.localizedDescription)
-                }
-            }.value
             guard let self else { return }
-            if self.routerHookStatus != result.0 { self.routerHookStatus = result.0 }
-            if self.routerHookError != result.1 { self.routerHookError = result.1 }
             guard let runner else { return }
             let fence = self.relayKeyFence
             let plugin = await Self.switchPluginNow(on: on, install: install, paths: paths, version: version, findBinary: findBinary,

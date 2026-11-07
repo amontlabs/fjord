@@ -103,19 +103,41 @@ private func th(_ id: String, _ status: String?, state: String = "idle", session
         #expect(RouterBriefEngine.entries(model: model, board: board).isEmpty)
     }
 
-    @Test func aLocalEntryCarriesTheHooksFormAndItsOptions() {
+    @Test func aLocalEntryCarriesT3sQuestionAndItsOptions() {
         let store = Store()
         store.persists = false
         let briefs = store.routerBriefs
-        briefs.sessions = ["local:cli": "cse_1"]
-        briefs.clis = ["cse_1": "cli"]
-        store.pendingForms["cli"] = PendingForm(id: "f1", cliSessionID: "cli", transcriptPath: "",
-            questions: [.init(question: "Silent?", header: "", multiSelect: false, options: [.init(label: "Yes", description: ""), .init(label: "No", description: "")])],
-            createdAt: Date(), pid: 0, toolUseID: "tu")
+        briefs.sessions = ["local:cli": "th_1"]
+        store.requests["th_1"] = ThreadRequest(id: "r1", threadID: "th_1", body: .question([
+            T3Question(demo: "", "Silent?", options: [("Yes", ""), ("No", "")])]))
         let e = BriefEntry(project: "local:x", thread: "local:cli", kind: .request, state: .needsYou, since: 1, source: .local)
         let r = briefs.resolved(e, store: store)
-        #expect(r.form?.formID == "f1" && r.form?.toolUseID == "tu")
+        #expect(r.request?.id == "r1")
         #expect(r.kind == .question && r.question == "Silent?" && r.options == ["Yes", "No"])
+    }
+
+    @Test func aPermissionOffersT3sDecisionsAsButtons() {
+        let store = Store()
+        store.persists = false
+        store.requests["th_1"] = ThreadRequest(id: "r1", threadID: "th_1", body: .approval(
+            kind: "command", prompt: "rm -rf build", decisions: ThreadRequest.fallbackDecisions))
+        let e = BriefEntry(project: "local:x", thread: "th_1", kind: .question, state: .needsYou, since: 1, source: .local)
+        let r = store.routerBriefs.resolved(e, store: store)
+        #expect(r.kind == .permission && r.question == "rm -rf build")
+        #expect(r.options == ["Allow", "Allow for this session", "Always allow", "Decline"])
+    }
+
+    @Test func aPlanOffersTheTwoYesesAndAnExpiredRequestOffersNoButtons() {
+        let store = Store()
+        store.persists = false
+        store.requests["th_1"] = ThreadRequest(id: "p1", threadID: "th_1", body: .plan(markdown: "# Ship"))
+        store.requests["th_2"] = ThreadRequest(id: "r2", threadID: "th_2", body: .question([
+            T3Question(demo: "", "Silent?", options: [("Yes", ""), ("No", "")])]), live: false)
+        func entry(_ id: String) -> BriefEntry { BriefEntry(project: "local:x", thread: id, kind: .question, state: .needsYou, since: 1, source: .local) }
+        let plan = store.routerBriefs.resolved(entry("th_1"), store: store)
+        #expect(plan.kind == .plan && plan.options == ["Yes, auto-accept", "Yes, manually"])
+        let gone = store.routerBriefs.resolved(entry("th_2"), store: store)
+        #expect(gone.options.isEmpty && gone.question?.contains("T3 restarted") == true)
     }
 }
 

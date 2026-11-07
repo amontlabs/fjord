@@ -109,9 +109,9 @@ struct RouterAskBack: Identifiable, Equatable {
         var prepare: @MainActor (RouterTools, _ session: String) async throws -> Delivery
         /// The signed send, through the gate: the plugin's ack when it went through the inbox.
         var send: @MainActor (RouterTools, Delivery) async throws -> String?
-        /// A form answered for a thread: what was answered.
-        /// Only while the thread still holds the form it was judged on (`FormSnapshot`).
-        var answer: @MainActor (RouterTools, BriefTarget, _ answers: [String: String], FormSnapshot) async throws -> String
+        /// A question, permission or plan answered for a thread: what was done.
+        /// Only while the thread still holds the request it was judged on (`RequestSnapshot`).
+        var answer: @MainActor (RouterTools, BriefTarget, RequestAnswer, RequestSnapshot) async throws -> String
         /// A Haiku run for an intent, given the context it starts from.
         var run: @MainActor (RouterTools, RouterRun.Intent, _ input: String) async throws -> RouterRun.Answer
         /// What revises a proposed project from your words (the app's asks Sonnet).
@@ -122,12 +122,11 @@ struct RouterAskBack: Identifiable, Equatable {
         var cancel: @MainActor (RouterDecision.Delivered) async throws -> RouterDecision.Cancelled = { _ in
             throw RouterTools.Failure("The Router isn't ready")
         }
-        /// A plan decided for a thread (approved, or sent back with the message): what was done.
-        /// Only while the thread still holds the plan it was judged on (`FormSnapshot`).
-        var answerPlan: @MainActor (RouterTools, BriefTarget, PendingForm.PlanDecision, FormSnapshot) async throws -> String = { _, _, _, _ in
-            throw RouterTools.Failure("The Router isn't ready")
-        }
     }
+
+    /// What a message to a thread's waiting request does: answers to its questions, a plan decided, or a permission declined
+    /// with your words.
+    enum RequestAnswer: Sendable { case answers([String: T3Answer]), plan(PlanDecision), decline(String) }
 
     /// Asks waiting for a pick, oldest first.
     private(set) var askBacks: [RouterAskBack] = []
@@ -683,32 +682,6 @@ struct RouterAskBack: Identifiable, Equatable {
 
     // MARK: Replies to threads
 
-    /// The answer a question's form takes from a message that is exactly an option (or several, for a multiple choice):
-    /// anything else is text for the session. Only a single question; a plan is never answered this way.
-    static func formAnswers(_ form: PendingForm, message: String) -> [String: String]? {
-        guard !form.isPlan, form.questions.count == 1, let q = form.questions.first else { return nil }
-        let trim = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
-        let said = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The label as said (case aside) wins, its punctuation kept ("C#" vs "C"); only else the words alone ("sqlite."
-        // for "SQLite"), and then only when they fit one option: two fitting ("C." for "C#" and "C") is text for the session.
-        func option(_ text: String) -> String? {
-            let ws = CharacterSet.whitespacesAndNewlines
-            let exact = text.trimmingCharacters(in: ws).lowercased()
-            let hits = q.options.filter { $0.label.trimmingCharacters(in: ws).lowercased() == exact }
-            if hits.count == 1 { return hits[0].label }
-            guard hits.isEmpty else { return nil }
-            let t = text.trimmingCharacters(in: trim).lowercased()
-            let loose = q.options.filter { $0.label.trimmingCharacters(in: trim).lowercased() == t }
-            return loose.count == 1 ? loose[0].label : nil
-        }
-        if let one = option(said) { return [q.question: one] }
-        guard q.multiSelect else { return nil }
-        let parts = said.replacingOccurrences(of: " and ", with: ",").split(separator: ",").map(String.init)
-        let labels = parts.compactMap(option)
-        guard parts.count > 1, labels.count == parts.count else { return nil }
-        return [q.question: FormBridge.joined(labels)]
-    }
-
     /// Passes your words to a thread's session: the form's answer when you gave one, else your words without their
     /// addressing, signed, through the gate.
     private func reply(_ job: Job, to t: BriefTarget, session: String) async throws {
@@ -716,42 +689,47 @@ struct RouterAskBack: Identifiable, Equatable {
         // What the session would get, its addressing taken out ("@router no rush"), is what answers its form.
         let said = (try? Addressing.edit(job.text, pills: job.context.pills).text) ?? job.text
         let title = store.routerBriefs.title(t)
-        if let form = store.heldForm(t) {
-            // An answer is given only while the thread still holds that very form (it may have moved on while it was read),
-            // and at the write itself once more.
-            let snapshot = FormSnapshot(target: t, form: form)
-            if form.isPlan {
-                // A plan is approved or sent back, never sent as text it stays pending under.
+        if let request = store.heldRequest(t), request.live {
+            // An answer is given only while the thread still holds that very request (it may have moved on while it was
+            // read), and at the send itself once more.
+            let snapshot = RequestSnapshot(target: t, request: request)
+            switch request.body {
+            case .plan:
+                // A plan is approved or sent back, never sent as text it stays pending under. Never a yes without Jev's.
                 stage(job, "reading your decision")
-                let read = await Self.planDecision(form, message: said, ask: jev(job.tools))
+                let read = await Self.planDecision(request, message: said, ask: jev(job.tools))
                 try Task.checkCancellation()
-                // Jev couldn't be asked: nothing is read into your words, the plan stays waiting for you.
-                guard let decision = read else {
-                    note(job, .failed("Couldn't read your answer to “\(RouterDecision.clip(title, 40))” (Jev didn't answer): its plan is still waiting"),
-                         session: session, thread: t)
-                    return
-                }
+                let decision = read ?? PlanDecision(approve: false, feedback: said)
                 if snapshot.holds(store) {
                     stage(job, decision.approve ? "approving" : "sending it back")
-                    _ = try await effects.answerPlan(job.tools, t, decision, snapshot)
+                    _ = try await effects.answer(job.tools, t, .plan(decision), snapshot)
                     note(job, .answered(thread: title), session: session, thread: t)
                     return
                 }
-            } else {
-                var answers = Self.formAnswers(form, message: said)
-                if answers == nil {
-                    stage(job, "reading your answer")
-                    answers = await Self.askFormAnswers(form, message: said, ask: jev(job.tools))
-                    try Task.checkCancellation()
+            case .approval:
+                // Typed words are never a yes: they decline, and the words go to the agent as the reason.
+                if snapshot.holds(store), request.supportsFeedback {
+                    stage(job, "declining")
+                    _ = try await effects.answer(job.tools, t, .decline(said), snapshot)
+                    note(job, .answered(thread: title), session: session, thread: t)
+                    return
+                }
+            case .question(let questions):
+                stage(job, "reading your answer")
+                var answers = await Self.askFormAnswers(request, message: said, ask: jev(job.tools))
+                try Task.checkCancellation()
+                // Not one of its options: the words themselves, where the one question takes a custom answer.
+                if answers == nil, questions.count == 1, questions[0].allowCustomAnswer, !questions[0].multiSelect, !said.isEmpty {
+                    answers = [questions[0].id: .one(said)]
                 }
                 if let answers, snapshot.holds(store) {
                     stage(job, "answering")
-                    _ = try await effects.answer(job.tools, t, answers, snapshot)
+                    _ = try await effects.answer(job.tools, t, .answers(answers), snapshot)
                     note(job, .answered(thread: title), session: session, thread: t)
                     return
                 }
             }
-            // The form moved on while it was read: nothing is answered on a read of another one, and the words go on as text.
+            // The request moved on while it was read: nothing is answered on a read of another one, and the words go on as text.
         }
         stage(job, "preparing")
         let delivery = try await effects.prepare(job.tools, session)
@@ -1021,21 +999,37 @@ extension RouterDispatcher.Effects {
                                                    session: delivery.session, kind: .message,
                                                    decisionID: tools.decision, hostSessionID: delivery.session, body: delivery.body)
             },
-            answer: { [weak dispatcher] tools, target, answers, snapshot in
+            answer: { [weak dispatcher] tools, target, answer, snapshot in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
-                guard snapshot.holds(store) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
-                guard let form = store.heldForm(target), !form.isPlan else {
-                    throw RouterTools.Failure("That question isn't waiting anymore")
-                }
+                try tools.live(tools.ticket())
+                guard snapshot.holds(store) else { throw RouterTools.Failure(RequestSnapshot.changedWords) }
+                guard let request = store.heldRequest(target) else { throw RouterTools.Failure("That isn't waiting anymore") }
+                let title = store.routerBriefs.title(target)
                 let ticket = tools.ticket()
-                try tools.live(ticket)
-                // The write itself checks the snapshot once more, right before it.
-                switch await store.answerForm(form, answers, target: target, snapshot: snapshot,
-                                              alsoValid: { (try? tools.live(ticket)) != nil }) {
-                case .success:
-                    return "Answered “\(store.routerBriefs.title(target))”: " + form.questions.map { "\($0.question) = \(answers[$0.question] ?? "")" }.joined(separator: "; ")
-                case .failure(let error): throw error
+                let valid: @MainActor () -> Bool = { (try? tools.live(ticket)) != nil }
+                switch answer {
+                case .answers(let answers):
+                    switch await store.answerQuestion(request, answers, target: target, snapshot: snapshot, alsoValid: valid) {
+                    case .success:
+                        return "Answered “\(title)”: " + request.questions.map { q in
+                            "\(q.question) = " + (answers[q.id].map { a in switch a { case .one(let v): v; case .many(let m): m.joined(separator: ", ") } } ?? "")
+                        }.joined(separator: "; ")
+                    case .failure(let error): throw error
+                    }
+                case .plan(let decision):
+                    let result = decision.approve
+                        ? await store.implementPlan(request, mode: .approvalRequired, target: target, snapshot: snapshot)
+                        : await store.sendBackPlan(request, words: decision.feedback ?? "", target: target, snapshot: snapshot)
+                    switch result {
+                    case .success: return decision.approve ? "Approved “\(title)”" : "Sent “\(title)” back"
+                    case .failure(let error): throw error
+                    }
+                case .decline(let words):
+                    switch await store.answerPermission(request, .decline, feedback: words, target: target, snapshot: snapshot, alsoValid: valid) {
+                    case .success: return "Declined “\(title)”'s permission with your words"
+                    case .failure(let error): throw error
+                    }
                 }
             },
             run: { [weak dispatcher] tools, intent, input in
@@ -1055,20 +1049,6 @@ extension RouterDispatcher.Effects {
             cancel: { [weak dispatcher] sent in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 return try await store(dispatcher).cancelDelivery(sent)
-            },
-            answerPlan: { [weak dispatcher] tools, target, decision, snapshot in
-                guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
-                let store = try store(dispatcher)
-                try tools.live(tools.ticket())
-                guard snapshot.holds(store) else { throw RouterTools.Failure(FormSnapshot.changedWords) }
-                guard let form = store.heldForm(target), form.isPlan else {
-                    throw RouterTools.Failure("That plan isn't waiting anymore")
-                }
-                let title = store.routerBriefs.title(target)
-                switch await store.answerPlan(form, decision, target: target, snapshot: snapshot) {
-                case .success: return decision.approve ? "Approved “\(title)”" : "Sent “\(title)” back"
-                case .failure(let error): throw error
-                }
             }
         )
     }

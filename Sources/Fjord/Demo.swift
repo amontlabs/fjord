@@ -187,30 +187,32 @@ enum Demo {
     }
 
     /// The Router on, over the `agents` sessions: the one that asks is stopped on its question and the Linux sandbox on its
-    /// plan (forms Fjord's hook holds), with the decision log of what you said and what the Router did.
+    /// plan (requests T3 holds), with the decision log of what you said and what the Router did.
     private static func router(_ store: Store, _ now: Date) {
         claudeProjects(store, now: now)
         let lcu = blockedAgentID
         store.threadWork[lcu] = ThreadWork(text: "Should updates install silently, or ask first each time?",
                                            since: now.addingTimeInterval(-120))
         let question = "Should updates install silently, or ask first each time?"
-        store.pendingForms["cli-demo-lcu"] = PendingForm(
-            id: "cli-demo-lcu-1-1", cliSessionID: "cli-demo-lcu", transcriptPath: "",
-            questions: [PendingForm.Question(question: question, header: "Updates", multiSelect: false, options: [
-                PendingForm.Option(label: "Install silently", description: "Download and install in the background"),
-                PendingForm.Option(label: "Ask first", description: "Show a prompt before each update"),
-            ])],
-            createdAt: now.addingTimeInterval(-60), pid: 0, toolUseID: "toolu_demo_lcu")
+        store.requests[lcu] = ThreadRequest(
+            id: "demo-request-\(lcu)", threadID: lcu,
+            body: .question([T3Question(demo: "Updates", question, options: [
+                ("Install silently", "Download and install in the background"),
+                ("Ask first", "Show a prompt before each update"),
+            ])]))
         // The Linux sandbox's plan, held the same way: its entry shows it, to approve or send back.
-        store.pendingForms["cli-demo-linux"] = PendingForm(
-            id: "cli-demo-linux-1-1", cliSessionID: "cli-demo-linux", transcriptPath: "", questions: [],
-            createdAt: now.addingTimeInterval(-540), pid: 0, toolUseID: "toolu_demo_linux", plan: """
+        store.requests["local_demo-linux"] = ThreadRequest(id: "demo-plan-linux", threadID: "local_demo-linux", body: .plan(markdown: """
             # Run the JavaScript sandbox in a Firecracker microVM on Linux
 
             1. Add a `firecracker` backend next to the macOS one, behind the same `Sandbox` protocol.
             2. Boot a minimal kernel and rootfs with the JS runtime baked in; talk to it over vsock.
             3. Run the existing sandbox tests against both backends in CI (Linux runner with KVM).
-            """)
+            """))
+        // A permission, asked by a thread that is mid-run: its buttons are T3's decisions.
+        store.requests["local_demo-ci"] = ThreadRequest(
+            id: "demo-permission-ci", threadID: "local_demo-ci",
+            body: .approval(kind: "command", prompt: "git push --force-with-lease origin fix/flaky-sandbox-test",
+                            decisions: ThreadRequest.fallbackDecisions))
         var state = RouterSaved()
         state.enabled = true
         state.enabledAt = now.addingTimeInterval(-86400)

@@ -155,13 +155,13 @@ enum ClaudePlugin {
     /// lease, renewed by the plugin: one not renewed within `lease` of `now` is a plugin gone without a word (disabled
     /// and reloaded away).
     static func sessions(in presence: URL, registry: [Int32: [ClaudePeers.Registered]], keyID: String?, now: Date = leaseNow,
-                         alive: (Int32) -> Bool = FormBridge.processAlive) -> Set<String> {
+                         alive: (Int32) -> Bool = ProcessProbe.alive) -> Set<String> {
         Set(live(in: presence, registry: registry, keyID: keyID, now: now, alive: alive).keys)
     }
 
     /// `sessions(in:registry:keyID:now:alive:)` with each session's presence, so what the plugin there can do is known too.
     static func live(in presence: URL, registry: [Int32: [ClaudePeers.Registered]], keyID: String?, now: Date = leaseNow,
-                     alive: (Int32) -> Bool = FormBridge.processAlive) -> [String: Presence] {
+                     alive: (Int32) -> Bool = ProcessProbe.alive) -> [String: Presence] {
         guard let keyID else { return [:] }
         let nowMs = now.timeIntervalSince1970 * 1000, leaseMs = lease * 1000
         let files = (try? FileManager.default.contentsOfDirectory(at: presence, includingPropertiesForKeys: nil)) ?? []
@@ -1316,7 +1316,7 @@ extension ClaudePlugin {
     /// `sessions(in:registry:keyID:alive:)` under the key named by the plugin's `config.json` beside the presence folder.
     /// Reads files: call it off the main thread.
     static func sessions(in presence: URL, registry: [Int32: [ClaudePeers.Registered]],
-                         alive: (Int32) -> Bool = FormBridge.processAlive) -> Set<String> {
+                         alive: (Int32) -> Bool = ProcessProbe.alive) -> Set<String> {
         sessions(in: presence, registry: registry, keyID: currentKeyID(beside: presence), alive: alive)
     }
 
@@ -1344,13 +1344,13 @@ extension ClaudePlugin {
     /// version doesn't say so in its presence file, and is reached over the peer channel. Reads files: call it off the main
     /// thread.
     static func inboxSessions(in presence: URL, registry: [Int32: [ClaudePeers.Registered]], keyID: String?, now: Date = leaseNow,
-                              alive: (Int32) -> Bool = FormBridge.processAlive) -> Set<String> {
+                              alive: (Int32) -> Bool = ProcessProbe.alive) -> Set<String> {
         sessions(with: inboxCapability, in: presence, registry: registry, keyID: keyID, now: now, alive: alive)
     }
 
     /// The sessions whose plugin says it has `capability`.
     static func sessions(with capability: String, in presence: URL, registry: [Int32: [ClaudePeers.Registered]], keyID: String?,
-                         now: Date = leaseNow, alive: (Int32) -> Bool = FormBridge.processAlive) -> Set<String> {
+                         now: Date = leaseNow, alive: (Int32) -> Bool = ProcessProbe.alive) -> Set<String> {
         Set(live(in: presence, registry: registry, keyID: keyID, now: now, alive: alive)
             .filter { $0.value.capabilities?.contains(capability) == true }.keys)
     }

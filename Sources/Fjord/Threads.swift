@@ -369,16 +369,23 @@ extension Store {
         return text
     }
 
-    /// The threads whose detail Fjord holds open: the listed ones that work (or wait on you mid-turn), which are the ones
-    /// the Router shows an activity line for. A thread that settles drops out, and its subscription closes.
+    /// The threads whose detail Fjord holds open: the listed ones that work, which are the ones the Router shows an activity
+    /// line for, and the ones that wait on you, whose question, permission or plan only the projection carries. A thread
+    /// that settles drops out, and its subscription closes.
     func syncThreadDetail() {
-        let wanted = Set(allAgentRows.lazy.filter { $0.session.running }.map(\.id))
+        let wanted = Set(allAgentRows.lazy.filter { $0.session.running || $0.session.waitsForYou }.map(\.id))
         t3.store.watch(wanted)
         let gone = threadWork.keys.filter { !wanted.contains($0) }
         if !gone.isEmpty {
             var work = threadWork
             for id in gone { work[id] = nil }
             threadWork = work
+        }
+        let stale = requests.keys.filter { !wanted.contains($0) }
+        if !stale.isEmpty {
+            var next = requests
+            for id in stale { next[id] = nil }
+            requests = next
         }
     }
 
@@ -387,6 +394,9 @@ extension Store {
         guard agents.enabled, let projection = t3.store.projections[id] else { return }
         let work = ThreadWork(projection)
         if threadWork[id] != work { threadWork[id] = work }
+        // Whatever waits on you: the newest pending request, else the proposed plan; nothing once it is answered.
+        let request = ThreadRequest(projection)
+        if requests[id] != request { requests[id] = request }
     }
 
     /// A shell change, taken in at once; while the window's morph plays (`MotionGate`) it waits for the motion to end, and

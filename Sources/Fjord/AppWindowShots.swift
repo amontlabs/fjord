@@ -254,13 +254,14 @@ enum AppWindowShots {
         briefShot("brief-drawer", .aqua, drawer: true), briefShot("brief-drawer-dark", .darkAqua, drawer: true),
         briefShot("brief-drawer-narrow", .aqua, width: 900, drawer: true), briefShot("brief-drawer-narrow-dark", .darkAqua, width: 900, drawer: true),
         // A highlight hovered, its panel live: a question in the lead, a plan, a question with an option picked (and
-        // mentioned), a form of two questions, a finished thread's (a line to message it).
+        // mentioned), a form of two questions, a permission with its buttons, a finished thread's (a line to message it).
         briefShot("brief-hover", .aqua, hover: "lead-you#chan_demo_fjord/th_settings@3"),
         briefShot("brief-mentions", .aqua, mentions: [BriefTarget(project: "chan_demo_fjord", thread: "th_settings"),
                                                       BriefTarget(project: "chan_demo_fjord", thread: "th_migrate")]),
         briefShot("brief-hover-plan", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_migrate@6"),
         briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
         briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", twoQuestions: true),
+        briefShot("brief-permission", .aqua, hover: "local:lcu#local:lcu/local_demo-ci@6", permission: true),
         briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide@0"),
         briefShot("brief-hover-stranded", .aqua, hover: "chan_demo_silo#chan_demo_silo/th_flaky@6", stranded: true),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
@@ -413,7 +414,7 @@ enum AppWindowShots {
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,
-                                  twoQuestions: Bool = false, stranded: Bool = false, mentions: [BriefTarget] = []) -> Shot {
+                                  twoQuestions: Bool = false, permission: Bool = false, stranded: Bool = false, mentions: [BriefTarget] = []) -> Shot {
         Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
              compose: { _, store in
                  let briefs = store.routerBriefs
@@ -433,11 +434,18 @@ enum AppWindowShots {
                                                  since: Date().timeIntervalSince1970 - 7_200, source: .cloud)]
                      briefs.demoDocs["chan_demo_silo"] = silo
                  }
-                 if twoQuestions, var form = store.pendingForms["cli-demo-lcu"] {
-                     form.questions.append(PendingForm.Question(question: "Which channel should it follow?", header: "Channel", multiSelect: false,
-                                                                options: [PendingForm.Option(label: "Stable", description: ""),
-                                                                          PendingForm.Option(label: "Beta", description: "")]))
-                     store.pendingForms["cli-demo-lcu"] = form
+                 if twoQuestions, var request = store.requests[Demo.briefLocalSession], case .question(var questions) = request.body {
+                     questions.append(T3Question(demo: "Channel", "Which channel should it follow?", options: [("Stable", ""), ("Beta", "")]))
+                     request.body = .question(questions)
+                     store.requests[Demo.briefLocalSession] = request
+                 }
+                 if permission, var lcu = briefs.demoDocs["local:lcu"] {
+                     lcu.now.append("<t id=\"local_demo-ci\">The CI diagnosis</t> waits for a permission.")
+                     lcu.threads.append(BriefThread(id: "local_demo-ci", title: "CI failure diagnosis", status: .needsYou,
+                                                    age: Date().timeIntervalSince1970 - 240, source: .local))
+                     lcu.needsYou.append(BriefEntry(project: lcu.project, thread: "local_demo-ci", kind: .permission, state: .needsYou,
+                                                    since: Date().timeIntervalSince1970 - 240, source: .local))
+                     briefs.demoDocs["local:lcu"] = lcu
                  }
                  if drawer {
                      briefs.drawerOpen = true

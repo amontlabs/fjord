@@ -693,12 +693,18 @@ final class RouterMCPServer: @unchecked Sendable {
             if let session = briefs.desktopSession(e.target, store: store), let s = store.threads[session] {
                 fields.merge(sessionFields(store, s, peers)) { a, _ in a }
             }
-            if let form = store.heldForm(e.target), let plan = form.plan {
-                fields["plan"] = Self.fenced(plan, 4000)
-            } else if let form = store.heldForm(e.target) {
-                fields["form"] = form.questions.map { q -> [String: Any] in
-                    ["question": Self.short(q.question, 400), "header": Self.short(q.header, 80), "multiSelect": q.multiSelect,
-                     "options": q.options.map { Self.short($0.description.isEmpty ? $0.label : "\($0.label) — \($0.description)", 300) }]
+            if let request = store.heldRequest(e.target) {
+                if !request.live { fields["expired"] = "T3 restarted since it asked: answer it in T3, or send words instead" }
+                switch request.body {
+                case .plan(let markdown): fields["plan"] = Self.fenced(markdown, 4000)
+                case .approval(let kind, let prompt, let decisions):
+                    fields["permission"] = ["kind": Self.short(kind, 80), "asks": Self.fenced(prompt, 1200),
+                                            "decisions": decisions.map(\.rawValue)] as [String: Any]
+                case .question(let questions):
+                    fields["form"] = questions.map { q -> [String: Any] in
+                        ["question": Self.short(q.question, 400), "header": Self.short(q.header, 80), "multiSelect": q.multiSelect,
+                         "options": q.options.map { Self.short($0.description.isEmpty ? $0.label : "\($0.label) — \($0.description)", 300) }]
+                    }
                 }
             }
             return fields
@@ -829,7 +835,7 @@ final class RouterMCPServer: @unchecked Sendable {
 
     /// Claude Code's session ids of the live processes, by desktop session (`hostSessionId` → `sessionId`).
     nonisolated static func localPeers(dir: URL,
-                                       alive: (Int32) -> Bool = FormBridge.processAlive) -> [String: ClaudePeers.Peer] {
+                                       alive: (Int32) -> Bool = ProcessProbe.alive) -> [String: ClaudePeers.Peer] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var peers: [String: ClaudePeers.Peer] = [:]
         for url in files where url.pathExtension == "json" {
@@ -844,7 +850,7 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     nonisolated static func cliSessions(dir: URL,
-                                        alive: (Int32) -> Bool = FormBridge.processAlive) -> [String: Set<String>] {
+                                        alive: (Int32) -> Bool = ProcessProbe.alive) -> [String: Set<String>] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var out: [String: Set<String>] = [:]
         for url in files where url.pathExtension == "json" {
@@ -1017,108 +1023,5 @@ final class RouterMCPServer: @unchecked Sendable {
         guard given.hasSuffix("…") else { return false }
         let stem = String(given.dropLast())
         return !stem.isEmpty && stem.count < full.count && full.hasPrefix(stem)
-    }
-}
-
-extension FormWriter {
-    /// The answer file, written whole and only if there's none yet (renamed into place with RENAME_EXCL). It is written aside
-    /// first; `gate` is asked on the main actor right before the rename, in the same step (false throws `Cancelled`, and what
-    /// was written aside is removed).
-    fileprivate static func exclusive(_ form: PendingForm, data: Data, dir: URL, gate: () -> Bool) throws {
-        let url = FormBridge.answerURL(form.id, in: dir)
-        let temp = try PrivateFile.prepare(data, for: url)
-        let renamed = DispatchQueue.main.sync { () -> Int32? in
-            guard gate() else { return nil }
-            return renamex_np(temp.path, url.path, UInt32(RENAME_EXCL)) == 0 ? 0 : errno
-        }
-        guard let renamed else {
-            unlink(temp.path)
-            throw Cancelled()
-        }
-        guard renamed == 0 else {
-            let failure = renamed
-            unlink(temp.path)
-            if failure == EEXIST { throw AlreadyAnswered() }
-            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
-        }
-    }
-}
-
-/// Writes a form's answer (or a plan's decision) for the hook, off the main thread: the brief's answers and the Router's
-/// own answers both go through here, one write at a time.
-enum FormWriter {
-    /// One write at a time (tests hold it to look between the check and the write).
-    static let queue = DispatchQueue(label: "fjord.forms.writer", qos: .utility)
-
-    struct Cancelled: LocalizedError {
-        var errorDescription: String? { "Not sent: the Router was reset or switched off" }
-    }
-
-    /// Another answer for the same form came first (yours on its card, or the Router's): it stands, this one isn't sent.
-    struct AlreadyAnswered: LocalizedError {
-        var errorDescription: String? { "Already answered: an answer to this form was sent first, and it stands" }
-    }
-
-    /// Set once, read from any thread.
-    final class Flag: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = false
-        var isSet: Bool { lock.withLock { value } }
-        func set() { lock.withLock { value = true } }
-    }
-
-    /// The forms an answer was written for, by folder and key: touched only on `queue`. Each is answered once.
-    nonisolated(unsafe) private static var claimed: [String] = []
-
-    /// Checks the answers at once (throwing `FormBridge.Failure`), then writes `<form.id>.answer.json` in `dir` on a utility
-    /// queue. `stillValid` is asked on the main thread right before the write; false (or the task cancelled) throws
-    /// `Cancelled` and writes nothing.
-    @MainActor
-    static func write(_ form: PendingForm, answers: [String: String], dir: URL,
-                      didQueue: @escaping @MainActor () -> Void = {},
-                      stillValid: @escaping @MainActor () -> Bool = { true }) async throws {
-        try await write(form, data: FormBridge.answerData(form, answers), dir: dir, didQueue: didQueue, stillValid: stillValid)
-    }
-
-    /// The same for a plan: approved, or sent back to keep planning (throws `FormBridge.Failure.notAPlan` for a question).
-    @MainActor
-    static func write(_ form: PendingForm, plan decision: PendingForm.PlanDecision, dir: URL,
-                      didQueue: @escaping @MainActor () -> Void = {},
-                      stillValid: @escaping @MainActor () -> Bool = { true }) async throws {
-        try await write(form, data: FormBridge.answerData(form, plan: decision), dir: dir, didQueue: didQueue, stillValid: stillValid)
-    }
-
-    @MainActor
-    private static func write(_ form: PendingForm, data: Data, dir: URL, didQueue: @escaping @MainActor () -> Void,
-                              stillValid: @escaping @MainActor () -> Bool) async throws {
-        guard !Task.isCancelled, stillValid() else { throw Cancelled() }
-        // The task's cancellation reaches the queued write: checked right before it commits.
-        let cancelled = Flag()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
-                queue.async {
-                    guard !cancelled.isSet else { return done.resume(throwing: Cancelled()) }
-                    // First answer wins: one claim per form, and the file is never replaced (a late answer can't overwrite
-                    // the one already waiting for the hook).
-                    let claim = dir.standardizedFileURL.path + "/" + form.id
-                    guard !claimed.contains(claim) else { return done.resume(throwing: AlreadyAnswered()) }
-                    do {
-                        // Still valid (not stopped, not cancelled) asked together with the rename that puts it in place.
-                        try exclusive(form, data: data, dir: dir) {
-                            !cancelled.isSet && MainActor.assumeIsolated { stillValid() }
-                        }
-                        claimed.append(claim)
-                        if claimed.count > 1000 { claimed.removeFirst(claimed.count - 1000) }
-                        done.resume()
-                    } catch {
-                        if error is AlreadyAnswered { claimed.append(claim) }
-                        done.resume(throwing: error)
-                    }
-                }
-                didQueue()
-            }
-        } onCancel: {
-            cancelled.set()
-        }
     }
 }

@@ -500,7 +500,6 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         let s = Store()
         s.persists = false
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
-        s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.routerPluginRunner = cli.runner
         s.routerClaudeBinary = { "/fake/claude" }
         s.routerAppVersion = version
@@ -512,7 +511,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         cli.folderVersion = ClaudePlugin.version(app: "1.0.0")
         let s = store(dir, cli)
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(s.routerPluginStatus == .installed && s.routerPluginError == nil)
         let paths = try #require(s.routerPaths)
         let key = try #require(ClaudePlugin.key(at: paths.relayKey))
@@ -528,7 +527,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
 
         s.setRouterEnabled(false)
         #expect(s.signRelay(body: "hello", target: "cli-a") == nil && s.relayKeyCache == nil)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(s.routerPluginStatus == .notInstalled && cli.marketplaces.isEmpty)
     }
 
@@ -537,13 +536,13 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         cli.folderVersion = ClaudePlugin.version(app: "1.0.0")
         let s = store(dir, cli)
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         let paths = try #require(s.routerPaths)
         cli.failing = "plugin uninstall"
         s.setRouterEnabled(false)
         // Gone at once, before the CLI is even asked.
         #expect(ClaudePlugin.key(at: paths.relayKey) == nil)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(s.routerPluginError?.contains("boom: plugin uninstall") == true)
         #expect(ClaudePlugin.key(at: paths.relayKey) == nil && s.signRelay(body: "x", target: "cli-a") == nil)
     }
@@ -560,7 +559,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         s.setRouterEnabled(false)
         #expect(ClaudePlugin.key(at: paths.relayKey) == nil)
         cli.release()
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(ClaudePlugin.key(at: paths.relayKey) == nil && s.relayKeyCache == nil)
         #expect(s.routerPluginStatus == .notInstalled)
     }
@@ -572,7 +571,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         let s = store(dir, cli)
         s.setRouterEnabled(true)
         s.setRouterEnabled(false)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         let paths = try #require(s.routerPaths)
         #expect(ClaudePlugin.key(at: paths.relayKey) == nil && cli.marketplaces.isEmpty && cli.plugins.isEmpty)
     }
@@ -584,7 +583,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         let migrated = store(dir, cli)
         migrated.router.enabled = true
         migrated.startRouter()
-        await migrated.routerHookWork?.value
+        await migrated.routerInstallWork?.value
         #expect(migrated.routerPluginStatus == .installed)
         #expect(cli.changes.contains("plugin install \(ClaudePlugin.id) --scope user"))
         let installs = cli.changes.count
@@ -592,13 +591,13 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         let same = store(dir, cli)
         same.router.enabled = true
         same.startRouter()
-        await same.routerHookWork?.value
+        await same.routerInstallWork?.value
         #expect(cli.changes.count == installs && same.routerPluginStatus == .installed)
         // An update of Fjord: the folder holds the new version, Claude Code is brought to it.
         let updated = store(dir, cli, version: "1.1.0")
         updated.router.enabled = true
         updated.startRouter()
-        await updated.routerHookWork?.value
+        await updated.routerInstallWork?.value
         #expect(cli.changes.last == "plugin update \(ClaudePlugin.id) --scope user")
         let manifest = try String(contentsOf: dir.path("support/claude-plugin/.claude-plugin/plugin.json"), encoding: .utf8)
         #expect(manifest.contains(ClaudePlugin.version(app: "1.1.0")))
@@ -609,7 +608,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         cli.folderVersion = ClaudePlugin.version(app: "1.0.0")
         let s = store(dir, cli)
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         let paths = try #require(s.routerPaths)
         PluginFixture.live("cli-a", support: paths.support, claude: paths.claudeDir)
         let stale = try Data(contentsOf: paths.pluginSessions.appendingPathComponent("cli-a"))
@@ -617,10 +616,10 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         // Off: the key and the presence files go at once.
         s.setRouterEnabled(false)
         #expect(try FileManager.default.contentsOfDirectory(atPath: paths.pluginSessions.path).isEmpty)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         // On again (a new key); the session's old file, same process and id, under the old key, doesn't count.
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         try stale.write(to: paths.pluginSessions.appendingPathComponent("cli-a"))
         #expect(s.sessionsWithPlugin().isEmpty)
         // Its plugin, still loaded, says so again under the new key.
@@ -633,7 +632,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         cli.folderVersion = ClaudePlugin.version(app: "1.0.0")
         let s = store(dir, cli)
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         let paths = try #require(s.routerPaths)
         #expect(s.signRelay(body: "x", target: "t") != nil)
         // The file changed: not signed with what was read before; read again in the background.
@@ -653,7 +652,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         let onMain = OSAllocatedUnfairLockBox()
         s.routerClaudeBinary = { onMain.set(Thread.isMainThread); return "/fake/claude" }
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(onMain.value == false && s.routerPluginStatus == .installed)
     }
 
@@ -662,7 +661,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         cli.failing = "plugin marketplace add"
         let s = store(dir, cli)
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(s.routerPluginStatus == .notInstalled)
         #expect(s.routerPluginError?.contains("boom: plugin marketplace add") == true)
     }

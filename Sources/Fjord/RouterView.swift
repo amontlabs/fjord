@@ -55,51 +55,92 @@ extension Store {
         return routerDispatcher.submit(text, context: context) != nil
     }
 
-    /// The form Fjord's hook holds for a thread now.
-    func heldForm(_ target: BriefTarget) -> PendingForm? {
-        routerBriefs.localForm(target, store: self)
+    /// What T3 says the thread waits on you for now.
+    func heldRequest(_ target: BriefTarget) -> ThreadRequest? {
+        requests[routerBriefs.threadID(target)]
     }
 
-    /// The last check before a form's answer is written: the Router is on, the thread still holds that very form and, for an
-    /// answer the Router read, still the form it was read against.
-    func answerStillValid(_ form: PendingForm, target: BriefTarget, snapshot: FormSnapshot?,
+    /// The last check before an answer goes: the Router is on and the thread still holds that very request (and, for an
+    /// answer the Router read, the one it was read against).
+    func answerStillValid(_ request: ThreadRequest, target: BriefTarget, snapshot: RequestSnapshot?,
                           alsoValid: (@MainActor () -> Bool)? = nil) -> Bool {
-        guard routerOn, alsoValid?() != false, let held = heldForm(target) else { return false }
-        return held.id == form.id && held.toolUseID == form.toolUseID && snapshot.map { $0.holds(self) } != false
+        guard routerOn, alsoValid?() != false, let held = heldRequest(target) else { return false }
+        return held.id == request.id && snapshot.map { $0.holds(self) } != false
     }
 
-    /// Writes a form's answer for its thread's session (the hook passes it on) through the shared `FormWriter`, off the main
-    /// thread, or through the remote computer that holds it; in a demo, nothing is written. With a `snapshot` (an answer the
-    /// Router read), it is written only while the thread still holds that very form, checked again right before the write.
-    func answerForm(_ form: PendingForm, _ answers: [String: String], target: BriefTarget,
-                    snapshot: FormSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
-        if let snapshot, !snapshot.holds(self) { return .failure(FormWriter.Cancelled()) }
-        if routerIsPretend { return Result { _ = try FormBridge.validate(form, answers) } }
-        guard let dir = formBridge.dir else { return .failure(FormWriter.Cancelled()) }
+    /// Sends commands to T3 in order; in a demo nothing is sent.
+    private func sendCommands(_ commands: [T3Command]) async throws {
+        if requestSender == nil, routerIsPretend { return }
+        for command in commands {
+            if let requestSender { try await requestSender(command) } else { _ = try await t3.store.send(command) }
+        }
+    }
+
+    /// The answer to a question (`runtime-request.respond`): an option's value, several for a multiple choice, or the
+    /// words of a custom answer. Only while the thread still holds that request, checked again right before it is sent.
+    func answerQuestion(_ request: ThreadRequest, _ answers: [String: T3Answer], target: BriefTarget,
+                        snapshot: RequestSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         do {
-            try await FormWriter.write(form, answers: answers, dir: dir, stillValid: { [weak self] in
-                self?.answerStillValid(form, target: target, snapshot: snapshot, alsoValid: alsoValid) ?? false
-            })
-            logEntryAction("Answered the form", target: target)
+            let checked = try request.validate(answers)
+            guard request.live else { throw RequestFailure.notLive }
+            guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
+            else { throw RequestFailure.moved }
+            try await sendCommands([.respondAnswers(threadId: routerBriefs.threadID(target), requestId: request.id, answers: checked)])
+            logEntryAction("Answered the question", target: target)
             return .success(())
         } catch {
             return .failure(error)
         }
     }
 
-    /// The same for a plan: your decision is written for the hook, which gives it to the session as Approve or Keep planning
-    /// in the app would.
-    func answerPlan(_ form: PendingForm, _ decision: PendingForm.PlanDecision, target: BriefTarget,
-                    snapshot: FormSnapshot? = nil) async -> Result<Void, Error> {
-        if let snapshot, !snapshot.holds(self) { return .failure(FormWriter.Cancelled()) }
-        if routerIsPretend { return Result { _ = try FormBridge.answerData(form, plan: decision) } }
-        let words = decision.approve ? "Approved the plan" : "Sent the plan back"
-        guard let dir = formBridge.dir else { return .failure(FormWriter.Cancelled()) }
+    /// A permission's answer: a button's decision, or a decline carrying your words.
+    func answerPermission(_ request: ThreadRequest, _ decision: T3Decision, feedback: String? = nil, target: BriefTarget,
+                          snapshot: RequestSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         do {
-            try await FormWriter.write(form, plan: decision, dir: dir, stillValid: { [weak self] in
-                self?.answerStillValid(form, target: target, snapshot: snapshot) ?? false
-            })
-            logEntryAction(words, target: target)
+            guard case .approval(_, _, let allowed) = request.body else { throw RequestFailure.notAPermission }
+            guard request.live else { throw RequestFailure.notLive }
+            guard allowed.contains(decision) else { throw RequestFailure.unknownOption(decision.rawValue) }
+            if feedback != nil, !request.supportsFeedback { throw RequestFailure.noFeedback }
+            guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
+            else { throw RequestFailure.moved }
+            try await sendCommands([.respondDecision(threadId: routerBriefs.threadID(target), requestId: request.id, decision: decision, feedback: feedback)])
+            logEntryAction(decision == .decline ? "Declined the permission" : "Allowed the permission", target: target)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// "Yes" to a plan: the mode it runs in, the default interaction mode, then the message T3's own composer sends to
+    /// implement it, naming the plan (S1 f).
+    func implementPlan(_ request: ThreadRequest, mode: T3RuntimeMode, target: BriefTarget,
+                       snapshot: RequestSnapshot? = nil) async -> Result<Void, Error> {
+        do {
+            guard let markdown = request.planMarkdown else { throw RequestFailure.notAPlan }
+            guard answerStillValid(request, target: target, snapshot: snapshot) else { throw RequestFailure.moved }
+            let thread = routerBriefs.threadID(target)
+            try await sendCommands([
+                .runtimeModeSet(threadId: thread, mode: mode),
+                .interactionModeSet(threadId: thread, mode: .default),
+                .messageDispatch(threadId: thread, messageId: UUID().uuidString.lowercased(), text: ThreadRequest.implementText(markdown),
+                                 dispatch: .startImmediately(intent: .auto), sourcePlan: (thread, request.id)),
+            ])
+            logEntryAction("Approved the plan (" + (mode == .autoAcceptEdits ? "auto-accept" : "manually") + ")", target: target)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// "No" to a plan: your words as a normal message, the thread still in plan mode.
+    func sendBackPlan(_ request: ThreadRequest, words: String, target: BriefTarget,
+                      snapshot: RequestSnapshot? = nil) async -> Result<Void, Error> {
+        do {
+            guard request.isPlan else { throw RequestFailure.notAPlan }
+            guard answerStillValid(request, target: target, snapshot: snapshot) else { throw RequestFailure.moved }
+            try await sendCommands([.messageDispatch(threadId: routerBriefs.threadID(target), messageId: UUID().uuidString.lowercased(), text: words,
+                                                     dispatch: .startImmediately(intent: .auto))])
+            logEntryAction("Sent the plan back", target: target)
             return .success(())
         } catch {
             return .failure(error)
@@ -456,8 +497,6 @@ struct RouterSetupNotice: View {
             } else if model.claudeCodeMissing == true && store.routerStatus.claudeCode == nil {
                 line("Claude Code wasn't found. Install or open the Claude desktop app.", color: Theme.amber,
                      action: "Look again") { Task { await model.checkClaudeCode(store) } }
-            } else if let error = store.routerHookError {
-                line("The form hook couldn't be installed: \(error)", color: Theme.red, action: nil) {}
             }
         }
     }

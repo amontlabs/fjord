@@ -519,7 +519,7 @@ struct BriefAnswerPanel: View {
     let target: BriefTarget
     let close: () -> Void
     @State private var words = ""
-    /// A form's choices so far: each question's picked option labels.
+    /// A request's choices so far: each question's (by id) picked option values.
     @State private var choices: [String: [String]] = [:]
     @FocusState private var typing: Bool
 
@@ -529,12 +529,13 @@ struct BriefAnswerPanel: View {
         let briefs = store.routerBriefs
         let now = briefs.clock().timeIntervalSince1970
         let entry = briefs.entry(target, store: store)
-        let form = entry.flatMap { briefs.form($0, store: store) }
+        let request = entry.flatMap { briefs.request($0, store: store) }
+        let questions = request?.live == true ? request?.questions ?? [] : []
         VStack(alignment: .leading, spacing: 12) {
             BriefThreadHeader(store: store, target: target, state: BriefSpanState.of(target, store: store), now: now)
             if let entry {
-                if let form, !form.isPlan, form.questions.count > 1 || form.questions.contains(where: \.multiSelect) {
-                    formQuestions(form)
+                if questions.count > 1 || questions.contains(where: \.multiSelect) {
+                    formQuestions(questions)
                 } else {
                     // A stop or a permission with nothing written about it: its note says what it waits on instead.
                     if entry.question?.isEmpty == false || Self.note(entry) == nil { question(entry) }
@@ -587,11 +588,11 @@ struct BriefAnswerPanel: View {
     }
 
     /// Every question of a form, each with its options (several for a multi-select), and one Send once each has one.
-    private func formQuestions(_ form: PendingForm) -> some View {
+    private func formQuestions(_ questions: [T3Question]) -> some View {
         let briefs = store.routerBriefs
-        let complete = form.questions.allSatisfy { !(choices[$0.question] ?? []).isEmpty }
+        let complete = questions.allSatisfy { !(choices[$0.id] ?? []).isEmpty }
         return VStack(alignment: .leading, spacing: 12) {
-            ForEach(form.questions, id: \.question) { q in
+            ForEach(questions, id: \.id) { q in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(RouterText.inline(q.question)).cdsText(CDS.Density.compact.prose, .medium, CDS.Text.primary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -599,8 +600,8 @@ struct BriefAnswerPanel: View {
                     VStack(spacing: 0) {
                         ForEach(Array(q.options.enumerated()), id: \.offset) { n, option in
                             if n > 0 { Rectangle().fill(CDS.border).frame(height: 1) }
-                            BriefOptionRow(number: n + 1, label: option.label, on: choices[q.question]?.contains(option.label) == true,
-                                           keyed: false) { choose(option.label, in: q) }
+                            BriefOptionRow(number: n + 1, label: option.label, on: choices[q.id]?.contains(option.value) == true,
+                                           keyed: false) { choose(option.value, in: q) }
                         }
                     }
                     .clipShape(shape)
@@ -610,22 +611,21 @@ struct BriefAnswerPanel: View {
             HStack {
                 Spacer()
                 ClaudeButton("Send", variant: .primary, size: .sm, busy: briefs.answering.contains(target)) {
-                    let answers = choices.mapValues { $0.joined(separator: ", ") }
-                    if briefs.answerAll(target, answers, store: store) { close() }
+                    if briefs.answerAll(target, choices, store: store) { close() }
                 }
                 .disabled(!complete || briefs.answering.contains(target))
             }
         }
     }
 
-    private func choose(_ label: String, in q: PendingForm.Question) {
-        var picked = choices[q.question] ?? []
+    private func choose(_ value: String, in q: T3Question) {
+        var picked = choices[q.id] ?? []
         if q.multiSelect {
-            if let i = picked.firstIndex(of: label) { picked.remove(at: i) } else { picked.append(label) }
+            if let i = picked.firstIndex(of: value) { picked.remove(at: i) } else { picked.append(value) }
         } else {
-            picked = picked == [label] ? [] : [label]
+            picked = picked == [value] ? [] : [value]
         }
-        choices[q.question] = picked
+        choices[q.id] = picked
     }
 
     @ViewBuilder private var status: some View {
@@ -657,8 +657,9 @@ struct BriefAnswerPanel: View {
         guard let e else { return "Message this thread" }
         switch e.kind {
         case .stranded: return "Tell it to go on"
-        case .permission: return "Message this thread"
-        case .question, .request, .plan: return e.options.count > 1 ? "Or type an answer" : "Type your answer"
+        case .permission: return e.request?.live == true ? "Or say why not (this declines it)" : "Message this thread"
+        case .plan: return e.request?.live == true ? "Or type what to change (this sends it back)" : "Message this thread"
+        case .question, .request: return e.options.count > 1 ? "Or type an answer" : "Type your answer"
         }
     }
 
@@ -666,7 +667,7 @@ struct BriefAnswerPanel: View {
     static func note(_ e: BriefEntry?) -> String? {
         switch e?.kind {
         case .stranded: "It stopped before it finished: tell it to go on, or open it."
-        case .permission: "It waits for a permission, which only Claude can grant: open it to allow or deny."
+        case .permission where e?.request == nil: "It waits for a permission: open it in T3 to allow or deny."
         default: nil
         }
     }

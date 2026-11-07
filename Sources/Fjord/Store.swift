@@ -317,14 +317,13 @@ final class Store {
     }
     /// Bumped on every change to `router`: a cheap memo/animation key.
     private(set) var routerRevision = 0
-    /// The question forms Fjord's hook holds, by Claude Code session id (`AgentThread.cliID`).
-    var pendingForms: [String: PendingForm] = [:] {
+    /// What each thread waits on you for (a question, a permission, a plan), by thread id: read from T3's projection of the
+    /// thread, which Fjord holds open only while something waits (`syncThreadDetail`). Live state, never stored.
+    var requests: [String: ThreadRequest] = [:] {
         didSet { shownRevision &+= 1 }
     }
-    /// Why installing or removing the form hook failed, if it did.
-    var routerHookError: String?
-    /// The form hook as last checked (nil until the Router has been switched on in this run).
-    var routerHookStatus: FormHookInstaller.Status?
+    /// Sends a command to T3; a test stands one in.
+    @ObservationIgnored var requestSender: (@MainActor (T3Command) async throws -> Void)?
     /// Fjord's Claude Code plugin as last checked (nil until the Router has been switched on in this run, or
     /// in a test that stands in no CLI), and why installing or removing it failed, if it did.
     var routerPluginStatus: ClaudePluginInstaller.Status?
@@ -472,9 +471,6 @@ final class Store {
     /// The system-wide shortcuts the system last refused to register (another app holds the key), by the key it refused:
     /// one still stored does nothing, and Settings says so.
     var refusedShortcuts: [ShortcutAction: Shortcut] = [:]
-    /// The forms folder has been read since the Router was switched on: until then no form is known to be gone.
-    @ObservationIgnored var routerFormsLoaded = false
-    @ObservationIgnored let formBridge = FormBridge()
     /// Claude Code's binary, which the Router's runs use.
     @ObservationIgnored lazy var routerStatus = RouterStatus()
     /// Your messages to the Router, as typed runs (each its own).
@@ -517,10 +513,8 @@ final class Store {
     @ObservationIgnored var routerRunReverted: (UUID) -> Void = { _ in }
     /// Where the Router's files go, in a test (see `routerFiles`).
     @ObservationIgnored var routerPaths: RouterPaths?
-    /// The executable the hook runs; this one unless a test says otherwise.
-    @ObservationIgnored var routerExecutable: String?
-    /// The latest install or removal of the hook (each waits for the one before).
-    @ObservationIgnored var routerHookWork: Task<Void, Never>?
+    /// The latest install or removal of the plugin (each waits for the one before).
+    @ObservationIgnored var routerInstallWork: Task<Void, Never>?
     /// Runs Claude Code's CLI for the plugin; a test stands one in (without one, a test run leaves the plugin alone).
     @ObservationIgnored var routerPluginRunner: ClaudePluginInstaller.Runner?
     /// Who may make the relay key (see `RelayKeyFence`), and the key as last read (see `signRelay`).

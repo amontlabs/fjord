@@ -334,16 +334,15 @@ import UserNotifications
         let s = Store()
         s.persists = false
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
-        s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.routerPluginRunner = cli.runner
         s.routerClaudeBinary = { "/fake/claude" }
         s.routerAppVersion = "1.0.0"
         s.agents.enabled = true
         s.setRouterEnabled(true)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         cli.failing = "plugin uninstall"
         s.setRouterEnabled(false)
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         let error = try #require(s.routerRemovalError)
         #expect(error.contains("boom"))
         // Settings shows it, and the button that tries again, though the Router's own lines are hidden while it is off.
@@ -352,7 +351,7 @@ import UserNotifications
         #expect(tree.all.contains { $0.role == "AXButton" && $0.label == "Try again" })
         cli.failing = nil
         s.retryRouterRemoval()
-        await s.routerHookWork?.value
+        await s.routerInstallWork?.value
         #expect(s.routerRemovalError == nil && s.routerPluginStatus == .notInstalled && cli.plugins.isEmpty)
     }
 
@@ -364,62 +363,121 @@ import UserNotifications
         #expect(RouterMentions.rank([("/a", "microsandbox")], query: "zz", limit: 6).isEmpty)
     }
 
-    // MARK: Forms
+    // MARK: Requests
 
-    /// A store that writes for real, its forms folder in `dir` (nil: never started, as with the Router off).
+    /// A store that persists for real, to a file of its own.
     private func writing(_ dir: URL?) -> Store {
         let store = demo()
         store.stateFile = FileManager.default.temporaryDirectory.appendingPathComponent("router-ui-\(UUID().uuidString).json")
         store.persists = true
-        if let dir { store.formBridge.start(dir: dir) { _ in } }
         return store
     }
 
-    @Test func anAnswerIsWrittenToTheFormsFolder() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-forms-\(UUID().uuidString)")
-        let store = writing(dir)
-        defer { store.formBridge.stop(); store.persists = false; try? FileManager.default.removeItem(at: dir) }
+    /// A demo store whose commands to T3 are collected, not sent.
+    private func sending(_ sent: Sent) -> Store {
+        let store = demo()
+        store.requestSender = { sent.commands.append($0) }
+        return store
+    }
+
+    @MainActor final class Sent { var commands: [T3Command] = [] }
+
+    @Test func anOptionIsAnsweredThroughT3() async throws {
+        let sent = Sent()
+        let store = sending(sent)
         // The brief's local question: option 2 picked, then Return.
         let briefs = store.routerBriefs
         let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
-        let form = try #require(store.heldForm(t))
+        let request = try #require(store.heldRequest(t))
         briefs.pick(t, 2, store: store)
         #expect(briefs.confirm(t, store: store))
-        await waitUntil { FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: dir).path) }
-        // Its line in the drawer once the answer is written.
+        // Its line in the drawer once the answer is sent.
         await briefs.settled()
+        let question = try #require(request.questions.first)
+        #expect(sent.commands == [.respondAnswers(threadId: Demo.blockedAgentID, requestId: request.id,
+                                                  answers: [question.id: .one("Ask first")])])
         #expect(briefs.trouble[t] == nil && briefs.answers.first?.words == "Ask first")
     }
 
-    @Test func answeringWhileTheRouterIsSwitchedOffWritesNothing() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-forms-\(UUID().uuidString)")
-        let store = writing(dir)
-        defer { store.formBridge.stop(); store.persists = false; try? FileManager.default.removeItem(at: dir) }
+    @Test func answeringWhileTheRouterIsSwitchedOffSendsNothing() async throws {
+        let sent = Sent()
+        let store = sending(sent)
         let briefs = store.routerBriefs
         let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
-        let form = try #require(store.heldForm(t))
         briefs.pick(t, 2, store: store)
         #expect(briefs.confirm(t, store: store))
-        // Switched off before the write happens.
+        // Switched off before the answer goes.
         store.router.enabled = false
         await waitUntil { briefs.trouble[t] != nil }
-        #expect(briefs.trouble[t] == FormWriter.Cancelled().errorDescription)
-        #expect(!FileManager.default.fileExists(atPath: FormBridge.answerURL(form.id, in: dir).path))
+        #expect(briefs.trouble[t] == RequestFailure.moved.errorDescription)
+        #expect(sent.commands.isEmpty)
+    }
+
+    @Test func aRequestThatMovedOnIsNotAnsweredWithTheOldOnesAnswer() async throws {
+        let sent = Sent()
+        let store = sending(sent)
+        let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
+        let old = try #require(store.heldRequest(t))
+        // A retried permission is a new request id: the answer read for the old one doesn't go to it.
+        var next = old
+        next.id = "demo-request-2"
+        store.requests[Demo.blockedAgentID] = next
+        let answers = [try #require(old.questions.first).id: T3Answer.one("Ask first")]
+        let result = await store.answerQuestion(old, answers, target: t, snapshot: RequestSnapshot(target: t, request: old))
+        if case .success = result { Issue.record("answered a request that had moved on") }
+        #expect(sent.commands.isEmpty)
+    }
+
+    // MARK: Permissions
+
+    @Test func aPermissionIsAllowedByItsButtonAndDeclinedByYourWords() async throws {
+        let sent = Sent()
+        let store = sending(sent)
+        let t = BriefTarget(project: "local:lcu", thread: "local_demo-ci")
+        let request = try #require(store.heldRequest(t))
+        #expect(request.decisions == ThreadRequest.fallbackDecisions)
+        if case .failure(let error) = await store.answerPermission(request, .acceptForSession, target: t) { Issue.record("\(error)") }
+        if case .failure(let error) = await store.answerPermission(request, .decline, feedback: "not on main", target: t) { Issue.record("\(error)") }
+        #expect(sent.commands == [
+            .respondDecision(threadId: "local_demo-ci", requestId: request.id, decision: .acceptForSession),
+            .respondDecision(threadId: "local_demo-ci", requestId: request.id, decision: .decline, feedback: "not on main"),
+        ])
+        // A decision the request doesn't take is refused.
+        if case .success = await store.answerPermission(request, .cancel, target: t) { Issue.record("sent a decision it doesn't take") }
+        #expect(sent.commands.count == 2)
+    }
+
+    @Test func anExpiredPermissionTakesNoDecision() async throws {
+        let sent = Sent()
+        let store = sending(sent)
+        let t = BriefTarget(project: "local:lcu", thread: "local_demo-ci")
+        var request = try #require(store.heldRequest(t))
+        request.live = false
+        store.requests["local_demo-ci"] = request
+        if case .success = await store.answerPermission(request, .accept, target: t) { Issue.record("answered an expired request") }
+        #expect(sent.commands.isEmpty)
     }
 
     // MARK: Plans
 
-    @Test func anApprovalIsWrittenToTheFormsFolder() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-forms-\(UUID().uuidString)")
-        let store = writing(dir)
-        defer { store.formBridge.stop(); store.persists = false; try? FileManager.default.removeItem(at: dir) }
-        // The Linux sandbox's session, stopped on its plan: Approve carries no note.
+    @Test func aPlanIsImplementedInTheModeYouPickAndSentBackWithYourWords() async throws {
+        let sent = Sent()
+        let store = sending(sent)
+        // The Linux sandbox's session, stopped on its plan.
         let t = BriefTarget(project: "local:sandbox", thread: "local_demo-linux")
-        let form = try #require(store.heldForm(t))
-        #expect(form.isPlan)
-        if case .failure(let error) = await store.answerPlan(form, .init(approve: true), target: t) { Issue.record("\(error)") }
-        let written = try JSONSerialization.jsonObject(with: Data(contentsOf: FormBridge.answerURL(form.id, in: dir))) as? NSDictionary
-        #expect(written == ["plan": ["approve": true, "feedback": ""]] as NSDictionary)
+        let request = try #require(store.heldRequest(t))
+        #expect(request.isPlan)
+        if case .failure(let error) = await store.implementPlan(request, mode: .autoAcceptEdits, target: t) { Issue.record("\(error)") }
+        let payloads = sent.commands.map { $0.payload(commandId: "c") }
+        #expect(payloads.map { $0["type"]?.string } == ["thread.runtime-mode.set", "thread.interaction-mode.set", "message.dispatch"])
+        #expect(payloads[0]["runtimeMode"]?.string == "auto-accept-edits" && payloads[1]["interactionMode"]?.string == "default")
+        #expect(payloads[2]["text"]?.string?.hasPrefix("PLEASE IMPLEMENT THIS PLAN:\n# Run the JavaScript sandbox") == true)
+        #expect(payloads[2]["sourcePlanRef"]?["planId"]?.string == request.id)
+        sent.commands = []
+        if case .failure(let error) = await store.sendBackPlan(request, words: "Use QEMU instead", target: t) { Issue.record("\(error)") }
+        let back = try #require(sent.commands.first?.payload(commandId: "c"))
+        #expect(sent.commands.count == 1 && back["type"]?.string == "message.dispatch" && back["text"]?.string == "Use QEMU instead")
+        #expect(back["sourcePlanRef"] == nil)
     }
 
     // MARK: What works

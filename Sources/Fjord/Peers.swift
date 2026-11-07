@@ -10,7 +10,7 @@ enum ClaudePeers {
     }
 
     /// By the desktop app's session id (`hostSessionId`, `local_…`). Files of processes that are gone are skipped.
-    static func read(dir: URL, alive: (Int32) -> Bool = FormBridge.processAlive) -> [String: Peer] {
+    static func read(dir: URL, alive: (Int32) -> Bool = ProcessProbe.alive) -> [String: Peer] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var peers: [String: Peer] = [:]
         for url in files where url.pathExtension == "json" {
@@ -37,7 +37,7 @@ enum ClaudePeers {
 
     /// Every live process in the registry, by pid (what Fjord's plugin binds its presence to). A pid has one
     /// entry in Claude Code's own registry; all are kept in case two files name it.
-    static func registry(dir: URL, alive: (Int32) -> Bool = FormBridge.processAlive) -> [Int32: [Registered]] {
+    static func registry(dir: URL, alive: (Int32) -> Bool = ProcessProbe.alive) -> [Int32: [Registered]] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var found: [Int32: [Registered]] = [:]
         for url in files where url.pathExtension == "json" {

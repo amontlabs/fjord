@@ -180,7 +180,7 @@ private final class Client: @unchecked Sendable {
 
     @Test func stoppingCancelsTheRequestsBeingAnswered() async throws {
         let gate = RouterGate()
-        let cancelled = FormWriter.Flag()
+        let cancelled = StopFlag()
         var sawCancel: Bool?
         let (server, port) = try await start { _ in
             // The handler hears the cancellation as it happens (acknowledged), and finishes only when let go.
