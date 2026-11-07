@@ -268,46 +268,46 @@ import Testing
         #expect(model.plainDraft(store) == "@octo/app#12 @lookout rebase it")
     }
 
-    // MARK: claude.ai projects and threads
+    // MARK: T3 threads and projects
 
-    /// `triage()`'s store with two claude.ai projects on the engine's Board, one with a thread.
-    private func claude() -> (store: Store, pr: Thing, category: InboxCategory) {
+    /// `triage()`'s store with two T3 projects, one with a thread.
+    private func t3() -> (store: Store, pr: Thing, category: InboxCategory) {
         let t = triage()
-        t.store.routerCourierLink.take(CourierSnapshot(places: [
-            RouterDispatcherTests.lookout,
-            CourierPlace(id: "chan_lcu", name: "lcu", purpose: "", threads: []),
-        ]))
+        t.store.agents.enabled = true
+        t.store.t3.store.seed(T3Fixture.state([T3Fixture.shell("t1", title: "Fix the login redirect", project: "p1", minutes: 5)],
+                                              projects: [T3Fixture.project("p1", title: "lookout", root: "/code/lookout"),
+                                                         T3Fixture.project("p2", title: "lcu", root: "/code/lcu")]))
         return t
     }
 
-    @Test func theSuggestionsOfferClaudeProjectsAndTheirThreadsAndNoSessions() {
-        let (store, pr, category) = claude()
+    @Test func theSuggestionsOfferT3ProjectsAndTheirThreadsAndNoSessions() {
+        let (store, pr, category) = t3()
         let all = RouterMentions.candidates(store)
         #expect(Set(all.map(\.section)) == [.projects, .notifications, .categories])
-        let claude = all.filter { if case .pointer(.claude) = $0.pick { true } else { false } }
-        #expect(claude.map(\.name).contains("lookout") && claude.map(\.name).contains("lcu")
-                && claude.map(\.name).contains("Fix the login redirect"))
+        let places = all.filter { if case .pointer(.t3) = $0.pick { true } else { false } }
+        #expect(places.map(\.name).contains("lookout") && places.map(\.name).contains("lcu")
+                && places.map(\.name).contains("Fix the login redirect"))
         // A thread by its title or its project's name; a notification and a category as before.
-        #expect(RouterMentions.suggest(all, query: "login").first?.pick == .pointer(.claude("claude-thread:lookout/t1")))
-        #expect(RouterMentions.suggest(all, query: "lcu").contains { $0.pick == .pointer(.claude("claude-project:lcu")) })
+        #expect(RouterMentions.suggest(all, query: "login").first?.pick == .pointer(.t3("t3-thread:t1")))
+        #expect(RouterMentions.suggest(all, query: "lcu").contains { $0.pick == .pointer(.t3("new_thread:p2")) })
         #expect(RouterMentions.suggest(all, query: "app#12").map(\.pick) == [.pointer(.notification(pr.id))])
         #expect(RouterMentions.suggest(all, query: "mine").map(\.pick) == [.pointer(.category(category.id))])
         #expect(RouterMentions.suggest(all, query: "zzz").isEmpty)
         // What the draft tags already isn't offered again.
-        #expect(!RouterMentions.candidates(store, except: [.claude("claude-project:lcu")]).contains { $0.pick == .pointer(.claude("claude-project:lcu")) })
+        #expect(!RouterMentions.candidates(store, except: [.t3("new_thread:p2")]).contains { $0.pick == .pointer(.t3("new_thread:p2")) })
     }
 
     @Test func aPickedThreadIsAnAddressPillThatSendsTheMessageThere() {
-        let (store, _, _) = claude()
+        let (store, _, _) = t3()
         let model = RouterModel()
         model.draft = "@login"
         let found = model.suggestions(store)
-        #expect(found.first?.pick == .pointer(.claude("claude-thread:lookout/t1")))
+        #expect(found.first?.pick == .pointer(.t3("t3-thread:t1")))
         model.pickMention(found[0])
         model.draft += "merge it"
         let context = model.context(store)
-        #expect(context.claudeTargets == ["claude-thread:lookout/t1"] && context.pills.count == 1)
-        #expect(RouterDispatcher.plan(text: model.plainDraft(store), context: context, store: store) == .send("claude-thread:lookout/t1"))
+        #expect(context.threadTargets == ["t3-thread:t1"] && context.pills.count == 1)
+        #expect(RouterDispatcher.plan(text: model.plainDraft(store), context: context, store: store) == .send("t3-thread:t1"))
         // A local project's pill is what you talk about, not where it goes: it is context, never an address.
         var local = RouterContext()
         local.tag([RouterMention(range: 0..<8, pointer: .project("/code/lookout"), name: "lookout")])
@@ -316,10 +316,10 @@ import Testing
     }
 
     @Test func pointersRoundTripAndAGoneSessionPillLeavesItsEntryWithoutPills() throws {
-        let all: [RouterPointer] = [.project("/code/lookout"), .claude("claude-thread:lookout/t1"), .notification("pr:octo/app#12"),
+        let all: [RouterPointer] = [.project("/code/lookout"), .t3("t3-thread:t1"), .notification("pr:octo/app#12"),
                                     .category(UUID()), .thisItem]
         #expect(try JSONDecoder().decode([RouterPointer].self, from: JSONEncoder().encode(all)) == all)
-        #expect(all.filter(\.addresses) == [.claude("claude-thread:lookout/t1")])
+        #expect(all.filter(\.addresses) == [.t3("t3-thread:t1")])
         let entry = #"{"id":"6B1B1C9E-1E3B-4F0E-9C1A-2E8F6D1E2A01","at":0,"trigger":{"you":{"_0":"@x hi"}},"decision":{},"done":[],"outcome":{"done":{}},"links":{"sessions":[],"cards":[],"changes":[]},"mentions":[{"range":[0,2],"pointer":{"session":"local_a"},"name":"x"}]}"#
         let decoded = try JSONDecoder().decode(RouterDecision.self, from: Data(entry.utf8))
         #expect(decoded.mentions == nil && decoded.triggerText == "@x hi")

@@ -212,8 +212,8 @@ final class PaletteModel {
             for t in doc.threads { brief.combine(t.id); brief.combine(t.title); brief.combine(t.status) }
             for e in doc.needsYou { brief.combine(e) }
         }
-        brief.combine(briefs.marks.read)
-        brief.combine(briefs.marks.archived)
+        brief.combine(briefs.read)
+        brief.combine(briefs.archived)
         return Stamp(inbox: store.inboxRevision, display: store.inboxDisplayRevision, router: store.routerRevision,
                      corpus: store.corpusRevision, routerOn: store.routerOn, canSend: routerModel.canSend(store),
                      tools: store.tools, computers: computers.finalize(), brief: brief.finalize())

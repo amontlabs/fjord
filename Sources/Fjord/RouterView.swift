@@ -300,8 +300,6 @@ final class RouterModel {
     /// target you pinned; the composer keeps the focus for the next one.
     /// `queue` (⌥Return): the words wait for the turn under way instead of steering it.
     func send(store: Store, queue: Bool = false) {
-        // A proposed project takes the words (and an empty composer creates it).
-        if answerProposal(store: store) { return }
         // Threads to reply to: your words go to each, no model. One that refuses them stays picked, with the words, so
         // sending again reaches only it.
         let briefs = store.routerBriefs

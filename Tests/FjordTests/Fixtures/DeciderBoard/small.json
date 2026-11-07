@@ -1,0 +1,67 @@
+{
+ "name": "small",
+ "projects": [
+  "harbor-notes",
+  "quiet-lab",
+  "kite"
+ ],
+ "purposes": {
+  "harbor-notes": "A note-taking app for sailors with offline charts.",
+  "kite": "Wind forecasts."
+ },
+ "threads": [
+  {
+   "id": "7f3a9c21",
+   "project": "harbor-notes",
+   "title": "Tide table import",
+   "flag": "finished",
+   "running": false,
+   "minutesIdle": 120,
+   "summary": "",
+   "step": "",
+   "said": "The importer now reads both CSV layouts and skips rows with a missing station code. Two stations still fail on a trailing comma.",
+   "youSaid": "Add the second layout too",
+   "waiting": null
+  },
+  {
+   "id": "1b88e0d4",
+   "project": "harbor-notes",
+   "title": "Chart tile cache",
+   "flag": "running",
+   "running": true,
+   "minutesIdle": 0,
+   "summary": "",
+   "step": "Run the memory test against 5000 tiles",
+   "said": "Cache eviction is in; running the memory test now.",
+   "youSaid": null,
+   "waiting": null
+  },
+  {
+   "id": "9c0de5aa",
+   "project": "harbor-notes",
+   "title": "Fix crash on startup",
+   "flag": "finished",
+   "running": false,
+   "minutesIdle": 1500,
+   "summary": "",
+   "step": "",
+   "said": "Fixed.",
+   "youSaid": "",
+   "waiting": null
+  },
+  {
+   "id": "c4a11f08",
+   "project": "kite",
+   "title": "Forecast  parser\n rewrite",
+   "flag": "waiting",
+   "running": false,
+   "minutesIdle": 45,
+   "summary": "",
+   "step": "",
+   "said": "I need a decision on the units.",
+   "youSaid": null,
+   "waiting": "Which unit should the parser use for gusts?\n  - knots\n  - m/s"
+  }
+ ],
+ "expected": "## harbor-notes\n- new in harbor-notes | start a new thread here | purpose: A note-taking app for sailors with offline charts. | last threads: Chart tile cache; Tide table import; Fix crash on startup\n- 1b88e0d4 | Chart tile cache | running (a message would interrupt it), 0m ago\n  last message: Cache eviction is in; running the memory test now.\n  current step: Run the memory test against 5000 tiles\n- 7f3a9c21 | Tide table import | finished, 2h ago\n  last message: The importer now reads both CSV layouts and skips rows with a missing station code. Two stations still fail on a trailing comma.\n  you last said there: Add the second layout too\n## kite\n- new in kite | start a new thread here | purpose: Wind forecasts. | last threads: Forecast parser rewrite\n- c4a11f08 | Forecast parser rewrite | waiting on you, 45m ago\n  last message: I need a decision on the units.\n  waiting request: Which unit should the parser use for gusts? - knots - m/s\n## quiet-lab\n- new in quiet-lab | start a new thread here | purpose: unknown\n## Fjord\n- here | Fjord itself: a question about the board or all threads, or a bare acknowledgement"
+}

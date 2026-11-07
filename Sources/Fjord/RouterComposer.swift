@@ -44,13 +44,6 @@ struct RouterComposer: View {
         let on = model.canSend(store)
         let suggestions = model.suggestions(store)
         VStack(alignment: .leading, spacing: 0) {
-            // A project proposed for the message that fit none.
-            if let proposal = store.routerProposal {
-                RouterProjectProposalPill(proposal: proposal, queued: store.routerProposalQueue.count) {
-                    _ = model.dropProposal(store: store)
-                }.padding(.bottom, C.dockGap)
-                    .transition(.opacity)
-            }
             // What the engine is doing for claude.ai, over your messages still finding where they go.
             RouterCourierStack(pills: store.routerCourier)
                 .padding(.bottom, store.routerCourier.items.isEmpty ? 0 : C.dockGap)
@@ -81,12 +74,8 @@ struct RouterComposer: View {
         .motion(.fade, value: suggestions.map(\.id))
         .onAppear {
             if on { requestFocus() }
-            model.proposalDraftChanged(store: store)
         }
         .onChange(of: model.focusRequest) { requestFocus() }
-        // A dropped proposal's message leaving the composer shows the next one; a restored one's words come back.
-        .onChange(of: model.draft) { model.proposalDraftChanged(store: store) }
-        .onChange(of: store.routerProposal.map(ObjectIdentifier.init)) { model.proposalDraftChanged(store: store) }
         .onDisappear {
             focused = false
             model.composerFocused = false

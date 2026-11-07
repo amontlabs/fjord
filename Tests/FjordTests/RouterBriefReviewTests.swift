@@ -159,21 +159,27 @@ import Testing
     // MARK: Banners and the away gate (P2-7)
 
     @Test func eachNewEntryIsAnnouncedOnceAndItsBannerOpensIt() {
-        let store = demo()
+        let store = Store()
+        store.persists = false
         store.router.enabled = true
         store.agents.enabled = true
         store.settings.notifications = true
+        let now = Date()
+        var asks = AgentThread(id: "t-ask", title: "Pick a layout", lastActivity: now, unseen: true)
+        asks.status = .running
+        asks.pendingRequest = T3PendingRequest(json: T3JSON.parse(#"{"id":"r1","kind":"user_input","blocking":true}"#))
+        store.threads = ["t-ask": asks]
+        store.routerBriefs.clock = { now }
         var posted: [String] = []
         store.notifier.onPost = { posted.append($0.identifier) }
         store.routerBriefs.announce(store: store)
-        #expect(!posted.isEmpty && posted.allSatisfy { $0.hasPrefix(RouterBriefs.notificationPrefix) })
-        let first = posted.count
+        #expect(posted == [RouterBriefs.notificationPrefix + BriefTarget(project: asks.projectID, thread: "t-ask").key])
         store.routerBriefs.announce(store: store)
-        #expect(posted.count == first, "once per entry")
+        #expect(posted.count == 1, "once per request")
         var opened: BriefTarget?
         store.onOpenBrief = { opened = $0 }
-        store.openNotification(id: RouterBriefs.notificationPrefix + settings(store).key, url: nil)
-        #expect(opened == settings(store))
+        store.openNotification(id: posted[0], url: nil)
+        #expect(opened?.thread == "t-ask")
     }
 
     @Test func awayOnlyWhatCantWaitComesAndTheRestIsSummedUpOnce() {

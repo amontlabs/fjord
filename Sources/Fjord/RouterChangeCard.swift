@@ -150,8 +150,15 @@ struct ChangeCard: View {
             MarksPreview(changes: changes, store: store)
         case .briefAction(_, _, let act, _):
             VStack(alignment: .leading, spacing: 2) {
-                Text("Needs you").cdsText(CDS.Transcript.text, .regular, CDS.Text.muted)
+                Text(act.before).cdsText(CDS.Transcript.text, .regular, CDS.Text.muted)
                 Text(act.label).cdsText(CDS.Transcript.text)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        case .threadLaunch(_, _, let projectTitle):
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No thread").cdsText(CDS.Transcript.text, .regular, CDS.Text.muted)
+                Text("A new thread in \(projectTitle)").cdsText(CDS.Transcript.text)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)

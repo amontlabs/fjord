@@ -5,8 +5,8 @@ import Observation
 // The briefs in the app (docs/design/router-watch-and-briefs.md 3.5, 4 and 5): the engine's documents (or a demo's), the
 // page they make (`BriefPage`, ordered as in 4), what you focus and pick, and the acts: an option answered by Return, your
 // words sent to the thread, Open, mark read, archive. A waiting request is answered through T3. The facts are T3's threads
-// (T3BriefSource.swift) and Fjord's own log of what happened (BriefLog.swift). Mark read and archive are Fjord changes with a Revert (`FjordChange.briefAction`); the marks, and which
-// finished threads were told, are kept in briefs.db.
+// (T3BriefSource.swift) and Fjord's own log of what happened (BriefLog.swift). Mark read, archive, snooze, settle, rename and tags are T3's (ThreadActs.swift), each a change with a Revert
+// (`FjordChange.briefAction`); briefs.db keeps only which finished threads were told and which banners were posted.
 
 /// An answer you gave from the brief, one line in the drawer (an answer can't be taken back).
 struct BriefAnswer: Identifiable, Equatable {
@@ -170,19 +170,19 @@ enum BriefKeys {
     var viewport: CGSize = .zero
     @ObservationIgnored private var pointerIn = false
     @ObservationIgnored private var holding = false
-    @ObservationIgnored private var leaving: Task<Void, Never>?
+    @ObservationIgnored private var departing: Task<Void, Never>?
 
     /// The pointer on a highlight or its panel, or off it: it shows at once, and goes a moment after the pointer leaves
     /// both, so crossing from one to the other keeps it.
     func hover(_ key: String, _ t: BriefTarget, inside: Bool) {
-        leaving?.cancel()
+        departing?.cancel()
         pointerIn = inside
         if inside {
             if hovered != key { hovered = key; hoveredTarget = t }
             return
         }
         guard !holding, hovered == key else { return }
-        leaving = Task { @MainActor [weak self] in
+        departing = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(Self.hoverGrace))
             guard let self, !Task.isCancelled, !self.pointerIn, !self.holding, self.hovered == key else { return }
             self.unhover()
@@ -192,7 +192,7 @@ enum BriefKeys {
     static let hoverGrace = 220
 
     func unhover() {
-        leaving?.cancel()
+        departing?.cancel()
         hovered = nil
         hoveredTarget = nil
         holding = false
@@ -211,12 +211,49 @@ enum BriefKeys {
     /// Entries with an answer under way: no other pick or answer until it settles.
     private(set) var answering: Set<BriefTarget> = []
     @ObservationIgnored private var work: [BriefTarget: Task<Void, Never>] = [:]
-    /// Entries marked read (`BriefPage.entryKey`), threads archived (`BriefTarget.key`), and finished threads told (their
-    /// section was shown and then left), as briefs.db keeps them.
+    /// Finished threads told (their section was shown and then left) and entries a banner was posted for, as briefs.db keeps
+    /// them. Read state, archive, snooze and settle are T3's.
     private(set) var marks = BriefMarks()
-    var read: Set<String> { marks.read }
-    var archived: Set<String> { marks.archived }
     var told: Set<String> { marks.told }
+    /// Threads whose entry was marked read here, with the activity they had then: hidden until T3's own `unseen` says so (or
+    /// the thread moves on). A thread id the shell doesn't hold (a demo) stays hidden.
+    private(set) var visited: [String: Date] = [:]
+    /// Threads archived, snoozed or settled here: hidden until the board no longer lists them, or until Revert.
+    private(set) var awayThreads: Set<String> = []
+    /// The entries (`BriefPage.entryKey`) that are read: T3's `thread.visit` (this app's, T3's or the phone's), or marked here.
+    var read: Set<String> {
+        var out = Set<String>()
+        for doc in docs.values {
+            for e in doc.needsYou where isRead(e) { out.insert(BriefPage.entryKey(e)) }
+        }
+        return out
+    }
+    /// The brief targets (`BriefTarget.key`) acted away.
+    var archived: Set<String> {
+        var out = Set<String>()
+        for (project, doc) in docs {
+            let ids = Set(doc.threads.map(\.id)).union(doc.needsYou.map(\.thread))
+            for id in awayThreads where ids.contains(id) { out.insert(BriefTarget(project: project, thread: id).key) }
+        }
+        return out
+    }
+
+    private func isRead(_ e: BriefEntry) -> Bool {
+        let thread = store?.threads[e.thread]
+        if let seen = visited[e.thread], seen == (thread?.lastActivity ?? seen) { return true }
+        guard engine != nil, let thread else { return false }
+        return !thread.unseen
+    }
+
+    /// An act applied (or taken back) here, shown at once before T3 has said so.
+    func holdAct(_ act: BriefAction, _ t: BriefTarget, detail: String, on: Bool, store: Store) {
+        switch act {
+        case .read: visited[t.thread] = on ? (store.threads[t.thread]?.lastActivity ?? Date()) : nil
+        case .archive, .snooze, .settle: if on { awayThreads.insert(t.thread) } else { awayThreads.remove(t.thread) }
+        case .rename, .tag: break
+        }
+        recount()
+    }
     @ObservationIgnored var shownFinishes: Set<String> = []
     private(set) var answers: [BriefAnswer] = []
     /// Entries not marked read, every project (the bar's mark): counted when the documents or the marks change.
@@ -298,8 +335,15 @@ enum BriefKeys {
             seen[t.id] = facts
             log.setSeen(t.id, facts)
         }
+        // What T3 has confirmed is no longer held here.
+        let listed = Set(boards.values.flatMap { $0.threads.map(\.id) })
+        let stillLeaving = awayThreads.filter { listed.contains($0) }
+        if stillLeaving != awayThreads { awayThreads = stillLeaving }
+        let stillVisited = visited.filter { id, at in store.threads[id].map { $0.lastActivity == at && $0.unseen } ?? false }
+        if stillVisited != visited { visited = stillVisited }
         let before = lastBoards
         lastBoards = boards
+        defer { recount(); announce(store: store) }
         guard engineStarted else { engineStarted = true; engine.start(); return }
         for p in itemProjects.sorted() { engine.itemsChanged(p) }
         for p in Set(boards.keys).union(before.keys).subtracting(itemProjects).sorted() where boards[p] != before[p] { engine.boardChanged(p) }
@@ -311,6 +355,7 @@ enum BriefKeys {
         if log.append(BriefLog.request(request, title: thread.title, at: clock().timeIntervalSince1970), project: thread.projectID) {
             engine?.itemsChanged(thread.projectID)
         }
+        announce(store: store)
     }
 
     /// T3 answered, or stopped answering: the boards say since when, and the briefs start at the first word either way.
@@ -326,11 +371,9 @@ enum BriefKeys {
 
     // MARK: Count and banners
 
-    /// The documents or the marks changed: the count again, and a banner for each entry newly told (once per entry).
+    /// The documents changed: the count again.
     private func docsChanged() {
         recount()
-        guard engine != nil, let store else { return }
-        announce(store: store)
     }
 
     private func recount() {
@@ -338,28 +381,28 @@ enum BriefKeys {
         if untoldNeedsYou != count { untoldNeedsYou = count }
     }
 
-    /// The entries no banner has told yet (not read, not archived), each told once, through the app's banners; more than
-    /// `notifyEach` at once, one banner says how many.
+    /// What the threads show now that no banner has told yet (needs you, finished, failed, usage limit), each told once by the
+    /// request, plan or run it is about; more than `notifyEach` at once, one banner says how many. It runs on the shell's own
+    /// change, with no model between.
     func announce(store: Store) {
-        var fresh: [(name: String, entry: BriefEntry)] = []
-        for (id, doc) in docs.sorted(by: { $0.key < $1.key }) {
-            for e in doc.needsYou where !marks.notified.contains(BriefPage.entryKey(e)) && !read.contains(BriefPage.entryKey(e))
-                && !archived.contains(e.target.key) {
-                fresh.append((names[id].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(id), e))
+        let now = clock()
+        var fresh: [ThreadNotice] = []
+        for t in store.threads.values.sorted(by: { ($0.lastActivity, $0.id) < ($1.lastActivity, $1.id) }) where t.unseen {
+            for n in ThreadNotices.notices(t, request: store.requests[t.id], now: now) where !marks.notified.contains(n.key) {
+                fresh.append(n)
             }
         }
         guard !fresh.isEmpty else { return }
-        for f in fresh { set(.notified, BriefPage.entryKey(f.entry), on: true) }
+        for n in fresh { set(.notified, n.key, on: true) }
+        func name(_ n: ThreadNotice) -> String { names[n.project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(n.project) }
         if fresh.count > Self.notifyEach {
-            let first = fresh.min { $0.entry.since < $1.entry.since }!.entry
-            store.notifyRouter(id: Self.notificationPrefix + first.target.key, title: "\(fresh.count) threads need you",
-                               subtitle: Set(fresh.map(\.name)).sorted().joined(separator: ", "), body: "")
+            store.notifyRouter(id: Self.notificationPrefix + BriefTarget(project: fresh[0].project, thread: fresh[0].thread).key,
+                               title: "\(fresh.count) threads have news", subtitle: Set(fresh.map(name)).sorted().joined(separator: ", "), body: "")
             return
         }
-        for f in fresh {
-            let e = f.entry
-            store.notifyRouter(id: Self.notificationPrefix + e.target.key, title: "\(f.name) · needs you", subtitle: title(e.target),
-                               body: e.question ?? BriefEntryText.kindLabel(e))
+        for n in fresh {
+            store.notifyRouter(id: Self.notificationPrefix + BriefTarget(project: n.project, thread: n.thread).key,
+                               title: "\(name(n)) · \(n.heading)", subtitle: n.title, body: n.body)
         }
     }
 
@@ -616,30 +659,35 @@ enum BriefKeys {
         return store.openThread(session)
     }
 
-    /// Marks the entry read: a change of Fjord's, with its Revert in the drawer.
+    /// Marks the thread read (`thread.visit`, which T3's sidebar and phone share): a change with its Revert in the drawer.
     func markRead(_ t: BriefTarget, store: Store) {
-        guard let e = docs[t.project]?.needsYou.first(where: { $0.target == t }) else { return }
-        store.briefAct(.read, on: t, mark: BriefPage.entryKey(e), title: title(t))
+        guard docs[t.project]?.needsYou.contains(where: { $0.target == t }) == true else { return }
+        store.threadAct(.read, on: t, title: title(t))
         leave(t)
     }
 
-    /// Archives the thread: it leaves the brief until Revert.
+    /// Archives the thread in T3 (`thread.archive`): only ever on an explicit press. It leaves the brief until Revert.
     func archive(_ t: BriefTarget, store: Store) {
-        store.briefAct(.archive, on: t, mark: t.key, title: title(t))
+        store.threadAct(.archive, on: t, title: title(t))
         leave(t)
     }
 
-    /// Sets or clears a mark, and keeps it in briefs.db.
-    func setMark(_ act: BriefAction, _ key: String, on: Bool) {
-        let kind: BriefMarks.Kind = act == .read ? .read : .archived
-        set(kind, key, on: on)
+    /// Snoozes the thread until then: T3 wakes it on a new request or a failure.
+    func snooze(_ t: BriefTarget, until: Date, store: Store) {
+        store.snoozeThread(t, until: until)
+        leave(t)
+    }
+
+    /// Settles the thread (T3's "done with it"): it leaves the brief unless it needs you again.
+    func settle(_ t: BriefTarget, store: Store) {
+        store.settleThread(t)
+        leave(t)
     }
 
     private func set(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
         guard marks[kind].contains(key) != on else { return }
         if on { marks[kind].insert(key) } else { marks[kind].remove(key) }
         engine?.setMark(kind, key, on: on)
-        if kind == .read || kind == .archived { recount() }
     }
 
     /// The entry your words went to left the brief: they go nowhere now (never on to another entry unasked).
@@ -702,20 +750,5 @@ enum BriefKeys {
             markRead(f, store: store)
         }
         return true
-    }
-}
-
-extension Store {
-    /// An act on a brief entry, done at once and logged as a change of Fjord's that Revert sets back.
-    func briefAct(_ act: BriefAction, on t: BriefTarget, mark: String, title: String, now: Date = Date()) {
-        guard !routerBriefs.marks[act == .read ? .read : .archived].contains(mark) else { return }
-        routerBriefs.setMark(act, mark, on: true)
-        let change = FjordChange(date: now, title: "\(act.label) \(title)",
-                                 patch: .briefAction(project: t.project, thread: t.thread, act: act, mark: mark))
-        var state = router
-        state.changes.append(change)
-        state.pruneChanges()
-        router = state
-        logChange(change)
     }
 }

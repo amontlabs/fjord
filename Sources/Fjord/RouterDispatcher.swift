@@ -3,19 +3,19 @@ import Observation
 
 // What you type (docs/design/router-redesign.md, "How a message flows"). Each message is a run of its own (several can be in
 // flight), one entry of the decision log, its stage shown on its pill over the composer. Where it goes is decided once, among
-// your claude.ai projects only: a reply armed on a thread goes to that thread (its session on this Mac); a claude.ai project or thread you tagged
-// goes there with no model; anything else is for the project decider (`RouterProjectDecider`: Jev, then Sonnet),
-// whose decision is acted on as it is: a thread gets the words, a project's coordinator picks the thread, a new project is
-// proposed under the composer, the Router answers here, or you're asked where it goes. Nothing is sent when it isn't sure.
+// T3's threads: a reply armed on a thread goes to that thread; a thread you tagged goes there with no model; anything else is
+// for the decider (`RouterProjectDecider`: Sonnet on the board, Jev without a key), whose decision is acted on as it is: a
+// thread gets the words (a waiting request is answered by its own rules first), a new thread starts with them, the Router
+// answers here, or you're asked where it goes. Nothing is sent when it isn't sure.
 
-/// What a message of yours comes with besides its text: the thread you're replying to (it is the target), the claude.ai
+/// What a message of yours comes with besides its text: the thread you're replying to (it is the target), the T3
 /// place a Retry goes to again or one waved off, and its pills.
 struct RouterContext: Equatable {
     /// The thread it replies to.
     var replyTo: BriefTarget?
     /// The local projects the message tags (their folders): context for an answer, and the folder a new project may use.
     var projects: [String]
-    /// A claude.ai target (`RouterCourier.Target`) it goes to: the place you confirmed.
+    /// A T3 target (`RouteTarget`) it goes to: the place you confirmed.
     var target: String?
     /// A target you dismissed (or a wrong send's, on Send elsewhere): the message never goes there without asking you.
     var notTo: String?
@@ -23,10 +23,10 @@ struct RouterContext: Equatable {
     /// words, never words that happen to match a project's name.
     var pills: [Range<Int>]
     /// Every pill of the message, what it points to and where (`RouterPointer`; `tag` sets this, `pills` and `projects`
-    /// together): a claude.ai place tagged is where it goes, a notification or a category goes with it as a fenced block
+    /// together): a T3 thread tagged is where it goes, a notification or a category goes with it as a fenced block
     /// (`RouterPointers.context`).
     var mentions: [RouterMention] = []
-    /// A category's "Then" sends it for a thing (`ActionMessage`): unattended, it goes only to a claude.ai project or thread
+    /// A category's "Then" sends it for a thing (`ActionMessage`): unattended, it goes only to a T3 thread or project
     /// (never the Router's own runs: an incoming PR must never change settings), and when where isn't clear it waits for your
     /// pick, with no fallback.
     var action: RouterActionSource?
@@ -46,10 +46,12 @@ struct RouterContext: Equatable {
 
 /// "Where should this go?": a message waiting for you to say where. Nothing is sent until you pick.
 struct RouterAskBack: Identifiable, Equatable {
-    /// "New project…": the proposal flow starts for the message (`RouterProjectProposal`).
-    static let newProject = "new_project"
+    /// "New thread in <project>": a thread is started in a T3 project (`target` is this prefix and the project's id), and
+    /// "New thread in <folder>": the folder has no T3 project yet, so one is made first (the prefix and the folder's path).
+    static let newThread = "new_thread:"
+    static let newFolder = "new_folder:"
 
-    /// A target you can pick: a claude.ai project or thread (`RouterCourier.Target`), `newProject`, or `change_fjord` (the
+    /// A target you can pick: a T3 thread or a new thread in a project (`RouteTarget`), a folder, or `change_fjord` (the
     /// Router answers here).
     struct Option: Identifiable, Equatable, Hashable {
         var target: String
@@ -69,8 +71,6 @@ struct RouterAskBack: Identifiable, Equatable {
     var at: Date
     /// Why it asks, when it isn't the decider's doubt ("Not delivered there").
     var note: String? = nil
-    /// The name the decider gave a new project, for "New project…".
-    var projectName: String? = nil
 }
 
 // MARK: - Dispatcher
@@ -80,7 +80,7 @@ struct RouterAskBack: Identifiable, Equatable {
     enum Plan: Equatable {
         /// A thread of this Mac (or a remote computer's Desktop session) you replied to: its session id.
         case reply(project: String, thread: String, session: String)
-        /// A claude.ai project or thread you tagged, or a Retry's confirmed one.
+        /// A T3 thread you tagged, or a Retry's confirmed place.
         case send(String)
         /// Wholly for the Router ("@router what needs me?").
         case answer
@@ -105,7 +105,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// Everything a run does outside Fjord's own state, so a test stands in for each. The defaults are the real ones.
     struct Effects {
-        /// Where a message goes among the claude.ai projects (`RouterProjectDecider`), its stage told as it goes. `unattended`:
+        /// Where a message goes among T3's threads (`RouterProjectDecider`), its stage told as it goes. `unattended`:
         /// an action's message, read by Jev only as an inbox action may be.
         var decide: @MainActor (RouterTools, _ message: String, _ unattended: Bool,
                                 _ stage: @escaping @MainActor (RouterProjectDecider.Stage) -> Void) async throws -> RouterProjectDecision
@@ -116,8 +116,6 @@ struct RouterAskBack: Identifiable, Equatable {
         var answer: @MainActor (RouterTools, BriefTarget, RequestAnswer, RequestSnapshot) async throws -> String
         /// A Haiku run for an intent, given the context it starts from.
         var run: @MainActor (RouterTools, RouterRun.Intent, _ input: String) async throws -> RouterRun.Answer
-        /// What revises a proposed project from your words (the app's asks Sonnet).
-        var reviser: @MainActor () -> RouterProjectReviser = { RouterProjectFakeReviser() }
     }
 
     /// What a message to a thread's waiting request does: answers to its questions, a plan decided, or a permission declined
@@ -138,8 +136,6 @@ struct RouterAskBack: Identifiable, Equatable {
     static let waitingTurn = "waiting its turn"
     /// The entries of actions' messages under way or waiting their turn (`submit`, `launch`), until they end.
     @ObservationIgnored private var actionRuns: Set<UUID> = []
-    /// The entries whose message waits on a project proposal under the composer: not done until it is made or dropped.
-    @ObservationIgnored private var proposing: Set<UUID> = []
 
     @ObservationIgnored weak var store: Store?
     @ObservationIgnored var effects: Effects
@@ -153,15 +149,21 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var runTools: [UUID: RouterTools] = [:]
     /// Jev's questions (tests answer for him); else `RouterTools.chooser`, else TypeSafe with your key.
     @ObservationIgnored var asker: JevAsker?
+    /// Every decision and what became of it, for the benchmark (nil in a test or a demo).
+    @ObservationIgnored var decisionLog: DeciderLog?
+    /// What you last said in each thread, kept by thread@lastActivity.
+    @ObservationIgnored let youSaid = YouSaidCache()
+    /// Sonnet's client; tests don't reach it (they stand in `Effects.decide`).
+    @ObservationIgnored lazy var anthropic = RouterProjectDecider.makeClient()
 
     init(store: Store) {
         self.store = store
+        // A test run only has the folder it stood in (`routerPaths`); the user's own is never reached from here.
+        decisionLog = DeciderLog.live(UnderTest.isRunning ? store.routerPaths : store.routerFiles)
         effects = Effects.unavailable
         effects = Effects.live(self)
         // An entry whose ask-back card is still up is not pruned from the history (its pick needs the record).
-        store.decisionsInUse = { [weak self] in Set(self?.askBacks.map(\.id) ?? []).union(self?.proposing ?? []) }
-        store.onProposalsRestored = { [weak self] in self?.reattachProposals() }
-        reattachProposals()
+        store.decisionsInUse = { [weak self] in Set(self?.askBacks.map(\.id) ?? []) }
     }
 
     struct Job {
@@ -249,8 +251,8 @@ struct RouterAskBack: Identifiable, Equatable {
     func pick(_ id: UUID, target: String) -> Bool {
         guard let store, store.routerOn, let ask = askBacks.first(where: { $0.id == id }) else { return false }
         guard live(ask, store: store) else { return false }
-        // An action's message goes only to a claude.ai place, and only while Triage and the Router are both on.
-        if ask.context.action != nil, RouterCourier.Target(target) == nil || !store.toolsLinked { return false }
+        // An action's message goes only to a T3 place, and only while Triage and the Router are both on.
+        if ask.context.action != nil, !store.toolsLinked || (RouteTarget(target) == nil && !target.hasPrefix(RouterAskBack.newFolder)) { return false }
         // Offered when it was asked: a place the Board no longer has isn't sent to.
         guard eligible(target, store: store) else { return false }
         answer(ask, target: target, store: store)
@@ -284,14 +286,8 @@ struct RouterAskBack: Identifiable, Equatable {
         let tools = makeTools(id, ask.message, pills: ask.context.pills, mentions: ask.context.mentions,
                               action: ask.context.action != nil)
         let job = Job(id: id, text: ask.message, context: ask.context, tools: tools)
-        launch(job, stage: "starting") { [self] job in
-            // The send this one corrects (Send elsewhere): the engine keeps the correction on it.
-            if corrected, let wrong = ask.suggestion.flatMap(RouterCourier.Target.init), let target = RouterCourier.Target(target),
-               let old = store.router.record(id)?.decision.courierIntent, wrong.project != target.project {
-                store.routerCourier.correct(old, project: target.project)
-            }
-            try await route(job, to: target, projectName: ask.projectName)
-        }
+        decisionLog?.outcome(id: id, "picked", target: target, guess: !corrected)
+        launch(job, stage: "starting") { [self] job in try await route(job, to: target) }
         follow(id)
     }
 
@@ -301,6 +297,7 @@ struct RouterAskBack: Identifiable, Equatable {
     func dismiss(_ id: UUID, reason: String? = nil) {
         guard let store, let i = askBacks.firstIndex(where: { $0.id == id }) else { return }
         let ask = askBacks.remove(at: i)
+        decisionLog?.outcome(id: id, "dismissed")
         store.updateDecision(id) {
             if let reason, ask.context.action != nil {
                 $0.add(.failed(reason))
@@ -403,8 +400,8 @@ struct RouterAskBack: Identifiable, Equatable {
         live[job.id] = nil
         tasks[job.id] = nil
         runTools[job.id] = nil
-        // Waiting for your pick, or on a proposal, is not over; anything else not settled is done.
-        if !askBacks.contains(where: { $0.id == job.id }), !proposing.contains(job.id) {
+        // Waiting for your pick is not over; anything else not settled is done.
+        if !askBacks.contains(where: { $0.id == job.id }) {
             store?.updateDecision(job.id) { if $0.outcome == .pending { $0.outcome = .done } }
         }
         follow(job.id)
@@ -465,37 +462,33 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Where a message goes without a model: the thread a reply is armed on (its session on this Mac, else its claude.ai thread;
-    /// neither reachable, it is refused), a Retry's confirmed place, or the one claude.ai place tagged (and nothing else that
-    /// says where). Words wholly for the Router are its own. Anything else is decided.
+    /// Where a message goes without a model: the thread a reply is armed on (refused when T3 no longer lists it), a Retry's
+    /// confirmed place, or the one thread the message tags (and nothing else that says where). Words wholly for the Router are
+    /// its own. Anything else is decided.
     static func plan(text: String, context: RouterContext, store: Store) -> Plan {
-        // An action's message is never the Router's own, nor a reply: it goes to a claude.ai place.
+        // An action's message is never the Router's own, nor a reply: it goes to a T3 place.
         let unattended = context.action != nil
         if !unattended, forRouter(text, pills: context.pills) { return .answer }
         if !unattended, let t = context.replyTo {
             if let session = store.routerBriefs.desktopSession(t, store: store) {
                 return .reply(project: t.project, thread: t.thread, session: session)
             }
-            let thread = RouterCourier.Target.thread(project: t.project, thread: t.thread)
-            if !t.project.hasPrefix("local:"), RouterCourier.eligible(thread, store: store) { return .send(thread.targetID) }
             // Your reply is for that thread alone: it doesn't go to another place a model would pick.
-            return .unreachable(t.project.hasPrefix("local:") ? "Not sent: that session isn't open in the Claude app"
-                                                               : "Not sent: that thread can't be reached on claude.ai now")
+            return .unreachable("Not sent: that thread isn't in T3 anymore")
         }
-        if !unattended, let target = context.target, let courier = RouterCourier.Target(target),
-           RouterCourier.eligible(courier, store: store) {
-            return .send(courier.targetID)
+        if !unattended, let target = context.target, let place = RouteTarget(target), place.eligible(store: store) {
+            return .send(place.targetID)
         }
-        if let only = claudeTag(context, store: store) { return .send(only) }
+        if let only = threadTag(context, store: store) { return .send(only) }
         return .decide
     }
 
-    /// The one claude.ai place the message tags, when it tags no other and no reply or Retry fixes it: nil otherwise, or when the
-    /// Board hasn't that place.
-    static func claudeTag(_ context: RouterContext, store: Store) -> String? {
-        let tagged = context.claudeTargets
+    /// The one thread the message tags, when it tags no other and no reply or Retry fixes it: nil otherwise, or when T3 no
+    /// longer lists it.
+    static func threadTag(_ context: RouterContext, store: Store) -> String? {
+        let tagged = context.threadTargets
         guard tagged.count == 1, context.replyTo == nil, context.target == nil,
-              let target = RouterCourier.Target(tagged[0]), RouterCourier.eligible(target, store: store) else { return nil }
+              let target = RouteTarget(tagged[0]), target.eligible(store: store) else { return nil }
         return target.targetID
     }
 
@@ -506,11 +499,12 @@ struct RouterAskBack: Identifiable, Equatable {
         return false
     }
 
-    /// The decider's decision, acted on: a place gets the words, a new project is proposed, the Router answers, or you're asked.
+    /// The decider's decision, acted on: a thread gets the words (steering its run when one is under way), a new thread starts
+    /// with them, the Router answers, or you're asked. Every decision is logged for the benchmark (`DeciderLog`).
     func decideAndAct(_ job: Job) async throws {
         guard let store else { return }
         let unattended = job.context.action != nil
-        stage(job, RouterProjectDecider.Stage.jev.words)
+        stage(job, RouterProjectDecider.Stage.sonnet.words)
         let decision = try await effects.decide(job.tools, job.text, unattended) { [weak self] in self?.stage(job, $0.words) }
         try Task.checkCancellation()
         try linked(job.context)
@@ -519,28 +513,26 @@ struct RouterAskBack: Identifiable, Equatable {
             $0.decision.confidence = decision.confidence
             if !decision.reason.isEmpty { $0.note = RouterDecision.clip(decision.reason, 200) }
         }
+        var sent = "asked"
+        defer {
+            decisionLog?.decision(id: job.id, message: job.text, decision: decision, board: decision.boardText,
+                                  candidates: (decision.board?.candidates ?? []).map { ($0.id, $0.key) }, sent: sent)
+        }
         switch decision.kind {
-        case .project, .newWork:
+        case .thread, .newThread:
             guard let target = decision.target?.targetID, target != job.context.notTo, eligible(target, store: store) else {
                 return askBack(job, decision)
             }
+            sent = "sent"
             store.updateDecision(job.id) {
                 $0.decision.label = Self.label(target)
                 $0.decision.target = describe(target, store: store)
                 $0.decision.targetID = target
             }
             try await route(job, to: target)
-        case .newProject(let name):
-            // An action's message never makes a project by itself: you pick.
-            guard !unattended else { return askBack(job, decision) }
-            store.updateDecision(job.id) {
-                $0.decision.label = "new_project"
-                $0.decision.target = "new claude.ai project “\(name)”"
-                $0.decision.targetID = RouterAskBack.newProject
-            }
-            propose(job, name: name)
         case .answer:
             guard !unattended else { return askBack(job, decision) }
+            sent = "answered"
             store.updateDecision(job.id) { $0.decision.label = RouteLabel.changeFjord.rawValue }
             try await think(job, .changeFjord)
         case .ask:
@@ -548,110 +540,21 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// Acts on a target: a claude.ai place gets the message, "New project…" proposes one, an intent is a run.
-    func route(_ job: Job, to target: String, projectName: String? = nil) async throws {
+    /// Acts on a target: a thread gets the words (a waiting request is answered deterministically first, see `reply`), a new
+    /// thread starts with them, an intent is a run.
+    func route(_ job: Job, to target: String) async throws {
         try linked(job.context)
-        if target == RouterAskBack.newProject {
-            return propose(job, name: projectName ?? RouterProjectProposalSeed.name(from: job.text))
+        if target.hasPrefix(RouterAskBack.newThread) || target.hasPrefix(RouterAskBack.newFolder) {
+            return try await launchNewThread(job, target: target)
         }
-        if try await courierHandoff(job, to: target) { return }
+        if let place = RouteTarget(target) {
+            guard let store, let thread = place.briefTarget(store: store) else {
+                throw RouterTools.Failure("That thread isn't in T3 anymore: nothing was sent")
+            }
+            return try await reply(job, to: thread, session: thread.thread)
+        }
         if let intent = RouterRun.Intent(rawValue: target) { return try await think(job, intent) }
         throw RouterTools.Failure("Nowhere to send that")
-    }
-
-    /// The proposal for a new project, under the composer: the decider's name with the folder and repo the message points to.
-    /// The entry waits on it: made, it says where the message went (and what you changed of the proposal, for the measurement);
-    /// dropped, that nothing was sent.
-    func propose(_ job: Job, name: String) {
-        guard let store else { return }
-        let first = RouterProjectProposalSeed.fields(name: name, message: job.text, context: job.context, store: store)
-        let id = job.id
-        let proposal = store.proposeProject(for: Self.courierWords(job.text, pills: job.context.pills), tagged: job.tools.tagged,
-                                            first: first, reviser: effects.reviser(), decision: id)
-        watch(proposal, entry: id, original: job.text)
-        progress[id] = nil
-        follow(id)
-    }
-
-    /// The proposals restored at launch go on writing their history entries, as they did before the quit.
-    func reattachProposals() {
-        store?.reattachProposals { proposal, id in
-            store?.updateDecision(id) { $0.outcome = .pending }
-            watch(proposal, entry: id, original: proposal.message)
-        }
-    }
-
-    /// The entry follows the proposal: made, where the message went (and what you changed of the decider's proposal);
-    /// dropped, that nothing was sent (and what the engine may still do).
-    private func watch(_ proposal: RouterProjectProposal, entry id: UUID, original: String) {
-        let first = proposal.first
-        proposing.insert(id)
-        var made = false
-        proposal.onCreated = { [weak store, weak proposal] fields, intent in
-            made = true
-            guard let proposal else { return }
-            store?.updateDecision(id) {
-                // Its delivery, judged by the engine's record as any other send is (`RouterProjectContext.routings`).
-                $0.decision.courierIntent = intent
-                let target = RouterCourier.Target.project(fields.name).targetID
-                $0.decision.target = "new claude.ai project “\(fields.name)”"
-                $0.decision.targetID = target
-                $0.add(.sent(to: fields.name, text: proposal.message, original: proposal.message == original ? nil : original))
-                // What you changed of the decider's proposal is a correction of it.
-                let changed = fields.changes(from: first)
-                if !changed.isEmpty {
-                    $0.outcome = .corrected(from: "new claude.ai project “\(first.name)”",
-                                            to: "new claude.ai project “\(fields.name)” (\(changed.joined(separator: ", ")) changed)")
-                } else {
-                    $0.outcome = .done
-                }
-            }
-        }
-        let ended = proposal.onEnd
-        proposal.onEnd = { [weak self, weak store, weak proposal] in
-            let note = proposal?.endNote
-            ended()
-            guard let self, self.proposing.remove(id) != nil else { return }
-            if !made {
-                store?.updateDecision(id) {
-                    $0.reply = note ?? "Dropped: nothing was sent."
-                    $0.outcome = .done
-                }
-            }
-            self.follow(id)
-        }
-    }
-
-    /// A claude.ai target goes to the engine, its pill over the composer taking over from the message's own. False: the target
-    /// is not one. The message is recorded as sent only once the engine took it (a real intent id); when it didn't (the host or
-    /// its database failed), nothing was sent, and this throws so the message shows the failure with Retry, never lost or sent
-    /// twice. What the message tags goes after your words, fenced, never inside them (`RouterPointers.attach`).
-    func courierHandoff(_ job: Job, to target: String) async throws -> Bool {
-        guard let store, let courier = RouterCourier.Target(target) else { return false }
-        // The pills that address it at the start of your words aren't part of them.
-        let words = Self.courierWords(job.text, pills: job.context.pills)
-        let id = job.id
-        let intent = await store.routerCourier.send(RouterPointers.attach(job.tools.tagged, to: words), display: words, to: courier)
-        guard intent > 0 else { throw RouterTools.Failure(Self.notTakenWords) }
-        store.updateDecision(id) {
-            $0.decision.courierIntent = intent
-            // The target the flights read to leave the message's pill to the engine's (`RouterFlights.handedToCourier`).
-            $0.decision.targetID = courier.targetID
-            $0.add(.sent(to: RouterCourierPills.place(courier.project, store.routerCourier.threadTitle(courier) ?? courier.thread),
-                         text: words, original: words == job.text ? nil : job.text))
-            // A correction (a pick that wasn't the decider's) stays one.
-            if $0.outcome == .pending { $0.outcome = .done }
-        }
-        return true
-    }
-
-    /// Why a message the engine didn't take shows as failed.
-    static let notTakenWords = "Couldn't hand it to claude.ai: nothing was sent"
-
-    /// Your words without the address pills they start with; as they are when nothing is left.
-    nonisolated static func courierWords(_ text: String, pills: [Range<Int>]) -> String {
-        let rest = (Addressing.withoutLeadingPills(text, pills) ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
-        return rest.isEmpty ? text : rest
     }
 
     /// Haiku, fresh, for what needs judgment or tools; its reply is what the history shows.
@@ -738,9 +641,9 @@ struct RouterAskBack: Identifiable, Equatable {
         }
     }
 
-    /// A wrong send to a claude.ai place: asked again with that place left out. What was sent there stays (claude.ai has no
-    /// take-back); the place you pick gets the words, and the pick is a correction of where it went, with who decided it (the
-    /// engine's intent keeps it too).
+    /// A wrong send to a thread: asked again with that place left out. What was sent there stays (take it back from its entry
+    /// while it waits, or stop its run); the place you pick gets the words, and the pick is a correction of where it went, with
+    /// who decided it.
     func sendElsewhere(_ id: UUID) {
         guard canSendElsewhere(id), let store, let entry = store.router.record(id), case .you(let text) = entry.trigger,
               let wrong = entry.decision.targetID else { return }
@@ -749,6 +652,7 @@ struct RouterAskBack: Identifiable, Equatable {
         context.action = entry.actionSource
         if context.action != nil, !store.toolsLinked { return }
         store.updateDecision(id) { $0.outcome = .pending }
+        decisionLog?.outcome(id: id, "sent_elsewhere", target: wrong)
         let job = Job(id: id, text: text, context: context,
                       tools: makeTools(id, text, pills: [], mentions: context.mentions, action: context.action != nil))
         let places = Self.places(store, without: wrong)
@@ -756,25 +660,21 @@ struct RouterAskBack: Identifiable, Equatable {
         askBack(job, ask, suggestion: wrong, note: "Sent to \(describe(wrong, store: store)); where else should it go?")
     }
 
-    /// Whether the message went to a claude.ai place and is settled: it can be asked again elsewhere.
+    /// Whether the message went to a T3 thread and is settled: it can be asked again elsewhere.
     func canSendElsewhere(_ id: UUID?) -> Bool {
         guard let id, let store, store.routerOn, progress[id] == nil, !askBacks.contains(where: { $0.id == id }),
               let entry = store.router.record(id), case .you = entry.trigger,
               let wrong = entry.decision.targetID else { return false }
-        return RouterCourier.Target(wrong) != nil
+        return RouteTarget(wrong) != nil
     }
 
-    /// Every claude.ai place but `wrong`: its project's latest threads first, then the projects.
+    /// Every place but `wrong`: the board's threads, most recent first, then a new thread in each project.
     static func places(_ store: Store, without wrong: String) -> [RouterProjectDecision.Kind] {
-        let gone = RouterCourier.Target(wrong)
-        var out: [RouterProjectDecision.Kind] = []
-        for place in RouterCourier.places(store) {
-            if let gone, gone.project == place.name || gone.project == place.id {
-                out += place.threads.prefix(2).filter { $0.id != gone.thread }.map { .project(place.name, thread: $0.id) }
-            } else {
-                out.append(.project(place.name, thread: nil))
-            }
-        }
+        let gone = RouteTarget(wrong)
+        let board = store.deciderBoard()
+        var out: [RouterProjectDecision.Kind] = board.candidates.sorted { $0.minutesIdle < $1.minutesIdle }
+            .filter { $0.key != gone?.threadID }.map { .thread($0.key) }
+        out += board.projects.map { .newThread(project: board.projectID($0)) }
         return out
     }
 
@@ -784,33 +684,35 @@ struct RouterAskBack: Identifiable, Equatable {
         store?.jevAsker(.routing, base: asker ?? tools?.chooser.map(JevClient.asker(choosing:)))
     }
 
-    /// Whether a target can still be sent to: a claude.ai place the Board has, "New project…", or an intent.
+    /// Whether a target can still be sent to: a thread or project T3 has, a folder to start a project in, or an intent.
     func eligible(_ target: String, store: Store) -> Bool {
-        if let courier = RouterCourier.Target(target) { return RouterCourier.eligible(courier, store: store) }
-        return target == RouterAskBack.newProject || RouterRun.Intent(rawValue: target) != nil
+        if let place = RouteTarget(target) { return place.eligible(store: store) }
+        if target.hasPrefix(RouterAskBack.newFolder) { return true }
+        return RouterRun.Intent(rawValue: target) != nil
     }
 
-    /// The label a target stands for: reply (a claude.ai place), a new project, or the intent.
+    /// The label a target stands for: reply (a thread), a new thread, or the intent.
     static func label(_ target: String) -> String {
-        if RouterCourier.Target(target) != nil { return "reply" }
-        return target
+        switch RouteTarget(target) {
+        case .thread?: return "reply"
+        case .newThread?: return "new_thread"
+        case nil: return target
+        }
     }
 
     // MARK: Ask back
 
-    /// "Where should this go?" with the decider's places first, then "New project…" and the Router's own answer.
+    /// "Where should this go?" with the decider's places first, then the Router's own answer.
     /// `suggestion`: what a pick corrects, when it isn't the decider's best guess (a wrong send asked again).
     func askBack(_ job: Job, _ decision: RouterProjectDecision, suggestion: String? = nil, note: String? = nil) {
         guard let store else { return }
         let unattended = job.context.action != nil
         var places: [RouterProjectDecision.Kind]
-        var name: String?
         switch decision.kind {
         case .ask(let kinds): places = kinds
-        case .newProject(let n): places = []; name = n
         default: places = [decision.kind]
         }
-        // Too few to choose from: the other projects follow.
+        // Too few to choose from: the other places follow.
         if places.count < 3 {
             for p in Self.places(store, without: job.context.notTo ?? "") where !places.contains(p) && places.count < 4 { places.append(p) }
         }
@@ -822,13 +724,17 @@ struct RouterAskBack: Identifiable, Equatable {
                   let option = option(target, store: store), seen.insert(option.id).inserted else { continue }
             options.append(option)
         }
+        // A new thread in the T3 project of each local folder the message tags, or in the folder itself when T3 has none.
+        for path in job.context.projects where options.count < 6 {
+            let target = store.t3Project(forFolder: path).map { RouterAskBack.newThread + $0.id } ?? RouterAskBack.newFolder + path
+            if let option = option(target, store: store), seen.insert(option.id).inserted { options.append(option) }
+        }
         if !unattended {
-            options.append(.init(target: RouterAskBack.newProject, title: "New project…", detail: name.map { "“\($0)” on claude.ai" } ?? "on claude.ai"))
             if let answer = option(RouteLabel.changeFjord.rawValue, store: store) { options.append(answer) }
         }
         let guess = suggestion ?? options.first.map(\.target)
         let ask = RouterAskBack(id: job.id, message: job.text, context: job.context, options: options, suggestion: guess, at: Date(),
-                                note: note, projectName: name)
+                                note: note)
         askBacks.append(ask)
         store.updateDecision(job.id) {
             $0.add(.asked(options.map(\.title)))
@@ -841,36 +747,30 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// A target as a button.
     func option(_ target: String, store: Store) -> RouterAskBack.Option? {
-        if let courier = RouterCourier.Target(target) { return RouterCourier.option(courier, store: store) }
+        if let place = RouteTarget(target) { return place.option(store: store) }
         switch target {
-        case RouterAskBack.newProject: return .init(target: target, title: "New project…", detail: "on claude.ai")
+        case _ where target.hasPrefix(RouterAskBack.newFolder):
+            let path = String(target.dropFirst(RouterAskBack.newFolder.count))
+            return .init(target: target, title: "New thread in \(ThreadLauncher.projectTitle(root: path))", detail: "makes a T3 project of the folder")
         case "change_fjord": return .init(target: target, title: "Answer here", detail: "The Router answers, or changes Fjord")
         case "question": return .init(target: target, title: "Answer from what Fjord knows", detail: "A question about now")
         default: return nil
         }
     }
 
-    /// A target in words, for the log ("thread “Fix the login” in claude.ai project lcu").
+    /// A target in words, for the log ("thread “Fix the login” in fjord").
     func describe(_ target: String, store: Store) -> String {
-        if let courier = RouterCourier.Target(target) {
-            let title = RouterCourier.option(courier, store: store)?.title ?? courier.thread ?? courier.project
-            return courier.thread == nil ? "claude.ai project “\(courier.project)”" : "thread “\(title)” in claude.ai project \(courier.project)"
-        }
+        if let place = RouteTarget(target) { return place.describe(store: store) }
         guard let option = option(target, store: store) else { return target }
         return option.title.lowercased()
     }
 
-    /// Everything the "Something else…" picker offers: the claude.ai projects and their latest threads.
+    /// Everything the "Something else…" picker offers: the board's threads and a new thread in each project.
     func pickerOptions() -> [RouterAskBack.Option] {
         guard let store else { return [] }
-        var out: [RouterAskBack.Option] = []
-        for place in RouterCourier.places(store).prefix(30) {
-            if let o = option(RouterCourier.Target.project(place.name).targetID, store: store) { out.append(o) }
-            for t in place.threads.prefix(3) {
-                if let o = option(RouterCourier.Target.thread(project: place.name, thread: t.id).targetID, store: store) { out.append(o) }
-            }
+        return Self.places(store, without: "").prefix(30).compactMap { kind in
+            RouterProjectDecision(kind: kind, confidence: 0, decider: .none).target.flatMap { option($0.targetID, store: store) }
         }
-        return out
     }
 }
 
@@ -932,17 +832,16 @@ extension RouterDispatcher.Effects {
             decide: { [weak dispatcher] tools, message, unattended, stage in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
-                let link = store.routerCourierLink
-                let board = await link.board()
-                let read = link.readLocal
-                let local = await Task.detached { read() }.value
-                let statuses = await RouterProjectContext.deliveries(store)
-                let context = RouterProjectContext.gather(board: board, local: local, store: store, excluding: tools.decision,
-                                                          statuses: statuses)
-                var decider = RouterProjectDecider.app(store)
+                // The board, then what you last said in each candidate that isn't known, then the board again with it.
+                let youSaid = await store.youSaidReads(for: store.deciderBoard(), cache: dispatcher.youSaid)
+                let board = store.deciderBoard(youSaid: youSaid)
+                var decider = RouterProjectDecider.app(store, client: dispatcher.anthropic)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
                 decider.jev = unattended ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
-                return try await decider.decide(message, in: context, tagged: tools.tagged, stage: stage)
+                var decision = try await decider.decide(message, in: board, tagged: tools.tagged, stage: stage)
+                decision.board = board
+                decision.boardText = board.render()
+                return decision
             },
             send: { [weak dispatcher] tools, delivery in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
@@ -992,10 +891,6 @@ extension RouterDispatcher.Effects {
                 let store = try store(dispatcher)
                 guard let binary = dispatcher.claudePath() else { throw RouterTools.Failure("Claude Code wasn't found") }
                 return try await RouterRun.run(intent, input: input, tools: tools, store: store, binary: binary)
-            },
-            reviser: { [weak dispatcher] in
-                guard let store = dispatcher?.storeForEffects else { return RouterProjectFakeReviser(failure: "Fjord isn't ready") }
-                return RouterProjectModelReviser.app(store)
             }
         )
     }

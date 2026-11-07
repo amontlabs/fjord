@@ -209,6 +209,22 @@ final class T3Store {
         return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// The last message you sent in a thread (what the decider shows as "you last said there").
+    nonisolated static func lastUserMessage(in p: T3Projection) -> String? {
+        let text = p.messages.last { $0.role == "user" && !$0.text.isEmpty }?.text
+            ?? p.turnItems.lazy.reversed().compactMap { i -> String? in if case .userMessage(_, let t) = i.detail, !t.isEmpty { t } else { nil } }.first
+        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Reads a thread's last message of yours through a subscription held only until its snapshot arrives.
+    func readLastUserMessage(_ id: String) async -> String? {
+        guard let client else { return nil }
+        for await item in await client.subscribeThread(id) {
+            if case .snapshot(_, let p) = item { return Self.lastUserMessage(in: p) }
+        }
+        return nil
+    }
+
     /// Reads a thread's first message through a subscription held only until its snapshot arrives.
     func readFirstUserMessage(_ id: String) async -> String? {
         guard let client else { return nil }
@@ -242,6 +258,12 @@ final class T3Store {
     func markOpened(_ id: String) {
         guard client != nil else { return }
         Task { _ = try? await send(.threadVisit(threadId: id, visitedAt: T3Timestamp(date: Date()), opened: true)) }
+    }
+
+    /// A unary request (for example `server.getConfig`).
+    func call(tag: String, payload: T3JSON = [:]) async throws -> T3JSON {
+        guard let client else { throw T3Error(kind: .disconnected, message: "Not connected") }
+        return try await client.call(tag: tag, payload: payload)
     }
 
     @discardableResult

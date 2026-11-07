@@ -186,6 +186,7 @@ struct SettingsView: View {
             SettingsRow("Desktop notifications") {
                 SettingsSwitch("Desktop notifications", isOn: $store.settings.notifications)
             }
+            SettingsNote("Fjord tells you about your T3 threads, so turn off T3 Code's own desktop notifications to avoid being told twice.")
             if blocked {
                 SettingsRow(nil, description: "macOS is blocking Fjord's notifications. Allow them in System Settings › Notifications.",
                             descriptionColor: CDS.Text.warning) {

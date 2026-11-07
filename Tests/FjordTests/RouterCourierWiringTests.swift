@@ -73,27 +73,4 @@ import Testing
         link.take(CourierSnapshot(health: .init(tabConnected: true, signedIn: true)))
         #expect(await updates.next() == CourierSetupHealth(tabConnected: true, signedIn: true))
     }
-
-    // MARK: Routing
-
-    @Test func claudeTargetsAreNamedAndEligibleWhileTheBoardHasThem() {
-        let (s, d, _) = RouterDispatcherTests().setup()
-        #expect(d.eligible("claude-project:lookout", store: s) && d.eligible("claude-thread:lookout/t1", store: s))
-        #expect(!d.eligible("claude-project:gone", store: s) && !d.eligible("claude-thread:lookout/t9", store: s))
-        #expect(d.option("claude-thread:lookout/t1", store: s)?.title == "Fix the login redirect")
-        #expect(d.describe("claude-project:lookout", store: s) == "claude.ai project “lookout”")
-        #expect(d.pickerOptions().contains { $0.target == "claude-project:lookout" })
-        #expect(!d.eligible("session:local_a", store: s), "a local session is no destination")
-        #expect(!NativeHostManifest.enabled, "never under a test")
-    }
-
-    @Test func aSendToAClaudeProjectLeavesItsPillToTheEngines() async {
-        let (s, d, f) = RouterDispatcherTests().setup()
-        f.decisions = [RouterProjectDecision(kind: .project("lookout", thread: nil), confidence: 0.9, decider: .jev)]
-        let id = d.submit("ship the release notes")
-        await waitUntil { id.map { f.finished.contains($0) } ?? true }
-        await waitUntil { !f.requests.isEmpty }
-        #expect(f.sent.isEmpty, "no local session was sent to")
-        #expect(s.routerCourier.items.count == 1)
-    }
 }

@@ -43,9 +43,11 @@ struct FjordChange: Codable, Hashable, Identifiable {
         case order(before: [UUID], after: [UUID])
         case setting(key: String, before: SettingValue, after: SettingValue)
         case marks(state: String, [EntryChange])
-        /// An act on a brief entry (archive, mark read), done at once and taken back by Revert. `mark`: the brief's own key
-        /// for what it set (`RouterBriefs.marks`).
+        /// An act on a brief entry's thread (archive, mark read, snooze, settle, rename, tag), done at once in T3 and taken back
+        /// by Revert. `mark`: what the act carries beyond the thread (`ThreadActDetail`).
         case briefAction(project: String, thread: String, act: BriefAction, mark: String)
+        /// A thread Fjord started in T3 (`Store.launchThread`); Revert archives it.
+        case threadLaunch(project: String, thread: String, projectTitle: String)
     }
 
     var isReverted: Bool { revertedAt != nil }
@@ -70,6 +72,7 @@ struct FjordChange: Codable, Hashable, Identifiable {
         case .setting: "gearshape"
         case .marks: "checkmark.circle"
         case .briefAction(_, _, let act, _): act.symbol
+        case .threadLaunch: "plus.bubble"
         }
     }
 
@@ -219,7 +222,9 @@ extension FjordChange {
             return ChangePayload(before: changes.map { "\(name($0.thing)): \(Self.describe($0.before))" },
                                  after: changes.map { "\(name($0.thing)): \(Self.describe($0.after))" })
         case .briefAction(_, _, let act, _):
-            return ChangePayload(before: ["Needs you"], after: [act.label])
+            return ChangePayload(before: [act.before], after: [act.label])
+        case .threadLaunch(_, _, let projectTitle):
+            return ChangePayload(before: ["No thread"], after: ["A new thread in \(projectTitle)"])
         }
     }
 
@@ -419,8 +424,10 @@ extension Store {
                 if marks[item.thing] != item.after { edited = true }
                 marks[item.thing] = item.before
             }
-        case .briefAction(_, _, let act, let mark):
-            routerBriefs.setMark(act, mark, on: false)
+        case .briefAction:
+            replayBriefAction(change.patch, forward: false)
+        case .threadLaunch(_, let thread, _):
+            archiveLaunchedThread(change.id, thread: thread)
         }
         change.revertedAt = now
         change.revertNote = edited ? "Reverted (later edits to it were undone too)" : "Reverted"
@@ -459,7 +466,7 @@ extension FjordChange {
     /// It changed Triage (its categories, groups or inbox), not the app's settings.
     var touchesTriage: Bool {
         switch patch {
-        case .setting, .briefAction: false
+        case .setting, .briefAction, .threadLaunch: false
         default: true
         }
     }
@@ -481,7 +488,7 @@ extension FjordChange {
         case .marks(_, let changes):
             guard let first = changes.first?.thing, let entry = store.entries.first(where: { $0.id == first }) else { return .categories }
             return .entry(thing: first, category: entry.categoryID, done: entry.isDone)
-        case .briefAction:
+        case .briefAction, .threadLaunch:
             return .router
         }
     }

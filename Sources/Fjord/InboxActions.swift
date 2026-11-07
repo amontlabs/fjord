@@ -64,6 +64,8 @@ struct CategoryAction: Codable, Hashable, Identifiable {
     var id = UUID()
     var kind: ActionKind
     var trigger: ActionTrigger = .enter
+    /// For "Send to the Router": how much the thread it starts may do unattended (a `T3RuntimeMode`); nil: T3's own default.
+    var runtimeMode: String?
 
     var title: String {
         switch kind {
@@ -863,7 +865,7 @@ extension InboxActions {
             case .askRouter(let prompt):
                 // Your words and pills, the thing's pill among them: what GitHub wrote goes only in the thing's fenced block.
                 let origin = SessionOrigin(category: job.category.name, thing: sessionTitle(thing), actionID: job.action.id.uuidString,
-                                           runID: UUID().uuidString)
+                                           runID: UUID().uuidString, runtimeMode: job.action.runtimeMode)
                 let source = RouterActionSource(origin: origin)
                 // Sent: where it goes is the Router's to say, and the run follows it there.
                 run.message = try await performer.sendToRouter(ActionMessage(parts: prompt.parts(thing: thing.id), source: source))

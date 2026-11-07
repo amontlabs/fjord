@@ -111,6 +111,8 @@ struct SessionOrigin: Codable, Equatable, Hashable {
     var thing: String
     var actionID: String
     var runID: String
+    /// The runtime mode the action asked for its thread (`T3RuntimeMode`); nil: T3's own default.
+    var runtimeMode: String?
 
     /// "⚡ from <category> · <thing>": on the session's rows.
     var label: String { "⚡ from \(category) · \(thing)" }

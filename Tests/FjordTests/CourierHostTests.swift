@@ -252,8 +252,8 @@ import Testing
         await w.host.stop()
     }
 
-    /// Round 3 A/C: after a relaunch the engine's own record says where a proposal's delivery is, and it isn't sent again.
-    @MainActor @Test func aProposalsDeliveryIsReadFromTheEngineAfterARelaunchAndNotResent() async throws {
+    /// Round 3 A/C: after a relaunch the engine's own record says where a delivery is, and it isn't sent again.
+    @MainActor @Test func theEnginesRecordSaysWhereADeliveryIsAfterARelaunch() async throws {
         let w = try await started(World())
         let client = try Client(w.socket)
         w.pageUp(client, signedIn: false)
@@ -266,23 +266,6 @@ import Testing
         #expect(await w.host.intent(matching: "ship it", project: "chan_a", since: since) == .found(id))
         #expect(await w.host.intent(matching: "ship it", project: nil, since: since) == .found(id))
         #expect(await w.host.intent(matching: "something else", project: "chan_a", since: since) == CourierLookup.none)
-        let pills = RouterCourierPills()
-        pills.attach(.host(w.host))
-        let engine = RouterProjectPillsEngine(pills: pills)
-        let store = Store()
-        store.persists = false
-        store.restoreProposals([.init(message: "ship it", fields: .init(name: "alpha"), made: [.create], project: "chan_a",
-                                      stopped: "Fjord quit as your message went", sent: id),
-                                .init(message: "ship it", fields: .init(name: "alpha"), made: [.create], project: "chan_a",
-                                      stopped: "Fjord quit as your message went",
-                                      sending: .init(words: "ship it", project: "chan_a", at: since))],
-                               reviser: RouterProjectFakeReviser(), engine: engine)
-        let p = try #require(store.routerProposal)
-        p.settleAfter = nil
-        let q = try #require(store.routerProposalQueue.first)
-        await store.reconciling?.value
-        #expect(p.phase == .created)
-        #expect(q.phase == .created && q.sentIntent == id)
         // Nothing new reached the engine.
         #expect(await w.host.status(of: id + 1) == nil)
         await w.host.stop()

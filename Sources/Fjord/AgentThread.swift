@@ -33,6 +33,8 @@ struct AgentThread: Identifiable, Hashable {
     /// The run stopped on a usage limit and won't pick up again by itself.
     var limitStopped = false
     var limitResetAt: Date?
+    /// The thread failed on a usage limit (whether or not T3 resumes it by itself): thread information, never an account window.
+    var usageLimit = false
     var branch: String?
     var pullRequests: [T3PullRequest] = []
     var tags: [String] = []
@@ -76,6 +78,7 @@ extension AgentThread {
             lastError: t.lastError,
             limitStopped: t.status == .failed && raw.str("lastErrorClass") == "usage_limit" && recovery?["autoResume"]?.bool != true,
             limitResetAt: (raw.ts("usageLimitResetAt") ?? recovery?.ts("resetAt")).flatMap(Self.date),
+            usageLimit: t.status == .failed && raw.str("lastErrorClass") == "usage_limit",
             branch: t.branch, pullRequests: t.pullRequests, tags: t.tags, provider: t.providerInstanceId)
     }
 

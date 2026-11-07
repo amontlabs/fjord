@@ -60,32 +60,17 @@ protocol BriefStore: AnyObject {
     func setLead(_ lead: GeneralBrief)
 }
 
-/// What you marked on the brief: entries read, threads archived, finished threads told.
+/// What Fjord keeps of the brief: finished threads told, and entries a banner was posted for. Read state and archive are T3's
+/// (`thread.visit`, `thread.archive`), so they sync with its sidebar and phone.
 struct BriefMarks: Equatable, Sendable {
-    enum Kind: String, CaseIterable, Sendable { case read, archived, told, notified }
-    var read: Set<String> = []
-    var archived: Set<String> = []
+    enum Kind: String, CaseIterable, Sendable { case told, notified }
     var told: Set<String> = []
-    /// Entries a notification was posted for (`BriefPage.entryKey`).
+    /// What a banner was posted for (`ThreadNotice.key`), each once.
     var notified: Set<String> = []
 
     subscript(_ kind: Kind) -> Set<String> {
-        get {
-            switch kind {
-            case .read: read
-            case .archived: archived
-            case .told: told
-            case .notified: notified
-            }
-        }
-        set {
-            switch kind {
-            case .read: read = newValue
-            case .archived: archived = newValue
-            case .told: told = newValue
-            case .notified: notified = newValue
-            }
-        }
+        get { kind == .told ? told : notified }
+        set { if kind == .told { told = newValue } else { notified = newValue } }
     }
 }
 
@@ -123,6 +108,7 @@ final class SQLiteBriefStore: BriefStore {
         create table if not exists brief_cursors (project text primary key, cursor integer not null);
         create table if not exists brief_marks (kind text not null, key text not null, primary key (kind, key));
         create table if not exists brief_lead (id integer primary key check (id = 1), at real not null, lead text not null);
+        delete from brief_marks where kind in ('read', 'archived');
         """)
     }
 

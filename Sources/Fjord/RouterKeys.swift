@@ -46,7 +46,7 @@ final class RouterKeys {
         let briefs = store.routerBriefs
         let inComposer = responder is NSText && model.composerFocused
         let fieldOtherThanComposer = responder is NSText && !model.composerFocused
-        if !fieldOtherThanComposer, !(responder is NSControl), model.draft.isEmpty, store.routerProposal == nil || code != kVK_Escape {
+        if !fieldOtherThanComposer, !(responder is NSControl), model.draft.isEmpty {
             let walk = flags.isEmpty && (code == kVK_UpArrow || code == kVK_DownArrow) && !briefs.page().entries.isEmpty
             if walk, inComposer, model.suggestions(store).isEmpty {
                 // Walking the brief: the keyboard is on it now, its letter keys with it.
@@ -71,8 +71,6 @@ final class RouterKeys {
         if code == kVK_Escape, flags.isEmpty {
             // The suggestions shown (an @ word that names nothing shows none, and Esc goes on to what is there).
             if !model.suggestions(store).isEmpty { model.dismissMention() }
-            // A proposed project is dropped and its message is yours again.
-            else if model.dropProposal(store: store) {}
             else if briefs.focused != nil { briefs.focus(nil) }
             // Nothing to step out of: a field keeps it (an NSTextView's own Esc would offer completions), anything else
             // gets it.
@@ -102,13 +100,15 @@ final class RouterKeys {
             }
             if isReturn, flags == .option {
                 // ⌥Return: the words wait for the turn under way instead of steering it.
-                if model.draft.isEmpty || model.answerProposal(store: store) { return true }
+                if model.draft.isEmpty { return true }
                 model.send(store: store, queue: true)
                 return true
             }
             if isReturn, flags.isEmpty {
-                // A proposed project: your words revise it, nothing typed creates it.
-                if model.answerProposal(store: store) { return true }
+                // Nothing typed and a "Where should this go?" up: Return confirms the decider's guess (the button in the primary
+                // colour); the others are ⌘1–⌘4. No modal: the ask sits over the composer while you decide.
+                if model.draft.isEmpty, let ask = store.routerDispatcher.askBacks.last, let guess = ask.suggestion,
+                   store.routerDispatcher.pick(ask.id, target: guess) { return true }
                 // Nothing typed and a grant waiting: Return allows it.
                 if model.draft.isEmpty, store.routerCourier.allowNewest() { return true }
                 model.send(store: store)

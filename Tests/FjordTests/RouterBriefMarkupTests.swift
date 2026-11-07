@@ -158,8 +158,9 @@ import Testing
     }
 
     @Test func aMessagesPlaceIsItsThreadOrItsProject() {
-        #expect(RouterDrawer.place("claude-thread:chan_a/th_1").thread == BriefTarget(project: "chan_a", thread: "th_1"))
-        #expect(RouterDrawer.place("claude-project:chan_a").project == "chan_a")
+        // A thread's project isn't in its target (the entry's links name it); only a new thread names its project.
+        #expect(RouterDrawer.place("t3-thread:th_1").thread == nil)
+        #expect(RouterDrawer.place(RouterAskBack.newThread + "chan_a").project == "chan_a")
         #expect(RouterDrawer.place(nil).thread == nil)
     }
 

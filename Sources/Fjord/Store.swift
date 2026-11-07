@@ -324,6 +324,8 @@ final class Store {
     }
     /// Sends a command to T3; a test stands one in.
     @ObservationIgnored var requestSender: (@MainActor (T3Command, _ commandId: String) async throws -> Void)?
+    /// What a thread launch needs from outside (T3's configuration, a project made, a default branch); a test stands one in.
+    @ObservationIgnored lazy var launchSupport: ThreadLaunchSupport = Store.liveLaunchSupport(self)
     /// Every project's name, with as much of its path as tells it from another of the same name (`customer-a/app`): worked
     /// out when the folders change, not by each view that names a project. Only a change in it redraws what reads it.
     var folderNames: [String: String] = [:] {
@@ -479,22 +481,8 @@ final class Store {
     @ObservationIgnored lazy var routerCourier: RouterCourierPills = {
         let pills = RouterCourierPills()
         pills.threadTitle = { [weak self] in self?.routerCourierLink.title($0) }
-        // The engine is up: a restored proposal's delivery can be asked about now.
-        pills.onAttach = { [weak self] in self?.reconcileProposals() }
         return pills
     }()
-    /// A proposal to start a project for a message that fit none (RouterProjectProposal.swift); its pill is over the composer.
-    var routerProposal: RouterProjectProposal?
-    /// Proposals for later messages, waiting for the one up to end; the next shows then.
-    var routerProposalQueue: [RouterProjectProposal] = []
-    /// A dropped proposal's message is back in the composer: the next proposal waits until it is sent or cleared.
-    var routerProposalHeld = false
-    /// Proposals were restored at launch (the dispatcher reattaches their history entries, `reattachProposals`).
-    @ObservationIgnored var onProposalsRestored: () -> Void = {}
-    /// The restored proposals' look at their deliveries (a test waits for it).
-    @ObservationIgnored var reconciling: Task<Void, Never>?
-    /// A proposal changed what is saved of it (`routerProposalsSaved`): written like any other persisted change.
-    func routerProposalsChanged() { persistedRevision &+= 1 }
     /// The engine itself while it runs (started at launch): its places for the dispatcher, its health for the setup.
     @ObservationIgnored lazy var routerCourierLink = RouterCourierLink()
     /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
@@ -789,8 +777,6 @@ final class Store {
         myTeams = state.myTeams ?? []
         reposResolvedAt = state.reposResolvedAt
         login = state.login ?? ""
-        // A proposal under way when the app quit shows again, stopped where it was (Return goes on, never re-creating).
-        restoreProposals(state.routerProposals ?? [])
         savedRevision = persistedRevision
         loadActions()
         // Once the login, marks and actions' records are in: carried during the load, a cached rating or Done was lost.
@@ -1000,8 +986,7 @@ final class Store {
                                                        contributedRepos: contributedRepos, reposResolvedAt: reposResolvedAt,
                                                        myTeams: myTeams, login: login.isEmpty ? nil : login,
                                                        fetchedFor: fetchedFor, baselinePending: baselinePending ? true : nil,
-                                                       snippets: snippets,
-                                                       routerProposals: routerProposalsSaved.isEmpty ? nil : routerProposalsSaved))
+                                                       snippets: snippets))
         let write: @Sendable () -> String? = {
             let enc = JSONEncoder()
             enc.dateEncodingStrategy = .iso8601

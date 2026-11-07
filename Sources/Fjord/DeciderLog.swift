@@ -1,0 +1,85 @@
+import CryptoKit
+import Foundation
+
+// Every live routing decision, kept locally for the future benchmark set (R1 D: after about 200 moments it becomes the headline):
+// the board the model read (and its hash), the candidates, the pick, confidence, latency, tokens, and later what you did with
+// it. One JSON object per line in Application Support/Fjord/decider-log.jsonl, readable by you alone. It holds your words and
+// your threads' text, so it stays in that folder and never goes into the repo; nothing reads it back but the eval.
+
+final class DeciderLog: @unchecked Sendable {
+    let url: URL
+    private let queue = DispatchQueue(label: "fjord.decider-log")
+
+    init(url: URL) { self.url = url }
+
+    /// `Application Support/Fjord/decider-log.jsonl`; nil in a test run or a demo (no paths).
+    static func live(_ paths: RouterPaths?) -> DeciderLog? {
+        paths.map { DeciderLog(url: $0.support.appendingPathComponent("decider-log.jsonl")) }
+    }
+
+    static func hash(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A decision: the entry it belongs to (`id`), the message, the board, and what the decider did.
+    func decision(id: UUID, message: String, decision d: RouterProjectDecision, board: String, candidates: [(id: String, key: String)],
+                  sent: String, now: Date = Date()) {
+        var kind: String
+        var target = ""
+        var places: [String] = []
+        switch d.kind {
+        case .thread(let t): kind = "thread"; target = t
+        case .newThread(let p): kind = "new_thread"; target = p
+        case .answer: kind = "answer"
+        case .ask(let ps):
+            kind = "ask"
+            places = ps.map { k in
+                switch k {
+                case .thread(let t): "thread:" + t
+                case .newThread(let p): "new_thread:" + p
+                default: "other"
+                }
+            }
+        }
+        var record: [String: Any] = [
+            "type": "decision", "id": id.uuidString, "at": ISO8601DateFormatter().string(from: now),
+            "decider": d.decider.rawValue, "action": d.action, "kind": kind, "target": target, "places": places,
+            "confidence": d.confidence, "projectConfidence": d.projectConfidence, "reason": d.reason, "sent": sent,
+            "message": message, "boardHash": Self.hash(board), "board": board,
+            "candidates": candidates.map { ["id": $0.id, "thread": $0.key] },
+        ]
+        if let latency = d.latency { record["latencyMs"] = Int(latency * 1000) }
+        if let u = d.usage {
+            record["usage"] = ["input": u.inputTokens, "output": u.outputTokens, "cacheRead": u.cacheReadTokens, "cacheCreation": u.cacheCreationTokens]
+        }
+        append(record)
+    }
+
+    /// What you then did with a decision: `sent` (acted on at once), `picked` (an ask's pick, with whether it was the guess),
+    /// `dismissed`, `sent_elsewhere` (a wrong send asked again), `reverted`.
+    func outcome(id: UUID, _ what: String, target: String = "", guess: Bool? = nil, now: Date = Date()) {
+        var record: [String: Any] = ["type": "outcome", "id": id.uuidString, "at": ISO8601DateFormatter().string(from: now), "what": what]
+        if !target.isEmpty { record["target"] = target }
+        if let guess { record["wasGuess"] = guess }
+        append(record)
+    }
+
+    private func append(_ record: [String: Any]) {
+        guard JSONSerialization.isValidJSONObject(record),
+              var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys, .withoutEscapingSlashes]) else { return }
+        data.append(0x0A)
+        queue.async { [url] in
+            let fm = FileManager.default
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+            if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
+            guard let handle = try? FileHandle(forWritingTo: url) else { return }
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        }
+    }
+
+    /// Waits for what was queued to be written (tests).
+    func flush() { queue.sync {} }
+}

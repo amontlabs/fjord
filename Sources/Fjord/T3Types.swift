@@ -724,6 +724,14 @@ struct T3LaunchRequest: Equatable, Sendable {
     var messageId: String
     var text: String
     var attachments: [T3Attachment] = []
+    /// Typed context the text points at with `t3-context://` links (`ThreadMessage.records`).
+    var context: [T3JSON] = []
+
+    var initialMessage: T3JSON {
+        var m: [String: T3JSON] = ["messageId": .string(messageId), "text": .string(text), "attachments": .array(attachments.map(\.json))]
+        if !context.isEmpty { m["context"] = ["version": 1, "records": .array(context)] }
+        return .object(m)
+    }
 }
 
 /// Every command Fjord sends. `payload(commandId:)` is exactly what goes in the `dispatchCommand` request
@@ -746,6 +754,9 @@ enum T3Command: Equatable, Sendable {
     case tagSet(threadId: String, tag: String, tagged: Bool)
     case snooze(threadId: String, until: T3Timestamp)
     case unsnooze(threadId: String)
+    case threadSettle(threadId: String)
+    case threadUnsettle(threadId: String)
+    case threadRename(threadId: String, title: String)
     case queueResume(threadId: String)
     case launchThread(T3LaunchRequest)
 
@@ -804,6 +815,9 @@ enum T3Command: Equatable, Sendable {
         case .tagSet(let thread, let tag, let tagged): return cmd("thread.tag.set", thread, ["tag": .string(tag), "tagged": .bool(tagged)])
         case .snooze(let thread, let until): return cmd("thread.snooze", thread, ["snoozedUntil": .string(until.text)])
         case .unsnooze(let thread): return cmd("thread.unsnooze", thread, ["reason": "user"])
+        case .threadSettle(let thread): return cmd("thread.settle", thread)
+        case .threadUnsettle(let thread): return cmd("thread.unsettle", thread, ["reason": "user"])
+        case .threadRename(let thread, let title): return cmd("thread.metadata.update", thread, ["title": .string(title)])
         case .queueResume(let thread): return cmd("queue.resume", thread)
         case .launchThread(let r):
             return [
@@ -812,7 +826,7 @@ enum T3Command: Equatable, Sendable {
                 "modelSelection": ["instanceId": .string(r.instanceId), "model": .string(r.model)],
                 "runtimeMode": .string(r.runtimeMode.rawValue), "interactionMode": .string(r.interactionMode.rawValue),
                 "workspaceStrategy": r.workspaceStrategy,
-                "initialMessage": ["messageId": .string(r.messageId), "text": .string(r.text), "attachments": .array(r.attachments.map(\.json))],
+                "initialMessage": r.initialMessage,
             ]
         }
     }

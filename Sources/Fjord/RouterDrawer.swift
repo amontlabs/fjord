@@ -155,9 +155,9 @@ struct RouterDrawer: View {
 
     /// Where a decision's target sends: a thread, or a project.
     static func place(_ targetID: String?) -> (thread: BriefTarget?, project: String?) {
-        switch targetID.flatMap(RouterCourier.Target.init) {
-        case .thread(let project, let thread): (BriefTarget(project: project, thread: thread), nil)
-        case .project(let project): (nil, project)
+        switch targetID.flatMap(RouteTarget.init) {
+        case .newThread(let project)?: (nil, project)
+        // A thread's project isn't in its target: the entry's links name it.
         default: (nil, nil)
         }
     }
@@ -170,13 +170,6 @@ struct RouterDrawer: View {
             case .cancelled: return .cancelled
             case .asked where d.outcome == .pending: return .asked
             default: continue
-            }
-        }
-        if let id = d.decision.courierIntent, let update = store.routerCourier.lastUpdates[id] {
-            switch update.state {
-            case .failed, .refused: return .failed(update.cause)
-            case .sending, .taken, .paused, .awaiting: return .sending
-            default: return .delivered
             }
         }
         if d.done.contains(where: \.sendsWords) { return .delivered }

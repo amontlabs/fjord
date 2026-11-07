@@ -319,7 +319,7 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ] + courierShots + proposalShots
+    ] + courierShots
 
     // MARK: The engine's pills
 
@@ -379,39 +379,6 @@ enum AppWindowShots {
         }
     }
 
-    // MARK: The proposal to start a project
-
-    /// The pill proposing a project for a message that fit none, one shot per state, light and dark
-    /// (`router-proposal-<state>[-dark]`).
-    private static var proposalShots: [Shot] {
-        let message = "set up a Swift package for the iOS companion app, with a CI workflow that builds on every push"
-        let first = RouterProjectFields(name: "fjord-ios-companion", folder: NSHomeDirectory() + "/code/projects/fjord-ios-companion",
-                                        repo: "amontlabs/fjord-ios-companion",
-                                        instructions: "A Swift package for Fjord's iOS companion app; keep CI green on every push.")
-        let revised = RouterProjectFields(name: "fjord-ios", folder: first.folder, repo: nil, instructions: first.instructions)
-        let scenes: [(String, RouterProjectFields, RouterProjectProposal.Phase, [String], String?)] = [
-            ("proposed", first, .proposed, [], nil),
-            ("revising", first, .revising, [], nil),
-            ("revised", revised, .proposed, ["name", "repo"], nil),
-            ("revise-failed", first, .proposed, [], "Couldn't revise that: the model didn't answer. The proposal stays as it was."),
-            ("creating", revised, .creating("Adding the repo"), [], nil),
-            ("waiting", revised, .waiting("Chrome isn't connected: Fjord goes on once it is"), [], nil),
-            ("created", revised, .created, [], nil),
-            ("failed", revised, .failed("The project wasn't created: a project named fjord-ios already exists"), [], nil),
-            ("none", RouterProjectFields(name: "scratch-notes"), .proposed, [], nil),
-        ]
-        return scenes.flatMap { name, fields, phase, changed, note in
-            [(name, NSAppearance.Name.aqua), (name + "-dark", .darkAqua)].map { shot, look in
-                Shot(name: "router-proposal-\(shot)", destination: { _ in .router }, compose: { _, store in
-                    let proposal = store.proposeProject(for: message, first: first, reviser: RouterProjectFakeReviser(),
-                                                        engine: RouterProjectFakeEngine())
-                    proposal.settleAfter = nil
-                    proposal.show(fields, phase: phase, changed: changed, note: note)
-                }, appearance: look)
-            }
-        }
-    }
-
     private static func setupShot(_ name: String, _ look: NSAppearance.Name, facts: CourierSetupFacts, health: CourierSetupHealth) -> Shot {
         Shot(name: name, destination: { _ in .router }, size: CGSize(width: 680, height: 460), appearance: look, standalone: { _, _ in
             AnyView(RouterCourierSetupView(setup: RouterCourierSetup(facts: facts, health: health, read: { facts }))
@@ -459,7 +426,7 @@ enum AppWindowShots {
                  }
                  if drawer {
                      briefs.drawerOpen = true
-                     store.briefAct(.read, on: BriefTarget(project: "chan_demo_docs", thread: "th_guide"), mark: "chan_demo_docs/th_guide/0",
+                     store.threadAct(.read, on: BriefTarget(project: "chan_demo_docs", thread: "th_guide"),
                                     title: briefs.title(BriefTarget(project: "chan_demo_docs", thread: "th_guide")))
                      briefs.record(BriefTarget(project: "chan_demo_fjord", thread: "th_bar"), "Count only what's unread")
                  }

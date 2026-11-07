@@ -685,6 +685,26 @@ struct BriefAnswerPanel: View {
                         briefs.markRead(target, store: store); close()
                     }
                     .help("It leaves the brief; Revert in the history")
+                    Menu {
+                        ForEach(Store.snoozeChoices(), id: \.title) { choice in
+                            Button(choice.title) { briefs.snooze(target, until: choice.until, store: store); close() }
+                        }
+                    } label: {
+                        Label("Snooze", systemImage: "moon.zzz")
+                    }
+                    .menuStyle(.button)
+                    .fixedSize()
+                    .help("Hides it until then; T3 wakes it on a new request or a failure. Revert in the history")
+                    ClaudeButton("Settle", variant: .secondary, size: .sm, icon: "checkmark.seal") {
+                        briefs.settle(target, store: store); close()
+                    }
+                    .help("T3's settled: it leaves the brief until it needs you again. Revert in the history")
+                    ClaudeButton("Rename", variant: .secondary, size: .sm, icon: "pencil") {
+                        let old = briefs.title(target)
+                        close()
+                        if let new = RenameAsk.title(for: old) { store.renameThread(target, to: new) }
+                    }
+                    .help("Renames the thread in T3. Revert in the history")
                 }
                 ClaudeButton("Open in T3", variant: .secondary, size: .sm, icon: ThreadMark.openSymbol) {
                     briefs.open(target, store: store); close()
@@ -825,25 +845,6 @@ struct BriefUpdated: View {
                 Text("Updated " + agoPhrase(Date(timeIntervalSince1970: at), now: context.date))
                     .font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
             }
-        }
-    }
-}
-
-/// An act on a brief entry that Revert sets back: what `FjordChange.briefAction` records.
-enum BriefAction: String, Codable, Hashable, Sendable {
-    case archive, read
-
-    var label: String {
-        switch self {
-        case .archive: "Archived"
-        case .read: "Marked read"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .archive: "archivebox"
-        case .read: "checkmark.circle"
         }
     }
 }

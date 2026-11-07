@@ -162,34 +162,9 @@ enum Demo {
         }
     }
 
-    /// The demo's claude.ai projects and their threads, as the engine's Board would share them: where the Router sends.
-    static func claudeProjects(_ store: Store, now: Date = Date()) {
-        func thread(_ id: String, _ title: String, _ state: String, minutes: Double) -> CourierPlace.Thread {
-            .init(id: id, title: title, state: state, touched: now.addingTimeInterval(-minutes * 60).timeIntervalSince1970)
-        }
-        var snapshot = CourierSnapshot()
-        snapshot.health = CourierSetupHealth(tabConnected: true, signedIn: true)
-        snapshot.places = [
-            CourierPlace(id: "chan_demo_lookout", name: "lookout", purpose: "Fjord, the macOS app", threads: [
-                thread("thr_demo_notify", "Agent completion notifications", "working", minutes: 3),
-                thread("thr_demo_ci", "CI failure diagnosis", "idle", minutes: 4),
-            ]),
-            CourierPlace(id: "chan_demo_lcu", name: "lcu", purpose: "Computer use for agents", threads: [
-                thread("thr_demo_updates", "Update notifications", "needs_you", minutes: 2),
-            ]),
-            CourierPlace(id: "chan_demo_sandbox", name: "microsandbox", purpose: "Sandboxes for untrusted code", threads: [
-                thread("thr_demo_transfer", "Repository ownership transfer setup", "idle", minutes: 12),
-                thread("thr_demo_linux", "Linux sandbox in a Firecracker microVM", "needs_you", minutes: 9),
-            ]),
-            CourierPlace(id: "chan_demo_zig", name: "zig", purpose: "", threads: []),
-        ]
-        store.routerCourierLink.take(snapshot)
-    }
-
     /// The Router on, over the `agents` sessions: the one that asks is stopped on its question and the Linux sandbox on its
     /// plan (requests T3 holds), with the decision log of what you said and what the Router did.
     private static func router(_ store: Store, _ now: Date) {
-        claudeProjects(store, now: now)
         let lcu = blockedAgentID
         store.threadWork[lcu] = ThreadWork(text: "Should updates install silently, or ask first each time?",
                                            since: now.addingTimeInterval(-120))
@@ -232,22 +207,22 @@ enum Demo {
         let changes = state.changes
         var sentToThread = entry(3.3, .you("remove the old remote"), "message",
                                  [.sent(to: "microsandbox · Repository ownership transfer setup", text: "remove the old remote", original: nil)])
-        sentToThread.decision.targetID = RouterCourier.Target.thread(project: "microsandbox", thread: "thr_demo_transfer").targetID
-        sentToThread.decision.target = "thread “Repository ownership transfer setup” in claude.ai project microsandbox"
+        sentToThread.decision.targetID = RouteTarget.thread("local_demo-transfer").targetID
+        sentToThread.decision.target = "thread “Repository ownership transfer setup” in microsandbox"
         sentToThread.decision.decider = "jev"
         var asked = entry(5, .you("what needs me?"), "question", [])
         asked.reply = "**3 need you**: *LCU update notifications* asks how updates install; the Linux sandbox has a plan to approve; "
             + "*Calculator display reading* is stuck on the VPN.\nDone: CI failure diagnosis."
         asked.note = "answered"
         var undelivered = entry(0.2, .you("rebase the games branch on main"), "reply",
-                                [.failed("Not delivered to microsandbox: Fjord's tab in Chrome isn't connected")])
-        undelivered.decision.targetID = RouterCourier.Target.project("microsandbox").targetID
+                                [.failed("That thread isn't in T3 anymore: nothing was sent")])
+        undelivered.decision.targetID = RouteTarget.newThread(project: "demo-project-microsandbox").targetID
         undelivered.decision.decider = "sonnet"
-        // A category's "Then" sent its prompt with the thing tagged; the Router sent it to its claude.ai project.
+        // A category's "Then" sent its prompt with the thing tagged; the Router started a thread for it.
         let pill = "@ziglang/zig#1"
         let prompt = "Address what \(pill) is waiting on."
         var sentByThen = entry(0.3, .you(prompt), "message", [.sent(to: "zig", text: prompt, original: nil)])
-        sentByThen.decision.targetID = RouterCourier.Target.project("zig").targetID
+        sentByThen.decision.targetID = RouteTarget.newThread(project: "demo-project-lookout").targetID
         sentByThen.decision.decider = "jev"
         sentByThen.fromAction = SessionOrigin(category: "Contributions", thing: "ziglang/zig#1", actionID: "demo", runID: "demo")
         sentByThen.mentions = [RouterMention(range: 13..<(13 + pill.count), pointer: .notification("pr:ziglang/zig#1"), name: "ziglang/zig#1")]
@@ -272,11 +247,10 @@ enum Demo {
         let running = RouterDecision(at: now.addingTimeInterval(-4), trigger: .you("archive the old fork once the transfer is done"), decision: .init(intent: "message"))
         state.decisions += [asking, running]
         store.router = state
-        let ci = RouterCourier.Target.thread(project: "lookout", thread: "thr_demo_ci").targetID
-        let places = [ci, RouterCourier.Target.thread(project: "microsandbox", thread: "thr_demo_transfer").targetID,
-                      RouterCourier.Target.project("lcu").targetID]
+        let ci = RouteTarget.thread("local_demo-ci").targetID
+        let places = [ci, RouteTarget.thread("local_demo-transfer").targetID,
+                      RouteTarget.newThread(project: "demo-project-lcu-research").targetID]
         let options = places.compactMap { store.routerDispatcher.option($0, store: store) }
-            + [.init(target: RouterAskBack.newProject, title: "New project…", detail: "on claude.ai")]
         store.routerDispatcher.preview(
             ask: RouterAskBack(id: asking.id, message: "ship it tomorrow morning", context: RouterContext(),
                                options: options, suggestion: ci, at: now.addingTimeInterval(-15)),

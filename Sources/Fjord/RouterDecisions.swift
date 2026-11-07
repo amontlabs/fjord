@@ -33,8 +33,6 @@ struct RouterDecision: Identifiable, Equatable {
         /// Who decided where it goes (`RouterProjectDecision.Decider`: jev, sonnet), for measuring the decider against your
         /// corrections; nil when no model did (a tag, a reply).
         var decider: String?
-        /// The engine's intent that delivered it to claude.ai: a correction (Send elsewhere) is kept on it too.
-        var courierIntent: Int?
         init(target: String? = nil, intent: String? = nil, label: String? = nil, confidence: Double? = nil) {
             self.target = target
             self.intent = intent

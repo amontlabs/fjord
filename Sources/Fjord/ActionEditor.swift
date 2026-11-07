@@ -108,6 +108,14 @@ private struct ActionRow: View {
             case .askRouter(let prompt):
                 ActionPromptField(prompt: ActionsEditor.prompt(of: $action, else: prompt), store: store)
                     .tip("Prompt", "Sent to the Router as yours, from this category, with the thing tagged: @this notification says where it goes in your words (else it is added at the end). The Router sends it to the claude.ai project or thread it is for; if it isn't sure where, it asks you and waits. Its title, link, why it is here and the last comment go with it in a block marked as written by others, so nothing others wrote reads as your words. @ also inserts a snippet, or tags a claude.ai project or thread, a local project or a category.")
+                HStack(spacing: 8) {
+                    Text("The thread it starts").cdsText(foot12, .regular, CDS.Text.secondary)
+                    MenuChip(title: Self.modeTitle(action.runtimeMode), label: "What the thread may do") {
+                        ForEach(Self.modes, id: \.mode) { choice in
+                            Toggle(choice.title, isOn: Binding(get: { action.runtimeMode == choice.mode }, set: { _ in action.runtimeMode = choice.mode }))
+                        }
+                    }
+                }
                 RouterWarning(strong: InboxActions.rulesMatchOthers(rules))
             case .comment(let text):
                 ActionTextBox(text: Binding(get: { text }, set: { action.kind = .comment($0) }),
@@ -151,6 +159,14 @@ private struct ActionRow: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(CDS.border, lineWidth: 1))
     }
 
+    /// What the thread an action starts may do, unattended (`T3RuntimeMode`); nil is T3's own default.
+    private static let modes: [(mode: String?, title: String)] = [
+        (nil, "uses T3's default"), ("approval-required", "asks before it acts"),
+        ("auto-accept-edits", "edits freely, asks for the rest"), ("full-access", "can do anything"),
+    ]
+
+    private static func modeTitle(_ mode: String?) -> String { modes.first { $0.mode == mode }?.title ?? "uses T3's default" }
+
     private func tryIt() async {
         trying = true
         defer { trying = false }
@@ -172,12 +188,12 @@ private struct RouterWarning: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10, weight: .semibold))
-            Text("GitHub text reaches a Claude session on your Mac").cdsText(foot12, strong ? .medium : .regular, CDS.Text.warning)
+            Text("GitHub text reaches an agent thread on your Mac").cdsText(foot12, strong ? .medium : .regular, CDS.Text.warning)
         }
         .foregroundStyle(CDS.Text.warning)
         .padding(.horizontal, strong ? 8 : 0).padding(.vertical, strong ? 4 : 0)
         .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(CDS.Text.warning.opacity(strong ? 0.16 : 0)))
-        .tip("Prompt injection", "Anyone who can write a title or comment on matching items can try to steer the session it reaches. That session runs with your Claude Code permission settings, unattended. The Router never acts on the item itself (it never changes Fjord in response to one), but keep the prompt narrow and the rules tight (by me, Maintainers)."
+        .tip("Prompt injection", "Anyone who can write a title or comment on matching items can try to steer the session it reaches. The thread runs in a worktree of its own, unattended, with the permissions chosen above. The Router never acts on the item itself (it never changes Fjord in response to one), but keep the prompt narrow and the rules tight (by me, Maintainers)."
              + (strong ? " These rules match items others write." : ""))
         .accessibilityElement(children: .combine)
     }

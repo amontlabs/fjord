@@ -112,7 +112,7 @@ struct ActionPrompt: Hashable, ExpressibleByStringLiteral {
         switch pointer {
         case .thisItem: thisItemName
         case .project(let folder): (folder as NSString).lastPathComponent
-        case .claude(let target): RouterCourier.Target(target)?.project ?? "claude.ai"
+        case .t3: "a thread"
         case .notification(let id): id
         case .category: "a category"
         }

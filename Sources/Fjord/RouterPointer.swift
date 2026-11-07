@@ -10,9 +10,8 @@ import SwiftUI
 enum RouterPointer: Hashable, Codable {
     /// A project, by its folder.
     case project(String)
-    /// A claude.ai project or thread the delivery engine sends to, by its target (`claude-project:<project>`,
-    /// `claude-thread:<project>/<thread>`, `RouterCourier.Target`). Offered only while the engine runs.
-    case claude(String)
+    /// A T3 thread or a project to start a thread in, by its target (`t3-thread:<id>`, `new_thread:<project id>`, `RouteTarget`).
+    case t3(String)
     /// A thing of the Triage inbox, by its id (`pr:owner/repo#12`).
     case notification(String)
     /// A category of the Triage inbox.
@@ -21,17 +20,17 @@ enum RouterPointer: Hashable, Codable {
     /// the action makes it the thing's notification pill (`ActionPrompt.parts`).
     case thisItem
 
-    /// Whether it says where the message goes (a claude.ai place): such a pill is taken out of your words where they start
+    /// Whether it says where the message goes (a T3 place): such a pill is taken out of your words where they start
     /// with it, as an address (`RouterContext.pills`). A local project, a notification or a category is what you talk about,
     /// and stays.
     var addresses: Bool {
         switch self {
-        case .claude: true
+        case .t3: true
         case .project, .notification, .category, .thisItem: false
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case project, claude, notification, category, thisItem }
+    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem }
 
     /// `{"project": "/code/lookout"}` and so on; a bare string, a project's folder (as the pills were kept before there
     /// were other kinds), is a project.
@@ -42,7 +41,7 @@ enum RouterPointer: Hashable, Codable {
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try c.decodeIfPresent(String.self, forKey: .project) { self = .project(v) }
-        else if let v = try c.decodeIfPresent(String.self, forKey: .claude) { self = .claude(v) }
+        else if let v = try c.decodeIfPresent(String.self, forKey: .t3) ?? c.decodeIfPresent(String.self, forKey: .claude) { self = .t3(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .notification) { self = .notification(v) }
         else if let v = try c.decodeIfPresent(UUID.self, forKey: .category) { self = .category(v) }
         else if c.contains(.thisItem) { self = .thisItem }
@@ -53,7 +52,7 @@ enum RouterPointer: Hashable, Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .project(let folder): try c.encode(folder, forKey: .project)
-        case .claude(let target): try c.encode(target, forKey: .claude)
+        case .t3(let target): try c.encode(target, forKey: .t3)
         case .notification(let id): try c.encode(id, forKey: .notification)
         case .category(let id): try c.encode(id, forKey: .category)
         case .thisItem: try c.encode(true, forKey: .thisItem)
@@ -93,8 +92,8 @@ extension Store {
         switch pointer {
         case .project(let folder):
             return folderName(folder)
-        case .claude(let target):
-            return RouterPointers.inert(RouterCourier.Target(target).flatMap { RouterCourier.option($0, store: self)?.title ?? $0.project } ?? "claude.ai", 40)
+        case .t3(let target):
+            return RouterPointers.inert(RouteTarget(target).flatMap { $0.option(store: self)?.title } ?? "thread", 40)
         case .notification(let id):
             return things[id].map(RouterPointers.reference) ?? "notification"
         case .category(let id):
@@ -111,8 +110,9 @@ extension Store {
         switch pointer {
         case .project(let folder):
             return MentionLook(label: name ?? folderName(folder), symbol: nil, tint: projectColor(folder))
-        case .claude:
-            return MentionLook(label: name ?? pointerName(pointer), symbol: "cloud", tint: CDS.Text.secondary)
+        case .t3(let target):
+            let thread = RouteTarget(target)?.threadID != nil
+            return MentionLook(label: name ?? pointerName(pointer), symbol: thread ? "text.bubble" : "plus.bubble", tint: CDS.Text.secondary)
         case .notification(let id):
             guard let thing = things[id] else { return MentionLook(label: name ?? "notification", symbol: "bell", tint: CDS.Text.muted) }
             let category = entries.first { $0.id == id }.flatMap { e in categories.first { $0.id == e.categoryID } }
@@ -173,10 +173,10 @@ extension RouterContext {
         return mentions.compactMap { if case .notification(let id) = $0.pointer { id } else { nil } }.filter { seen.insert($0).inserted }
     }
 
-    /// The claude.ai places tagged (their targets), in order.
-    var claudeTargets: [String] {
+    /// The T3 places tagged (their targets), in order.
+    var threadTargets: [String] {
         var seen = Set<String>()
-        return mentions.compactMap { if case .claude(let t) = $0.pointer { t } else { nil } }.filter { seen.insert($0).inserted }
+        return mentions.compactMap { if case .t3(let t) = $0.pointer { t } else { nil } }.filter { seen.insert($0).inserted }
     }
 
     /// The categories tagged, in order.
@@ -293,7 +293,7 @@ enum RouterPointers {
                 let open = store.entries(in: c.id)
                 blocks.append(category(name: m.name, rules: RuleWords(store: store).summary(c), open: open.count,
                                        unread: open.filter(\.isUnread).count))
-            case .project, .claude, .thisItem:
+            case .project, .t3, .thisItem:
                 continue
             }
         }
@@ -393,7 +393,7 @@ struct MentionSuggestion: Identifiable, Equatable {
     var id: String {
         switch pick {
         case .pointer(.project(let v)): "project:" + v
-        case .pointer(.claude(let v)): v
+        case .pointer(.t3(let v)): v
         case .pointer(.notification(let v)): "notification:" + v
         case .pointer(.category(let v)): "category:" + v.uuidString
         case .pointer(.thisItem): "this"
@@ -437,24 +437,25 @@ extension RouterMentions {
                                          detail: MentionList.shortPath(folder),
                                          look: MentionLook(label: name, symbol: "folder", tint: CDS.Text.secondary), keys: [name]))
         }
-        // The claude.ai projects, while the delivery engine runs: in Projects, marked as claude.ai's.
-        for place in RouterCourier.places(store) {
-            let target = RouterCourier.Target.project(place.name).targetID
-            guard !except.contains(.claude(target)), found([place.name]) else { continue }
-            out.append(MentionSuggestion(section: .projects, pick: .pointer(.claude(target)), name: place.name, detail: "claude.ai",
-                                         look: MentionLook(label: place.name, symbol: "cloud", tint: CDS.Text.secondary), keys: [place.name]))
+        // T3's projects (a new thread in one) and their latest threads (a message to one): marked as T3's.
+        let board = store.deciderBoard()
+        for name in board.projects {
+            let target = RouteTarget.newThread(project: board.projectID(name)).targetID
+            guard !except.contains(.t3(target)), found([name]) else { continue }
+            out.append(MentionSuggestion(section: .projects, pick: .pointer(.t3(target)), name: name, detail: "new thread in T3",
+                                         look: MentionLook(label: name, symbol: "plus.bubble", tint: CDS.Text.secondary), keys: [name]))
         }
         // Their threads, latest first, after the projects' own rows.
-        for place in RouterCourier.places(store) {
-            for t in place.threads.prefix(6) {
-                let target = RouterCourier.Target.thread(project: place.name, thread: t.id).targetID
-                let title = t.title.isEmpty ? "Untitled thread" : RouterPointers.inert(t.title, 40)
-                guard !except.contains(.claude(target)), found([t.title, place.name]) else { continue }
-                out.append(MentionSuggestion(section: .projects, pick: .pointer(.claude(target)), name: title,
-                                             detail: "claude.ai · \(place.name)",
-                                             look: MentionLook(label: title, symbol: "text.bubble", tint: CDS.Text.secondary),
-                                             keys: [t.title, place.name]))
-            }
+        var perProject: [String: Int] = [:]
+        for t in board.threads {
+            guard perProject[t.project, default: 0] < 6 else { continue }
+            let target = RouteTarget.thread(t.key).targetID
+            let title = t.title.isEmpty ? "Untitled thread" : RouterPointers.inert(t.title, 40)
+            guard !except.contains(.t3(target)), found([t.title, t.project]) else { continue }
+            perProject[t.project, default: 0] += 1
+            out.append(MentionSuggestion(section: .projects, pick: .pointer(.t3(target)), name: title, detail: "T3 · \(t.project)",
+                                         look: MentionLook(label: title, symbol: "text.bubble", tint: CDS.Text.secondary),
+                                         keys: [t.title, t.project]))
         }
         var made = 0
         let open = MentionBase.open(store).lazy.filter { !except.contains(.notification($0.id)) }.prefix(300)
