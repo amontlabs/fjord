@@ -102,7 +102,7 @@ struct AppSettings: Codable {
 
 struct PersistedState: Codable {
     var settings: AppSettings
-    var agents: AgentsState?
+    var agents: ThreadsState?
     var router: RouterSaved?
     var categories: [InboxCategory]? = nil
     var groups: [InboxGroup]? = nil
@@ -128,7 +128,7 @@ struct PersistedState: Codable {
     /// The project proposals up or waiting when the app quit (RouterProjectProposal.swift); nil: none.
     var routerProposals: [RouterProjectProposal.Saved]? = nil
 
-    init(settings: AppSettings, agents: AgentsState? = nil, router: RouterSaved? = nil, categories: [InboxCategory]? = nil,
+    init(settings: AppSettings, agents: ThreadsState? = nil, router: RouterSaved? = nil, categories: [InboxCategory]? = nil,
          groups: [InboxGroup]? = nil, categorySections: [CategorySection]? = nil, things: [String: Thing]? = nil,
          marks: [String: EntryMarks]? = nil,
          categoryBaselines: [UUID: Set<UUID>]? = nil, ownedRepos: Set<String>? = nil, contributedRepos: Set<String>? = nil,

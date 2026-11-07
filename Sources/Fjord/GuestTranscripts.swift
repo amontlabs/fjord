@@ -11,7 +11,7 @@ struct GuestTranscriptSnapshot: Equatable, Sendable {
     var tail: Data
 
     var messages: [YourMessages.Message] { YourMessages.messages(in: tail) }
-    var activity: ClaudeActivity? { Claude.activity(tail: tail) }
+    var activity: ThreadWork? { Claude.activity(tail: tail) }
 }
 
 /// Keeps only recent transcript tails. Metadata is checked on every read so append, truncate, and atomic replacement

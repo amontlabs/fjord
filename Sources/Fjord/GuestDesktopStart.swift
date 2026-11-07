@@ -12,7 +12,7 @@ struct GuestSessionEvidence: Equatable, Sendable {
     var capabilities: [String]
     var transcriptMessages: [YourMessages.Message]
     var transcript: GuestTranscriptSnapshot? = nil
-    var tasks: [ClaudeTask]? = nil
+    var tasks: [BackgroundWork]? = nil
     /// Live by the Router hook's held form and the guest registry, with no plugin presence (so no relay): enough to
     /// match a start to its Desktop session and answer its form, not to deliver messages.
     var formBacked = false
@@ -29,7 +29,7 @@ struct GuestExecutionState: Equatable {
     var availability: Availability
     /// `nil` means an inaccessible guest has not supplied enough evidence to replace the last known value.
     var isRunning: Bool?
-    var activity: ClaudeActivity?
+    var activity: ThreadWork?
 }
 
 struct DesktopSSHSession: Equatable, Sendable {

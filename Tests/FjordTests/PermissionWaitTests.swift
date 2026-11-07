@@ -29,7 +29,7 @@ import Testing
         return url
     }
 
-    private func merged(_ transcript: String, _ dir: TempDir) -> ClaudeActivity? {
+    private func merged(_ transcript: String, _ dir: TempDir) -> ThreadWork? {
         let tail = Data(transcript.utf8)
         return Claude.mergingPermission(Claude.activity(tail: tail), calls: Claude.tailCalls(tail: tail),
                                         notes: Claude.PermissionNote.read(in: dir.path("permissions"), session: "cli-1"))
@@ -106,10 +106,10 @@ import Testing
     }
 
     @Test func aRowWithAPermissionPromptNeedsYou() throws {
-        let activity = ClaudeActivity(text: Claude.permissionText(tool: "Bash", input: ["command": "git push"]),
+        let activity = ThreadWork(text: Claude.permissionText(tool: "Bash", input: ["command": "git push"]),
                                       since: Date(timeIntervalSince1970: 1_792_576_800), waitsForYou: true, tool: "Bash", toolUseID: "t1")
-        var row = AgentRow(session: ClaudeSession(id: "s", title: "T", lastActivity: Date(), running: true),
-                           entry: AgentEntry(id: "s"), label: "T")
+        var row = ThreadRow(session: AgentThread(id: "s", title: "T", lastActivity: Date(), running: true),
+                           entry: ThreadEntry(id: "s"), label: "T")
         row.activity = activity
         #expect(row.waitsForYou && row.group == .needsYou)
     }

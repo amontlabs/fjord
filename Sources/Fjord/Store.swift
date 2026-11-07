@@ -303,7 +303,7 @@ final class Store {
     }
 
     /// Claude sessions extension (see Agents.swift).
-    var agents = AgentsState() {
+    var agents = ThreadsState() {
         didSet {
             updateRouterOn()
             agentCache = nil
@@ -325,7 +325,7 @@ final class Store {
     }
     /// Bumped on every change to `router`: a cheap memo/animation key.
     private(set) var routerRevision = 0
-    /// The question forms Fjord's hook holds, by Claude Code session id (`ClaudeSession.cliID`).
+    /// The question forms Fjord's hook holds, by Claude Code session id (`AgentThread.cliID`).
     var pendingForms: [String: PendingForm] = [:] {
         didSet { shownRevision &+= 1 }
     }
@@ -346,12 +346,12 @@ final class Store {
     /// Names of folders no session is in, worked out among `namedFoldersSeen` (`folderName`); cleared when that changes.
     @ObservationIgnored var folderNameMisses: [String: String] = [:]
     /// The agents' entries by session, made when a row is and dropped with every change to `agents`.
-    @ObservationIgnored var agentEntryIndex: [String: AgentEntry]?
+    @ObservationIgnored var agentEntryIndex: [String: ThreadEntry]?
     /// The folders `folderNames` was worked out for: the work is skipped while they are the same.
     @ObservationIgnored var namedFoldersSeen: Set<String>?
     /// The git repos in your code folders, kept fresh (CodeFolders.swift).
     @ObservationIgnored lazy var codeFolders = CodeFolderScanner(store: self)
-    var claudeSessions: [String: ClaudeSession] = [:] {
+    var threads: [String: AgentThread] = [:] {
         didSet {
             claudeSessionsRevision &+= 1
             shownRevision &+= 1
@@ -363,7 +363,7 @@ final class Store {
     /// Guest execution observations keyed by the Desktop session that owns the SSH mirror. Local reads can refresh
     /// title, folder, and timestamps, but must not replace this guest-owned execution state.
     @ObservationIgnored var guestExecutionStates: [String: GuestExecutionState] = [:]
-    /// Bumped on every change to `claudeSessions`: a cheap memo key for what is worked out from them (unobserved).
+    /// Bumped on every change to `threads`: a cheap memo key for what is worked out from them (unobserved).
     @ObservationIgnored private(set) var claudeSessionsRevision = 0
     /// Bumped when what the open palette lists changes besides the inbox and the Router (`inboxRevision`, `routerRevision`):
     /// the sessions, the agents, the actions' runs, the snippets, the project folders. Observed, so the palette follows it.
@@ -373,7 +373,7 @@ final class Store {
     /// activity, task titles, the agents, the forms pending, a recent session ageing out): the window's kept picture is not forgiven
     /// a small difference across one (`AppTransition.Marks`). Unobserved.
     @ObservationIgnored private(set) var shownRevision = 0
-    var claudeActivity: [String: ClaudeActivity] = [:] {
+    var threadWork: [String: ThreadWork] = [:] {
         didSet {
             shownRevision &+= 1
             agentCache = nil
@@ -388,7 +388,7 @@ final class Store {
     }
     @ObservationIgnored var recentExpiry: Timer?
     /// Subagents and commands still running in sessions whose turn is over.
-    var claudeTasks: [String: [ClaudeTask]] = [:] {
+    var backgroundWork: [String: [BackgroundWork]] = [:] {
         didSet {
             shownRevision &+= 1
             agentCache = nil
@@ -403,7 +403,7 @@ final class Store {
         }
     }
     /// Claude's sessions have been read since Fjord started reading them: a read failing after that leaves the
-    /// last ones known (`claudeSessions`), not nothing known.
+    /// last ones known (`threads`), not nothing known.
     var claudeSessionsRead = false
 
     var me: GHUser? {
@@ -561,7 +561,7 @@ final class Store {
         return feed
     }()
     /// Derived rows, rebuilt after any change to the agents or what was read (see Agents.swift).
-    @ObservationIgnored var agentCache: AgentCache?
+    @ObservationIgnored var agentCache: ThreadCache?
     /// Tells a read of the app that was asked for before you changed something from one asked for after.
     @ObservationIgnored var claudeStamp = ClaudeStamp()
     @ObservationIgnored var ingesting = false
@@ -736,12 +736,12 @@ final class Store {
         }
         var next: TimeInterval?
         let now = Date()
-        for session in claudeSessions.values where session.running {
+        for session in threads.values where session.running {
             let left = (session.lastUserMessage ?? .distantPast).addingTimeInterval(Claude.runningTimeout).timeIntervalSince(now)
             next = min(next ?? left, left)
         }
         // Sessions with background work: its end isn't always an event (a command's process just exits).
-        if !claudeTasks.isEmpty { next = min(next ?? 60, 60) }
+        if !backgroundWork.isEmpty { next = min(next ?? 60, 60) }
         // Icon picking waits out a failure (a rejected key waits for a new one instead).
         if agents.iconsEnabled, iconsPausedUntil > now, iconsPausedUntil < .distantFuture {
             next = min(next ?? .infinity, iconsPausedUntil.timeIntervalSince(now))
@@ -920,7 +920,7 @@ final class Store {
         }
         if !state.dropped.isEmpty { keepAside(file, data, dropped: state.dropped) }
         settings = state.settings
-        agents = state.agents ?? AgentsState()
+        agents = state.agents ?? ThreadsState()
         var router = state.router ?? RouterSaved()
         router.settleInterrupted()
         self.router = router

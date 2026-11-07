@@ -313,17 +313,17 @@ enum BriefKeys {
 
     // MARK: Entries
 
-    /// A local thread's Claude Code session id (`ClaudeSession.cliID`).
+    /// A local thread's Claude Code session id (`AgentThread.cliID`).
     func cli(_ t: BriefTarget, store: Store) -> String? {
         if let key = sessions[t.thread], let cli = clis[key] { return cli }
-        return store.claudeSessions[t.thread]?.cliID
+        return store.threads[t.thread]?.cliID
     }
 
     /// A local thread's session in the Claude app (a remote computer's runs there as a Desktop SSH session).
     func desktopSession(_ t: BriefTarget, store: Store) -> String? {
-        if store.claudeSessions[t.thread] != nil { return t.thread }
+        if store.threads[t.thread] != nil { return t.thread }
         guard let cli = cli(t, store: store) else { return nil }
-        return store.claudeSessions.first { $0.value.cliID == cli }?.key
+        return store.threads.first { $0.value.cliID == cli }?.key
     }
 
     /// The form Fjord's hook holds on this Mac for a local thread's session.

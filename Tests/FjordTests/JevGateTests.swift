@@ -185,7 +185,7 @@ import Testing
         let s = store()
         s.agents.iconsEnabled = true
         s.agents.enabledAt = Date().addingTimeInterval(-3600)
-        s.ingest([ClaudeSession(id: "a", title: "Fix the login", folder: "/code/app", completedTurns: 1, lastActivity: Date(), cliID: "cli-a")],
+        s.ingest([AgentThread(id: "a", title: "Fix the login", folder: "/code/app", completedTurns: 1, lastActivity: Date(), cliID: "cli-a")],
                  appUnread: [], claudeFrontmost: false, now: Date())
         let latch = Latch()
         s.iconFirstMessage = { _ in while !latch.open { Thread.sleep(forTimeInterval: 0.002) }; return "Fix the login form" }

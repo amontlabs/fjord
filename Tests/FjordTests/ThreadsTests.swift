@@ -8,8 +8,8 @@ import Testing
 
     private func session(_ id: String, turns: Int = 3, minutesAgo: Double = 5, messageMinutesAgo: Double? = nil,
                          focusedMinutesAgo: Double? = 60, folder: String? = "/code/app", blocked: Bool = false,
-                         running: Bool = false, archived: Bool = false) -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: folder, isArchived: archived, completedTurns: turns,
+                         running: Bool = false, archived: Bool = false) -> AgentThread {
+        AgentThread(id: id, title: "Session \(id)", folder: folder, isArchived: archived, completedTurns: turns,
                       lastActivity: now.addingTimeInterval(-minutesAgo * 60),
                       lastFocused: focusedMinutesAgo.map { now.addingTimeInterval(-$0 * 60) },
                       lastUserMessage: now.addingTimeInterval(-(messageMinutesAgo ?? minutesAgo + 1) * 60),
@@ -17,7 +17,7 @@ import Testing
     }
 
     /// A store that has already seen `sessions` once (seeded), so later reads are "new activity".
-    private func store(_ sessions: [ClaudeSession], dots: Set<String> = []) -> Store {
+    private func store(_ sessions: [AgentThread], dots: Set<String> = []) -> Store {
         let s = Store()
         s.persists = false
         s.agents.enabled = true
@@ -32,7 +32,7 @@ import Testing
         s.agents.entries[i].hiddenAt = s.agents.entries[i].seen
     }
 
-    private func entry(_ s: Store, _ id: String) -> AgentEntry? { s.agents.entries.first { $0.id == id } }
+    private func entry(_ s: Store, _ id: String) -> ThreadEntry? { s.agents.entries.first { $0.id == id } }
 
     /// Icons on and a key saved, so an icon can be asked for; the store has not read the key, so none is.
     private func keySaved(_ s: Store) {
@@ -62,7 +62,7 @@ import Testing
     }
 
     /// A store that asks for icons, with the transcript and Jev stood in for: every question gets its first option.
-    private func iconStore(_ sessions: [ClaudeSession], firstMessage: String? = "Fix the login form") -> Store {
+    private func iconStore(_ sessions: [AgentThread], firstMessage: String? = "Fix the login form") -> Store {
         let s = store(sessions)
         s.agents.iconsEnabled = true
         s.typesafeKeyCache = "test"
@@ -178,7 +178,7 @@ import Testing
         #expect(entry(s, "a")?.unread == true)
         // Opened from Fjord, then another turn finishes: unread again.
         s.interceptOpen = { _ in }
-        s.openAgent("a")
+        s.openThread("a")
         #expect(entry(s, "a")?.unread == false)
         s.ingest([session("a", turns: 5, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
         #expect(entry(s, "a")?.unread == true)
@@ -208,7 +208,7 @@ import Testing
         #expect(entry(s, "a")?.unread == true)
         // Opened from Fjord: the app still shows the dot, unchanged, so Fjord keeps your choice.
         s.interceptOpen = { _ in }
-        s.openAgent("a")
+        s.openThread("a")
         s.ingest([session("a")], appUnread: ["a"], claudeFrontmost: false, now: now)
         #expect(entry(s, "a")?.unread == false)
         // Unreadable dots (nil) change nothing.
@@ -257,18 +257,18 @@ import Testing
 
     @Test func anUnreadSessionWithWorkStillRunningIsWorkingUntilItEnds() throws {
         let s = store([session("f", minutesAgo: 4)], dots: ["f"])
-        s.claudeTasks = ["f": [ClaudeTask(id: "a", kind: .agent, title: "Review the changes", since: now)]]
+        s.backgroundWork = ["f": [BackgroundWork(id: "a", kind: .agent, title: "Review the changes", since: now)]]
         let row = try #require(s.allAgentRows.first { $0.id == "f" })
         #expect(row.unread && row.group == .working)
         // The work ends: still unread, so it is done again.
-        s.claudeTasks = [:]
+        s.backgroundWork = [:]
         let done = try #require(s.allAgentRows.first { $0.id == "f" })
         #expect(done.unread && done.group == .done)
     }
 
     @Test func aBlockedSessionWithWorkStillRunningStillNeedsYou() throws {
         let s = store([session("b", minutesAgo: 4, blocked: true)], dots: ["b"])
-        s.claudeTasks = ["b": [ClaudeTask(id: "c", kind: .command, title: "Run the full test suite", since: now)]]
+        s.backgroundWork = ["b": [BackgroundWork(id: "c", kind: .command, title: "Run the full test suite", since: now)]]
         let row = try #require(s.allAgentRows.first { $0.id == "b" })
         #expect(row.group == .needsYou)
     }
@@ -279,7 +279,7 @@ import Testing
         let a = try #require(rows.first { $0.id == "a" }), b = try #require(rows.first { $0.id == "b" })
         #expect(a.projectName == "customer-a/app" && b.projectName == "customer-b/app")
         // The name follows the folders: with the other project gone, the folder's own name is enough again.
-        s.claudeSessions["a"] = nil
+        s.threads["a"] = nil
         #expect(s.folderName("/customer-b/app") == "app")
         #expect(try #require(s.allAgentRows.first).projectName == "app")
         // A muted project still tells a session's project from another of its name.
@@ -329,7 +329,7 @@ import Testing
     @Test func oldStateFilesStillLoad() throws {
         let state = try JSONDecoder().decode(PersistedState.self, from: Data(#"{"repos":[],"items":[],"ci":{},"settings":{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"reviewRequests":true,"didInitialReviewSync":true}}"#.utf8))
         #expect(state.agents == nil && state.settings.shortcuts == nil)
-        let partial = try JSONDecoder().decode(AgentsState.self, from: Data(#"{"enabled":true}"#.utf8))
+        let partial = try JSONDecoder().decode(ThreadsState.self, from: Data(#"{"enabled":true}"#.utf8))
         #expect(partial.enabled && partial.entries.isEmpty)
     }
 
@@ -578,13 +578,13 @@ import Testing
     @MainActor @Test func theNamesFollowTheFolders() {
         let s = Store()
         s.persists = false
-        func session(_ id: String, _ folder: String) -> ClaudeSession {
-            ClaudeSession(id: id, title: id, folder: folder, lastActivity: Date())
+        func session(_ id: String, _ folder: String) -> AgentThread {
+            AgentThread(id: id, title: id, folder: folder, lastActivity: Date())
         }
-        s.claudeSessions = ["a": session("a", "/x/app"), "b": session("b", "/y/app")]
+        s.threads = ["a": session("a", "/x/app"), "b": session("b", "/y/app")]
         #expect(s.folderNames == ["/x/app": "x/app", "/y/app": "y/app"])
         // A new folder, or a muted one, is named as it comes.
-        s.claudeSessions["c"] = session("c", "/z/tool")
+        s.threads["c"] = session("c", "/z/tool")
         #expect(s.folderNames["/z/tool"] == "tool")
         s.agents.mutedFolders = ["/w/app"]
         #expect(s.folderNames["/w/app"] == "w/app" && s.folderNames["/x/app"] == "x/app")
@@ -596,8 +596,8 @@ import Testing
 @Suite struct TaskInventory {
     private let t0 = Date(timeIntervalSince1970: 2_000_000_000)
 
-    private func session(_ id: String, ended: Date, running: Bool = false) -> ClaudeSession {
-        ClaudeSession(id: id, title: id, folder: "/code/app", completedTurns: 1, lastActivity: ended, running: running, cliID: "cli-\(id)")
+    private func session(_ id: String, ended: Date, running: Bool = false) -> AgentThread {
+        AgentThread(id: id, title: id, folder: "/code/app", completedTurns: 1, lastActivity: ended, running: running, cliID: "cli-\(id)")
     }
 
     /// A command output in `folder`, made at `at`.

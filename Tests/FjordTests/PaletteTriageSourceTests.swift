@@ -213,7 +213,7 @@ import Testing
     @Test func aSessionStartedForAThingIsAnActionOfIt() throws {
         let store = store([InboxFixture.pr(9)])
         store.setTool(.router, on: true)
-        store.claudeSessions["s1"] = ClaudeSession(id: "s1", title: "Fix 9", folder: nil, lastActivity: Date())
+        store.threads["s1"] = AgentThread(id: "s1", title: "Fix 9", folder: nil, lastActivity: Date())
         store.actionLedger.runs["k"] = ActionRun(category: UUID(), thing: "pr:a/one#9", action: UUID(), trigger: "enter",
                                                  state: .done, at: Date(), sessionID: "s1")
 

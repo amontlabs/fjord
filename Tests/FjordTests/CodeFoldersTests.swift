@@ -198,8 +198,8 @@ private final class Count: @unchecked Sendable {
         tree.repo("session-only", remotes: [("origin", "https://github.com/o/app")])
         let session = tree.path("session-only")
         let s = store { _ in .init(repos: ["/code/app": ["o/app", "up/app"], "/code/other": ["o/other"], "/code/local": []]) }
-        s.claudeSessions = ["a": ClaudeSession(id: "a", title: "a", folder: session, lastActivity: Date()),
-                            "b": ClaudeSession(id: "b", title: "b", folder: "/code/app", lastActivity: Date())]
+        s.threads = ["a": AgentThread(id: "a", title: "a", folder: session, lastActivity: Date()),
+                            "b": AgentThread(id: "b", title: "b", folder: "/code/app", lastActivity: Date())]
         await s.codeFolders.settled()
         #expect(s.localClones(of: "o/app") == [session])
         s.addCodeFolders(["/code", "/code/"])
@@ -216,7 +216,7 @@ private final class Count: @unchecked Sendable {
 
     @Test func atOffersTheReposFoundInCodeFoldersAsProjects() async {
         let s = store { _ in .init(repos: ["/code/app": ["o/app"], "/code/tool": []]) }
-        s.claudeSessions = ["a": ClaudeSession(id: "a", title: "a", folder: "/x/lookout", lastActivity: Date())]
+        s.threads = ["a": AgentThread(id: "a", title: "a", folder: "/x/lookout", lastActivity: Date())]
         s.addCodeFolders(["/code"])
         await s.codeFolders.settled()
         let projects = RouterMentions.candidates(s).compactMap(\.folder)
@@ -232,7 +232,7 @@ private final class Count: @unchecked Sendable {
 
     @Test func scannedFoldersAreNamedAndTellSameNamedProjectsApart() async {
         let s = store { _ in .init(repos: ["/y/app": ["o/app"], "/y/tool": []]) }
-        s.claudeSessions = ["a": ClaudeSession(id: "a", title: "a", folder: "/x/app", lastActivity: Date())]
+        s.threads = ["a": AgentThread(id: "a", title: "a", folder: "/x/app", lastActivity: Date())]
         #expect(s.folderName("/x/app") == "app")
         s.addCodeFolders(["/y"])
         await s.codeFolders.settled()
@@ -265,20 +265,20 @@ private final class Count: @unchecked Sendable {
             reads.add()
             return folder == "/work/app" ? ["o/app"] : []
         }
-        func session(_ id: String, _ folder: String?) -> ClaudeSession {
-            ClaudeSession(id: id, title: id, folder: folder, lastActivity: Date())
+        func session(_ id: String, _ folder: String?) -> AgentThread {
+            AgentThread(id: id, title: id, folder: folder, lastActivity: Date())
         }
-        s.claudeSessions = ["a": session("a", "/work/app"), "b": session("b", "/work/notes"), "c": session("c", nil)]
+        s.threads = ["a": session("a", "/work/app"), "b": session("b", "/work/notes"), "c": session("c", nil)]
         await s.codeFolders.settled()
         #expect(reads.value == 2)
         #expect(s.localClones(of: "o/app") == ["/work/app"])
         // Asking again, or a session changing in the same folders, reads nothing.
         _ = s.localClones(of: "o/app")
-        s.claudeSessions["d"] = session("d", "/work/app")
+        s.threads["d"] = session("d", "/work/app")
         await s.codeFolders.settled()
         #expect(reads.value == 2)
         // A new folder is read alone; a scan reads every session's folder again, and takes in what it finds.
-        s.claudeSessions["e"] = session("e", "/work/other")
+        s.threads["e"] = session("e", "/work/other")
         await s.codeFolders.settled()
         #expect(reads.value == 3)
         s.addCodeFolders(["/code"])

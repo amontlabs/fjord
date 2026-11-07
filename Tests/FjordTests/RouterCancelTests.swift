@@ -62,8 +62,8 @@ import Testing
         .init(session: "local_a", cli: "cli-a", nonce: RelaySigning.nonce, at: sentAt, turns: turns, busy: busy, abortable: abortable)
     }
 
-    private static func session(turns: Int, archived: Bool = false) -> ClaudeSession {
-        ClaudeSession(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", isArchived: archived, completedTurns: turns,
+    private static func session(turns: Int, archived: Bool = false) -> AgentThread {
+        AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", isArchived: archived, completedTurns: turns,
                       lastActivity: sentAt)
     }
 
@@ -93,12 +93,12 @@ import Testing
 
     @Test func theStoreOffersItOnlyForAnEntryThatDeliveredSomething() {
         let s = InboxFixture.store([])
-        s.claudeSessions = ["local_a": Self.session(turns: 3)]
+        s.threads = ["local_a": Self.session(turns: 3)]
         var entry = RouterDecision(at: Self.sentAt, trigger: .you("hi"), outcome: .done)
         #expect(!s.canCancel(entry, now: Self.sentAt))
         entry.delivered = Self.delivered()
         #expect(s.canCancel(entry, now: Self.sentAt.addingTimeInterval(5)))
-        s.claudeSessions["local_a"]?.completedTurns = 4
+        s.threads["local_a"]?.completedTurns = 4
         #expect(!s.canCancel(entry, now: Self.sentAt.addingTimeInterval(5)))
     }
 
@@ -152,10 +152,10 @@ import Testing
             s.categories = [InboxStore.ci]
             s.router.enabled = true
             s.agents.enabled = true
-            s.claudeSessions = [
-                "local_a": ClaudeSession(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", completedTurns: 3,
+            s.threads = [
+                "local_a": AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", completedTurns: 3,
                                          lastActivity: Date(), running: true),
-                "local_b": ClaudeSession(id: "local_b", title: "Update the docs", folder: "/code/docs", completedTurns: 7,
+                "local_b": AgentThread(id: "local_b", title: "Update the docs", folder: "/code/docs", completedTurns: 7,
                                          lastActivity: Date().addingTimeInterval(-60)),
             ]
             store = s

@@ -4,7 +4,7 @@ import Foundation
 
 /// A Claude Code session of the Claude desktop app, as read from the app's own files. Nothing here is a public API:
 /// every field is optional on disk, and anything unexpected is skipped rather than trusted.
-struct ClaudeSession: Identifiable, Hashable {
+struct AgentThread: Identifiable, Hashable {
     var id: String
     var title: String
     /// Repository root (worktrees collapse onto it); nil for scratch chats, which have no folder of their own.
@@ -35,7 +35,7 @@ struct ClaudeSession: Identifiable, Hashable {
 }
 
 /// What a working agent is on right now, and since when.
-struct ClaudeActivity: Hashable {
+struct ThreadWork: Hashable {
     var text: String
     var since: Date
     /// Stopped mid-turn on you: a question, or a plan to approve.
@@ -59,14 +59,14 @@ struct ClaudeActivity: Hashable {
 }
 
 /// A subagent or shell command a session started in the background, still running.
-struct ClaudeTask: Hashable, Identifiable {
+struct BackgroundWork: Hashable, Identifiable {
     enum Kind: Hashable { case agent, command }
     var id: String
     var kind: Kind
     var title: String
     var since: Date
     /// What a subagent is on (from its own transcript); commands don't say.
-    var activity: ClaudeActivity? = nil
+    var activity: ThreadWork? = nil
 }
 
 enum Claude {
@@ -127,7 +127,7 @@ enum Claude {
         }
     }
 
-    static func decodeSession(_ data: Data, appRunning: Bool = true, now: Date = Date()) -> ClaudeSession? {
+    static func decodeSession(_ data: Data, appRunning: Bool = true, now: Date = Date()) -> AgentThread? {
         guard let raw = try? JSONDecoder().decode(Raw.self, from: data), let id = raw.sessionId, id.hasPrefix("local_") else {
             return nil
         }
@@ -139,13 +139,13 @@ enum Claude {
         // missing or still points at an older message.
         let current = raw.postTurnSummaryFor != nil && raw.postTurnSummaryFor == raw.lastAssistantUuid
         let summary = current ? raw.postTurnSummary.map {
-            ClaudeSession.Summary(blocked: $0.status_category == "blocked",
+            AgentThread.Summary(blocked: $0.status_category == "blocked",
                                   detail: ($0.status_detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         } : nil
         let lastMessage = date(raw.latestUserFrameAt)
         let running = appRunning && !current && raw.isArchived != true
             && lastMessage.map { now.timeIntervalSince($0) < runningTimeout } ?? false
-        return ClaudeSession(
+        return AgentThread(
             id: id, title: raw.title?.isEmpty == false ? raw.title! : "Untitled session",
             folder: scratch ? nil : path, isArchived: raw.isArchived ?? false,
             completedTurns: raw.completedTurns ?? 0, lastActivity: lastActivity,
@@ -159,22 +159,22 @@ enum Claude {
 
     /// Re-decodes only the files whose modification date changed since the last call.
     final class SessionReader {
-        private var cache: [URL: (Date, ClaudeSession?)] = [:]
+        private var cache: [URL: (Date, AgentThread?)] = [:]
 
-        func read() -> Result<[ClaudeSession], ReadError> {
+        func read() -> Result<[AgentThread], ReadError> {
             let fm = FileManager.default
             guard let enumerator = fm.enumerator(at: Claude.sessionsDir, includingPropertiesForKeys: [.contentModificationDateKey]) else {
                 return .failure(.missing)
             }
             let appRunning = Claude.isRunning
-            var sessions: [ClaudeSession] = []
+            var sessions: [AgentThread] = []
             var seen = Set<URL>()
             var files = 0
             for case let url as URL in enumerator where url.pathExtension == "json" && url.lastPathComponent.hasPrefix("local_") {
                 files += 1
                 seen.insert(url)
                 let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                var session: ClaudeSession?
+                var session: AgentThread?
                 if let cached = cache[url], cached.0 == modified {
                     session = cached.1
                 } else {
@@ -218,11 +218,11 @@ enum Claude {
 
         private struct Cached {
             var modified: Date
-            var activity: ClaudeActivity?
+            var activity: ThreadWork?
             var calls: Claude.TailCalls
             /// The permission notes this was merged with (their file names).
             var notes: [String]
-            var merged: ClaudeActivity?
+            var merged: ThreadWork?
         }
 
         init(permissions: URL? = nil) { self.permissions = permissions }
@@ -300,7 +300,7 @@ enum Claude {
             lock.unlock()
         }
 
-        func activity(for cliID: String) -> ClaudeActivity? {
+        func activity(for cliID: String) -> ThreadWork? {
             guard let url = transcript(cliID) else { return nil }
             lock.lock()
             defer { lock.unlock() }
@@ -352,12 +352,12 @@ enum Claude {
 
     /// The last step in a transcript: the tool being run, or thinking between steps; with the session's task list and the
     /// agent's latest narration, found in the same tail (only the lines that can hold them are parsed).
-    static func activity(tail: Data) -> ClaudeActivity? {
+    static func activity(tail: Data) -> ThreadWork? {
         let lines = tail.split(separator: UInt8(ascii: "\n")).reversed()
-        var result: ClaudeActivity?
+        var result: ThreadWork?
         var narration: String?
         var narrating = true
-        var todo: ClaudeActivity.Todo?
+        var todo: ThreadWork.Todo?
         let todoMark = Data("TodoWrite".utf8)
         for line in lines {
             let raw = Data(line)
@@ -373,15 +373,15 @@ enum Claude {
                     if let tool = parts.last(where: { $0["type"] as? String == "tool_use" }) {
                         let name = tool["name"] as? String ?? ""
                         let waits = ["AskUserQuestion", "ExitPlanMode"].contains(name)
-                        result = ClaudeActivity(text: describe(tool: name, input: tool["input"] as? [String: Any] ?? [:]),
+                        result = ThreadWork(text: describe(tool: name, input: tool["input"] as? [String: Any] ?? [:]),
                                                 since: since, waitsForYou: waits, tool: waits ? name : nil,
                                                 toolUseID: waits ? tool["id"] as? String : nil)
                     } else {
-                        result = ClaudeActivity(text: parts.contains { $0["type"] as? String == "text" } ? "Writing" : "Thinking", since: since)
+                        result = ThreadWork(text: parts.contains { $0["type"] as? String == "text" } ? "Writing" : "Thinking", since: since)
                     }
                 } else {
                     // A tool's result, or your message: the model is working out the next step.
-                    result = ClaudeActivity(text: "Thinking", since: since)
+                    result = ThreadWork(text: "Thinking", since: since)
                 }
             }
             if narrating {
@@ -399,7 +399,7 @@ enum Claude {
                 let done = items.filter { $0["status"] as? String == "completed" }.count
                 let active = items.first { $0["status"] as? String == "in_progress" }
                     .flatMap { ($0["activeForm"] as? String) ?? ($0["content"] as? String) }
-                todo = ClaudeActivity.Todo(done: done, total: items.count, active: active)
+                todo = ThreadWork.Todo(done: done, total: items.count, active: active)
             }
             if !narrating, todo != nil { break }
         }
@@ -525,7 +525,7 @@ enum Claude {
     /// The activity as it is with the permission prompts there are: a note whose call has its result is over and is taken
     /// away; one whose call is still open makes the session wait on you, as a question does. A session already waiting on
     /// a question or a plan is left as it is.
-    static func mergingPermission(_ base: ClaudeActivity?, calls: TailCalls, notes: [PermissionNote]) -> ClaudeActivity? {
+    static func mergingPermission(_ base: ThreadWork?, calls: TailCalls, notes: [PermissionNote]) -> ThreadWork? {
         var pending: (PermissionNote, OpenCall)?
         for note in notes {
             // The note's call is the latest of those it matches: with its result, the prompt is over.
@@ -537,7 +537,7 @@ enum Claude {
             }
         }
         guard base?.waitsForYou != true, let (note, call) = pending else { return base }
-        var merged = ClaudeActivity(text: permissionText(tool: note.tool, input: note.input as? [String: Any] ?? [:]),
+        var merged = ThreadWork(text: permissionText(tool: note.tool, input: note.input as? [String: Any] ?? [:]),
                                     since: call.since, waitsForYou: true, tool: call.name, toolUseID: call.id)
         merged.narration = base?.narration
         merged.todo = base?.todo
@@ -761,7 +761,7 @@ enum Claude {
     final class TaskReader {
         private var finished = Set<String>()
         private var titles: [String: String] = [:]
-        private var agentActivity: [URL: (Date, ClaudeActivity?)] = [:]
+        private var agentActivity: [URL: (Date, ThreadWork?)] = [:]
         /// Task ids announced as ended in each session transcript. Transcripts only grow, so only new bytes are searched.
         private var scans: [URL: (offset: Int, ended: Set<String>, inode: UInt64)] = [:]
 
@@ -820,18 +820,18 @@ enum Claude {
             (outputs(in: folder) ?? []).contains { !$0.isLink && !finished.contains($0.id) }
         }
 
-        func tasks(in folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> [ClaudeTask] {
+        func tasks(in folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> [BackgroundWork] {
             read(folder, transcript: transcript, openOutputs: openOutputs, now: now).tasks
         }
 
         /// The tasks, and whether that is the whole answer: a command listed only a moment ago and not open yet may be
         /// about to start, so its session's background work isn't known yet.
-        func read(_ folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> (tasks: [ClaudeTask], certain: Bool) {
+        func read(_ folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> (tasks: [BackgroundWork], certain: Bool) {
             let fm = FileManager.default
             // A folder that can't be read says nothing: not "no tasks".
             guard let entries = outputs(in: folder) else { return ([], false) }
             var certain = true
-            var tasks: [ClaudeTask] = []
+            var tasks: [BackgroundWork] = []
             // The transcript is read in full at most once per call, and only for a command's title.
             var whole: Data??
             func transcriptData() -> Data? {
@@ -862,7 +862,7 @@ enum Claude {
                     }
                     let title = titles[id] ?? Claude.agentTitle(meta: agent.deletingPathExtension().appendingPathExtension("meta.json"))
                     titles[id] = title
-                    tasks.append(ClaudeTask(id: id, kind: .agent, title: title, since: since, activity: activity(agent, modified)))
+                    tasks.append(BackgroundWork(id: id, kind: .agent, title: title, since: since, activity: activity(agent, modified)))
                 } else {
                     guard openOutputs.contains(entry.path) else {
                         // (A file only just listed may not be open yet.)
@@ -871,7 +871,7 @@ enum Claude {
                     }
                     let title = titles[id] ?? transcriptData().flatMap { Claude.commandTitle(id, in: $0) } ?? "Background command"
                     titles[id] = title
-                    tasks.append(ClaudeTask(id: id, kind: .command, title: title, since: since))
+                    tasks.append(BackgroundWork(id: id, kind: .command, title: title, since: since))
                 }
             }
             return (tasks.sorted { $0.since < $1.since }, certain)
@@ -883,7 +883,7 @@ enum Claude {
             (outputs(in: folder) ?? []).compactMap { $0.isLink ? nil : $0.created }.max()
         }
 
-        private func activity(_ url: URL, _ modified: Date) -> ClaudeActivity? {
+        private func activity(_ url: URL, _ modified: Date) -> ThreadWork? {
             if let cached = agentActivity[url], cached.0 == modified { return cached.1 }
             let activity = Claude.activity(tail: Claude.tail(of: url))
             agentActivity[url] = (modified, activity)
@@ -1051,11 +1051,11 @@ struct FolderStamp: Equatable {
 /// Everything one read of the app produced. `sessions` is nil for an activity-only refresh.
 struct ClaudeSnapshot {
     var link: ClaudeLink?
-    var sessions: [ClaudeSession]?
+    var sessions: [AgentThread]?
     var appUnread: Set<String>?
     var frontmost = false
-    var activity: [String: ClaudeActivity]?
-    var tasks: [String: [ClaudeTask]]?
+    var activity: [String: ThreadWork]?
+    var tasks: [String: [BackgroundWork]]?
     /// What the store looked like when the read was asked for (see `Store.applyClaude`).
     var stamp = ClaudeStamp()
 }
@@ -1083,8 +1083,8 @@ final class ClaudeFeed: @unchecked Sendable {
     private var deliver: (@MainActor (ClaudeSnapshot) -> Void)?
     private var relevant = Set<String>()
     // Only touched on `queue`.
-    private var live: [ClaudeSession]?
-    private var allSessions: [ClaudeSession]?
+    private var live: [AgentThread]?
+    private var allSessions: [AgentThread]?
 
     init(activityReader: Claude.ActivityReader) { self.activityReader = activityReader }
 
@@ -1202,7 +1202,7 @@ final class ClaudeFeed: @unchecked Sendable {
     /// The sessions with `running` taken from the plugin's presence where it is fresh and says anything about the turn
     /// (`turn` present, even null): a session that runs one is running, and one that doesn't isn't, whatever the app's own
     /// files guess. Where there is no plugin, or its file is old, the guess stands. Runs on `queue`.
-    private func applyingPresence(to sessions: [ClaudeSession]) -> [ClaudeSession] {
+    private func applyingPresence(to sessions: [AgentThread]) -> [AgentThread] {
         lock.lock()
         let paths = presencePaths
         lock.unlock()
@@ -1221,7 +1221,7 @@ final class ClaudeFeed: @unchecked Sendable {
     }
 
     /// `applyingPresence(to:)` on a given set of presence files.
-    static func applying(presence: [String: ClaudePlugin.Presence], to sessions: [ClaudeSession]) -> [ClaudeSession] {
+    static func applying(presence: [String: ClaudePlugin.Presence], to sessions: [AgentThread]) -> [AgentThread] {
         sessions.map { session in
             guard !session.isArchived, let cli = session.cliID, let file = presence[cli], file.hasTurnField else { return session }
             var session = session
@@ -1339,7 +1339,7 @@ final class ClaudeFeed: @unchecked Sendable {
             }
         }
         let sessions = live ?? []
-        var activity: [String: ClaudeActivity] = [:]
+        var activity: [String: ThreadWork] = [:]
         var watched = Set<String>()
         activityReader.pruneNotes()
         for session in sessions where session.running {
@@ -1368,8 +1368,8 @@ final class ClaudeFeed: @unchecked Sendable {
     /// counts only when every command in its folder is accounted for by a scan of open files made after its turn ended
     /// (a scan from before can't have seen what it started last), or none needed one.
     /// `folders` nil: they couldn't be read, and no session's work is known.
-    static func readTasks(sessions: [ClaudeSession], folders: [String: URL]?, reader: Claude.TaskReader, outputs: OpenOutputs,
-                          transcript: (String) -> URL?) -> (tasks: [String: [ClaudeTask]], inventory: Set<String>) {
+    static func readTasks(sessions: [AgentThread], folders: [String: URL]?, reader: Claude.TaskReader, outputs: OpenOutputs,
+                          transcript: (String) -> URL?) -> (tasks: [String: [BackgroundWork]], inventory: Set<String>) {
         guard let folders else { return ([:], []) }
         let idle = sessions.filter { !$0.running }
         let withFolders = idle.compactMap { s in s.cliID.flatMap { folders[$0] }.map { (s, $0) } }
@@ -1381,7 +1381,7 @@ final class ClaudeFeed: @unchecked Sendable {
         if !needed.isEmpty {
             scan = outputs.get(newerThan: needed.compactMap { reader.newestCommand(in: $0.1) }.max())
         }
-        var tasks: [String: [ClaudeTask]] = [:]
+        var tasks: [String: [BackgroundWork]] = [:]
         var inventory = Set(idle.filter { s in s.cliID.map { folders[$0] == nil } ?? true }.map(\.id))
         let now = outputs.now()
         for (session, folder) in withFolders {

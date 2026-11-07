@@ -423,7 +423,7 @@ private struct AccountPausingGuestClient: GuestClient {
         state.guestPendingForms = [guestForm]
         store.router = state
         // The thread the brief's entry names: its Desktop session, matched to the guest's.
-        store.claudeSessions[desktopID] = ClaudeSession(id: desktopID, title: "Ship?", folder: "/workspace/repo", lastActivity: Date())
+        store.threads[desktopID] = AgentThread(id: desktopID, title: "Ship?", folder: "/workspace/repo", lastActivity: Date())
         let target = BriefTarget(project: "local:repo", thread: desktopID)
         #expect(store.guestPendingForm(for: target)?.form.id == form.id)
 
@@ -577,14 +577,14 @@ private struct AccountPausingGuestClient: GuestClient {
     @MainActor @Test func aFolderInsideAComputerIsNeverOfferedAsAMacProject() {
         let store = InboxFixture.store([])
         store.agents.enabled = true
-        store.claudeSessions = [
-            "local_mac": ClaudeSession(id: "local_mac", title: "Mac", folder: "/code/app", lastActivity: Date(), running: false),
-            "local_guest": ClaudeSession(id: "local_guest", title: "Guest", folder: "/home/silo/e2e-proj",
+        store.threads = [
+            "local_mac": AgentThread(id: "local_mac", title: "Mac", folder: "/code/app", lastActivity: Date(), running: false),
+            "local_guest": AgentThread(id: "local_guest", title: "Guest", folder: "/home/silo/e2e-proj",
                 lastActivity: Date(), running: false, cliID: "cli-guest", sshHost: "ssh-computer-1"),
         ]
         #expect(store.knownFolders == ["/code/app"])
         // A local session in a folder of the same path keeps it a Mac project.
-        store.claudeSessions["local_same"] = ClaudeSession(id: "local_same", title: "Same", folder: "/home/silo/e2e-proj",
+        store.threads["local_same"] = AgentThread(id: "local_same", title: "Same", folder: "/home/silo/e2e-proj",
             lastActivity: Date(), running: false)
         #expect(store.knownFolders.contains("/home/silo/e2e-proj"))
     }
@@ -647,7 +647,7 @@ private struct AccountPausingGuestClient: GuestClient {
         state.runsOnProjects = [project]
         state.pendingDesktopStarts = [pending]
         store.router = state
-        store.claudeSessions[pending.desktopSessionID!] = ClaudeSession(id: pending.desktopSessionID!, title: "Fix it",
+        store.threads[pending.desktopSessionID!] = AgentThread(id: pending.desktopSessionID!, title: "Fix it",
             folder: "/host/mirror/ssh-computer-1", lastActivity: Date(), running: true)
 
         #expect(store.routerProjectFolder(sessionID: "local_desktop-1") == source)
@@ -805,7 +805,7 @@ private struct AccountPausingGuestClient: GuestClient {
         let desktopID = "local_desktop-guest-state"
         let cliID = "guest-cli-1"
         let opened = Date(timeIntervalSince1970: 1_800_000_000)
-        store.claudeSessions[desktopID] = ClaudeSession(id: desktopID, title: "Widget", folder: "/workspace/repo",
+        store.threads[desktopID] = AgentThread(id: desktopID, title: "Widget", folder: "/workspace/repo",
             lastActivity: opened, running: true, cliID: "mirror-cli")
         store.router.pendingDesktopStarts = [PendingDesktopStart(projectID: UUID(),
             location: .computer(deviceId: computer.deviceId, computerId: computer.computerId),
@@ -838,26 +838,26 @@ private struct AccountPausingGuestClient: GuestClient {
 
         try await GuestRouterRuntime.shared.startWatching(store: store, client: guest, computer: computer)
 
-        #expect(store.claudeSessions[desktopID]?.running == false)
-        #expect(store.claudeSessions[desktopID]?.cliID == cliID)
-        #expect(store.claudeActivity[desktopID]?.text == "Writing")
+        #expect(store.threads[desktopID]?.running == false)
+        #expect(store.threads[desktopID]?.cliID == cliID)
+        #expect(store.threadWork[desktopID]?.text == "Writing")
         #expect(store.guestExecutionStates[desktopID]?.availability == .live)
         #expect(store.guestExecutionStates[desktopID]?.isRunning == false)
 
-        var mirror = ClaudeSession(id: desktopID, title: "Widget", folder: "/workspace/repo", lastActivity: opened,
+        var mirror = AgentThread(id: desktopID, title: "Widget", folder: "/workspace/repo", lastActivity: opened,
                                   running: true, cliID: "mirror-cli")
         mirror.completedTurns = 0
         var snapshot = ClaudeSnapshot()
         snapshot.sessions = [mirror]
-        snapshot.activity = [desktopID: ClaudeActivity(text: "Reading stale mirror", since: opened)]
+        snapshot.activity = [desktopID: ThreadWork(text: "Reading stale mirror", since: opened)]
         // A read of the app as the feed makes one, stamped when it is taken: one stamped before a change since would be
         // dropped for a real read of this machine (none of these sessions).
         snapshot.stamp = store.claudeStamp
         store.applyClaude(snapshot)
 
-        #expect(store.claudeSessions[desktopID]?.running == false)
-        #expect(store.claudeSessions[desktopID]?.cliID == cliID)
-        #expect(store.claudeActivity[desktopID]?.text == "Writing")
+        #expect(store.threads[desktopID]?.running == false)
+        #expect(store.threads[desktopID]?.cliID == cliID)
+        #expect(store.threadWork[desktopID]?.text == "Writing")
 
         await guest.failNextRead(computer: computer, path: paths.key, with: .unavailable("temporary read failure"))
         let inaccessible = GuestRouterGate()
@@ -871,13 +871,13 @@ private struct AccountPausingGuestClient: GuestClient {
         await inaccessible.wait()
         snapshot.stamp = store.claudeStamp
         store.applyClaude(snapshot)
-        #expect(store.claudeSessions[desktopID]?.running == false)
-        #expect(store.claudeActivity[desktopID]?.text == "Writing")
+        #expect(store.threads[desktopID]?.running == false)
+        #expect(store.threadWork[desktopID]?.text == "Writing")
 
         _ = try await guest.filesRemove(computer: computer, paths: [GuestRouterPaths.join(paths.presence, cliID)])
         await dead.wait()
-        #expect(store.claudeSessions[desktopID]?.running == false)
-        #expect(store.claudeActivity[desktopID] == nil)
+        #expect(store.threads[desktopID]?.running == false)
+        #expect(store.threadWork[desktopID] == nil)
     }
 
     @Test func signedGuestRelayUsesGuestKeyAndPersistsDeliveryState() async throws {
@@ -923,7 +923,7 @@ private struct AccountPausingGuestClient: GuestClient {
     @MainActor private func controllableGuest(_ store: Store, desktopID: String, cliID: String, guest: MockGuestClient,
                                               capabilities: [String]) async throws -> GuestRouterPaths {
         let opened = Date(timeIntervalSince1970: 1_800_000_000)
-        store.claudeSessions[desktopID] = ClaudeSession(id: desktopID, title: "Widget", folder: "/workspace/repo",
+        store.threads[desktopID] = AgentThread(id: desktopID, title: "Widget", folder: "/workspace/repo",
             lastActivity: opened, running: false, cliID: "mirror-cli")
         store.router.pendingDesktopStarts = [PendingDesktopStart(projectID: UUID(),
             location: .computer(deviceId: computer.deviceId, computerId: computer.computerId),

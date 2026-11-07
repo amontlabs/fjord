@@ -68,8 +68,8 @@ import Testing
         s.categories = [InboxStore.ci]
         s.router.enabled = true
         s.agents.enabled = true
-        s.claudeSessions = [
-            "local_a": ClaudeSession(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: Date(), running: true),
+        s.threads = [
+            "local_a": AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: Date(), running: true),
         ]
         s.routerCourierLink.take(CourierSnapshot(health: .init(tabConnected: true, signedIn: true), places: [Self.lookout, Self.lcu]))
         let d = s.routerDispatcher

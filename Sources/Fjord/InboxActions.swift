@@ -1250,7 +1250,7 @@ extension Store {
 
     func openActionTarget(_ target: InboxActions.Chip.Target) {
         switch target {
-        case .session(let id): openAgent(id)
+        case .session(let id): openThread(id)
         case .router: break  // the chip opens the window on the Router (it has the environment for it)
         case .url(let url):
             if let interceptOpen { interceptOpen("Open on GitHub · comment") } else { Link.open(url) }

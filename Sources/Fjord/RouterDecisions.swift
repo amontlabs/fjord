@@ -115,7 +115,7 @@ struct RouterDecision: Identifiable, Equatable {
         /// cancelled yet, its plugin takes aborts, sent within `window`, the session not archived, and its turn not
         /// seen to finish (the one it waited behind, then its own). A session Fjord hasn't read yet (one just started)
         /// is given the window. The plugin has the last word: a turn over meanwhile is told as too late.
-        func cancellable(session: ClaudeSession?, now: Date) -> Bool {
+        func cancellable(session: AgentThread?, now: Date) -> Bool {
             guard cancelled == nil, abortable, now.timeIntervalSince(at) < Self.window else { return false }
             guard let session else { return true }
             return !session.isArchived && session.completedTurns < turns + (busy ? 2 : 1)

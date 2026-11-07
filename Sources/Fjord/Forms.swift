@@ -105,7 +105,7 @@ struct PendingForm: Codable, Hashable, Identifiable, Sendable {
 
     /// The file's key: `<session>-<ms>-<pid>`.
     var id: String
-    /// Claude Code's session id (`ClaudeSession.cliID`).
+    /// Claude Code's session id (`AgentThread.cliID`).
     var cliSessionID: String
     var transcriptPath: String
     var questions: [Question]

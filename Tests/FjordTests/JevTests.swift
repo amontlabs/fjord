@@ -167,14 +167,14 @@ final class StubProtocol: URLProtocol {
 
     @Test func iconsFromAnOlderListArePickedAgain() throws {
         let old = #"{"entries":[{"id":"a","kept":true,"unread":false,"seen":"","label":"AB","icon":"hammer","rejectedIcons":["ant"]}]}"#
-        let state = try JSONDecoder().decode(AgentsState.self, from: Data(old.utf8))
+        let state = try JSONDecoder().decode(ThreadsState.self, from: Data(old.utf8))
         #expect(state.entries[0].icon == nil && state.entries[0].rejectedIcons == nil)
         #expect(state.entries[0].label == "AB")
-        let saved = try JSONDecoder().decode(AgentsState.self, from: JSONEncoder().encode(state))
-        #expect(saved.iconsVersion == AgentsState.icons)
+        let saved = try JSONDecoder().decode(ThreadsState.self, from: JSONEncoder().encode(state))
+        #expect(saved.iconsVersion == ThreadsState.icons)
         var picked = saved
         picked.entries[0].icon = "ladybug"
-        #expect(try JSONDecoder().decode(AgentsState.self, from: JSONEncoder().encode(picked)).entries[0].icon == "ladybug")
+        #expect(try JSONDecoder().decode(ThreadsState.self, from: JSONEncoder().encode(picked)).entries[0].icon == "ladybug")
     }
 
     @Test func shortlistAddsTheRunnerUpOnlyWhenClose() {

@@ -73,8 +73,8 @@ import Testing
         let f = fixture()
         let output = PaletteRouterSource.make(f.context)
         let sessions = output.items.filter { $0.kind == .session }
-        #expect(sessions.count == f.store.claudeSessions.count)
-        for session in f.store.claudeSessions.values {
+        #expect(sessions.count == f.store.threads.count)
+        for session in f.store.threads.values {
             let item = try #require(sessions.first { $0.id == "session:" + session.id })
             let age = Date().timeIntervalSince(session.lastActivity)
             #expect(item.weight == (age < 86_400 ? 1.1 : age < 7 * 86_400 ? 1.0 : 0.8))
@@ -133,7 +133,7 @@ import Testing
         let f = fixture()
         let thing = try #require(f.store.entries.first { !$0.isDone && $0.thing.kind == .pr }?.thing)
         let entry = try #require(f.store.entries.first { $0.id == thing.id })
-        let session = try #require(f.store.claudeSessions.values.first)
+        let session = try #require(f.store.threads.values.first)
         var run = ActionRun(category: entry.categoryID, thing: thing.id, action: UUID(), trigger: "enter", state: .done, at: Date())
         run.sessionID = session.id
         f.store.actionLedger.set(run)
@@ -159,7 +159,7 @@ import Testing
     @Test func aFewThousandSessionsAreMadeQuickly() {
         let f = fixture()
         for n in 0..<3000 {
-            f.store.claudeSessions["perf-\(n)"] = ClaudeSession(id: "perf-\(n)", title: "Session \(n)", folder: "/code/p\(n % 40)",
+            f.store.threads["perf-\(n)"] = AgentThread(id: "perf-\(n)", title: "Session \(n)", folder: "/code/p\(n % 40)",
                                                                 lastActivity: Date().addingTimeInterval(-Double(n) * 600), cliID: "cli-\(n)")
         }
         let start = ContinuousClock.now

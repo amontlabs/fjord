@@ -100,8 +100,8 @@ import Testing
 @MainActor @Suite struct ClaudeFeedHold {
     private let now = Date()
 
-    private func session(_ id: String, turns: Int, message: Double = -120, archived: Bool = false) -> ClaudeSession {
-        var s = ClaudeSession(id: id, title: "Session \(id)", folder: "/code/app", completedTurns: turns,
+    private func session(_ id: String, turns: Int, message: Double = -120, archived: Bool = false) -> AgentThread {
+        var s = AgentThread(id: id, title: "Session \(id)", folder: "/code/app", completedTurns: turns,
                               lastActivity: now.addingTimeInterval(-60), lastFocused: now.addingTimeInterval(-3600),
                               lastUserMessage: now.addingTimeInterval(message), summary: .init(blocked: false, detail: "Done it"),
                               cliID: "cli-\(id)")
@@ -109,7 +109,7 @@ import Testing
         return s
     }
 
-    private func store(_ dir: TempDir, _ sessions: [ClaudeSession], dots: Set<String> = []) -> Store {
+    private func store(_ dir: TempDir, _ sessions: [AgentThread], dots: Set<String> = []) -> Store {
         let s = Store()
         s.persists = false
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
@@ -123,7 +123,7 @@ import Testing
         return s
     }
 
-    private func read(_ sessions: [ClaudeSession], dots: Set<String> = []) -> ClaudeSnapshot {
+    private func read(_ sessions: [AgentThread], dots: Set<String> = []) -> ClaudeSnapshot {
         var read = ClaudeSnapshot()
         read.link = .ok
         read.sessions = sessions
@@ -134,7 +134,7 @@ import Testing
     }
 
     /// The reads taken in one by one, and held by a motion then let go: the same cards, the same read flags.
-    private func expectHeldAsInTurn(_ start: [ClaudeSession], dots: Set<String> = [], setUp: (Store) -> Void = { _ in },
+    private func expectHeldAsInTurn(_ start: [AgentThread], dots: Set<String> = [], setUp: (Store) -> Void = { _ in },
                                     _ reads: [ClaudeSnapshot], sourceLocation: SourceLocation = #_sourceLocation) async {
         let dirA = TempDir(), dirB = TempDir()
         let inTurn = store(dirA, start, dots: dots), held = store(dirB, start, dots: dots)
@@ -169,7 +169,7 @@ import Testing
         }
         func activity(_ id: String) -> ClaudeSnapshot {
             var read = ClaudeSnapshot()
-            read.activity = [id: ClaudeActivity(text: id, since: Date())]
+            read.activity = [id: ThreadWork(text: id, since: Date())]
             read.tasks = [:]
             return read
         }

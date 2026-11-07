@@ -310,7 +310,7 @@ struct PaletteView: View {
 struct PaletteGlyph {
     let symbol: String
     let tint: Color?
-    let session: AgentRow?
+    let session: ThreadRow?
 }
 
 /// A group's title: caption, muted.

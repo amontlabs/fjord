@@ -5,7 +5,7 @@ import SwiftUI
 /// A session's face in the Router's lists: the icon Jev picked (else its letters, or an emoji) on a neutral square, in the
 /// project's colour, with Claude's status dot on its corner when `dot` is on. Without a session behind it, nothing.
 struct SessionGlyph: View {
-    let row: AgentRow
+    let row: ThreadRow
     var size: CGFloat = 18
     var dot = true
 
@@ -40,7 +40,7 @@ struct SessionGlyph: View {
 extension ClaudeDot.Kind {
     /// A session's dot, as Claude's list draws it: needs you, done and unread, working (or left something running), else
     /// the quiet hollow ring.
-    init(_ row: AgentRow) {
+    init(_ row: ThreadRow) {
         switch row.group {
         case .needsYou: self = .needsYou
         case .done: self = .done

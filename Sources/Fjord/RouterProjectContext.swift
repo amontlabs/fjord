@@ -210,13 +210,13 @@ extension RouterProjectContext {
         for e in briefs.docs.values.flatMap(\.needsYou) where RouterTools.waitsOnYou.contains(e.kind) {
             if let cli = briefs.cli(e.target, store: store) { waiting[cli, default: []].append(e) }
         }
-        let byCLI = Dictionary(store.claudeSessions.values.compactMap { s in s.cliID.map { ($0, s) } }, uniquingKeysWith: { a, b in
+        let byCLI = Dictionary(store.threads.values.compactMap { s in s.cliID.map { ($0, s) } }, uniquingKeysWith: { a, b in
             a.lastActivity >= b.lastActivity ? a : b
         })
         return from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store, excluding: excluding, statuses: statuses)) { cli in
             guard let s = byCLI[cli] else { return nil }
             var f = LocalFacts(summary: s.summary?.detail ?? "")
-            if s.running { f.doing = store.claudeActivity[s.id]?.text ?? "" }
+            if s.running { f.doing = store.threadWork[s.id]?.text ?? "" }
             if let t = told[s.id] { f.told = Told(text: t.text, minutesAgo: max(0, Int(now.timeIntervalSince(t.at) / 60))) }
             f.waiting = (waiting[cli] ?? []).sorted { $0.since < $1.since }
                 .map { Waiting(kind: $0.kind.rawValue, text: $0.question ?? "") }

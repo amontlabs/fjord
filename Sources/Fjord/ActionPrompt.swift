@@ -204,7 +204,7 @@ extension Store {
         let dispatcher = dispatcher ?? routerDispatcher
         let (state, detail, session) = InboxActions.outcome(
             of: entry, waiting: dispatcher.askBacks.contains { $0.id == decision }, busy: dispatcher.progress[decision] != nil,
-            title: { [claudeSessions] in claudeSessions[$0]?.title })
+            title: { [threads] in threads[$0]?.title })
         var ledger = actionLedger
         for (key, run) in ledger.runs where run.message == decision && run.state != .baselined {
             var next = run

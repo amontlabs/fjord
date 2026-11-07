@@ -29,7 +29,7 @@ enum PaletteRouterSource {
         output.needsYou = page.sections.flatMap { s in s.entries.map { entryItem($0, section: s, context: context) } }
         let recent = page.sections.flatMap { s in s.recent.map { threadItem($0, section: s, context: context) } }
         output.items = output.needsYou + recent
-        output.items += store.claudeSessions.values.map { session in
+        output.items += store.threads.values.map { session in
             sessionItem(session, row: rows[session.id], now: now, context: context, links: links)
         }
         return output
@@ -92,7 +92,7 @@ extension PaletteRouterSource {
 // MARK: - Sessions
 
 extension PaletteRouterSource {
-    private static func sessionItem(_ session: ClaudeSession, row: AgentRow?, now: Date, context: PaletteContext,
+    private static func sessionItem(_ session: AgentThread, row: ThreadRow?, now: Date, context: PaletteContext,
                                     links: Links) -> PaletteItem {
         let store = context.store
         let id = session.id
@@ -103,7 +103,7 @@ extension PaletteRouterSource {
         let thing = links.thing(session: id)
         if let thing { keywords += links.keywords(thing) }
 
-        var actions = [PaletteAction(id: "open", title: "Open in Claude", symbol: ClaudeMark.openSymbol) { store.openAgent(id) }]
+        var actions = [PaletteAction(id: "open", title: "Open in Claude", symbol: ClaudeMark.openSymbol) { store.openThread(id) }]
         if let thing { actions.append(linkAction(thing, context)) }
 
         var subtitle = project

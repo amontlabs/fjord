@@ -424,7 +424,7 @@ import Testing
         store.routerBriefs.demoDocs = ["p": doc]
         #expect(model.sourceStamp != carded)
         let sessioned = model.sourceStamp
-        store.claudeSessions["x"] = ClaudeSession(id: "x", title: "T", folder: "/code/web", lastActivity: Date())
+        store.threads["x"] = AgentThread(id: "x", title: "T", folder: "/code/web", lastActivity: Date())
         #expect(model.sourceStamp != sessioned)
         let ledgered = model.sourceStamp
         store.actionLedger = ActionLedger()

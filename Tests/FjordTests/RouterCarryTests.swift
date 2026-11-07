@@ -506,7 +506,7 @@ import Testing
         let s = Store()
         s.persists = false
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
-        s.claudeSessions = ["local_t": ClaudeSession(id: "local_t", title: "Target", folder: "/code/api", completedTurns: 1,
+        s.threads = ["local_t": AgentThread(id: "local_t", title: "Target", folder: "/code/api", completedTurns: 1,
                                                      lastActivity: Date(), running: false, cliID: "cli-target")]
         try? FileManager.default.createDirectory(at: dir.path("support"), withIntermediateDirectories: true)
         try? Data(Self.key.utf8).write(to: dir.path("support/relay.key"))

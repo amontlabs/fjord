@@ -4,7 +4,7 @@ import Foundation
 /// process table and the SSH mirror never establish guest task state.
 struct GuestBackgroundTasks: Sendable {
     struct Result: Equatable, Sendable {
-        var tasks: [ClaudeTask]
+        var tasks: [BackgroundWork]
         /// False means at least one guest read or descriptor check was inconclusive.
         var certain: Bool
     }
@@ -65,7 +65,7 @@ struct GuestBackgroundTasks: Sendable {
             }
         }
 
-        var tasks: [ClaudeTask] = []
+        var tasks: [BackgroundWork] = []
         for output in outputs {
             let id = String(output.entry.name.dropLast(".output".count))
             let since = Date(timeIntervalSince1970: Double(output.entry.mtimeMs) / 1000)
@@ -73,7 +73,7 @@ struct GuestBackgroundTasks: Sendable {
             if output.entry.type == .file {
                 if openPaths.contains(output.path) {
                     let title = Claude.commandTitle(id, in: parentTranscript) ?? "Background command"
-                    tasks.append(ClaudeTask(id: id, kind: .command, title: title, since: since))
+                    tasks.append(BackgroundWork(id: id, kind: .command, title: title, since: since))
                 } else if now.timeIntervalSince(since) <= recentOutputGrace {
                     certain = false
                 }
@@ -112,7 +112,7 @@ struct GuestBackgroundTasks: Sendable {
             }
             guard let transcript = transcriptRead else { certain = false; continue }
             let title = await agentTitle(computer: computer, transcriptPath: target) ?? "Subagent"
-            tasks.append(ClaudeTask(id: id, kind: .agent, title: title, since: since, activity: transcript.activity))
+            tasks.append(BackgroundWork(id: id, kind: .agent, title: title, since: since, activity: transcript.activity))
         }
         return Result(tasks: tasks.sorted { $0.since < $1.since }, certain: certain)
     }

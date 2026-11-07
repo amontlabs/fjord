@@ -186,13 +186,13 @@ import Foundation
             guard let desktopID = pending.desktopSessionID, let cliID = pending.guestSessionID else { continue }
             store.guestExecutionStates[desktopID] = GuestExecutionState(cliSessionID: cliID, availability: .dead,
                 isRunning: false, activity: nil)
-            if var session = store.claudeSessions[desktopID] {
+            if var session = store.threads[desktopID] {
                 session.running = false
                 session.cliID = cliID
-                store.claudeSessions[desktopID] = session
+                store.threads[desktopID] = session
             }
-            store.claudeActivity[desktopID] = nil
-            store.claudeTasks[desktopID] = nil
+            store.threadWork[desktopID] = nil
+            store.backgroundWork[desktopID] = nil
         }
     }
 
@@ -324,7 +324,7 @@ import Foundation
     func reconcileDesktopMetadata() {
         guard let store else { return }
         for pending in store.router.pendingDesktopStarts where pending.state == .readyInClaude {
-            let candidates = store.claudeSessions.values.compactMap { session -> DesktopSSHSession? in
+            let candidates = store.threads.values.compactMap { session -> DesktopSSHSession? in
                 guard !session.isArchived, let alias = session.sshHost, let folder = session.folder, folder == pending.folder,
                       session.lastActivity >= pending.openedAt else { return nil }
                 return DesktopSSHSession(id: session.id, alias: alias, folder: folder)
@@ -484,9 +484,9 @@ import Foundation
 
     private func applyGuestEvidenceToStore() {
         guard let store else { return }
-        var sessions = store.claudeSessions
-        var activities = store.claudeActivity
-        var tasks = store.claudeTasks
+        var sessions = store.threads
+        var activities = store.threadWork
+        var tasks = store.backgroundWork
         var changedSessions = false
         var changedActivities = false
         var changedTasks = false
@@ -535,9 +535,9 @@ import Foundation
                 if tasks[desktopID] != value { tasks[desktopID] = value; changedTasks = true }
             }
         }
-        if changedSessions { store.claudeSessions = sessions }
-        if changedActivities { store.claudeActivity = activities }
-        if changedTasks { store.claudeTasks = tasks }
+        if changedSessions { store.threads = sessions }
+        if changedActivities { store.threadWork = activities }
+        if changedTasks { store.backgroundWork = tasks }
     }
 
     private func markGuestExecutionInaccessible(_ computer: GuestReference) {
@@ -551,8 +551,8 @@ import Foundation
     private func inaccessibleState(for desktopID: String, cliID: String, in store: Store) -> GuestExecutionState {
         let previous = store.guestExecutionStates[desktopID]
         return GuestExecutionState(cliSessionID: cliID, availability: .inaccessible,
-            isRunning: previous?.isRunning ?? store.claudeSessions[desktopID]?.running,
-            activity: previous?.activity ?? store.claudeActivity[desktopID])
+            isRunning: previous?.isRunning ?? store.threads[desktopID]?.running,
+            activity: previous?.activity ?? store.threadWork[desktopID])
     }
 
     private func clearPendingDisable(_ computer: GuestReference) {

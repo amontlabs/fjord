@@ -191,9 +191,9 @@ enum Demo {
     private static func router(_ store: Store, _ now: Date) {
         claudeProjects(store, now: now)
         let lcu = blockedAgentID
-        store.claudeSessions[lcu]?.running = true
-        store.claudeSessions[lcu]?.cliID = "cli-demo-lcu"
-        store.claudeActivity[lcu] = ClaudeActivity(text: "Should updates install silently, or ask first each time?",
+        store.threads[lcu]?.running = true
+        store.threads[lcu]?.cliID = "cli-demo-lcu"
+        store.threadWork[lcu] = ThreadWork(text: "Should updates install silently, or ask first each time?",
                                                    since: now.addingTimeInterval(-120), waitsForYou: true, tool: "AskUserQuestion",
                                                    toolUseID: "toolu_demo_lcu")
         let question = "Should updates install silently, or ask first each time?"
@@ -206,7 +206,7 @@ enum Demo {
             createdAt: now.addingTimeInterval(-60), pid: 0, toolUseID: "toolu_demo_lcu")
         // The Linux sandbox's plan, held the same way: its entry shows it, to approve or send back.
         let linux = "local_demo-linux"
-        store.claudeSessions[linux]?.cliID = "cli-demo-linux"
+        store.threads[linux]?.cliID = "cli-demo-linux"
         store.pendingForms["cli-demo-linux"] = PendingForm(
             id: "cli-demo-linux-1-1", cliSessionID: "cli-demo-linux", transcriptPath: "", questions: [],
             createdAt: now.addingTimeInterval(-540), pid: 0, toolUseID: "toolu_demo_linux", plan: """
@@ -544,21 +544,21 @@ enum Demo {
 
     /// A session as the Claude app reports it: a finished turn with a summary, or (`running`) mid-turn.
     private static func session(_ id: String, _ title: String, _ folder: String?, minutes: Double, turns: Int = 4,
-                                blocked: Bool = false, detail: String = "", running: Bool = false) -> ClaudeSession {
+                                blocked: Bool = false, detail: String = "", running: Bool = false) -> AgentThread {
         let at = Date().addingTimeInterval(-minutes * 60)
-        return ClaudeSession(id: id, title: title, folder: folder.map { "/Users/me/code/\($0)" }, completedTurns: turns,
+        return AgentThread(id: id, title: title, folder: folder.map { "/Users/me/code/\($0)" }, completedTurns: turns,
                              lastActivity: at, lastFocused: at.addingTimeInterval(-600), lastUserMessage: at.addingTimeInterval(-90),
-                             summary: running ? nil : ClaudeSession.Summary(blocked: blocked, detail: detail), running: running)
+                             summary: running ? nil : AgentThread.Summary(blocked: blocked, detail: detail), running: running)
     }
 
     /// A session and how Fjord lists it: read or not, with the label or icon it was given.
     private struct Listed {
-        var session: ClaudeSession
+        var session: AgentThread
         var unread = false
         var label: String?
         var icon: String?
 
-        init(_ session: ClaudeSession, unread: Bool = false, label: String? = nil, icon: String? = nil) {
+        init(_ session: AgentThread, unread: Bool = false, label: String? = nil, icon: String? = nil) {
             self.session = session
             self.unread = unread
             self.label = label
@@ -568,14 +568,14 @@ enum Demo {
 
     /// The Router's reading of Claude's sessions, on, with these sessions. `colors` pins each project's colour; the others get the
     /// least used one, in listing order. `unlisted` are known to the app but without an entry: only found by search.
-    private static func sessions(_ store: Store, _ now: Date, _ listed: [Listed], activity: [String: ClaudeActivity] = [:],
-                                 tasks: [String: [ClaudeTask]] = [:], colors: [String: Int] = [:],
-                                 unlisted: [ClaudeSession] = []) {
-        store.claudeSessions = Dictionary(uniqueKeysWithValues: (listed.map(\.session) + unlisted).map { ($0.id, $0) })
+    private static func sessions(_ store: Store, _ now: Date, _ listed: [Listed], activity: [String: ThreadWork] = [:],
+                                 tasks: [String: [BackgroundWork]] = [:], colors: [String: Int] = [:],
+                                 unlisted: [AgentThread] = []) {
+        store.threads = Dictionary(uniqueKeysWithValues: (listed.map(\.session) + unlisted).map { ($0.id, $0) })
         store.claudeLink = .ok
-        store.claudeActivity = activity
-        store.claudeTasks = tasks
-        var state = AgentsState()
+        store.threadWork = activity
+        store.backgroundWork = tasks
+        var state = ThreadsState()
         state.folderColors = colors
         for folder in listed.compactMap(\.session.folder) { state.assignColor(folder) }
         state.enabled = true
@@ -583,7 +583,7 @@ enum Demo {
         state.seeded = true
         state.iconsEnabled = true
         state.entries = listed.map { l in
-            AgentEntry(id: l.session.id, label: l.label, unread: l.unread, seen: l.session.activity,
+            ThreadEntry(id: l.session.id, label: l.label, unread: l.unread, seen: l.session.activity,
                        focusedAt: l.session.lastFocused, icon: l.icon)
         }
         store.agents = state
@@ -608,15 +608,15 @@ enum Demo {
         ]
         let hidden = session("local_demo-storage", "Sandbox storage directory customization", "microsandbox", minutes: 2900,
                              detail: "Storage path is configurable through the CLI and the env.")
-        sessions(store, now, listed, activity: ["local_demo-lookout": ClaudeActivity(
+        sessions(store, now, listed, activity: ["local_demo-lookout": ThreadWork(
                     text: "Running swift test", since: now.addingTimeInterval(-20),
                     todo: .init(done: 3, total: 7, active: "Running the test suite"))],
                  tasks: ["local_demo-ci": [
-                    ClaudeTask(id: "a1", kind: .agent, title: "Review the sandbox changes", since: now.addingTimeInterval(-190),
-                               activity: ClaudeActivity(text: "Reading sandbox.rs", since: now.addingTimeInterval(-5))),
-                    ClaudeTask(id: "a2", kind: .agent, title: "Check the other CI jobs", since: now.addingTimeInterval(-70),
-                               activity: ClaudeActivity(text: "Thinking", since: now.addingTimeInterval(-2))),
-                    ClaudeTask(id: "b1", kind: .command, title: "Run the full test suite", since: now.addingTimeInterval(-370)),
+                    BackgroundWork(id: "a1", kind: .agent, title: "Review the sandbox changes", since: now.addingTimeInterval(-190),
+                               activity: ThreadWork(text: "Reading sandbox.rs", since: now.addingTimeInterval(-5))),
+                    BackgroundWork(id: "a2", kind: .agent, title: "Check the other CI jobs", since: now.addingTimeInterval(-70),
+                               activity: ThreadWork(text: "Thinking", since: now.addingTimeInterval(-2))),
+                    BackgroundWork(id: "b1", kind: .command, title: "Run the full test suite", since: now.addingTimeInterval(-370)),
                  ]],
                  colors: ["/Users/me/code/lcu": 0, "/Users/me/code/microsandbox": 1, "/Users/me/code/lookout": 2,
                           "/Users/me/code/lcu-research": 3],

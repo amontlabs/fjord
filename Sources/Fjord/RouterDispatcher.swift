@@ -756,7 +756,7 @@ struct RouterAskBack: Identifiable, Equatable {
         stage(job, "preparing")
         let delivery = try await effects.prepare(job.tools, session)
         stage(job, "sending")
-        let before = store.claudeSessions[session]
+        let before = store.threads[session]
         _ = try await effects.send(job.tools, delivery)
         note(job, .sent(to: delivery.to, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
              session: session, thread: t)
@@ -817,7 +817,7 @@ struct RouterAskBack: Identifiable, Equatable {
             }
             do {
                 _ = try await GuestRouterRuntime.shared.retry(record)
-                let previous = store.claudeSessions[hostSessionID]
+                let previous = store.threads[hostSessionID]
                 store.updateDecision(id) { entry in
                     entry.done.removeAll { if case .failed = $0 { true } else { false } }
                     entry.add(.sent(to: hostSessionID, text: record.body ?? "", original: nil), session: hostSessionID)

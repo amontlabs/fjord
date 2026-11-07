@@ -7,15 +7,15 @@ import Testing
 @Suite struct RouterStore {
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
 
-    private func session(_ id: String, turns: Int, focused: Double = -60, summary: String? = "Done it") -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: "/code/app", completedTurns: turns,
+    private func session(_ id: String, turns: Int, focused: Double = -60, summary: String? = "Done it") -> AgentThread {
+        AgentThread(id: id, title: "Session \(id)", folder: "/code/app", completedTurns: turns,
                       lastActivity: now.addingTimeInterval(-60), lastFocused: now.addingTimeInterval(focused * 60),
                       lastUserMessage: now.addingTimeInterval(-120), summary: summary.map { .init(blocked: false, detail: $0) },
                       cliID: "cli-\(id)")
     }
 
     /// Sessions and Router on, the Router's files in `dir`, every session seen once.
-    private func store(_ dir: TempDir, _ sessions: [ClaudeSession]) -> Store {
+    private func store(_ dir: TempDir, _ sessions: [AgentThread]) -> Store {
         let s = Store()
         s.persists = false
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
@@ -92,7 +92,7 @@ import Testing
         running.summary = nil
         s.ingest([running], appUnread: [], claudeFrontmost: false, now: now)
         let text = tool == "ExitPlanMode" ? "Approve the plan: Ship it" : "Which one?"
-        s.claudeActivity = [id: ClaudeActivity(text: text, since: since, waitsForYou: true, tool: tool, toolUseID: call)]
+        s.threadWork = [id: ThreadWork(text: text, since: since, waitsForYou: true, tool: tool, toolUseID: call)]
     }
 
     /// The hook holds a form for `call` (nil: not found yet): written to the forms folder and read back by the bridge when

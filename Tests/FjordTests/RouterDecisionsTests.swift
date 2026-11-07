@@ -10,8 +10,8 @@ import Testing
         let s = InboxFixture.store([])
         s.router.enabled = true
         s.agents.enabled = true
-        s.claudeSessions = [
-            "local_a": ClaudeSession(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: Date(), running: true),
+        s.threads = [
+            "local_a": AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: Date(), running: true),
         ]
         return s
     }

@@ -147,7 +147,7 @@ enum PaletteTriageSource {
             })
         }
 
-        if let session = links.session[id], store.claudeSessions[session] != nil {
+        if let session = links.session[id], store.threads[session] != nil {
             actions.append(sessionAction(session, context: context))
         }
 
@@ -182,7 +182,7 @@ enum PaletteTriageSource {
     private static func sessionAction(_ session: String, context: PaletteContext) -> PaletteAction {
         let store = context.store
         return PaletteAction(id: "session", title: "Open its session", symbol: "bubble.left.and.text.bubble.right") {
-            store.openAgent(session)
+            store.openThread(session)
         }
     }
 

@@ -1153,7 +1153,7 @@ extension WindowSeams {
                 controller.store.pendingForms = [:]
                 #expect(controller.marks != before)
                 let marked = controller.marks
-                controller.store.claudeActivity = [:]
+                controller.store.threadWork = [:]
                 #expect(controller.marks != marked)
                 closeWithKeptPicture(controller, ticks, on: .done)
                 controller.show(.done)
@@ -1165,7 +1165,7 @@ extension WindowSeams {
 
         @Test func aChangedTaskTitleIsNotForgivenAsPictureNoise() throws {
             try morphing { controller, _ in
-                controller.store.claudeTasks = ["session": [ClaudeTask(id: "task", kind: .agent, title: "Read logs", since: .now)]]
+                controller.store.backgroundWork = ["session": [BackgroundWork(id: "task", kind: .agent, title: "Read logs", since: .now)]]
                 let bitmap = try #require(CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 16,
                                                     space: CGColorSpaceCreateDeviceRGB(),
                                                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
@@ -1181,7 +1181,7 @@ extension WindowSeams {
                                             tolerance: AppTransition.Glance.closeTolerance)
                 }
                 #expect(freshness() == .cosmetic)
-                controller.store.claudeTasks["session"]?[0].title = "Fix the failure"
+                controller.store.backgroundWork["session"]?[0].title = "Fix the failure"
                 #expect(freshness() == .stale)
             }
         }

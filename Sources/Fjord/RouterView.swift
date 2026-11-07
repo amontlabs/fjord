@@ -12,7 +12,7 @@ extension Store {
     func routerSessionProject(_ sessionID: String) -> (name: String, color: Color?) {
         guard let start = router.pendingDesktopStarts.first(where: { $0.desktopSessionID == sessionID && $0.state == .matched }),
               let project = router.runsOnProjects.first(where: { $0.id == start.projectID }) else {
-            let folder = claudeSessions[sessionID]?.folderKey ?? ""
+            let folder = threads[sessionID]?.folderKey ?? ""
             return (folderName(folder), projectColor(folder))
         }
         let owner = start.location.key
@@ -47,13 +47,13 @@ extension Store {
 
     /// The sessions working now (not those stopped on you), and those whose turn is over with subagents or commands still
     /// running (the tiles count them as working too); the longest running first.
-    var routerWorkingRows: [AgentRow] {
+    var routerWorkingRows: [ThreadRow] {
         allAgentRows.filter { ($0.session.running && !$0.waitsForYou) || (!$0.session.running && !$0.tasks.isEmpty) }
             .sorted { (Self.workingStart($0) ?? .distantFuture) < (Self.workingStart($1) ?? .distantFuture) }
     }
 
     /// Since when a row in the Working list works: its turn, or the oldest thing it left running.
-    static func workingStart(_ row: AgentRow) -> Date? {
+    static func workingStart(_ row: ThreadRow) -> Date? {
         row.session.running ? row.workingSince : row.tasks.map(\.since).min()
     }
 
@@ -594,7 +594,7 @@ struct RouterWorkingList: View {
 }
 
 private struct WorkingLine: View {
-    let row: AgentRow
+    let row: ThreadRow
     let store: Store
     let now: Date
     @State private var hover = false
@@ -612,7 +612,7 @@ private struct WorkingLine: View {
         let start = Store.workingStart(row)
         let since = Self.minutes(now.timeIntervalSince(start ?? now))
         let doing = row.session.running ? row.activity?.text ?? "Working" : row.tasksText ?? "Working"
-        Button { store.openAgent(row.id) } label: {
+        Button { store.openThread(row.id) } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 SessionGlyph(row: row, size: 16, dot: false)
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
@@ -629,7 +629,7 @@ private struct WorkingLine: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .contextMenu {
-            Button("Open in Claude") { store.openAgent(row.id) }
+            Button("Open in Claude") { store.openThread(row.id) }
             if store.canPickIcons && row.entry.label == nil {
                 Button(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") { store.repickIcon(row.id) }
             }
@@ -643,7 +643,7 @@ private struct WorkingLine: View {
 
 /// What a session left running, by name, in a tooltip (nothing when it left nothing).
 private struct RunningTip: ViewModifier {
-    let tasks: [ClaudeTask]
+    let tasks: [BackgroundWork]
     func body(content: Content) -> some View {
         if tasks.isEmpty { content } else { content.tip("Running", tasks.map(\.title).joined(separator: "\n")) }
     }

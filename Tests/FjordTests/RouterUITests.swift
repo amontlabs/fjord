@@ -456,7 +456,7 @@ import UserNotifications
         #expect(rows.map(\.id) == ["local_demo-ci", "local_demo-lookout"])
         #expect(!rows[0].session.running)
         #expect(!rows.contains { $0.waitsForYou })
-        store.openAgent(rows[1].id)
+        store.openThread(rows[1].id)
         #expect(opened.first?.contains("Agent completion notifications") == true)
     }
 

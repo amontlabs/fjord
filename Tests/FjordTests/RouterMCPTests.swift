@@ -128,8 +128,8 @@ import Testing
 
     // MARK: Tools
 
-    private func session(_ id: String, _ title: String, folder: String?, running: Bool = false, minutes: Double = -5) -> ClaudeSession {
-        ClaudeSession(id: id, title: title, folder: folder, completedTurns: 1, lastActivity: now.addingTimeInterval(minutes * 60),
+    private func session(_ id: String, _ title: String, folder: String?, running: Bool = false, minutes: Double = -5) -> AgentThread {
+        AgentThread(id: id, title: title, folder: folder, completedTurns: 1, lastActivity: now.addingTimeInterval(minutes * 60),
                       lastUserMessage: now.addingTimeInterval(-600), summary: .init(blocked: false, detail: "Tests pass"),
                       running: running, cliID: "cli-\(id)")
     }
@@ -141,12 +141,12 @@ import Testing
         s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
         s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
         s.agents.enabled = true
-        s.claudeSessions = [
+        s.threads = [
             "local_a": session("local_a", "Fix the login bug", folder: "/code/lookout", running: true),
             "local_b": session("local_b", "Write the README", folder: "/code/api"),
         ]
         // Stopped on a question since 0.5 s after the epoch: the brief's entry for its thread.
-        s.claudeActivity = ["local_a": ClaudeActivity(text: "Which database?", since: Date(timeIntervalSince1970: 0.5),
+        s.threadWork = ["local_a": ThreadWork(text: "Which database?", since: Date(timeIntervalSince1970: 0.5),
                                                       waitsForYou: true, tool: "AskUserQuestion")]
         s.setRouterEnabled(true, now: now)
         await s.routerHookWork?.value
@@ -386,7 +386,7 @@ import Testing
         let dir = TempDir()
         let s = await store(dir)
         // Titled to read as the start of a message to it.
-        s.claudeSessions["local_a"]?.title = "lookout only if backup succeeds"
+        s.threads["local_a"]?.title = "lookout only if backup succeeds"
         let t = tools(s, turn: nil)
         t.beginTurn("@lookout only if backup succeeds: delete the database")
         _ = try #require(await t.tool("prepare", ["session": "local_a"]))
@@ -394,7 +394,7 @@ import Testing
         t.beginTurn("@lookout only if backup succeeds: delete the database", pills: [0..<8])
         _ = try #require(await t.tool("prepare", ["session": "local_a"]))
         #expect(t.prepared.values.first?.body == "only if backup succeeds: delete the database", "only the pill goes")
-        s.claudeSessions["local_a"]?.title = "Only if backup succeeds"
+        s.threads["local_a"]?.title = "Only if backup succeeds"
         t.beginTurn("tell Only if backup succeeds to delete the database")
         _ = try #require(await t.tool("prepare", ["session": "local_a"]))
         #expect(t.prepared.values.first?.body == "tell Only if backup succeeds to delete the database", "an address goes as written")

@@ -68,6 +68,6 @@ extension Store {
     /// Whether a history entry's message can still be cancelled, as Fjord sees its session now.
     func canCancel(_ decision: RouterDecision, now: Date = Date()) -> Bool {
         guard let sent = decision.delivered else { return false }
-        return sent.cancellable(session: claudeSessions[sent.session], now: now)
+        return sent.cancellable(session: threads[sent.session], now: now)
     }
 }

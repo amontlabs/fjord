@@ -4,14 +4,14 @@ import SwiftUI
 // MARK: - Persisted state
 
 /// What Fjord remembers about a Claude session it has shown.
-struct AgentEntry: Codable, Hashable, Identifiable {
+struct ThreadEntry: Codable, Hashable, Identifiable {
     var id: String
     /// Two letters or an emoji chosen by you; nil uses letters from the title.
     var label: String?
     /// Fjord's own read flag. It follows the app (new turns, opening the session, the sidebar dot) but can be changed
     /// here without touching the app.
     var unread = false
-    /// Activity last seen (see `ClaudeSession.activity`).
+    /// Activity last seen (see `AgentThread.activity`).
     var seen = ""
     /// Not listed at this activity (an entry made only to hold a label or an icon): hidden until there is newer activity.
     var hiddenAt: String?
@@ -22,11 +22,11 @@ struct AgentEntry: Codable, Hashable, Identifiable {
     var rejectedIcons: [String]?
 }
 
-struct AgentsState: Codable {
+struct ThreadsState: Codable {
     /// Whether Claude's sessions are read: they follow the Router's switch (see `Store.switchRouter`).
     var enabled = false
     var enabledAt: Date?
-    var entries: [AgentEntry] = []
+    var entries: [ThreadEntry] = []
     /// Folders whose sessions never show up as pending ("" = scratch chats).
     var mutedFolders: [String] = []
     /// Sidebar dots at the last read, to notice when one appears or disappears.
@@ -38,10 +38,10 @@ struct AgentsState: Codable {
     /// Icons picked by Jev (TypeSafe) for each session; needs a TypeSafe API key (kept in the Keychain).
     var iconsEnabled = false
     /// Bumped when the palette changes, so colours picked from an older one are picked again.
-    var paletteVersion = AgentsState.palette
+    var paletteVersion = ThreadsState.palette
     static let palette = 2
     /// Bumped when the icon list changes, so icons picked from an older one are picked again.
-    var iconsVersion = AgentsState.icons
+    var iconsVersion = ThreadsState.icons
     static let icons = 2
 
     init() {}
@@ -57,7 +57,7 @@ struct AgentsState: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         enabledAt = try c.decodeIfPresent(Date.self, forKey: .enabledAt)
-        entries = try c.decodeIfPresent([AgentEntry].self, forKey: .entries) ?? []
+        entries = try c.decodeIfPresent([ThreadEntry].self, forKey: .entries) ?? []
         mutedFolders = try c.decodeIfPresent([String].self, forKey: .mutedFolders) ?? []
         appUnread = try c.decodeIfPresent([String].self, forKey: .appUnread)
         seeded = try c.decodeIfPresent(Bool.self, forKey: .seeded) ?? false
@@ -81,22 +81,22 @@ enum ClaudeLink: Equatable {
 
 /// What a session is doing for the Router: needs you, finished, working, or quiet (listed for `Store.recentWindow` after its
 /// last activity).
-enum AgentGroup: Int, CaseIterable {
+enum ThreadGroup: Int, CaseIterable {
     case needsYou, done, working, idle
 }
 
-struct AgentRow: Identifiable, Hashable {
-    var session: ClaudeSession
-    var entry: AgentEntry
+struct ThreadRow: Identifiable, Hashable {
+    var session: AgentThread
+    var entry: ThreadEntry
     var label: String
     /// The project's colour (nil for scratch chats).
     var color: Color?
     /// The project's name as the lists say it, with enough of its path to tell it from another of the same name.
     var project: String?
     /// What it's doing, while it works.
-    var activity: ClaudeActivity?
+    var activity: ThreadWork?
     /// Turn over, but subagents or commands it started are still running.
-    var tasks: [ClaudeTask] = []
+    var tasks: [BackgroundWork] = []
 
     /// The picked icon, unless you chose letters or an emoji yourself.
     var icon: String? { entry.label == nil ? entry.icon : nil }
@@ -112,7 +112,7 @@ struct AgentRow: Identifiable, Hashable {
     /// Mid-turn but stopped on you (a question, a plan): counts as waiting, not as working.
     var waitsForYou: Bool { session.running && activity?.waitsForYou == true }
 
-    var group: AgentGroup {
+    var group: ThreadGroup {
         if waitsForYou { return .needsYou }
         if session.running { return .working }
         if entry.unread && session.summary?.blocked == true { return .needsYou }
@@ -192,17 +192,17 @@ enum AgentLabel {
 // MARK: - Store
 
 /// What the views derive from the agents and the read sessions, computed once per change.
-struct AgentCache {
-    var all: [AgentRow]
-    var entries: [String: AgentEntry]
+struct ThreadCache {
+    var all: [ThreadRow]
+    var entries: [String: ThreadEntry]
     var labels: [String: String]
 }
 
 extension Store {
     /// Derived rows, memoized: views read these dozens of times per render. The getters still read the observed
     /// properties, so SwiftUI keeps tracking them; `agentCache` is dropped whenever one of them changes.
-    private var cache: AgentCache {
-        let state = agents, sessions = claudeSessions, activity = claudeActivity, tasks = claudeTasks
+    private var cache: ThreadCache {
+        let state = agents, sessions = threads, activity = threadWork, tasks = backgroundWork
         // Read for what observes the rows: each names its session's project.
         _ = (recentTick, folderNames)
         if let agentCache { return agentCache }
@@ -211,15 +211,15 @@ extension Store {
         return built
     }
 
-    private func buildAgentCache(_ state: AgentsState, _ sessions: [String: ClaudeSession],
-                                 _ activity: [String: ClaudeActivity], _ tasks: [String: [ClaudeTask]]) -> AgentCache {
+    private func buildAgentCache(_ state: ThreadsState, _ sessions: [String: AgentThread],
+                                 _ activity: [String: ThreadWork], _ tasks: [String: [BackgroundWork]]) -> ThreadCache {
         let byID = Dictionary(state.entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let muted = mutedSessionIDs(state.mutedFolders, among: Array(sessions.values))
         // Sessions stay while they work or wait to be read, and for an hour after their last activity; then only a
         // search finds them.
         let now = Date(), cutoff = now.addingTimeInterval(-Self.recentWindow)
         let pending = sessions.values
-            .compactMap { s -> (ClaudeSession, AgentEntry)? in
+            .compactMap { s -> (AgentThread, ThreadEntry)? in
                 guard let e = byID[s.id], e.hiddenAt == nil, !muted.contains(s.id) else { return nil }
                 guard s.running || e.unread || tasks[s.id]?.isEmpty == false || s.lastActivity > cutoff else { return nil }
                 return (s, e)
@@ -231,7 +231,7 @@ extension Store {
         let labels = AgentLabel.assign(pending.map { (id: $0.0.id, title: $0.0.title, custom: $0.1.label) },
                                        folders: Dictionary(pending.map { ($0.0.id, $0.0.folderName) }, uniquingKeysWith: { a, _ in a }))
         let allRows = pending.map { makeRow($0.0, $0.1, label: labels[$0.0.id]) }
-        return AgentCache(all: allRows, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
+        return ThreadCache(all: allRows, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
 
     /// How long a session that went quiet stays listed.
@@ -249,26 +249,26 @@ extension Store {
     }
 
     /// A row for any session, listed or not (search results show sessions Fjord hasn't listed).
-    func row(_ session: ClaudeSession, _ entry: AgentEntry? = nil, label: String? = nil) -> AgentRow {
+    func row(_ session: AgentThread, _ entry: ThreadEntry? = nil, label: String? = nil) -> ThreadRow {
         makeRow(session, entry ?? cache.entries[session.id], label: label)
     }
 
     /// A session's row, listed or not: `row(session)`, its entry looked up without the listed rows being made.
-    func sessionRow(_ id: String) -> AgentRow? {
-        guard let session = claudeSessions[id] else { return nil }
+    func sessionRow(_ id: String) -> ThreadRow? {
+        guard let session = threads[id] else { return nil }
         if agentEntryIndex == nil {
             agentEntryIndex = Dictionary(agents.entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         }
         return makeRow(session, agentEntryIndex?[id], label: nil)
     }
 
-    private func makeRow(_ session: ClaudeSession, _ entry: AgentEntry?, label: String?) -> AgentRow {
-        AgentRow(session: session, entry: entry ?? AgentEntry(id: session.id),
+    private func makeRow(_ session: AgentThread, _ entry: ThreadEntry?, label: String?) -> ThreadRow {
+        ThreadRow(session: session, entry: entry ?? ThreadEntry(id: session.id),
                  // Sessions outside the cache (hidden ones found through search) still show their saved label.
                  label: label ?? entry?.label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
                  color: projectColor(session.folderKey), project: folderName(session.folderKey),
-                 activity: session.running ? claudeActivity[session.id] : nil,
-                 tasks: session.running ? [] : claudeTasks[session.id] ?? [])
+                 activity: session.running ? threadWork[session.id] : nil,
+                 tasks: session.running ? [] : backgroundWork[session.id] ?? [])
     }
 
     func projectColor(_ folder: String) -> Color? {
@@ -276,10 +276,10 @@ extension Store {
         return Theme.projectColors[i % Theme.projectColors.count]
     }
 
-    var allAgentRows: [AgentRow] { cache.all }
+    var allAgentRows: [ThreadRow] { cache.all }
 
     /// Every folder a name can be asked for: the ones sessions are in, the ones muted and the clones in your code folders.
-    var namedFolders: Set<String> { namedFolders(sessions: Set(claudeSessions.values.map(\.folderKey))) }
+    var namedFolders: Set<String> { namedFolders(sessions: Set(threads.values.map(\.folderKey))) }
 
     private func namedFolders(sessions: Set<String>) -> Set<String> {
         sessions.union(agents.mutedFolders).union(codeFolders.clones.keys).subtracting([""])
@@ -300,7 +300,7 @@ extension Store {
     /// Called when the sessions or the muted folders change : the
     /// names are worked out again only when the set of folders is another, and the dictionary is only written when a name did.
     func refreshFolderNames() {
-        let sessions = Set(claudeSessions.values.map(\.folderKey))
+        let sessions = Set(threads.values.map(\.folderKey))
         // The projects (and their clones) follow the sessions' folders too.
         codeFolders.sessionFoldersChanged(macSessionFolders)
         let folders = namedFolders(sessions: sessions)
@@ -314,7 +314,7 @@ extension Store {
     /// The folders on this Mac that sessions are in. A session Desktop runs over SSH (a computer's guest) has a folder
     /// that exists only there: it is never a Mac project, unless a local session is in a folder of the same path.
     var macSessionFolders: Set<String> {
-        let sessions = Array(claudeSessions.values)
+        let sessions = Array(threads.values)
         let local = Set(sessions.filter { $0.sshHost == nil }.map(\.folderKey))
         return local.union(sessions.filter { $0.folderKey.isEmpty }.map(\.folderKey))
     }
@@ -381,29 +381,29 @@ extension Store {
             var merged = next
             for (id, guest) in guestExecutionStates {
                 if guest.availability == .inaccessible {
-                    merged[id] = claudeActivity[id]
+                    merged[id] = threadWork[id]
                 } else {
                     merged[id] = guest.activity
                 }
             }
-            if merged != claudeActivity { claudeActivity = merged }
+            if merged != threadWork { threadWork = merged }
         }
         if let next = snapshot.tasks {
             var merged = next
             for (id, guest) in guestExecutionStates {
-                merged[id] = guest.availability == .dead ? nil : claudeTasks[id]
+                merged[id] = guest.availability == .dead ? nil : backgroundWork[id]
             }
-            if merged != claudeTasks { claudeTasks = merged }
+            if merged != backgroundWork { backgroundWork = merged }
         }
         if snapshot.sessions != nil { pickIcons() }
         scheduleClaudeTick()
     }
 
     /// Folds a fresh read of the app into what Fjord remembers. Pure apart from `now`, so tests drive it directly.
-    func ingest(_ sessions: [ClaudeSession], appUnread: Set<String>?, claudeFrontmost: Bool, now: Date = Date()) {
+    func ingest(_ sessions: [AgentThread], appUnread: Set<String>?, claudeFrontmost: Bool, now: Date = Date()) {
         var state = agents
         let live = sessions.filter { !$0.isArchived }
-        let byID = Dictionary(live.map { incoming -> (String, ClaudeSession) in
+        let byID = Dictionary(live.map { incoming -> (String, AgentThread) in
             var session = incoming
             if let guest = guestExecutionStates[session.id] {
                 session.cliID = guest.cliSessionID
@@ -430,7 +430,7 @@ extension Store {
                 // First sight of a session: offered as pending if it moved recently enough to matter.
                 let recent = state.seeded ? session.lastActivity > since : seedIDs.contains(session.id)
                 guard recent, !muted.contains(session.id) else { continue }
-                var entry = AgentEntry(id: session.id, seen: session.activity, focusedAt: session.lastFocused)
+                var entry = ThreadEntry(id: session.id, seen: session.activity, focusedAt: session.lastFocused)
                 // The sidebar dot lags; a session that just finished a turn elsewhere is unread already.
                 let finished = state.seeded && session.completedTurns > 0 && session.id != viewing && !session.running
                 entry.unread = appUnread?.contains(session.id) == true || finished
@@ -479,26 +479,26 @@ extension Store {
             agents = state
         }
         // Only on change: the views observing these redraw on every assignment.
-        if claudeSessions != byID { claudeSessions = byID }
+        if threads != byID { threads = byID }
     }
 
     // MARK: Actions
 
-    private func mutateAgent(_ id: String, _ f: (inout AgentEntry) -> Void) {
+    private func mutateAgent(_ id: String, _ f: (inout ThreadEntry) -> Void) {
         guard let i = agents.entries.firstIndex(where: { $0.id == id }) else { return }
         f(&agents.entries[i])
     }
 
-    func openAgent(_ id: String) {
-        if let interceptOpen { interceptOpen("Open in Claude · \(claudeSessions[id]?.title ?? id)") } else { Claude.open(id) }
+    func openThread(_ id: String) {
+        if let interceptOpen { interceptOpen("Open in Claude · \(threads[id]?.title ?? id)") } else { Claude.open(id) }
         mutateAgent(id) { $0.unread = false }
     }
 
     /// Sessions Fjord holds no entry for (old, muted, past the first read's cap) get one when an icon is picked for
     /// them: hidden, so they stay unlisted until their next activity.
     private func ensureEntry(_ id: String) {
-        guard !agents.entries.contains(where: { $0.id == id }), let session = claudeSessions[id] else { return }
-        agents.entries.append(AgentEntry(id: id, seen: session.activity, hiddenAt: session.activity, focusedAt: session.lastFocused))
+        guard !agents.entries.contains(where: { $0.id == id }), let session = threads[id] else { return }
+        agents.entries.append(ThreadEntry(id: id, seen: session.activity, hiddenAt: session.activity, focusedAt: session.lastFocused))
         agents.assignColor(session.folderKey)
     }
 
@@ -506,29 +506,29 @@ extension Store {
 
     /// The session to pick an icon for next: one you asked for (it may be hidden, found through search), then the
     /// listed ones that don't have one yet. Sessions with nothing to go on are skipped until they change.
-    func iconTarget() -> AgentRow? {
+    func iconTarget() -> ThreadRow? {
         iconRequests.removeAll { iconRow($0)?.needsIcon != true }
         iconDeferred = iconDeferred.filter { iconRow($0.key).map { iconStamp($0.session) } == $0.value }
-        func ready(_ row: AgentRow) -> Bool { iconDeferred[row.id] == nil }
+        func ready(_ row: ThreadRow) -> Bool { iconDeferred[row.id] == nil }
         return iconRequests.lazy.compactMap { self.iconRow($0) }.first(where: ready)
             ?? allAgentRows.first { $0.needsIcon && ready($0) }
     }
 
     /// Whether a pick begun for `session` (as it was then) may still be taken: the session still wants an icon (none set
     /// meanwhile, by hand or otherwise), and what it was picked from (its title, its project, its transcript) is the same.
-    func iconStillWanted(_ session: ClaudeSession) -> Bool {
-        guard let now = claudeSessions[session.id], iconRow(session.id)?.needsIcon == true else { return false }
+    func iconStillWanted(_ session: AgentThread) -> Bool {
+        guard let now = threads[session.id], iconRow(session.id)?.needsIcon == true else { return false }
         return now.title == session.title && now.folderName == session.folderName && now.cliID == session.cliID
     }
 
     /// What a session looked like when it had nothing to go on: new activity, a title or a transcript changes it.
-    private func iconStamp(_ session: ClaudeSession) -> String {
+    private func iconStamp(_ session: AgentThread) -> String {
         "\(session.title)|\(session.activity)|\(session.cliID ?? "")"
     }
 
     /// A row for a session Fjord keeps an entry for, listed or hidden.
-    private func iconRow(_ id: String) -> AgentRow? {
-        guard let session = claudeSessions[id], let entry = cache.entries[id] else { return nil }
+    private func iconRow(_ id: String) -> ThreadRow? {
+        guard let session = threads[id], let entry = cache.entries[id] else { return nil }
         return row(session, entry)
     }
 
@@ -655,7 +655,7 @@ extension Store {
     }
 
     /// The sessions of muted projects: a guest session goes by its project's key (`routerProjectGroupKey`).
-    func mutedSessionIDs(_ muted: [String], among sessions: [ClaudeSession]) -> Set<String> {
+    func mutedSessionIDs(_ muted: [String], among sessions: [AgentThread]) -> Set<String> {
         guard !muted.isEmpty else { return [] }
         let set = Set(muted)
         return Set(sessions.filter { set.contains(routerProjectGroupKey(sessionID: $0.id, folder: $0.folderKey)) }.map(\.id))
@@ -675,7 +675,7 @@ extension Store {
             if persists { watchClaude() } else { refreshClaude() }
         } else {
             if persists { watchClaude() }
-            claudeSessions = [:]
+            threads = [:]
             claudeLink = .off
             claudeSessionsRead = false
         }

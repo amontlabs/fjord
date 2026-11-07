@@ -100,6 +100,6 @@ extension Store {
            let project = router.runsOnProjects.first(where: { $0.id == start.projectID }) {
             return project.sourceFolder
         }
-        return fallback ?? claudeSessions[sessionID]?.folderKey ?? ""
+        return fallback ?? threads[sessionID]?.folderKey ?? ""
     }
 }

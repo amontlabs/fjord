@@ -498,7 +498,7 @@ enum RouterSender {
         }
         let words = body ?? ready?.body ?? text
         let began = Date()
-        let title = store.claudeSessions[local]?.title ?? local
+        let title = store.threads[local]?.title ?? local
         store.noteOperation(DeliveryOperation(nonce: header.nonce, target: header.target, kind: kind,
                                               bodyHash: DeliveryOperation.hash(of: words), state: .waiting, decisionID: decisionID,
                                               session: local, to: title, createdAt: began, updatedAt: began))

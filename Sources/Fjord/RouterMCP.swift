@@ -651,7 +651,7 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     /// Dates read from disk may be anything: bounded before they're turned into whole seconds.
-    private func age(_ date: Date) -> String { AgentRow.duration(Self.bounded(Date().timeIntervalSince(date))) }
+    private func age(_ date: Date) -> String { ThreadRow.duration(Self.bounded(Date().timeIntervalSince(date))) }
 
     /// Session text for the board: cleaned, bounded and fenced as data (what a session wrote is never an instruction).
     private static func fenced(_ text: String, _ limit: Int) -> String {
@@ -674,7 +674,7 @@ final class RouterMCPServer: @unchecked Sendable {
         return fenced(parts.joined(separator: "\n"), 2000)
     }
 
-    private func sessionFields(_ store: Store, _ session: ClaudeSession, _ peers: [String: ClaudePeers.Peer]) -> [String: Any] {
+    private func sessionFields(_ store: Store, _ session: AgentThread, _ peers: [String: ClaudePeers.Peer]) -> [String: Any] {
         let peer = peers[session.id]
         let guest = store.router.pendingDesktopStarts.first { $0.desktopSessionID == session.id && $0.state == .matched }
         let project = guest.flatMap { start in store.router.runsOnProjects.first(where: { $0.id == start.projectID }) }
@@ -692,8 +692,8 @@ final class RouterMCPServer: @unchecked Sendable {
 
     /// The sessions a message could be for: working ones, then the most recent of the rest.
     /// `projects`: only sessions in these folders (applied before the limit, so a tagged project's sessions all count).
-    func candidates(_ store: Store, projects: Set<String>? = nil) -> (working: [ClaudeSession], recent: [ClaudeSession]) {
-        let live = store.claudeSessions.values.filter {
+    func candidates(_ store: Store, projects: Set<String>? = nil) -> (working: [AgentThread], recent: [AgentThread]) {
+        let live = store.threads.values.filter {
             !$0.isArchived && (projects?.contains(store.routerProjectFolder(sessionID: $0.id, fallback: $0.folderKey)) ?? true)
         }
             .sorted { $0.lastActivity > $1.lastActivity }
@@ -709,7 +709,7 @@ final class RouterMCPServer: @unchecked Sendable {
                                          "project": Self.short(briefs.names[e.project] ?? BriefPage.fallbackName(e.project), 200),
                                          "question": Self.fenced(e.question ?? "", 1200), "age": age(Date(timeIntervalSince1970: e.since))]
             if !e.options.isEmpty { fields["options"] = e.options.map { Self.short($0, 300) } }
-            if let session = briefs.desktopSession(e.target, store: store), let s = store.claudeSessions[session] {
+            if let session = briefs.desktopSession(e.target, store: store), let s = store.threads[session] {
                 fields.merge(sessionFields(store, s, peers)) { a, _ in a }
             }
             if let form = store.heldForm(e.target), let plan = form.plan {
@@ -725,7 +725,7 @@ final class RouterMCPServer: @unchecked Sendable {
         let (working, recent) = candidates(store)
         let workingRows = working.map { s -> [String: Any] in
             var fields = sessionFields(store, s, peers)
-            let activity = store.claudeActivity[s.id]
+            let activity = store.threadWork[s.id]
             fields["doing"] = Self.short(activity?.text ?? "Working", 300)
             if activity?.waitsForYou == true { fields["waitingForUser"] = true }
             fields["for"] = age(s.lastUserMessage ?? activity?.since ?? s.lastActivity)
@@ -827,11 +827,11 @@ final class RouterMCPServer: @unchecked Sendable {
     /// A session by id, peer name or exact title, and the `to` a message to it takes; `cli`: its Claude Code session id by
     /// the registry of live processes (nil when it has none, or more than one).
     private func target(_ store: Store, _ query: String) async throws
-        -> (session: ClaudeSession, to: String, reachable: Bool, cli: String?) {
-        let titled = store.claudeSessions.values.filter { !$0.isArchived && $0.title.lowercased() == query.lowercased() }
-        let known = store.claudeSessions[query] ?? (titled.count == 1 ? titled[0] : nil)
+        -> (session: AgentThread, to: String, reachable: Bool, cli: String?) {
+        let titled = store.threads.values.filter { !$0.isArchived && $0.title.lowercased() == query.lowercased() }
+        let known = store.threads[query] ?? (titled.count == 1 ? titled[0] : nil)
         let guestByAlias = store.router.pendingDesktopStarts.filter { $0.state == .matched && $0.alias == query }
-        let aliasedGuest = guestByAlias.count == 1 ? store.claudeSessions[guestByAlias[0].desktopSessionID ?? ""] : nil
+        let aliasedGuest = guestByAlias.count == 1 ? store.threads[guestByAlias[0].desktopSessionID ?? ""] : nil
 
         // A matched guest target is resolved from Desktop metadata and the guest registry join. Never enumerate local
         // Claude peer files or call host kill(2) for its guest PID just to prepare a follow-up.
@@ -851,7 +851,7 @@ final class RouterMCPServer: @unchecked Sendable {
         }
         guard let session = known
             ?? aliasedGuest
-            ?? ClaudePeers.session(named: query, peers: peers).flatMap({ store.claudeSessions[$0] }) else {
+            ?? ClaudePeers.session(named: query, peers: peers).flatMap({ store.threads[$0] }) else {
             throw Failure("No session “\(query)”; call board")
         }
         let peer = peers[session.id].flatMap { $0.name.isEmpty ? nil : $0.name }
