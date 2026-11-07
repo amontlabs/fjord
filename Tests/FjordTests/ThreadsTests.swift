@@ -2,37 +2,174 @@ import Foundation
 import Testing
 @testable import Fjord
 
+/// The threads as Fjord lists them, from T3's shell rows: what decides each row's group, what lists it, and what Fjord keeps
+/// of its own (icons, labels, colours).
 @MainActor
 @Suite struct Agents {
-    private let now = Date(timeIntervalSince1970: 2_000_000_000)
+    typealias F = T3Fixture
 
-    private func session(_ id: String, turns: Int = 3, minutesAgo: Double = 5, messageMinutesAgo: Double? = nil,
-                         focusedMinutesAgo: Double? = 60, folder: String? = "/code/app", blocked: Bool = false,
-                         running: Bool = false, archived: Bool = false) -> AgentThread {
-        AgentThread(id: id, title: "Session \(id)", folder: folder, isArchived: archived, completedTurns: turns,
-                      lastActivity: now.addingTimeInterval(-minutesAgo * 60),
-                      lastFocused: focusedMinutesAgo.map { now.addingTimeInterval(-$0 * 60) },
-                      lastUserMessage: now.addingTimeInterval(-(messageMinutesAgo ?? minutesAgo + 1) * 60),
-                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
+    private func row(_ s: Store, _ id: String) -> ThreadRow? { s.allAgentRows.first { $0.id == id } }
+    private func entry(_ s: Store, _ id: String) -> ThreadEntry? { s.agents.entries.first { $0.id == id } }
+
+    @Test func eachRowsGroupComesFromItsShellRow() throws {
+        let s = Store.reading([
+            F.shell("run", status: "running", extra: ["activityRunStatus": "running"]),
+            // The shell keeps `running` while an approval waits (S1 e): the request decides.
+            F.shell("ask", status: "running", extra: ["pendingRuntimeRequest": ["id": "rq1", "kind": "command", "blocking": true]]),
+            F.shell("plan", extra: ["hasActionableProposedPlan": true]),
+            F.shell("new", unseen: true),
+            F.shell("seen"),
+            F.shell("broke", status: "failed", unseen: true),
+            F.shell("brokeSeen", status: "failed"),
+            F.shell("queued", status: "queued"),
+        ])
+        let groups = Dictionary(uniqueKeysWithValues: s.allAgentRows.map { ($0.id, $0.group) })
+        #expect(groups == ["run": .working, "ask": .needsYou, "plan": .needsYou, "new": .done, "seen": .idle,
+                           "broke": .needsYou, "brokeSeen": .idle, "queued": .working])
+        #expect(try #require(row(s, "new")).unread && !(try #require(row(s, "seen")).unread))
+        #expect(try #require(row(s, "ask")).waitsForYou)
     }
 
-    /// A store that has already seen `sessions` once (seeded), so later reads are "new activity".
-    private func store(_ sessions: [AgentThread], dots: Set<String> = []) -> Store {
+    @Test func aUsageLimitThatWontResumeNeedsYouAndOneThatWillDoesnt() throws {
+        let limit: [String: T3JSON] = ["lastErrorClass": "usage_limit", "usageLimitResetAt": "2030-01-01T15:00:00.000Z"]
+        var resumes = limit
+        resumes["limitRecovery"] = ["runId": "r1", "resetAt": "2030-01-01T15:00:00.000Z", "autoResume": true]
+        let s = Store.reading([F.shell("stuck", status: "failed", extra: limit), F.shell("resumes", status: "failed", extra: resumes)])
+        let stuck = try #require(s.threads["stuck"]), resumed = try #require(s.threads["resumes"])
+        #expect(stuck.limitStopped && stuck.limitResetAt != nil && !resumed.limitStopped)
+        // Seen, the failed one stops asking; the limit that won't resume still does, until it's seen.
+        #expect(row(s, "stuck")?.group == .idle && row(s, "resumes")?.group == .idle)
+        s.update(F.shell("stuck", status: "failed", unseen: true, extra: limit))
+        #expect(row(s, "stuck")?.group == .needsYou)
+    }
+
+    @Test func quietThreadsStayAnHourAndOnlyWorkKeepsASettledOneListed() {
+        let s = Store.reading([
+            F.shell("recent", minutes: 30),
+            F.shell("old", minutes: 90),
+            F.shell("oldUnseen", minutes: 3 * 24 * 60, unseen: true),
+            // Every imported thread is settled: listed only while it works or waits on you.
+            F.shell("settled", minutes: 1, unseen: true, extra: ["settledAt": .string(F.ago(1))]),
+            F.shell("settledRunning", status: "running", minutes: 1, extra: ["settledAt": .string(F.ago(1))]),
+            F.shell("settledAsks", status: "running", minutes: 1, extra: ["settledAt": .string(F.ago(1)),
+                    "pendingRuntimeRequest": ["id": "rq", "kind": "user_input", "blocking": true]]),
+        ])
+        #expect(Set(s.allAgentRows.map(\.id)) == ["recent", "oldUnseen", "settledRunning", "settledAsks"])
+        // The rest are still T3's threads: a search finds them.
+        #expect(s.threads.count == 6 && s.sessionRow("old") != nil)
+    }
+
+    @Test func subagentsArchivedDeletedAndSnoozedThreadsAreNotListed() {
+        let s = Store.reading([
+            F.shell("a"),
+            F.thread("sub", relationship: "subagent"),
+            F.shell("archived", extra: ["archivedAt": .string(F.ago(1))]),
+            F.shell("deleted", extra: ["deletedAt": .string(F.ago(1))]),
+            F.shell("snoozed", unseen: true, extra: ["snoozedUntil": .string(T3Timestamp.format(Date().addingTimeInterval(3600)))]),
+            F.shell("woke", unseen: true, extra: ["snoozedUntil": .string(F.ago(1))]),
+        ])
+        #expect(Set(s.threads.keys) == ["a", "snoozed", "woke"])
+        #expect(Set(s.allAgentRows.map(\.id)) == ["a", "woke"])
+    }
+
+    @Test func backgroundTasksKeepAFinishedThreadWorkingUntilTheyEnd() throws {
+        // A command it didn't say it waits on (a dev server, as often as not) doesn't count, as in T3.
+        let tasks: T3JSON = [["taskId": "t1", "kind": "subagent", "description": "Review the changes"],
+                             ["taskId": "t2", "kind": "command", "description": "Run the full test suite", "awaited": true],
+                             ["taskId": "t3", "kind": "command", "description": "Serve the docs"]]
+        let s = Store.reading([F.shell("f", unseen: true, extra: ["pendingBackgroundTasks": tasks])])
+        let r = try #require(row(s, "f"))
+        #expect(r.group == .working && r.tasksText == "2 running")
+        #expect(r.tasks.map(\.kind) == [.agent, .command] && r.tasks.map(\.title) == ["Review the changes", "Run the full test suite"])
+        // The work ends: still unseen, so it is done.
+        s.update(F.shell("f", unseen: true))
+        #expect(row(s, "f")?.group == .done && s.backgroundWork.isEmpty)
+    }
+
+    @Test func aThreadsProjectIsItsFolderAndRepoAndTheScratchProjectHasNone() throws {
+        let s = Store.reading([F.shell("a"), F.shell("b", project: "scratch")],
+                              projects: [F.project("p1", root: "/code/app"), F.project("scratch", title: "No project", root: AgentThread.scratchRoot)])
+        let a = try #require(s.threads["a"]), b = try #require(s.threads["b"])
+        #expect(a.folder == "/code/app" && a.repo == "acme/garden" && a.projectID == "p1")
+        #expect(b.folder == nil && row(s, "b")?.projectName == "Scratch")
+        #expect(s.agents.folderColors["/code/app"] != nil && s.agents.folderColors.count == 1)
+    }
+
+    @Test func oneThreadsUpdateChangesItsRowAloneAndARemovalTakesItAway() throws {
+        let s = Store.reading([F.shell("a", unseen: true), F.shell("b")])
+        let before = try #require(s.threads["b"])
+        s.update(F.shell("a", status: "running", extra: ["activityRunStatus": "running"]))
+        #expect(row(s, "a")?.group == .working && s.threads["b"] == before)
+        // Archived in T3: the shell sends the row with the archive's location, or removes it.
+        var shell = s.t3.store.shell
+        shell.apply(.threadRemoved(sequence: 999, location: .active, threadId: "a"))
+        s.t3.store.seed(shell, notify: false)
+        s.applyShell(.threadRemoved(sequence: 999, location: .active, threadId: "a"))
+        #expect(s.threads["a"] == nil && s.allAgentRows.map(\.id) == ["b"])
+    }
+
+    @Test func aProjectsUpdateChangesItsThreadsAlone() throws {
+        let s = Store.reading([F.shell("a"), F.shell("b", project: "p2")],
+                              projects: [F.project("p1", root: "/code/app"), F.project("p2", root: "/code/web")])
+        let b = try #require(s.threads["b"])
+        var shell = s.t3.store.shell
+        let moved = T3Project(json: F.project("p1", root: "/code/app2"))
+        shell.apply(.projectUpdated(sequence: 200, project: moved))
+        s.t3.store.seed(shell, notify: false)
+        s.applyShell(.projectUpdated(sequence: 200, project: moved))
+        #expect(s.threads["a"]?.folder == "/code/app2" && s.threads["b"] == b)
+    }
+
+    @Test func theStoreFollowsTheShellStreamWithNoReadOfItsOwn() {
         let s = Store()
         s.persists = false
         s.agents.enabled = true
-        s.agents.enabledAt = now.addingTimeInterval(-3600)
-        s.ingest(sessions, appUnread: dots, claudeFrontmost: false, now: now)
-        return s
+        // What T3's store does on each item it applies: the threads follow at once.
+        s.t3.store.seed(F.state([F.shell("a")]))
+        #expect(s.threads.keys.sorted() == ["a"])
+        s.t3.store.seed(F.state([F.shell("a"), F.shell("b", status: "running")]))
+        #expect(s.threads.keys.sorted() == ["a", "b"] && s.threads["b"]?.running == true)
+        // Off: nothing is read, and what was goes.
+        s.setAgentsEnabled(false)
+        #expect(s.threads.isEmpty)
+        s.t3.store.seed(F.state([F.shell("c")]))
+        #expect(s.threads.isEmpty)
+        s.setAgentsEnabled(true)
+        #expect(s.threads.keys.sorted() == ["c"])
     }
 
-    /// Unlisted until its next activity, as an entry made only to hold an icon picked for it is (see `Store.ensureEntry`).
-    private func holdOnlyForAnIcon(_ s: Store, _ id: String) {
-        guard let i = s.agents.entries.firstIndex(where: { $0.id == id }) else { return }
-        s.agents.entries[i].hiddenAt = s.agents.entries[i].seen
+    @Test func routingWaitsForT3sFirstWordOnceItWasAskedFor() {
+        let s = Store()
+        s.persists = false
+        s.agents.enabled = true
+        s.threadsReadAsked = true
+        #expect(!s.threadsReadOnce)
+        s.t3.store.seed(F.state([F.shell("a")]))
+        #expect(s.threadsReadOnce)
+        // No server to hear from counts as word too: the actions don't wait forever.
+        let other = Store()
+        other.persists = false
+        other.threadsReadAsked = true
+        other.t3ConnectionChanged(.noServer)
+        #expect(other.threadsReadOnce)
     }
 
-    private func entry(_ s: Store, _ id: String) -> ThreadEntry? { s.agents.entries.first { $0.id == id } }
+    @Test func mutedProjectsAreNotListed() {
+        let s = Store.reading([F.shell("a", unseen: true)])
+        s.setFolderMuted("/code/app", true)
+        #expect(s.allAgentRows.isEmpty)
+        s.setFolderMuted("/code/app", false)
+        #expect(s.allAgentRows.map(\.id) == ["a"])
+    }
+
+    @Test func entriesOfThreadsT3NoLongerHasGo() {
+        let s = Store.reading([F.shell("a"), F.shell("b")])
+        s.agents.entries = [ThreadEntry(id: "a", icon: "star"), ThreadEntry(id: "gone", icon: "moon")]
+        s.t3.store.seed(F.state([F.shell("a"), F.shell("b")]))
+        #expect(s.agents.entries.map(\.id) == ["a"])
+    }
+
+    // MARK: Icons
 
     /// Icons on and a key saved, so an icon can be asked for; the store has not read the key, so none is.
     private func keySaved(_ s: Store) {
@@ -40,30 +177,9 @@ import Testing
         s.hasTypesafeKey = true
     }
 
-    @Test func askingForAnIconOfAHiddenSessionPicksIt() {
-        let s = store([session("a"), session("b")])
-        holdOnlyForAnIcon(s, "a")
-        #expect(s.allAgentRows.map(\.id) == ["b"])
-        keySaved(s)
-        s.repickIcon("a")  // the key is not read yet, so nothing is asked for yet
-        #expect(s.iconTarget()?.id == "a")
-        s.agents.entries[s.agents.entries.firstIndex { $0.id == "a" }!].icon = "star"
-        #expect(s.iconTarget()?.id == "b")
-    }
-
-    @Test func askingForAnIconOfAnOldSessionFoundThroughSearchPicksIt() {
-        let s = store([session("a"), session("old", minutesAgo: 3 * 24 * 60)])
-        #expect(entry(s, "old") == nil)
-        keySaved(s)
-        s.repickIcon("old")  // the key is not read yet, so nothing is asked for yet
-        #expect(s.iconTarget()?.id == "old")
-        #expect(s.allAgentRows.map(\.id) == ["a"])  // still unlisted
-        #expect(entry(s, "old")?.hiddenAt != nil)
-    }
-
-    /// A store that asks for icons, with the transcript and Jev stood in for: every question gets its first option.
-    private func iconStore(_ sessions: [AgentThread], firstMessage: String? = "Fix the login form") -> Store {
-        let s = store(sessions)
+    /// A store that asks for icons, with the first message and Jev stood in for: every question gets its first option.
+    private func iconStore(_ threads: [T3JSON], firstMessage: String? = "Fix the login form") -> Store {
+        let s = Store.reading(threads)
         s.agents.iconsEnabled = true
         s.typesafeKeyCache = "test"
         s.hasTypesafeKey = true
@@ -76,10 +192,29 @@ import Testing
         while let task = s.iconTask { await task.value }
     }
 
-    @Test func anIconPickedForWhatASessionWasIsPickedAgainAndOneSetMeanwhileWins() async {
+    @Test func askingForAnIconOfAnOldThreadFoundThroughSearchPicksIt() {
+        let s = Store.reading([F.shell("a"), F.shell("old", minutes: 3 * 24 * 60)])
+        keySaved(s)
+        s.repickIcon("old")  // the key is not read yet, so nothing is asked for yet
+        #expect(s.iconTarget()?.id == "old")
+        #expect(s.allAgentRows.map(\.id) == ["a"])  // still unlisted
+        s.agents.entries = [ThreadEntry(id: "old", icon: "star")]
+        #expect(s.iconTarget()?.id == "a")
+    }
+
+    @Test func theIconPickedForAnOldThreadIsKeptAndSurvivesTheNextChange() async {
+        let s = iconStore([F.shell("a"), F.shell("old", minutes: 45 * 24 * 60)])
+        s.repickIcon("old")
+        await finishIcons(s)
+        #expect(entry(s, "old")?.icon != nil && s.allAgentRows.map(\.id) == ["a"])
+        s.update(F.shell("old", minutes: 45 * 24 * 60))
+        #expect(entry(s, "old")?.icon != nil)
+    }
+
+    @Test func anIconPickedForWhatAThreadWasIsPickedAgainAndOneSetMeanwhileWins() async {
         final class Latch: @unchecked Sendable { var open = false }
         let latch = Latch()
-        let s = iconStore([session("a")])
+        let s = iconStore([F.shell("a")])
         var titles: [String] = []
         s.iconChooser = { options, _, state, _ in
             titles.append(state["session title"] ?? "")
@@ -89,12 +224,10 @@ import Testing
         s.pickIcons()
         for _ in 0..<2000 where titles.isEmpty { try? await Task.sleep(for: .milliseconds(2)) }
         // Renamed while Jev answers: the pick for the old name isn't taken; one is made for the new.
-        var renamed = session("a")
-        renamed.title = "Fix the login form"
-        s.ingest([renamed], appUnread: [], claudeFrontmost: false, now: now)
+        s.update(F.shell("a", title: "Fix the login form"))
         latch.open = true
         await finishIcons(s)
-        #expect(titles.first == "Session a" && titles.last == "Fix the login form" && entry(s, "a")?.icon != nil)
+        #expect(titles.first == "Thread a" && titles.last == "Fix the login form" && entry(s, "a")?.icon != nil)
 
         // An icon set by hand while one is picked: yours stays.
         latch.open = false
@@ -108,188 +241,27 @@ import Testing
         #expect(entry(s, "a")?.icon == nil && entry(s, "a")?.label == "ZZ")
     }
 
-    @Test func theIconPickedForAHiddenSessionIsKept() async {
-        var hidden = session("a")
-        hidden.cliID = "cli-a"
-        let s = iconStore([hidden, session("b")])
-        holdOnlyForAnIcon(s, "a")
-        s.repickIcon("a")
-        await finishIcons(s)
-        #expect(entry(s, "a")?.icon != nil)
-        #expect(s.allAgentRows.map(\.id) == ["b"])
-    }
-
-    @Test func theIconPickedForAnOldSessionSurvivesTheNextRefresh() async {
-        var old = session("old", minutesAgo: 45 * 24 * 60)
-        old.cliID = "cli-old"
-        let s = iconStore([session("a"), old])
-        s.repickIcon("old")
-        s.ingest([session("a"), old], appUnread: [], claudeFrontmost: false, now: now)  // before the icon is picked
-        await finishIcons(s)
-        s.ingest([session("a"), old], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(entry(s, "old")?.icon != nil)
-    }
-
-    @Test func theIconPickedForAnOldSessionFoundThroughSearchIsKept() async {
-        var old = session("old", minutesAgo: 3 * 24 * 60)
-        old.cliID = "cli-old"
-        let s = iconStore([session("a"), old])
-        s.repickIcon("old")
-        await finishIcons(s)
-        #expect(entry(s, "old")?.icon != nil)
-        #expect(s.allAgentRows.map(\.id) == ["a"])
-    }
-
-    @Test func aSessionWithNothingToGoOnDoesNotBlockTheOthers() async {
+    @Test func aThreadWithNothingToGoOnDoesNotBlockTheOthers() async {
         final class Reads: @unchecked Sendable { var ids: [String] = [] }
         let reads = Reads()
-        var untitled = session("u")
-        untitled.title = "Untitled session"
-        untitled.cliID = "cli-u"
-        let s = iconStore([untitled, session("b")])
+        let s = iconStore([F.shell("u", title: "New thread", minutes: 6), F.shell("b")])
         s.iconFirstMessage = { reads.ids.append($0); return nil }
-        holdOnlyForAnIcon(s, "u")
-        s.repickIcon("u")
         await finishIcons(s)
-        #expect(entry(s, "b")?.icon != nil)
-        #expect(entry(s, "u")?.icon == nil)
-        #expect(s.iconTarget() == nil)
-        // Later reads don't look at its transcript again, until it has something new.
         s.pickIcons()
         await finishIcons(s)
-        #expect(reads.ids == ["cli-u"])
-        var renamed = untitled
-        renamed.title = "Fix the login form"
-        s.ingest([renamed, session("b")], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "b")?.icon != nil && entry(s, "u")?.icon == nil)
+        #expect(s.iconTarget() == nil)
+        // Later changes don't look at it again, until it has a name.
+        s.pickIcons()
+        await finishIcons(s)
+        #expect(reads.ids.filter { $0 == "u" }.count == 1)
+        s.update(F.shell("u", title: "Fix the login form", minutes: 6))
         #expect(s.iconTarget()?.id == "u")
     }
 
-    @Test func firstReadOffersRecentSessionsOnly() {
-        let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
-        #expect(s.agents.entries.map(\.id) == ["a"])
-        #expect(entry(s, "a")?.unread == true)  // the sidebar dot decides on first sight
-        #expect(s.allAgentRows.map(\.id) == ["a"])
-    }
-
-    @Test func finishedTurnMarksUnread() {
-        let s = store([session("a")])
-        #expect(entry(s, "a")?.unread == false)
-        s.ingest([session("a", turns: 4, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == true)
-        // Opened from Fjord, then another turn finishes: unread again.
-        s.interceptOpen = { _ in }
-        s.openThread("a")
-        #expect(entry(s, "a")?.unread == false)
-        s.ingest([session("a", turns: 5, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == true)
-    }
-
-    @Test func finishedWhileYouWatchItStaysRead() {
-        let s = store([session("a", focusedMinutesAgo: 10), session("b", focusedMinutesAgo: 50)])
-        s.ingest([session("a", turns: 4, minutesAgo: 0, focusedMinutesAgo: 10), session("b", focusedMinutesAgo: 50)],
-                 appUnread: [], claudeFrontmost: true, now: now)
-        #expect(entry(s, "a")?.unread == false)
-    }
-
-    @Test func sendingAMessageOrOpeningItMarksRead() {
-        let s = store([session("a"), session("b")], dots: ["a", "b"])
-        // A new message (running, no new finished turn).
-        s.ingest([session("a", messageMinutesAgo: 0, running: true), session("b")], appUnread: ["a", "b"], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == false)
-        // Focused in the app.
-        s.ingest([session("a", messageMinutesAgo: 0, running: true), session("b", focusedMinutesAgo: 1)],
-                 appUnread: ["a", "b"], claudeFrontmost: true, now: now)
-        #expect(entry(s, "b")?.unread == false)
-    }
-
-    @Test func sidebarDotChangesWinButYourChoiceStandsOtherwise() {
-        let s = store([session("a")], dots: [])
-        s.ingest([session("a")], appUnread: ["a"], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == true)
-        // Opened from Fjord: the app still shows the dot, unchanged, so Fjord keeps your choice.
-        s.interceptOpen = { _ in }
-        s.openThread("a")
-        s.ingest([session("a")], appUnread: ["a"], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == false)
-        // Unreadable dots (nil) change nothing.
-        s.ingest([session("a")], appUnread: nil, claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == false)
-        // The app clears its dot: read, as it was.
-        s.ingest([session("a")], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == false)
-        // A dot appears again: unread.
-        s.ingest([session("a")], appUnread: ["a"], claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == true)
-        // Then the dots can't be read: it stays unread.
-        s.ingest([session("a")], appUnread: nil, claudeFrontmost: false, now: now)
-        #expect(entry(s, "a")?.unread == true)
-    }
-
-    @Test func aSessionHeldOnlyForAnIconIsListedAgainOnNewActivity() {
-        let s = store([session("a")])
-        holdOnlyForAnIcon(s, "a")
-        #expect(s.allAgentRows.isEmpty)
-        s.ingest([session("a")], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(s.allAgentRows.isEmpty)
-        s.ingest([session("a", turns: 4, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(s.allAgentRows.map(\.id) == ["a"])
-    }
-
-    @Test func archivedSessionsLeave() {
-        let s = store([session("a")])
-        s.ingest([session("a", archived: true)], appUnread: [], claudeFrontmost: false, now: now)
-        #expect(s.agents.entries.isEmpty)
-    }
-
-    @Test func newSessionsAfterSeedingArePendingUnlessMuted() {
-        let s = store([session("a")])
-        s.setFolderMuted("", true)  // scratch chats
-        s.ingest([session("a"), session("new", minutesAgo: 0), session("chat", minutesAgo: 0, folder: nil)],
-                 appUnread: [], claudeFrontmost: false, now: now)
-        #expect(Set(s.allAgentRows.map(\.id)) == ["a", "new"])
-        #expect(entry(s, "new")?.unread == true)
-        #expect(entry(s, "chat") == nil)
-        // Old sessions with nothing new stay out.
-        s.ingest([session("a"), session("new", minutesAgo: 0), session("stale", minutesAgo: 600)],
-                 appUnread: [], claudeFrontmost: false, now: now)
-        #expect(entry(s, "stale") == nil)
-    }
-
-    @Test func anUnreadSessionWithWorkStillRunningIsWorkingUntilItEnds() throws {
-        let s = store([session("f", minutesAgo: 4)], dots: ["f"])
-        s.backgroundWork = ["f": [BackgroundWork(id: "a", kind: .agent, title: "Review the changes", since: now)]]
-        let row = try #require(s.allAgentRows.first { $0.id == "f" })
-        #expect(row.unread && row.group == .working)
-        // The work ends: still unread, so it is done again.
-        s.backgroundWork = [:]
-        let done = try #require(s.allAgentRows.first { $0.id == "f" })
-        #expect(done.unread && done.group == .done)
-    }
-
-    @Test func aBlockedSessionWithWorkStillRunningStillNeedsYou() throws {
-        let s = store([session("b", minutesAgo: 4, blocked: true)], dots: ["b"])
-        s.backgroundWork = ["b": [BackgroundWork(id: "c", kind: .command, title: "Run the full test suite", since: now)]]
-        let row = try #require(s.allAgentRows.first { $0.id == "b" })
-        #expect(row.group == .needsYou)
-    }
-
-    @Test func sessionsOfSameNamedProjectsSayWhichProjectTheyAreIn() throws {
-        let s = store([session("a", folder: "/customer-a/app"), session("b", folder: "/customer-b/app")])
-        let rows = s.allAgentRows
-        let a = try #require(rows.first { $0.id == "a" }), b = try #require(rows.first { $0.id == "b" })
-        #expect(a.projectName == "customer-a/app" && b.projectName == "customer-b/app")
-        // The name follows the folders: with the other project gone, the folder's own name is enough again.
-        s.threads["a"] = nil
-        #expect(s.folderName("/customer-b/app") == "app")
-        #expect(try #require(s.allAgentRows.first).projectName == "app")
-        // A muted project still tells a session's project from another of its name.
-        s.setFolderMuted("/customer-a/app", true)
-        #expect(s.folderName("/customer-b/app") == "customer-b/app")
-    }
-
     @Test func aPickedIconStaysWhenNoneCanBePickedToReplaceIt() {
-        let s = store([session("a")])
-        s.agents.entries[0].icon = "hammer"
+        let s = Store.reading([F.shell("a")])
+        s.agents.entries = [ThreadEntry(id: "a", icon: "hammer")]
         // Icons off: the icon is kept (and shown), and cannot be repicked.
         #expect(!s.canPickIcons)
         s.repickIcon("a")
@@ -305,7 +277,7 @@ import Testing
     }
 
     @Test func aRejectedTypesafeKeyIsAnnouncedWhereItHappensAndOnceWhenSettingsShowsIt() async {
-        let s = store([session("a")])
+        let s = Store.reading([F.shell("a")])
         await Announced.exclusively {
             var said: [String] = []
             Announce.sink = { said.append($0) }
@@ -326,6 +298,8 @@ import Testing
         }
     }
 
+    // MARK: Saved state
+
     @Test func oldStateFilesStillLoad() throws {
         let state = try JSONDecoder().decode(PersistedState.self, from: Data(#"{"repos":[],"items":[],"ci":{},"settings":{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"reviewRequests":true,"didInitialReviewSync":true}}"#.utf8))
         #expect(state.agents == nil && state.settings.shortcuts == nil)
@@ -340,6 +314,26 @@ import Testing
         #expect(state.dropped.isEmpty && state.settings.centerPill == true)
         let decided = try JSONDecoder().decode(RouterDecision.Decided.self, from: Data(#"{"target":"lookout","settingsBy":"Jev"}"#.utf8))
         #expect(decided.target == "lookout")
+    }
+
+    /// Saved under `agents` when Fjord read the Claude app: the icons and labels of sessions T3 imported move to T3's ids once,
+    /// colours and the switch stay, and the rest (read flags, sessions T3 doesn't have) goes. Saved again under `threads`.
+    @Test func theClaudeAppsIconsMoveOnceToTheThreadsT3ImportedThemAs() throws {
+        let saved = ThreadsState.desktopCLIIDs
+        defer { ThreadsState.desktopCLIIDs = saved }
+        var asked = 0
+        ThreadsState.desktopCLIIDs = { asked += 1; return ["local_a": "cli-a", "local_b": "cli-b"] }
+        let json = #"{"settings":{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true},"agents":{"enabled":true,"iconsEnabled":true,"paletteVersion":2,"iconsVersion":2,"folderColors":{"/code/app":3},"mutedFolders":["/code/old"],"appUnread":["local_a"],"seeded":true,"entries":[{"id":"local_a","icon":"bell","unread":true,"seen":"3|1"},{"id":"local_b","label":"XY","seen":"1|1"},{"id":"local_c","icon":"star"},{"id":"local_d","seen":"2|2"}]}}"#
+        let state = try JSONDecoder().decode(PersistedState.self, from: Data(json.utf8))
+        let threads = try #require(state.agents)
+        #expect(threads.entries == [ThreadEntry(id: "import:claudeAgent:cli-a", icon: "bell"), ThreadEntry(id: "import:claudeAgent:cli-b", label: "XY")])
+        #expect(threads.enabled && threads.iconsEnabled && threads.folderColors == ["/code/app": 3] && threads.mutedFolders == ["/code/old"])
+        #expect(asked == 1)
+        // Written back under the new key, and read from it with no second look at the app's files.
+        let out = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any]
+        #expect(out?["agents"] == nil && out?["threads"] != nil)
+        let again = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(state))
+        #expect(again.agents?.entries == threads.entries && asked == 1)
     }
 }
 
@@ -368,159 +362,6 @@ import Testing
         #expect(labels["2"] != labels["3"])
     }
 
-}
-
-@Suite struct ClaudeFiles {
-    private func json(_ fields: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: fields) }
-
-    @Test func decodesFinishedSessionWithItsSummary() {
-        let s = Claude.decodeSession(json([
-            "sessionId": "local_1", "title": "Fix CI", "cwd": "/code/app/.claude/worktrees/x", "gitAnchorsFolderRealpath": "/code/app",
-            "completedTurns": 3, "lastActivityAt": 1_700_000_000_000.0, "latestUserFrameAt": 1_699_999_000_000.0,
-            "postTurnSummary": ["status_category": "blocked", "status_detail": " Which one? "],
-            "postTurnSummaryFor": "u1", "lastAssistantUuid": "u1", "someNewField": ["x": 1],
-        ]))
-        #expect(s?.folder == "/code/app")
-        #expect(s?.folderName == "app")
-        #expect(s?.summary == .init(blocked: true, detail: "Which one?"))
-        #expect(s?.running == false)
-    }
-
-    @Test func runningWhileTheSummaryLagsBehind() {
-        let now = Date()
-        let s = Claude.decodeSession(json([
-            "sessionId": "local_2", "latestUserFrameAt": now.addingTimeInterval(-60).timeIntervalSince1970 * 1000,
-            "postTurnSummary": ["status_category": "review_ready"], "postTurnSummaryFor": "old", "lastAssistantUuid": "new",
-            "cwd": "/Users/me/Library/Application Support/Claude/scratch-workspaces/a/b/scratch-1",
-        ]), now: now)
-        #expect(s?.running == true)
-        #expect(s?.summary == nil)
-        #expect(s?.folder == nil)
-        #expect(s?.title == "Untitled session")
-        // A turn that started hours ago with no summary died with the app.
-        let stale = Claude.decodeSession(json([
-            "sessionId": "local_3", "latestUserFrameAt": now.addingTimeInterval(-3 * 3600).timeIntervalSince1970 * 1000,
-        ]), now: now)
-        #expect(stale?.running == false)
-    }
-
-    @Test func activityIsTheLastStep() {
-        func line(_ obj: [String: Any]) -> String { String(data: try! JSONSerialization.data(withJSONObject: obj), encoding: .utf8)! }
-        let tool = line(["type": "assistant", "timestamp": "2026-10-05T08:33:04.292Z",
-                         "message": ["content": [["type": "thinking"], ["type": "tool_use", "name": "Bash",
-                                                                         "input": ["command": "swift test", "description": "Run the tests"]]]]])
-        let result = line(["type": "user", "timestamp": "2026-10-05T08:33:09.000Z", "message": ["content": [["type": "tool_result"]]]])
-        let other = line(["type": "attachment"])
-        let running = Claude.activity(tail: Data(("partial line\n" + tool + "\n" + other + "\n").utf8))
-        #expect(running?.text == "Run the tests")
-        #expect(Claude.activity(tail: Data((tool + "\n" + result + "\n").utf8))?.text == "Thinking")
-        let question = line(["type": "assistant", "timestamp": "2026-10-05T08:40:00.000Z",
-                             "message": ["content": [["type": "tool_use", "name": "AskUserQuestion", "input": [:]]]]])
-        #expect(Claude.activity(tail: Data((question + "\n").utf8))?.waitsForYou == true)
-        #expect(running?.waitsForYou == false)
-        // What it asks is what the row says.
-        #expect(Claude.describe(tool: "AskUserQuestion", input: ["questions": [["question": "Which tone should the notes take?"], ["question": "Second"]]])
-                == "Which tone should the notes take?")
-        #expect(Claude.describe(tool: "ExitPlanMode", input: ["plan": "\n## Ship the redesign\n\n1. Build it"]).contains("Ship the redesign"))
-    }
-
-    @Test func endNoticesCutAtAScanBoundaryAreStillFound() {
-        let full = Data("xx<task-id>a2</task-id>yy".utf8)
-        var ended = Set<String>()
-        for cut in 1..<full.count {
-            ended = []
-            let first = full.prefix(cut)
-            let next = Claude.scanEnds(Data(first), base: 0, into: &ended)
-            Claude.scanEnds(Data(full[next...]), base: next, into: &ended)
-            #expect(ended == ["a2"], "cut at \(cut)")
-        }
-    }
-
-    @Test func backgroundTasks() throws {
-        // Like Claude Code writes them: slashes as they are.
-        func line(_ obj: [String: Any]) -> String {
-            String(data: try! JSONSerialization.data(withJSONObject: obj, options: .withoutEscapingSlashes), encoding: .utf8)!
-        }
-        let fm = FileManager.default
-        // Resolved, as the system reports open files (/var is a link to /private/var).
-        let temp = URL(fileURLWithPath: realpath(fm.temporaryDirectory.path, nil).map { String(cString: $0) } ?? NSTemporaryDirectory())
-        let root = temp.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
-        let tasks = root.appendingPathComponent("tasks", isDirectory: true)
-        let subagents = root.appendingPathComponent("subagents", isDirectory: true)
-        try fm.createDirectory(at: tasks, withIntermediateDirectories: true)
-        try fm.createDirectory(at: subagents, withIntermediateDirectories: true)
-
-        // Two subagents (one announced as finished) and two commands (one still has its output open).
-        for id in ["a1", "a2"] {
-            let transcript = subagents.appendingPathComponent("agent-\(id).jsonl")
-            try Data((line(["type": "assistant", "timestamp": "2026-10-05T08:33:04.292Z", "message": ["content": [
-                ["type": "tool_use", "name": "Read", "input": ["file_path": "/x/Agents.swift"]]]]]) + "\n").utf8).write(to: transcript)
-            try Data(#"{"description":"Review \#(id)","requestShape":"background"}"#.utf8)
-                .write(to: subagents.appendingPathComponent("agent-\(id).meta.json"))
-            try fm.createSymbolicLink(at: tasks.appendingPathComponent("\(id).output"), withDestinationURL: transcript)
-        }
-        for id in ["b1", "b2"] { try Data().write(to: tasks.appendingPathComponent("\(id).output")) }
-        let parent = root.appendingPathComponent("session.jsonl")
-        try Data([
-            line(["type": "assistant", "message": ["content": [["type": "tool_use", "id": "toolu_1", "name": "Bash",
-                                                                 "input": ["command": "swift build", "description": "Build the app"]]]]]),
-            line(["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": "toolu_1",
-                                                            "content": "Command running in background with ID: b1. Output is being written to: …"]]]]),
-            line(["type": "queue-operation", "content": "<task-notification>\n<task-id>a2</task-id>\n<status>completed</status>"]),
-        ].joined(separator: "\n").utf8).write(to: parent)
-
-        let reader = Claude.TaskReader()
-        let open: Set<String> = [tasks.appendingPathComponent("b1.output").path]
-        let later = Date().addingTimeInterval(60)
-        let found = reader.tasks(in: tasks, transcript: parent, openOutputs: open, now: later)
-        #expect(found.map(\.id).sorted() == ["a1", "b1"])
-        #expect(found.first { $0.id == "a1" }?.kind == .agent)
-        #expect(found.first { $0.id == "a1" }?.title == "Review a1")
-        #expect(found.first { $0.id == "a1" }?.activity?.text == "Reading Agents.swift")
-        #expect(found.first { $0.id == "b1" }?.kind == .command)
-        #expect(found.first { $0.id == "b1" }?.title == "Build the app")
-        // The command ends: its output is closed, and it stays finished.
-        #expect(reader.tasks(in: tasks, transcript: parent, openOutputs: [], now: later).map(\.id) == ["a1"])
-        #expect(reader.tasks(in: tasks, transcript: parent, openOutputs: open, now: later).map(\.id) == ["a1"])
-        // A subagent whose transcript went quiet long ago died with its session.
-        #expect(reader.tasks(in: tasks, transcript: parent, openOutputs: [], now: later.addingTimeInterval(Claude.agentTimeout)).isEmpty)
-    }
-
-    @Test func runningCommandsHoldTheirOutputOpen() throws {
-        let fm = FileManager.default
-        // A folder of its own, not Claude's.
-        let made = fm.temporaryDirectory.appendingPathComponent("fjord-tests-\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: made.appendingPathComponent("p/s/tasks", isDirectory: true), withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: made) }
-        // The system names a file by its real path (/private/var, not /var).
-        let root = URL(fileURLWithPath: made.path.withCString { realpath($0, nil).map { String(cString: $0) } } ?? made.path)
-        let folder = root.appendingPathComponent("p/s/tasks", isDirectory: true)
-        let output = folder.appendingPathComponent("b1.output")
-        fm.createFile(atPath: output.path, contents: nil)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        process.arguments = ["10"]
-        process.standardOutput = try FileHandle(forWritingTo: output)
-        try process.run()
-        #expect(Claude.openTaskOutputs(under: root).contains(output.path))
-        process.terminate()
-        process.waitUntilExit()
-        #expect(!Claude.openTaskOutputs(under: root).contains(output.path))
-    }
-
-    @Test func rejectsOtherFiles() {
-        #expect(Claude.decodeSession(json(["scheduledTasks": []])) == nil)
-        #expect(Claude.decodeSession(Data("not json".utf8)) == nil)
-    }
-
-    @Test func parsesTheSidebarDots() {
-        let value = [UInt8(1)] + Array(#"{"state":{"unreadIds":["local_a","local_b"],"explicitUnreadIds":[]},"version":0}"#.utf8)
-        #expect(Claude.parseUnread(value) == ["local_a", "local_b"])
-        let utf16 = [UInt8(0)] + Array(#"{"state":{"unreadIds":["local_c"]}}"#.data(using: .utf16LittleEndian)!)
-        #expect(Claude.parseUnread(utf16) == ["local_c"])
-        #expect(Claude.parseUnread([1, 0x7b]) == nil)
-    }
 }
 
 @MainActor
@@ -591,203 +432,3 @@ import Testing
     }
 }
 
-/// Which sessions' background work is known: only from a scan of open files made after the session's turn ended, and never
-/// from a cached scan older than a command it hasn't seen.
-@Suite struct TaskInventory {
-    private let t0 = Date(timeIntervalSince1970: 2_000_000_000)
-
-    private func session(_ id: String, ended: Date, running: Bool = false) -> AgentThread {
-        AgentThread(id: id, title: id, folder: "/code/app", completedTurns: 1, lastActivity: ended, running: running, cliID: "cli-\(id)")
-    }
-
-    /// A command output in `folder`, made at `at`.
-    private func command(_ id: String, in folder: URL, at: Date) throws -> String {
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent("\(id).output")
-        try Data().write(to: url)
-        try FileManager.default.setAttributes([.creationDate: at, .modificationDate: at], ofItemAtPath: url.path)
-        // The path as the folder lists it (the temporary folder's /private prefix included), as a scan of open files says it.
-        let listed = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-        return try #require(listed.first { $0.lastPathComponent == "\(id).output" }).path
-    }
-
-    @Test func aCommandStartedAfterTheCachedScanIsLookedForAgain() throws {
-        let dir = TempDir()
-        let a = dir.path("a"), b = dir.path("b")
-        let aOut = try command("ca", in: a, at: t0.addingTimeInterval(-10))
-        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
-        var clock = t0, open: Set<String> = [aOut]
-        let outputs = OpenOutputs()
-        outputs.now = { clock }
-        outputs.scan = { open }
-        let reader = Claude.TaskReader()
-        let folders = ["cli-a": a, "cli-b": b]
-        // A's read walks the processes; B is working.
-        var read = ClaudeFeed.readTasks(sessions: [session("a", ended: t0.addingTimeInterval(-20)),
-                                                   session("b", ended: t0, running: true)],
-                                        folders: folders, reader: reader, outputs: outputs, transcript: { _ in nil })
-        #expect(read.tasks["a"]?.count == 1 && read.inventory == ["a"])
-        // Within the cached walk's two seconds, B starts a command and its turn ends.
-        let bOut = try command("cb", in: b, at: t0.addingTimeInterval(0.5))
-        open.insert(bOut)
-        clock = t0.addingTimeInterval(1.5)
-        read = ClaudeFeed.readTasks(sessions: [session("a", ended: t0.addingTimeInterval(-20)), session("b", ended: t0.addingTimeInterval(1))],
-                                    folders: folders, reader: reader, outputs: outputs, transcript: { _ in nil })
-        // The walk is made again (the cached one hadn't seen it): B's command is found, and B is known to be busy.
-        #expect(read.tasks["b"]?.map(\.id) == ["cb"] && read.inventory.contains("b"))
-    }
-
-    @Test func aTurnThatEndedAfterTheCachedScanIsUnknownUntilANewOne() throws {
-        let dir = TempDir()
-        let b = dir.path("b")
-        let bOut = try command("cb", in: b, at: t0.addingTimeInterval(-3))
-        var clock = t0
-        let outputs = OpenOutputs()
-        outputs.now = { clock }
-        outputs.scan = { [bOut] }
-        let reader = Claude.TaskReader()
-        // A walk at t0 (B still working: its command already running).
-        _ = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(-1))], folders: ["cli-b": b], reader: reader,
-                                 outputs: outputs, transcript: { _ in nil })
-        // B's turn ends at t0 + 1; the cached walk (from before) is used: what it left running isn't known yet.
-        clock = t0.addingTimeInterval(1.5)
-        var read = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(1))], folders: ["cli-b": b],
-                                        reader: reader, outputs: outputs, transcript: { _ in nil })
-        #expect(!read.inventory.contains("b"))
-        // A walk after it: known.
-        clock = t0.addingTimeInterval(2.5)
-        read = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(1))], folders: ["cli-b": b], reader: reader,
-                                    outputs: outputs, transcript: { _ in nil })
-        #expect(read.inventory.contains("b") && read.tasks["b"]?.map(\.id) == ["cb"])
-    }
-
-    @Test func aCommandListedButNotOpenYetLeavesTheSessionUnknown() throws {
-        let dir = TempDir()
-        let b = dir.path("b")
-        _ = try command("cb", in: b, at: t0.addingTimeInterval(-1))
-        let outputs = OpenOutputs()
-        outputs.now = { self.t0 }
-        outputs.scan = { [] }
-        let read = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(-2))], folders: ["cli-b": b],
-                                        reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
-        #expect(read.tasks.isEmpty && !read.inventory.contains("b"))
-    }
-
-    @Test func aCommandStillInItsGraceIsKnownOnceTheReadAfterItComes() throws {
-        // Listed a second ago and not open: unknown now; the re-read the store schedules (past the grace) knows.
-        let dir = TempDir()
-        let b = dir.path("b")
-        _ = try command("cb", in: b, at: t0.addingTimeInterval(-1))
-        var clock = t0
-        let outputs = OpenOutputs()
-        outputs.now = { clock }
-        outputs.scan = { [] }
-        let reader = Claude.TaskReader()
-        let ended = session("b", ended: t0.addingTimeInterval(-2))
-        var read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: reader, outputs: outputs, transcript: { _ in nil })
-        #expect(!read.inventory.contains("b"))
-        clock = t0.addingTimeInterval(6)
-        read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: reader, outputs: outputs, transcript: { _ in nil })
-        #expect(read.inventory.contains("b") && read.tasks.isEmpty)
-    }
-
-    @Test func aFolderThatCantBeReadIsUnknownNotEmptyUntilItCanBe() throws {
-        let dir = TempDir()
-        let b = dir.path("b")
-        _ = try command("cb", in: b, at: t0.addingTimeInterval(-60))
-        let outputs = OpenOutputs()
-        outputs.now = { self.t0 }
-        outputs.scan = { [] }
-        let ended = session("b", ended: t0.addingTimeInterval(-30))
-        // The task folders couldn't be listed: nothing is known.
-        var read = ClaudeFeed.readTasks(sessions: [ended], folders: nil, reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
-        #expect(read.inventory.isEmpty)
-        // The session's own folder can't be read: unknown too.
-        chmod(b.path, 0)
-        defer { chmod(b.path, 0o755) }
-        read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
-        #expect(read.inventory.isEmpty)
-        // Readable again: known.
-        chmod(b.path, 0o755)
-        read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
-        #expect(read.inventory == ["b"])
-    }
-
-    @Test func taskFoldersThatCantBeListedAreNotNone() throws {
-        let dir = TempDir()
-        #expect(Claude.readTaskFolders(root: dir.path("missing")) == [:])
-        let project = dir.path("root/project")
-        try FileManager.default.createDirectory(at: project.appendingPathComponent("cli-a/tasks"), withIntermediateDirectories: true)
-        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
-        chmod(project.path, 0)
-        defer { chmod(project.path, 0o755) }
-        #expect(Claude.readTaskFolders(root: dir.path("root")) == nil)
-        chmod(project.path, 0o755)
-        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
-    }
-
-    @Test func aSessionFolderThatCantBeLookedIntoIsNotNone() throws {
-        let dir = TempDir()
-        let session = dir.path("root/project/cli-a")
-        try FileManager.default.createDirectory(at: session.appendingPathComponent("tasks"), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: dir.path("root/project/cli-b"), withIntermediateDirectories: true)
-        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
-        // No execute permission on the session's folder: its tasks folder can't be looked for.
-        chmod(session.path, 0o600)
-        defer { chmod(session.path, 0o755) }
-        #expect(Claude.readTaskFolders(root: dir.path("root")) == nil)
-        chmod(session.path, 0o755)
-        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
-    }
-
-    @Test func aReaderThatKeepsItsListingsSeesWhatChangesAsAFreshReadDoes() throws {
-        let dir = TempDir(), fm = FileManager.default, reader = Claude.TaskFolderReader()
-        let root = dir.path("root")
-        #expect(reader.read(root: root) == [:])
-        try fm.createDirectory(at: root.appendingPathComponent("project/cli-a/tasks"), withIntermediateDirectories: true)
-        // Claude Code's own files beside the projects aren't folders of sessions.
-        try Data().write(to: root.appendingPathComponent("cache-break-state-1.json"))
-        #expect(reader.read(root: root)?.keys.sorted() == ["cli-a"])
-        // A session's tasks folder made in a project already listed, and a project made since.
-        try fm.createDirectory(at: root.appendingPathComponent("project/cli-b/tasks"), withIntermediateDirectories: true)
-        try fm.createDirectory(at: root.appendingPathComponent("other/cli-c/tasks"), withIntermediateDirectories: true)
-        #expect(reader.read(root: root)?.keys.sorted() == ["cli-a", "cli-b", "cli-c"])
-        try fm.removeItem(at: root.appendingPathComponent("project/cli-a/tasks"))
-        try fm.removeItem(at: root.appendingPathComponent("other"))
-        #expect(reader.read(root: root)?.keys.sorted() == ["cli-b"])
-        let project = root.appendingPathComponent("project")
-        chmod(project.path, 0)
-        defer { chmod(project.path, 0o755) }
-        #expect(reader.read(root: root) == nil)
-        chmod(project.path, 0o755)
-        #expect(reader.read(root: root)?.keys.sorted() == ["cli-b"])
-        // Only the sessions asked about are looked for: one that can't be looked into, not asked about, says nothing.
-        try fm.createDirectory(at: root.appendingPathComponent("project/cli-d/tasks"), withIntermediateDirectories: true)
-        #expect(reader.read(root: root, only: ["cli-d", "cli-x"])?.keys.sorted() == ["cli-d"])
-        let other = root.appendingPathComponent("project/cli-b")
-        chmod(other.path, 0o600)
-        defer { chmod(other.path, 0o755) }
-        #expect(reader.read(root: root, only: ["cli-d"])?.keys.sorted() == ["cli-d"])
-        #expect(reader.read(root: root, only: ["cli-b", "cli-d"]) == nil)
-    }
-
-    @Test func aTaskReaderListsAgainOnlyAFolderThatChangedAndSeesWhatChanged() throws {
-        let dir = TempDir()
-        let folder = dir.path("tasks")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let reader = Claude.TaskReader()
-        let now = Date()
-        #expect(!reader.needsOpenOutputs(in: folder))
-        #expect(reader.newestCommand(in: folder) == nil)
-        let output = folder.appendingPathComponent("b1.output")
-        try Data().write(to: output)
-        #expect(reader.needsOpenOutputs(in: folder))
-        #expect(reader.newestCommand(in: folder) != nil)
-        // As the listing names it (the system may give /private/var for /var).
-        let open = Set(try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).map(\.path))
-        #expect(reader.read(folder, transcript: nil, openOutputs: open, now: now).tasks.map(\.id) == ["b1"])
-        try FileManager.default.removeItem(at: output)
-        #expect(reader.read(folder, transcript: nil, openOutputs: open, now: now).tasks.isEmpty)
-        #expect(!reader.needsOpenOutputs(in: folder))
-    }
-}

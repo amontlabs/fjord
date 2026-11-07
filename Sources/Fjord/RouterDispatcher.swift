@@ -760,7 +760,7 @@ struct RouterAskBack: Identifiable, Equatable {
         _ = try await effects.send(job.tools, delivery)
         note(job, .sent(to: delivery.to, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
              session: session, thread: t)
-        await delivered(job, delivery, session: session, turns: before?.completedTurns ?? 0, busy: before?.running ?? false)
+        await delivered(job, delivery, session: session, turns: 0, busy: before?.running ?? false)
     }
 
     /// A send went: what it delivered, for a Cancel (`turns` and `busy`: the session as it was just before).

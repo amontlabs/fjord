@@ -126,6 +126,12 @@ final class T3Store {
     private(set) var projections: [String: T3Projection] = [:]
     private(set) var connection: T3ConnectionState = .connecting
 
+    /// Called on the main actor after every shell item is applied (nil: a whole new shell, `seed`), so what is built from the
+    /// shell follows each change as it lands, with no polling.
+    @ObservationIgnored var onShell: ((T3ShellItem?) -> Void)?
+    /// Called when the connection's state changes.
+    @ObservationIgnored var onConnection: ((T3ConnectionState) -> Void)?
+
     @ObservationIgnored private var client: T3Client?
     @ObservationIgnored private var shellTask: Task<Void, Never>?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
@@ -141,14 +147,22 @@ final class T3Store {
             for await item in await client.subscribeShell() {
                 guard let self else { return }
                 self.shell.apply(item)
+                self.onShell?(item)
             }
         }
         statusTask = Task { [weak self] in
             for await s in await client.connectionStates() {
                 guard let self else { return }
                 self.connection = s
+                self.onConnection?(s)
             }
         }
+    }
+
+    /// A shell with no server behind it: demo data, shots and tests (`notify: false` leaves telling `onShell` to the test).
+    func seed(_ shell: T3ShellState, notify: Bool = true) {
+        self.shell = shell
+        if notify { onShell?(nil) }
     }
 
     func stop() {

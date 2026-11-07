@@ -160,9 +160,13 @@ struct PersistedState: Codable {
     var dropped: [String] = []
 
     private enum CodingKeys: String, CodingKey {
-        case settings, agents, router, categories, groups, categorySections, things, marks, categoryBaselines, ownedRepos,
+        /// Saved as `threads`: what was under `agents` (Claude's sessions) is carried over once, on the first read.
+        case agents = "threads"
+        case settings, router, categories, groups, categorySections, things, marks, categoryBaselines, ownedRepos,
              contributedRepos, reposResolvedAt, myTeams, login, fetchedFor, baselinePending, snippets, routerProposals
     }
+
+    private enum LegacyKeys: String, CodingKey { case agents }
 
     /// Tolerant: a file from before the categories (repos, items, ci) loses that data and loads the rest; a part that no
     /// longer decodes is lost alone (and named in `dropped`).
@@ -191,6 +195,10 @@ struct PersistedState: Codable {
         }
         settings = part(.settings) ?? AppSettings()
         agents = part(.agents)
+        if agents == nil, let old = try? decoder.container(keyedBy: LegacyKeys.self),
+           let saved = try? old.decodeIfPresent(ThreadsState.self, forKey: .agents) {
+            agents = saved.carriedOver(cliIDs: ThreadsState.desktopCLIIDs())
+        }
         router = part(.router)
         // What the Router's state lost on its own (a decision, a change, a map) counts as lost too.
         if let lost = router?.dropped, !lost.isEmpty {

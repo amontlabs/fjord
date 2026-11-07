@@ -1222,10 +1222,10 @@ extension Store {
         return routingReady
     }
 
-    /// Whether the Router knows enough to route an action's message: your sessions read from the Claude app (once asked for),
+    /// Whether the Router knows enough to route an action's message: your threads heard from T3 (once asked for),
     /// and your code folders scanned with their remotes read, so a repo's clones are known. At launch the first refresh can
     /// come before them, and would find "No clone of …" where there are clones.
-    var routingReady: Bool { (!claudeReadAsked || claudeReadOnce) && codeFolders.readyForRouting }
+    var routingReady: Bool { (!threadsReadAsked || threadsReadOnce) && codeFolders.readyForRouting }
 
     /// Routing may have become ready: the actions left for it run now.
     func routingMayBeReady() {

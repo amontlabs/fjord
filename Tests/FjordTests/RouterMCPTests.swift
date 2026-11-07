@@ -129,9 +129,10 @@ import Testing
     // MARK: Tools
 
     private func session(_ id: String, _ title: String, folder: String?, running: Bool = false, minutes: Double = -5) -> AgentThread {
-        AgentThread(id: id, title: title, folder: folder, completedTurns: 1, lastActivity: now.addingTimeInterval(minutes * 60),
-                      lastUserMessage: now.addingTimeInterval(-600), summary: .init(blocked: false, detail: "Tests pass"),
-                      running: running, cliID: "cli-\(id)")
+        var s = AgentThread(id: id, title: title, folder: folder, lastActivity: now.addingTimeInterval(minutes * 60), running: running,
+                            latestMessage: "Tests pass")
+        s.lastUserMessage = now.addingTimeInterval(-600)
+        return s
     }
 
     /// Sessions in two projects, one open question card with a form, the Router's files in `dir`.
@@ -146,8 +147,8 @@ import Testing
             "local_b": session("local_b", "Write the README", folder: "/code/api"),
         ]
         // Stopped on a question since 0.5 s after the epoch: the brief's entry for its thread.
-        s.threadWork = ["local_a": ThreadWork(text: "Which database?", since: Date(timeIntervalSince1970: 0.5),
-                                                      waitsForYou: true, tool: "AskUserQuestion")]
+        s.threadWork = ["local_a": ThreadWork(text: "Which database?", since: Date(timeIntervalSince1970: 0.5))]
+        s.threads["local_a"]?.pendingRequest = T3PendingRequest(json: ["id": "rq1", "kind": "user_input", "blocking": true])
         s.setRouterEnabled(true, now: now)
         await s.routerHookWork?.value
         var doc = BriefDoc(project: "local:lookout")
@@ -205,10 +206,8 @@ import Testing
             (any as? String).map { $0.replacingOccurrences(of: SessionFence.open + "\n", with: "").replacingOccurrences(of: "\n" + SessionFence.close, with: "") }
         }
         #expect(card["thread"] as? String == "local:lookout/local_a" && card["kind"] as? String == "question")
-        #expect((card["options"] as? [String])?.count == 2)
+        // The hook's form is joined by Claude Code session id, which T3's threads don't carry: T3's own requests replace it.
         #expect(plain(card["peer"]) == "Fix the login bug" && card["reachable"] as? Bool == true)
-        let form = try #require((card["form"] as? [[String: Any]])?.first)
-        #expect((form["options"] as? [String])?.count == 2)
         let working = try #require((board["working"] as? [[String: Any]])?.first)
         #expect(plain(working["doing"]) == "Which database?" && working["waitingForUser"] as? Bool == true)
         let recent = try #require((board["recent"] as? [[String: Any]])?.first)
@@ -253,18 +252,6 @@ import Testing
         s.agents.enabled = false
         #expect(await t.call("answer", answer)?.isError == true)
         #expect(s.routerBriefs.answers.isEmpty)
-    }
-
-    /// The answer tool does what the brief's buttons do: option 2 of the local form is SQLite, answered through the hook.
-    @Test func anEntryIsAnsweredAsTheBriefsButtonsDo() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let out = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "option": 2]))
-        #expect(!out.isError && out.text.contains("SQLite"), "\(out.text)")
-        await s.routerBriefs.settled()
-        #expect(s.routerBriefs.answers.first?.words == "SQLite")
-        let bad = try #require(await tools(s).call("answer", ["thread": "local:lookout/local_a", "option": 3]))
-        #expect(bad.isError)
     }
 
     /// The model's words never go to a thread as yours: `answer` takes an option only.
@@ -375,9 +362,6 @@ import Testing
         #expect(first["to"] as? String == "Fix the login bug" && first["rephrased"] as? Bool == true)
         #expect(text.hasPrefix("⟦fjord v1 cli-local_a ") && text.hasSuffix("⟧\n" + Data("bump the version".utf8).base64EncodedString()))
         #expect(t.prepared["Fix the login bug"]?.body == "bump the version")
-        // A session with no process is asleep, not refused: the app starts it with the message (`RouterCarry`).
-        let away = try #require(await t.tool("prepare", ["session": "Write the README"]))
-        #expect(!away.isError && t.prepared["Write the README"]?.asleep == true)
         #expect(await t.tool("prepare", ["session": "nobody"])?.isError == true)
     }
 
@@ -570,18 +554,6 @@ import Testing
 
 
     // MARK: A session with no process
-
-    @Test func aSleepingSessionIsSignedForAndLeftForTheAppToStart() async throws {
-        let dir = TempDir()
-        let s = await store(dir)
-        let t = tools(s, turn: "tell them to ship")
-        // local_b has no process and no plugin up: nothing wakes it first, the message is signed for its Claude Code id and the
-        // app starts it with the message.
-        let out = try #require(await t.tool("prepare", ["session": "local_b"]))
-        #expect(!out.isError, "\(out.text)")
-        let ready = try #require(t.prepared["Write the README"])
-        #expect(ready.text.hasPrefix("⟦fjord v1 cli-local_b ") && ready.asleep && ready.local == "local_b")
-    }
 
     @Test func aSessionWithAProcessAndNoPluginIsNotSentTo() async throws {
         let dir = TempDir()

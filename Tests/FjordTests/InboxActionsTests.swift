@@ -1237,7 +1237,7 @@ final class DiskCheckingPerformer: ActionPerformer {
         let (store, performer) = store([], actions: [session, .make(.comment("hi"))])
         await store.runActions()
         // Launch: the Claude app's sessions asked for, not read yet; the code folders' first scan under way.
-        store.claudeReadAsked = true
+        store.threadsReadAsked = true
         store.codeFolders.scan = { _ in .init(repos: ["/code/one": ["a/one"]]) }
         store.settings.codeFolders = ["/code"]
         store.codeFolders.start()
@@ -1248,7 +1248,7 @@ final class DiskCheckingPerformer: ActionPerformer {
         #expect(store.actionChips(for: store.entries.first { $0.id == "pr:a/one#2" }!).first?.label == "queued")
         await store.codeFolders.settled()
         #expect(!store.routingReady, "the sessions aren't read yet")
-        store.claudeReadOnce = true
+        store.threadsReadOnce = true
         #expect(store.routingReady)
         await store.runActions()
         #expect(performer.asked.count == 1 && store.localClones(of: "a/one") == ["/code/one"])

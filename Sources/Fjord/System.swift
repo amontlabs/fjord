@@ -593,8 +593,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UpdateCheck.run(as: CommandLine.arguments[i + 1])
             return
         }
-        if CommandLine.arguments.contains("--claude") {
-            ClaudeCheck.run()
+        if CommandLine.arguments.contains("--t3") {
+            T3Check.run()
             return
         }
         if CommandLine.arguments.contains("--check-inbox") {

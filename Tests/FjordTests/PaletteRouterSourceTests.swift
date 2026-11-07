@@ -160,7 +160,7 @@ import Testing
         let f = fixture()
         for n in 0..<3000 {
             f.store.threads["perf-\(n)"] = AgentThread(id: "perf-\(n)", title: "Session \(n)", folder: "/code/p\(n % 40)",
-                                                                lastActivity: Date().addingTimeInterval(-Double(n) * 600), cliID: "cli-\(n)")
+                                                                lastActivity: Date().addingTimeInterval(-Double(n) * 600))
         }
         let start = ContinuousClock.now
         let output = PaletteRouterSource.make(f.context)

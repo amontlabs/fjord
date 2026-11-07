@@ -16,8 +16,10 @@ extension Demo {
         briefs.clock = { now }
         briefs.names = ["chan_demo_fjord": "fjord", "local:lcu": "lcu", "chan_demo_silo": "silo",
                         "chan_demo_docs": "docs-site", "chan_demo_evals": "router-evals"]
-        briefs.sessions = [briefLocalThread: briefLocalSession]
-        briefs.clis = [briefLocalSession: "cli-demo-lcu"]
+        // The hook's forms join their threads by Claude Code session id, as the Courier's board names them (until T3's
+        // requests replace them).
+        briefs.sessions = [briefLocalThread: briefLocalSession, "local_demo-linux": "cse_demo_linux"]
+        briefs.clis = [briefLocalSession: "cli-demo-lcu", "cse_demo_linux": "cli-demo-linux"]
 
         var fjord = BriefDoc(project: "chan_demo_fjord")
         fjord.purpose = "A Mac app that keeps your Claude threads, local and on claude.ai, in one place."

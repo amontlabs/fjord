@@ -313,17 +313,15 @@ enum BriefKeys {
 
     // MARK: Entries
 
-    /// A local thread's Claude Code session id (`AgentThread.cliID`).
+    /// A local thread's Claude Code session id, as the Courier's board knows it (T3's threads carry none).
     func cli(_ t: BriefTarget, store: Store) -> String? {
         if let key = sessions[t.thread], let cli = clis[key] { return cli }
-        return store.threads[t.thread]?.cliID
+        return nil
     }
 
-    /// A local thread's session in the Claude app (a remote computer's runs there as a Desktop SSH session).
+    /// The T3 thread a brief entry is about, when Fjord lists it.
     func desktopSession(_ t: BriefTarget, store: Store) -> String? {
-        if store.threads[t.thread] != nil { return t.thread }
-        guard let cli = cli(t, store: store) else { return nil }
-        return store.threads.first { $0.value.cliID == cli }?.key
+        store.threads[t.thread] != nil ? t.thread : nil
     }
 
     /// The form Fjord's hook holds on this Mac for a local thread's session.

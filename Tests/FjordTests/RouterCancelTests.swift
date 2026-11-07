@@ -62,43 +62,39 @@ import Testing
         .init(session: "local_a", cli: "cli-a", nonce: RelaySigning.nonce, at: sentAt, turns: turns, busy: busy, abortable: abortable)
     }
 
-    private static func session(turns: Int, archived: Bool = false) -> AgentThread {
-        AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", isArchived: archived, completedTurns: turns,
-                      lastActivity: sentAt)
+    /// The thread, its last run ended before the send or (`ended`) after it.
+    private static func session(ended: Bool = false) -> AgentThread {
+        AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", lastActivity: sentAt,
+                    lastRunEndedAt: sentAt.addingTimeInterval(ended ? 10 : -10))
     }
 
-    @Test func cancelIsOfferedUntilItsTurnFinishes() {
+    @Test func cancelIsOfferedUntilARunEndsAfterIt() {
         let soon = Self.sentAt.addingTimeInterval(30)
         let idle = Self.delivered()
-        #expect(idle.cancellable(session: Self.session(turns: 3), now: soon))
-        // Its own turn finished: nothing left to stop.
-        #expect(!idle.cancellable(session: Self.session(turns: 4), now: soon))
-        // Sent behind a running turn: that one finishing is not its own.
-        let queued = Self.delivered(busy: true)
-        #expect(queued.cancellable(session: Self.session(turns: 4), now: soon))
-        #expect(!queued.cancellable(session: Self.session(turns: 5), now: soon))
-        // A session not read yet (just started) is given the window; an archived one isn't.
+        #expect(idle.cancellable(session: Self.session(), now: soon))
+        // A run finished since: nothing left to stop.
+        #expect(!idle.cancellable(session: Self.session(ended: true), now: soon))
+        // A thread not read yet (just started) is given the window.
         #expect(idle.cancellable(session: nil, now: soon))
-        #expect(!idle.cancellable(session: Self.session(turns: 3, archived: true), now: soon))
     }
 
     @Test func cancelIsNotOfferedLateOnceDoneOrWhereThePluginCantDoIt() {
         let soon = Self.sentAt.addingTimeInterval(30)
-        #expect(!Self.delivered().cancellable(session: Self.session(turns: 3), now: Self.sentAt.addingTimeInterval(11 * 60)))
-        #expect(!Self.delivered(abortable: false).cancellable(session: Self.session(turns: 3), now: soon))
+        #expect(!Self.delivered().cancellable(session: Self.session(), now: Self.sentAt.addingTimeInterval(11 * 60)))
+        #expect(!Self.delivered(abortable: false).cancellable(session: Self.session(), now: soon))
         var done = Self.delivered()
         done.cancelled = .tooLate
-        #expect(!done.cancellable(session: Self.session(turns: 3), now: soon))
+        #expect(!done.cancellable(session: Self.session(), now: soon))
     }
 
     @Test func theStoreOffersItOnlyForAnEntryThatDeliveredSomething() {
         let s = InboxFixture.store([])
-        s.threads = ["local_a": Self.session(turns: 3)]
+        s.threads = ["local_a": Self.session()]
         var entry = RouterDecision(at: Self.sentAt, trigger: .you("hi"), outcome: .done)
         #expect(!s.canCancel(entry, now: Self.sentAt))
         entry.delivered = Self.delivered()
         #expect(s.canCancel(entry, now: Self.sentAt.addingTimeInterval(5)))
-        s.threads["local_a"]?.completedTurns = 4
+        s.threads["local_a"]?.lastRunEndedAt = Self.sentAt.addingTimeInterval(4)
         #expect(!s.canCancel(entry, now: Self.sentAt.addingTimeInterval(5)))
     }
 
@@ -153,9 +149,9 @@ import Testing
             s.router.enabled = true
             s.agents.enabled = true
             s.threads = [
-                "local_a": AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout", completedTurns: 3,
+                "local_a": AgentThread(id: "local_a", title: "Fix the login bug", folder: "/code/lookout",
                                          lastActivity: Date(), running: true),
-                "local_b": AgentThread(id: "local_b", title: "Update the docs", folder: "/code/docs", completedTurns: 7,
+                "local_b": AgentThread(id: "local_b", title: "Update the docs", folder: "/code/docs",
                                          lastActivity: Date().addingTimeInterval(-60)),
             ]
             store = s
@@ -196,8 +192,8 @@ import Testing
         let id = await w.reply()
         let sent = try #require(w.entry(id)?.delivered)
         #expect(sent.session == "local_b" && sent.cli == "cli-local_b" && sent.nonce == w.nonces.first)
-        // The session as it was just before: 7 turns finished, none running.
-        #expect(sent.turns == 7 && !sent.busy && sent.abortable && sent.cancelled == nil)
+        // The thread as it was just before: none running.
+        #expect(!sent.busy && sent.abortable && sent.cancelled == nil)
         #expect(w.store.canCancel(w.entry(id)!))
     }
 

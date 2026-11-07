@@ -15,12 +15,14 @@ enum CourierLocal {
         var transcripts: URL
         var home: String
 
-        static let app = Places(sessions: Claude.sessionsDir, registry: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/sessions"),
-                                transcripts: Claude.transcriptsDir, home: NSHomeDirectory())
+        static let app = Places(sessions: Claude.root.appendingPathComponent("claude-code-sessions", isDirectory: true),
+                                registry: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/sessions"),
+                                transcripts: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects", isDirectory: true),
+                                home: NSHomeDirectory())
     }
 
     /// `{"sessions": {bridge id: info}, "processes": {cli: alive}, "statuses": {cli: status}, "app": bool}`.
-    static func read(_ places: Places = .app, appRunning: Bool = Claude.isRunning, now: Double = Date().timeIntervalSince1970,
+    static func read(_ places: Places = .app, appRunning: Bool = !NSRunningApplication.runningApplications(withBundleIdentifier: Claude.bundleID).isEmpty, now: Double = Date().timeIntervalSince1970,
                      alive: (Int32) -> Bool = FormBridge.processAlive) -> JSON {
         var found = JSONObject(), processes = JSONObject(), statuses = JSONObject()
         let fm = FileManager.default

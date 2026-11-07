@@ -102,7 +102,7 @@ correction (Send elsewhere, a different pick on an ask, a proposal you changed) 
 
 | Command | What it does |
 | --- | --- |
-| `--claude [--watch]` | Prints what the Router reads of Claude; `--watch` prints live changes. |
+| `--t3 [--watch]` | Prints what the Router reads of T3 (link, threads by group, what waits on you), read-only; `--watch` prints live changes. |
 | `--check owner/repo` | Headless live sync of one repo; prints the inbox. |
 | `--check-inbox` | Headless live sync with sample categories; prints every entry. |
 

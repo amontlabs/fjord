@@ -27,6 +27,7 @@ final class Store {
         self.engineLauncher = engineLauncher ?? (offlineContext ? nil : EngineLauncher(socketPath: socketPath))
         let computers = ComputersModel(client: selectedClient, initialInventory: (selectedClient as? MockEngineClient)?.inventory)
         self.computers = computers
+        wireThreads()
     }
 
     var computersEngineReady: Bool { hasEngineConnection }
@@ -191,10 +192,12 @@ final class Store {
     }
     /// Does what actions do; nil is the real one (and nothing at all in the playground and tests).
     @ObservationIgnored var actionPerformer: ActionPerformer?
-    /// The Claude app's sessions were asked for, and the first read of them has come: until then a "Send to the Router"
-    /// action waits (`routingReady`), so it isn't routed before your sessions, and the clones among their folders, are known.
-    @ObservationIgnored var claudeReadAsked = false
-    @ObservationIgnored var claudeReadOnce = false
+    /// T3's threads were asked for, and the first word from T3 has come: until then a "Send to the Router" action waits
+    /// (`routingReady`), so it isn't routed before your threads, and the clones among their folders, are known.
+    @ObservationIgnored var threadsReadAsked = false
+    @ObservationIgnored var threadsReadOnce = false
+    /// A shell change came while the window's morph played: taken in once it is over (`shellChanged`).
+    @ObservationIgnored var shellHeld = false
     /// A "Send to the Router" job was left for when routing is ready (`routingMayBeReady` runs the actions then).
     @ObservationIgnored var actionsAwaitRouting = false
     @ObservationIgnored var actionsBusy = false
@@ -280,9 +283,9 @@ final class Store {
     /// Triage's switch (`settings.triage`; the Router's is `routerOn`), kept in step by `settings` and written only when it
     /// changes: what reads it (the bar, the window's root) doesn't redraw with every other setting.
     private(set) var triageOn = false
-    /// The Router's switch: on only while Fjord reads Claude's sessions too (`router.enabled && agents.enabled`,
+    /// The Router's switch: on only while Fjord reads T3's threads too (`router.enabled && agents.enabled`,
     /// which follow each other). Kept in step by `router` and `agents` and written only when it changes, so what reads it
-    /// doesn't redraw with every read of Claude's sessions, as reading those two whole would.
+    /// doesn't redraw with every change to the threads, as reading those two whole would.
     private(set) var routerOn = false
     @ObservationIgnored var routerGeneration: UInt64 = 0
     private func updateRouterOn() {
@@ -292,7 +295,7 @@ final class Store {
         routerBriefs.switched(store: self)
     }
 
-    /// Claude sessions extension (see Agents.swift).
+    /// What Fjord keeps of T3's threads (see Threads.swift).
     var agents = ThreadsState() {
         didSet {
             updateRouterOn()
@@ -301,7 +304,6 @@ final class Store {
             persistedRevision &+= 1
             shownRevision &+= 1
             corpusRevision &+= 1
-            if !ingesting { claudeStamp.revision += 1 }
             refreshFolderNames()
         }
     }
@@ -416,9 +418,7 @@ final class Store {
     /// What the window's morph holds the store's results back with (`MotionGate`). Under test, a gate of the store's own,
     /// which only a test that holds it holds: the app's, which window tests hold, would hold every store's work in the suites
     /// running beside them.
-    @ObservationIgnored var motionGate = UnderTest.isRunning ? MotionGate.Gate() : MotionGate.shared {
-        didSet { claudeFeed.gate = motionGate }
-    }
+    @ObservationIgnored var motionGate = UnderTest.isRunning ? MotionGate.Gate() : MotionGate.shared
     @ObservationIgnored let notifier = Notifier()
     @ObservationIgnored let updater = Updater()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -455,8 +455,6 @@ final class Store {
     }
     /// `persistedRevision` as of the last write (or load): quitting writes only if it moved since.
     @ObservationIgnored private var savedRevision = 0
-    /// When the one-shot Claude timer fires (it only ever moves earlier until it does).
-    @ObservationIgnored private var claudeDeadline: Date?
     @ObservationIgnored var persists = true
     /// Stops the shortcut recorder that is listening, if any. While one is, the panel's key handler stands down
     /// and the global hotkeys are released, so the recorder sees every combination.
@@ -535,24 +533,17 @@ final class Store {
     @ObservationIgnored var routerClaudeBinary: (@Sendable () -> String?)?
     /// The app's version, which the plugin's is stamped with.
     @ObservationIgnored var routerAppVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0-dev"
-    @ObservationIgnored let activityReader = Claude.ActivityReader()
-    @ObservationIgnored lazy var claudeFeed: ClaudeFeed = {
-        let feed = ClaudeFeed(activityReader: activityReader)
-        feed.gate = motionGate
-        return feed
-    }()
-    /// Derived rows, rebuilt after any change to the agents or what was read (see Agents.swift).
+    /// Derived rows, rebuilt after any change to the threads or Fjord's entries (see Threads.swift).
     @ObservationIgnored var agentCache: ThreadCache?
-    /// Tells a read of the app that was asked for before you changed something from one asked for after.
-    @ObservationIgnored var claudeStamp = ClaudeStamp()
-    @ObservationIgnored var ingesting = false
     @ObservationIgnored var iconTask: Task<Void, Never>?
     /// Sessions you asked an icon for, picked before the rest (they may not be listed).
     @ObservationIgnored var iconRequests: [String] = []
     /// Sessions with nothing to go on yet (see `iconStamp` for when they're looked at again).
     @ObservationIgnored var iconDeferred: [String: String] = [:]
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
-    /// Where icons get their input and their answer (a session's first message by transcript id; Jev's choice from
+    /// Ends an icon pause (`iconPickFailed`).
+    @ObservationIgnored var iconRetry: Timer?
+    /// Where icons get their input and their answer (a thread's first message by thread id; Jev's choice from
     /// options, hints, state and instructions). Tests swap them for the disk and the network.
     @ObservationIgnored var iconFirstMessage: (@Sendable (String) -> String?)?
     @ObservationIgnored var iconChooser: (([String], [String: String], [String: String], String) async throws -> JevClient.Choice)?
@@ -563,16 +554,6 @@ final class Store {
     @ObservationIgnored let jevGate = JevGate()
     /// What keeps a key in the Keychain (tests answer for it).
     @ObservationIgnored var keychainWrite: ((String, String) -> Bool)?
-    @ObservationIgnored private var transcriptWatcher: FolderWatcher?
-    @ObservationIgnored private var sessionsWatcher: FolderWatcher?
-    @ObservationIgnored private var dotsWatcher: FolderWatcher?
-    @ObservationIgnored var claudeTimer: Timer?
-    @ObservationIgnored private var claudeObservers: [NSObjectProtocol] = []
-    @ObservationIgnored private var screensAsleep = false
-
-    private nonisolated static func isClaude(_ note: Notification) -> Bool {
-        (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier == Claude.bundleID
-    }
 
     /// Where the state is kept, when not in the user's own file: a test's, in a folder of its own. A test run that reaches the
     /// user's file stops (see `UnderTest`).
@@ -627,13 +608,13 @@ final class Store {
         if !UnderTest.isRunning { Task { await resumeEngineHandoffIfPending() } }
         observeSleep()
         if triageOn { restartPolling() }
-        // The Router is the only reader of Claude's sessions, and they have no switch of their own: they follow it.
-        if agents.enabled != router.enabled {
-            agents.enabled = router.enabled
-            if router.enabled { agents.enabledAt = agents.enabledAt ?? Date() }
+        // The Router is the only reader of T3's threads, and they have no switch of their own: they follow it.
+        if agents.enabled != router.enabled { agents.enabled = router.enabled }
+        if !UnderTest.isRunning, !Store.isDemo {
+            t3.start()
+            // Routing waits for T3's first word, unless there is no T3 to hear from.
+            if t3.installed { threadsReadAsked = true }
         }
-        watchClaude()
-        if !UnderTest.isRunning, !Store.isDemo { t3.start() }
         startRouter()
         if !Store.isDemo { codeFolders.start() }
         Task.detached(priority: .utility) {
@@ -646,103 +627,6 @@ final class Store {
                 self.pickIcons()
             }
         }
-    }
-
-    /// File events give near-instant updates: the sessions folder triggers a read of the sessions, the app's local
-    /// storage (where it lazily writes the sidebar dots) only a re-read of the dots. What events can't tell is covered
-    /// by the app launching, quitting or coming to the front, and by a one-shot timer (see `scheduleClaudeTick`).
-    func watchClaude() {
-        sessionsWatcher = nil
-        dotsWatcher = nil
-        transcriptWatcher = nil
-        claudeTimer?.invalidate()
-        claudeTimer = nil
-        claudeDeadline = nil
-        let center = NSWorkspace.shared.notificationCenter
-        claudeObservers.forEach { center.removeObserver($0) }
-        claudeObservers = []
-        guard agents.enabled else { return }
-        sessionsWatcher = FolderWatcher([Claude.sessionsDir]) { [weak self] in
-            MainActor.assumeIsolated { self?.refreshClaude() }
-        }
-        // The app writes to its leveldb in bursts: one read of the dots per couple of seconds is plenty.
-        dotsWatcher = FolderWatcher([Claude.localStorageDir], latency: 2) { [weak self] in
-            MainActor.assumeIsolated { self?.refreshUnread() }
-        }
-        // Transcripts change with every step an agent takes: only the working sessions' tails are read, and only the
-        // transcripts of working sessions (and those with background tasks) are worth waking up for. The filter runs
-        // on the watcher's queue; `isRelevant` takes its own lock.
-        let feed = claudeFeed
-        transcriptWatcher = FolderWatcher([Claude.transcriptsDir], latency: 0.5, relevant: { feed.isRelevant($0) }) { [weak self] in
-            MainActor.assumeIsolated { self?.refreshActivity() }
-        }
-        func watch(_ name: Notification.Name, _ then: @escaping @MainActor (Store) -> Void) {
-            claudeObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                guard Self.isClaude(note) else { return }
-                MainActor.assumeIsolated { if let self { then(self) } }
-            })
-        }
-        // Whether the app is open decides if a session still "runs"; being in front, which one you're looking at.
-        watch(NSWorkspace.didLaunchApplicationNotification) { $0.refreshClaude() }
-        watch(NSWorkspace.didTerminateApplicationNotification) { $0.refreshClaude() }
-        watch(NSWorkspace.didActivateApplicationNotification) { $0.refreshClaude() }
-        claudeObservers.append(center.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.screensAsleep = true
-                self?.claudeTimer?.invalidate()
-                self?.claudeTimer = nil
-                self?.claudeDeadline = nil
-            }
-        })
-        claudeObservers.append(center.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.screensAsleep = false
-                self.refreshClaude()
-            }
-        })
-        screensAsleep = false
-        refreshClaude()
-    }
-
-
-    /// What nothing announces is the clock: a turn with no summary stops counting as running two hours after its last
-    /// message, and a background subagent that stopped writing is given up on. One timer, set after each read for the
-    /// first moment something can expire (and none while the screens are asleep or nothing is running).
-    func scheduleClaudeTick() {
-        guard agents.enabled, persists, !screensAsleep else {
-            claudeTimer?.invalidate()
-            claudeTimer = nil
-            claudeDeadline = nil
-            return
-        }
-        var next: TimeInterval?
-        let now = Date()
-        for session in threads.values where session.running {
-            let left = (session.lastUserMessage ?? .distantPast).addingTimeInterval(Claude.runningTimeout).timeIntervalSince(now)
-            next = min(next ?? left, left)
-        }
-        // Sessions with background work: its end isn't always an event (a command's process just exits).
-        if !backgroundWork.isEmpty { next = min(next ?? 60, 60) }
-        // Icon picking waits out a failure (a rejected key waits for a new one instead).
-        if agents.iconsEnabled, iconsPausedUntil > now, iconsPausedUntil < .distantFuture {
-            next = min(next ?? .infinity, iconsPausedUntil.timeIntervalSince(now))
-        }
-        guard let next else { return }
-        let deadline = now.addingTimeInterval(max(next, 1) + 1)
-        // Frequent reads must not keep pushing it back: it only moves earlier.
-        if claudeTimer?.isValid == true, let current = claudeDeadline, current <= deadline { return }
-        claudeTimer?.invalidate()
-        claudeDeadline = deadline
-        let timer = Timer(fire: deadline, interval: 0, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.claudeDeadline = nil
-                self?.refreshClaude()
-            }
-        }
-        timer.tolerance = max(next, 1) * 0.1 + 2
-        RunLoop.main.add(timer, forMode: .common)
-        claudeTimer = timer
     }
 
     /// Polls GitHub on a loop; nothing with Triage off.

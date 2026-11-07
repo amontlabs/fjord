@@ -118,7 +118,8 @@ struct RouterDecision: Identifiable, Equatable {
         func cancellable(session: AgentThread?, now: Date) -> Bool {
             guard cancelled == nil, abortable, now.timeIntervalSince(at) < Self.window else { return false }
             guard let session else { return true }
-            return !session.isArchived && session.completedTurns < turns + (busy ? 2 : 1)
+            // Its run (the one it waited behind, then its own) not seen to finish since.
+            return session.lastRunEndedAt.map { $0 < at } ?? true
         }
     }
 

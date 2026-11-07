@@ -45,13 +45,10 @@ import Testing
         #expect(done == 4)
     }
 
-    @Test func aStoreUnderTestWaitsOnAGateOfItsOwnAndItsFeedOnTheSame() {
+    @Test func aStoreUnderTestWaitsOnAGateOfItsOwn() {
         let s = Store()
         // The app's gate, which window tests hold, holds no store's work in the suites beside them.
-        #expect(s.motionGate !== MotionGate.shared && s.claudeFeed.gate === s.motionGate)
-        let gate = MotionGate.Gate(longest: 600)
-        s.motionGate = gate
-        #expect(s.claudeFeed.gate === gate)
+        #expect(s.motionGate !== MotionGate.shared)
     }
 
     @Test func stillWaitsItsTurnBehindWhatWasHeld() async {
@@ -97,106 +94,24 @@ import Testing
 }
 
 /// Claude's reads that come while the window moves are taken in after it, every one in order, as if each came then.
-@MainActor @Suite struct ClaudeFeedHold {
-    private let now = Date()
-
-    private func session(_ id: String, turns: Int, message: Double = -120, archived: Bool = false) -> AgentThread {
-        var s = AgentThread(id: id, title: "Session \(id)", folder: "/code/app", completedTurns: turns,
-                              lastActivity: now.addingTimeInterval(-60), lastFocused: now.addingTimeInterval(-3600),
-                              lastUserMessage: now.addingTimeInterval(message), summary: .init(blocked: false, detail: "Done it"),
-                              cliID: "cli-\(id)")
-        s.isArchived = archived
-        return s
-    }
-
-    private func store(_ dir: TempDir, _ sessions: [AgentThread], dots: Set<String> = []) -> Store {
+/// T3's shell changes wait for the window's morph, and are taken in as one once it is over.
+@MainActor @Suite struct ShellHeldByMotion {
+    @Test func shellChangesDuringAMorphLandTogetherOnceItEnds() async {
         let s = Store()
         s.persists = false
-        s.routerPaths = RouterPaths(support: dir.path("support"), claudeDir: dir.path("claude"))
-        s.routerExecutable = "/Applications/Fjord.app/Contents/MacOS/Fjord"
-        s.interceptOpen = { _ in }
         s.agents.enabled = true
-        s.agents.enabledAt = now.addingTimeInterval(-7200)
-        s.ingest(sessions, appUnread: dots, claudeFrontmost: false)
-        s.setRouterEnabled(true)
-        return s
-    }
-
-    private func read(_ sessions: [AgentThread], dots: Set<String> = []) -> ClaudeSnapshot {
-        var read = ClaudeSnapshot()
-        read.sessions = sessions
-        read.appUnread = dots
-        read.activity = [:]
-        read.tasks = [:]
-        return read
-    }
-
-    /// The reads taken in one by one, and held by a motion then let go: the same cards, the same read flags.
-    private func expectHeldAsInTurn(_ start: [AgentThread], dots: Set<String> = [], setUp: (Store) -> Void = { _ in },
-                                    _ reads: [ClaudeSnapshot], sourceLocation: SourceLocation = #_sourceLocation) async {
-        let dirA = TempDir(), dirB = TempDir()
-        let inTurn = store(dirA, start, dots: dots), held = store(dirB, start, dots: dots)
-        setUp(inTurn)
-        setUp(held)
-        for var read in reads {
-            read.stamp = inTurn.claudeStamp
-            inTurn.applyClaude(read)
-        }
         let gate = MotionGate.Gate(longest: 600)
+        s.motionGate = gate
+        s.t3.store.seed(T3Fixture.state([T3Fixture.shell("a")]))
+        #expect(s.threads.keys.sorted() == ["a"])
         gate.began()
-        var applied = 0
-        for var read in reads {
-            read.stamp = held.claudeStamp
-            held.claudeFeed.deliver(read, { applied += 1; held.applyClaude($0) }, gate: gate)
-        }
+        s.t3.store.seed(T3Fixture.state([T3Fixture.shell("a"), T3Fixture.shell("b")]))
+        s.t3.store.seed(T3Fixture.state([T3Fixture.shell("a", status: "running"), T3Fixture.shell("b"), T3Fixture.shell("c")]))
         await Task.yield()
-        #expect(applied == 0, sourceLocation: sourceLocation)
+        #expect(s.threads.keys.sorted() == ["a"])
         gate.ended()
-        for _ in 0..<3000 where applied < reads.count { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(held.agents.entries.map(\.unread) == inTurn.agents.entries.map(\.unread), sourceLocation: sourceLocation)
-    }
-
-    @Test func aBacklogGoesASliceATurnInOrderEveryReadItsOwn() async {
-        let gate = MotionGate.Gate(longest: 600)
-        let feed = ClaudeFeed(activityReader: Claude.ActivityReader())
-        feed.sliceBudget = 0.004
-        var applied: [String] = []
-        let apply: @MainActor (ClaudeSnapshot) -> Void = { read in
-            applied.append(read.activity?.keys.first ?? "full")
-            Thread.sleep(forTimeInterval: 0.003)
-        }
-        func activity(_ id: String) -> ClaudeSnapshot {
-            var read = ClaudeSnapshot()
-            read.activity = [id: ThreadWork(text: id, since: Date())]
-            read.tasks = [:]
-            return read
-        }
-        var full = ClaudeSnapshot()
-        full.sessions = []
-        gate.began()
-        // Every read in its place, activity reads in a row too (each may say a question began, or ended).
-        for read in [activity("a"), activity("b"), full, activity("c"), full, activity("d"), activity("e"), full, activity("f")] {
-            feed.deliver(read, apply, gate: gate)
-        }
-        gate.ended()
-        // The first slice, the turn after the motion: not all of it.
-        for _ in 0..<3000 where applied.isEmpty { try? await Task.sleep(for: .milliseconds(1)) }
-        #expect(applied.count < 9)
-        // Read while the backlog goes: behind it.
-        feed.deliver(activity("g"), apply, gate: gate)
-        for _ in 0..<3000 where applied.last != "g" { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(applied == ["a", "b", "full", "c", "full", "d", "e", "full", "f", "g"])
-        // Nothing held: taken in at once.
-        let before = applied.count
-        feed.deliver(full, apply, gate: gate)
-        #expect(applied.count == before + 1)
-    }
-
-    @Test func aDotClearedThenBackLeavesTheSessionUnread() async {
-        await expectHeldAsInTurn([session("local_a", turns: 1)], dots: ["local_a"], [
-            read([session("local_a", turns: 1)], dots: []),
-            read([session("local_a", turns: 1)], dots: ["local_a"]),
-        ])
+        for _ in 0..<3000 where s.threads.count < 3 { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(s.threads.keys.sorted() == ["a", "b", "c"] && s.threads["a"]?.running == true)
     }
 }
 

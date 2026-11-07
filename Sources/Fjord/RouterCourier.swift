@@ -129,7 +129,7 @@ enum RouterCourier {
 
     /// The engine hears of the local sessions when a session file or a registry file changes, and when the Claude app starts or
     /// quits; no timer. Once now, for the state at start.
-    func watchLocal(_ folders: [URL] = [Claude.sessionsDir, CourierLocal.Places.app.registry], observing center: NotificationCenter = NSWorkspace.shared.notificationCenter) {
+    func watchLocal(_ folders: [URL] = [CourierLocal.Places.app.sessions, CourierLocal.Places.app.registry], observing center: NotificationCenter = NSWorkspace.shared.notificationCenter) {
         localWatchers = [FolderWatcher(folders) { [weak self] in MainActor.assumeIsolated { self?.localChanged() } }]
         localObservers = [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification].map { name in
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in

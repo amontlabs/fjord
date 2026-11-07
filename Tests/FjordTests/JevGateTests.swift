@@ -184,9 +184,7 @@ import Testing
     @Test func anIconUnderWayAsksNothingOnceIconsAreOffOrTheKeyChanged() async throws {
         let s = store()
         s.agents.iconsEnabled = true
-        s.agents.enabledAt = Date().addingTimeInterval(-3600)
-        s.ingest([AgentThread(id: "a", title: "Fix the login", folder: "/code/app", completedTurns: 1, lastActivity: Date(), cliID: "cli-a")],
-                 appUnread: [], claudeFrontmost: false, now: Date())
+        s.t3.store.seed(T3Fixture.state([T3Fixture.shell("a", title: "Fix the login")]))
         let latch = Latch()
         s.iconFirstMessage = { _ in while !latch.open { Thread.sleep(forTimeInterval: 0.002) }; return "Fix the login form" }
         var asked = 0

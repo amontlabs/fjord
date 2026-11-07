@@ -191,11 +191,8 @@ enum Demo {
     private static func router(_ store: Store, _ now: Date) {
         claudeProjects(store, now: now)
         let lcu = blockedAgentID
-        store.threads[lcu]?.running = true
-        store.threads[lcu]?.cliID = "cli-demo-lcu"
         store.threadWork[lcu] = ThreadWork(text: "Should updates install silently, or ask first each time?",
-                                                   since: now.addingTimeInterval(-120), waitsForYou: true, tool: "AskUserQuestion",
-                                                   toolUseID: "toolu_demo_lcu")
+                                           since: now.addingTimeInterval(-120))
         let question = "Should updates install silently, or ask first each time?"
         store.pendingForms["cli-demo-lcu"] = PendingForm(
             id: "cli-demo-lcu-1-1", cliSessionID: "cli-demo-lcu", transcriptPath: "",
@@ -205,8 +202,6 @@ enum Demo {
             ])],
             createdAt: now.addingTimeInterval(-60), pid: 0, toolUseID: "toolu_demo_lcu")
         // The Linux sandbox's plan, held the same way: its entry shows it, to approve or send back.
-        let linux = "local_demo-linux"
-        store.threads[linux]?.cliID = "cli-demo-linux"
         store.pendingForms["cli-demo-linux"] = PendingForm(
             id: "cli-demo-linux-1-1", cliSessionID: "cli-demo-linux", transcriptPath: "", questions: [],
             createdAt: now.addingTimeInterval(-540), pid: 0, toolUseID: "toolu_demo_linux", plan: """
@@ -542,23 +537,33 @@ enum Demo {
 
     static let blockedAgentID = "local_demo-lcu"
 
-    /// A session as the Claude app reports it: a finished turn with a summary, or (`running`) mid-turn.
-    private static func session(_ id: String, _ title: String, _ folder: String?, minutes: Double, turns: Int = 4,
-                                blocked: Bool = false, detail: String = "", running: Bool = false) -> AgentThread {
+    /// A thread as T3's shell reports it: a finished run with its last message, waiting on a question (`blocked`), or mid-run.
+    private static func session(_ id: String, _ title: String, _ folder: String?, minutes: Double,
+                                blocked: Bool = false, detail: String = "", running: Bool = false) -> T3ThreadShell {
         let at = Date().addingTimeInterval(-minutes * 60)
-        return AgentThread(id: id, title: title, folder: folder.map { "/Users/me/code/\($0)" }, completedTurns: turns,
-                             lastActivity: at, lastFocused: at.addingTimeInterval(-600), lastUserMessage: at.addingTimeInterval(-90),
-                             summary: running ? nil : AgentThread.Summary(blocked: blocked, detail: detail), running: running)
+        let stamp = T3JSON.string(T3Timestamp.format(at))
+        let pending: T3JSON = blocked ? ["id": .string("demo-request-\(id)"), "kind": "user_input", "createdAt": stamp, "blocking": true] : .null
+        let message: T3JSON = detail.isEmpty ? .null : ["id": .string("demo-message-\(id)"), "role": "assistant", "text": .string(detail), "updatedAt": stamp]
+        return T3ThreadShell(json: [
+            "id": .string(id), "projectId": .string(projectID(folder)), "title": .string(title), "providerInstanceId": "claudeAgent",
+            "status": running || blocked ? "running" : "completed", "activityRunStatus": running || blocked ? "running" : .null,
+            "pendingRuntimeRequest": pending, "latestVisibleMessage": message,
+            "latestUserMessageAt": .string(T3Timestamp.format(at.addingTimeInterval(-90))),
+            "latestRunCompletedAt": running || blocked ? .null : stamp, "lineage": ["rootThreadId": .string(id)],
+            "createdAt": .string(T3Timestamp.format(at.addingTimeInterval(-3600))), "updatedAt": stamp,
+        ])
     }
 
-    /// A session and how Fjord lists it: read or not, with the label or icon it was given.
+    private static func projectID(_ folder: String?) -> String { "demo-project-\(folder ?? "scratch")" }
+
+    /// A thread and how Fjord lists it: seen or not, with the label or icon it was given.
     private struct Listed {
-        var session: AgentThread
+        var session: T3ThreadShell
         var unread = false
         var label: String?
         var icon: String?
 
-        init(_ session: AgentThread, unread: Bool = false, label: String? = nil, icon: String? = nil) {
+        init(_ session: T3ThreadShell, unread: Bool = false, label: String? = nil, icon: String? = nil) {
             self.session = session
             self.unread = unread
             self.label = label
@@ -566,27 +571,43 @@ enum Demo {
         }
     }
 
-    /// The Router's reading of Claude's sessions, on, with these sessions. `colors` pins each project's colour; the others get the
-    /// least used one, in listing order. `unlisted` are known to the app but without an entry: only found by search.
+    /// The Router's reading of T3's threads, on, with these threads (fed through T3's store, as the shell stream would).
+    /// `colors` pins each project's colour; the others get the least used one, in listing order. `unlisted` are in T3 but
+    /// quiet: only found by search.
     private static func sessions(_ store: Store, _ now: Date, _ listed: [Listed], activity: [String: ThreadWork] = [:],
                                  tasks: [String: [BackgroundWork]] = [:], colors: [String: Int] = [:],
-                                 unlisted: [AgentThread] = []) {
-        store.threads = Dictionary(uniqueKeysWithValues: (listed.map(\.session) + unlisted).map { ($0.id, $0) })
-        store.t3.demoStatus = .connected(threads: store.threads.count)
-        store.threadWork = activity
-        store.backgroundWork = tasks
+                                 unlisted: [T3ThreadShell] = []) {
+        var shell = T3ShellState()
+        for l in listed {
+            var t = l.session
+            // Seen: visited at its last update; unseen: never visited.
+            if !l.unread, let updated = t.updatedAt { t.lastVisitedAt = updated }
+            shell.threads[t.id] = t
+        }
+        for t in unlisted {
+            var t = t
+            t.lastVisitedAt = t.updatedAt
+            shell.threads[t.id] = t
+        }
+        for t in shell.threads.values where shell.projects[t.projectId] == nil {
+            let folder = t.projectId.hasSuffix("-scratch") ? nil : "/Users/me/code/" + t.projectId.replacingOccurrences(of: "demo-project-", with: "")
+            shell.projects[t.projectId] = T3Project(json: ["id": .string(t.projectId), "title": .string(folder.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "No project"),
+                                                           "workspaceRoot": .string(folder ?? AgentThread.scratchRoot)])
+        }
+        shell.synchronized = true
         var state = ThreadsState()
         state.folderColors = colors
-        for folder in listed.compactMap(\.session.folder) { state.assignColor(folder) }
         state.enabled = true
-        state.enabledAt = now.addingTimeInterval(-86400)
-        state.seeded = true
         state.iconsEnabled = true
-        state.entries = listed.map { l in
-            ThreadEntry(id: l.session.id, label: l.label, unread: l.unread, seen: l.session.activity,
-                       focusedAt: l.session.lastFocused, icon: l.icon)
+        state.entries = listed.compactMap { l in
+            l.label == nil && l.icon == nil ? nil : ThreadEntry(id: l.session.id, label: l.label, icon: l.icon)
         }
         store.agents = state
+        store.t3.store.seed(shell)
+        store.t3.demoStatus = .connected(threads: store.threads.count)
+        store.threadWork = activity
+        // What subagents are on comes with each thread's detail, in a later step: the demo says it already.
+        store.backgroundWork = store.backgroundWork.merging(tasks) { _, demo in demo }
     }
 
     /// The sessions in every state: a waiting one, a working one, finished ones (unread and read), new activity.
@@ -657,74 +678,57 @@ enum Check {
     }
 }
 
-/// `--claude`: what the Router reads of Claude's sessions from the desktop app right now.
+/// `--t3`: what the Router reads of T3 right now (its link, its threads by group, what waits on you), read-only; `--watch`
+/// keeps reading and prints every change. Nothing is saved and no command is sent.
 @MainActor
-enum ClaudeCheck {
+enum T3Check {
+    private static var store: Store?
+
     static func run() {
-        var start = Date()
-        let result = Claude.SessionReader().read()
-        let sessionsMS = Int(Date().timeIntervalSince(start) * 1000)
-        start = Date()
-        let unread = Claude.unreadIDs()
-        print("installed:", Claude.isInstalled, "running:", Claude.isRunning, "sessions read in", sessionsMS, "ms, dots in",
-              Int(Date().timeIntervalSince(start) * 1000), "ms")
-        switch result {
-        case .failure(let error): print("sessions:", error)
-        case .success(let sessions):
-            print("sessions:", sessions.count, "archived:", sessions.filter(\.isArchived).count)
-            for s in sessions.filter({ !$0.isArchived }).sorted(by: { $0.lastActivity > $1.lastActivity }).prefix(12) {
-                let state = s.running ? "running" : s.summary?.blocked == true ? "blocked" : s.summary == nil ? "-" : "done"
-                print(String(format: "%-8@ %-7@ %-5@ turns=%-4d %@ · %@", state, shortAgo(s.lastActivity),
-                             unread?.contains(s.id) == true ? "dot" : "", s.completedTurns, s.title, s.folderName))
-            }
-        }
-        print("unread dots:", unread.map { "\($0.count)" } ?? "unreadable")
-        if case .success(let sessions) = result {
-            let reader = Claude.ActivityReader()
-            for s in sessions where s.running {
-                print("  working:", s.title, "→", s.cliID.flatMap { reader.activity(for: $0) }.map { "\($0.text) (since \(shortAgo($0.since)))" } ?? "no transcript")
-            }
-            let folders = Claude.taskFolders()
-            let open = Claude.openTaskOutputs()
-            let tasks = Claude.TaskReader()
-            for s in sessions where !s.running && !s.isArchived {
-                guard let cli = s.cliID, let folder = folders[cli] else { continue }
-                for t in tasks.tasks(in: folder, transcript: reader.transcript(cli), openOutputs: open) {
-                    print("  background:", s.title, "→", t.kind == .agent ? "agent" : "command", t.title,
-                          t.activity.map { "(\($0.text))" } ?? "", "since \(shortAgo(t.since))")
-                }
-            }
-        }
-        if CommandLine.arguments.contains("--watch") { watch(); return }
-        if case .success(let sessions) = result, let unread {
-            for s in sessions where unread.contains(s.id) { print("  dot:", s.title, s.isArchived ? "(archived)" : "", shortAgo(s.lastActivity)) }
-        }
-        exit(0)
-    }
-
-    /// `--claude --watch`: the extension live against the real app, nothing saved; prints every change.
-    private static var watchers: [FolderWatcher] = []
-
-    private static func watch() {
         let store = Store()
+        Self.store = store
         store.persists = false
         store.agents.enabled = true
-        store.agents.enabledAt = Date()
+        let watching = CommandLine.arguments.contains("--watch")
         var last = ""
-        func dump(_ reason: String) {
-            store.refreshClaude()
-            let lines = store.allAgentRows.map { r in
-                "\(r.label) \(r.unread ? "UNREAD" : "read  ") \(String(describing: r.group).padding(toLength: 8, withPad: " ", startingAt: 0)) \(r.session.title)"
-            }
-            let text = lines.joined(separator: "\n")
+        var started = Date()
+        store.t3.store.onShell = { item in
+            store.shellChanged(item)
+            guard store.t3.store.shell.sequence != nil else { return }
+            let text = dump(store)
             guard text != last else { return }
+            if last.isEmpty { print("first shell in \(Int(Date().timeIntervalSince(started) * 1000)) ms") }
             last = text
-            print("--- \(Date().formatted(date: .omitted, time: .standard)) (\(reason))\n" + text)
+            print("--- \(Date().formatted(date: .omitted, time: .standard))\n" + text)
             fflush(stdout)
+            if !watching { exit(0) }
         }
-        dump("start")
-        // Held for the life of the process (the run loop never returns), so the stream keeps delivering.
-        watchers.append(FolderWatcher([Claude.sessionsDir, Claude.localStorageDir]) { MainActor.assumeIsolated { dump("files") } })
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in MainActor.assumeIsolated { dump("timer") } }
+        store.t3.store.onConnection = { state in
+            store.t3ConnectionChanged(state)
+            if store.t3.status.isProblem || store.t3.status == .notLinked {
+                print("link:", store.t3.status.text)
+                if !watching { exit(1) }
+            }
+        }
+        guard store.t3.installed else { print("link:", store.t3.status.text); exit(1) }
+        started = Date()
+        store.t3.start()
+    }
+
+    private static func dump(_ store: Store) -> String {
+        var lines = ["link: \(store.t3.status.text)", "threads: \(store.threads.count), listed: \(store.allAgentRows.count)"]
+        for group in ThreadGroup.allCases {
+            let rows = store.allAgentRows.filter { $0.group == group }
+            guard !rows.isEmpty else { continue }
+            lines.append("\(group): \(rows.count)")
+            for r in rows {
+                var line = "  \(r.label) \(r.session.status.rawValue) \(r.session.title) · \(r.projectName)"
+                if let p = r.session.pendingRequest { line += " · waits on \(p.kind)" }
+                if r.session.hasPlan { line += " · plan" }
+                if let t = r.tasksText { line += " · \(t)" }
+                lines.append(line)
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 }

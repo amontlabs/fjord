@@ -203,25 +203,8 @@ extension RouterProjectContext {
     /// routings from the history.
     @MainActor static func gather(board: JSON, local: JSON? = nil, store: Store, now: Date = Date(), excluding: UUID? = nil,
                                   statuses: [Int: CourierIntentStatus] = [:]) -> RouterProjectContext {
-        let told = store.lastTold()
-        // Each local session's open needs-you entries (a question, a plan, a request or a permission), oldest first.
-        let briefs = store.routerBriefs
-        var waiting: [String: [BriefEntry]] = [:]
-        for e in briefs.docs.values.flatMap(\.needsYou) where RouterTools.waitsOnYou.contains(e.kind) {
-            if let cli = briefs.cli(e.target, store: store) { waiting[cli, default: []].append(e) }
-        }
-        let byCLI = Dictionary(store.threads.values.compactMap { s in s.cliID.map { ($0, s) } }, uniquingKeysWith: { a, b in
-            a.lastActivity >= b.lastActivity ? a : b
-        })
-        return from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store, excluding: excluding, statuses: statuses)) { cli in
-            guard let s = byCLI[cli] else { return nil }
-            var f = LocalFacts(summary: s.summary?.detail ?? "")
-            if s.running { f.doing = store.threadWork[s.id]?.text ?? "" }
-            if let t = told[s.id] { f.told = Told(text: t.text, minutesAgo: max(0, Int(now.timeIntervalSince(t.at) / 60))) }
-            f.waiting = (waiting[cli] ?? []).sorted { $0.since < $1.since }
-                .map { Waiting(kind: $0.kind.rawValue, text: $0.question ?? "") }
-            return f
-        }
+        // The Courier's board names local sessions by Claude Code id; T3's threads carry none, so no local facts join it.
+        from(board: board, local: local, now: now.timeIntervalSince1970, routings: routings(store, excluding: excluding, statuses: statuses)) { _ in nil }
     }
 
     /// The engine's record of each delivery the history names (`courierIntent`), for `routings`.

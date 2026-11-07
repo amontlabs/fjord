@@ -505,8 +505,6 @@ final class RouterMCPServer: @unchecked Sendable {
     var stage: ((String) -> Void)?
     /// Told what a Haiku run has shown so far as it streams (`RouterRunLive`), from the reader's thread; the dispatcher sets it.
     var watch: (@Sendable (RouterRunLive) -> Void)?
-    /// Where Claude Code keeps transcripts (`<project>/<id>.jsonl`); a test gives its own.
-    var transcriptsRoot: URL = Claude.transcriptsDir
     /// Claude Code's bundled binary, as `RouterStatus` found it.
     var claudePath: () -> String? = { nil }
 
@@ -677,10 +675,10 @@ final class RouterMCPServer: @unchecked Sendable {
     /// `projects`: only sessions in these folders (applied before the limit, so a tagged project's sessions all count).
     func candidates(_ store: Store, projects: Set<String>? = nil) -> (working: [AgentThread], recent: [AgentThread]) {
         let live = store.threads.values.filter {
-            !$0.isArchived && (projects?.contains($0.folderKey) ?? true)
+            projects?.contains($0.folderKey) ?? true
         }
             .sorted { $0.lastActivity > $1.lastActivity }
-        return (live.filter(\.running), Array(live.filter { !$0.running }.prefix(20)))
+        return (live.filter { $0.running }, Array(live.filter { !$0.running }.prefix(20)))
     }
 
     func board(_ store: Store) async -> String {
@@ -710,14 +708,14 @@ final class RouterMCPServer: @unchecked Sendable {
             var fields = sessionFields(store, s, peers)
             let activity = store.threadWork[s.id]
             fields["doing"] = Self.short(activity?.text ?? "Working", 300)
-            if activity?.waitsForYou == true { fields["waitingForUser"] = true }
+            if s.waitsForYou { fields["waitingForUser"] = true }
             fields["for"] = age(s.lastUserMessage ?? activity?.since ?? s.lastActivity)
             return fields
         }
         let recentRows = recent.map { s -> [String: Any] in
             var fields = sessionFields(store, s, peers)
             fields["lastActivity"] = age(s.lastActivity) + " ago"
-            if let summary = s.summary, !summary.detail.isEmpty { fields["summary"] = Self.fenced(summary.detail, 600) }
+            if let summary = s.latestMessage { fields["summary"] = Self.fenced(summary, 600) }
             return fields
         }
         let projects = Set(briefs.names.values.filter { !$0.isEmpty }).sorted()
@@ -811,7 +809,7 @@ final class RouterMCPServer: @unchecked Sendable {
     /// the registry of live processes (nil when it has none, or more than one).
     private func target(_ store: Store, _ query: String) async throws
         -> (session: AgentThread, to: String, reachable: Bool, cli: String?) {
-        let titled = store.threads.values.filter { !$0.isArchived && $0.title.lowercased() == query.lowercased() }
+        let titled = store.threads.values.filter { $0.title.lowercased() == query.lowercased() }
         let known = store.threads[query] ?? (titled.count == 1 ? titled[0] : nil)
         let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true)
         let (peers, clis) = await OffMain.run { () -> ([String: ClaudePeers.Peer], [String: Set<String>]) in
@@ -965,10 +963,8 @@ final class RouterMCPServer: @unchecked Sendable {
         // A local session with no process at all (not two claiming it) is asleep: the app starts it with the message, so there is
         // no plugin presence to look for before it goes (`signed`).
         var asleep = false
-        if cli == nil, !reachable, session.sshHost == nil, let id = session.cliID {
-            asleep = true
-            cli = id
-        }
+        // T3's threads have no Claude Code process for the plugin to wake: sending to them is T3's, in a later step.
+        _ = reachable
         prepared[to] = nil
         let ready = verbatim ? Prepared(text: message, original: message, rephrased: false) : try edited(message)
         let sealed = try await signed(store, ready, title: session.title, cli: cli,
