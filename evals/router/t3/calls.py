@@ -33,7 +33,7 @@ def _key():
 
 
 def anthropic(system, user, schema=None, model="claude-sonnet-5-5", max_tokens=700, thinking={"type": "between_tools"},
-              cache_system=True, tag="", effort=None):
+              cache_system=True, tag="", effort=None, timeout=180):
     body = {"model": model, "max_tokens": max_tokens,
             "system": [{"type": "text", "text": system, **({"cache_control": {"type": "ephemeral"}} if cache_system else {})}],
             "messages": [{"role": "user", "content": user}]}
@@ -52,7 +52,7 @@ def anthropic(system, user, schema=None, model="claude-sonnet-5-5", max_tokens=7
     for att in range(6):
         t0 = time.time()
         try:
-            r = json.load(urllib.request.urlopen(req, timeout=180, context=_TLS))
+            r = json.load(urllib.request.urlopen(req, timeout=timeout, context=_TLS))
             sec = time.time() - t0
             break
         except urllib.error.HTTPError as e:
