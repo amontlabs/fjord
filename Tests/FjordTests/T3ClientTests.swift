@@ -86,7 +86,7 @@ struct T3ClientTests {
         var shell = await client.subscribeShell().makeAsyncIterator()
         let sock = await log.next()
         let req = await sock.outbox.request("orchestration.subscribeShell")
-        #expect(req.payload == [:])
+        #expect(req.payload == ["requestCompletionMarker": true])
         sock.push(.pong)
         sock.push(.chunk(requestId: req.id, values: [F.snapshot(threads: [F.thread("a")], sequence: 40)]))
         guard case .snapshot(let s)? = await shell.next() else { Issue.record("no snapshot"); return }
@@ -141,7 +141,7 @@ struct T3ClientTests {
         first.drop()
         let second = await log.next()
         let again = await second.outbox.request("orchestration.subscribeShell")
-        #expect(again.payload == ["afterSequence": 47])
+        #expect(again.payload == ["afterSequence": 47, "requestCompletionMarker": true])
         #expect(again.id != req.id)
         await client.shutdown()
     }

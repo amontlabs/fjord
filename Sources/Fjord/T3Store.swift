@@ -11,12 +11,18 @@ struct T3ShellState: Equatable, Sendable {
     /// Highest sequence seen: pass it as `afterSequence` when resubscribing.
     var sequence: Int?
     var synchronized = false
+    /// T3's authoritative snapshot (its projects and threads) has been applied: T3 has answered, marker or not.
+    var snapshotted = false
+
+    /// T3 has told us what it has: by its `synchronized` marker, or by its snapshot (a server that doesn't send the marker).
+    var answered: Bool { synchronized || snapshotted }
 
     mutating func apply(_ item: T3ShellItem) {
         if let s = item.sequence { sequence = max(sequence ?? 0, s) }
         switch item {
         case .synchronized: synchronized = true
         case .snapshot(let s):
+            snapshotted = true
             for p in s.projects { projects[p.id] = p }
             for t in s.threads where !t.id.isEmpty { threads[t.id] = t }
             // archivedThreads are not listed; make sure none lingers as active.

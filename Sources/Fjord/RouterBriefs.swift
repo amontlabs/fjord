@@ -286,17 +286,24 @@ enum BriefKeys {
         return tagged.allSatisfy({ id in BriefTarget(key: id).map { listing.projects.contains($0.project) } ?? false }) ? lead : GeneralBrief()
     }
 
-    /// T3's projects and threads now, once its shell has arrived with something in it (nil before: an empty or unreachable T3
-    /// is not a reason to drop anything).
+    /// T3's projects and threads now, once it has answered (its snapshot or its `synchronized`, whichever order they and the
+    /// engine arrive in) with something in it (nil before: an empty T3 is not a reason to drop anything).
     func t3Listing() -> (projects: Set<String>, threads: Set<String>)? {
-        guard let store, store.t3.store.shell.synchronized else { return nil }
+        guard let store, store.t3.store.shell.answered else { return nil }
         let projects = Set(store.t3.store.shell.projects.keys).union(store.threads.values.map(\.projectID))
         return projects.isEmpty ? nil : (projects, Set(store.threads.keys))
     }
 
+    /// The listing, for what changes briefs.db: also only while the link is up (what a dropped link last said is shown, not
+    /// acted on). A store with no link behind it (demo, shots, tests) has only its shell to go by.
+    private func liveListing() -> (projects: Set<String>, threads: Set<String>)? {
+        guard let store, !store.t3.store.hasClient || store.t3.store.connection == .connected else { return nil }
+        return t3Listing()
+    }
+
     /// Rewrites every current project's brief and the lead now (⌘R on the Router page, the menu, the palette).
     func rewriteAll() {
-        guard let engine, let listing = t3Listing() else { return }
+        guard let engine, let listing = liveListing() else { return }
         engine.rewrite(projects: listing.projects)
     }
     var rewriting: Bool { engine?.rewriting ?? false }
@@ -304,7 +311,7 @@ enum BriefKeys {
     /// What briefs.db holds of projects and threads T3 doesn't list goes, once the listing is known and when it changes.
     @ObservationIgnored private var purged: (projects: Set<String>, threads: Set<String>)?
     private func purgeUnlisted() {
-        guard let engine, let listing = t3Listing(), purged?.projects != listing.projects || purged?.threads != listing.threads else { return }
+        guard let engine, let listing = liveListing(), purged?.projects != listing.projects || purged?.threads != listing.threads else { return }
         purged = listing
         log?.purge(keepingProjects: listing.projects, threads: listing.threads)
         seen = seen.filter { listing.threads.contains($0.key) }

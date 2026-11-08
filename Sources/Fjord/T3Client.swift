@@ -233,8 +233,9 @@ actor T3Client {
     }
 
     /// Every thread, live. Resumes with `afterSequence` after a reconnect. Items repeat harmlessly (rows are whole upserts).
+    /// T3 sends `synchronized` (everything it has has been said) only to a subscription that asks for it.
     func subscribeShell() -> AsyncStream<T3ShellItem> {
-        subscribe(tag: "orchestration.subscribeShell", payload: [:]) { T3ShellItem(json: $0) } sequence: { $0.sequence }
+        subscribe(tag: "orchestration.subscribeShell", payload: ["requestCompletionMarker": .bool(true)]) { T3ShellItem(json: $0) } sequence: { $0.sequence }
     }
 
     /// One thread: a snapshot, then events.
