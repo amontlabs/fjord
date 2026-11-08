@@ -2,18 +2,47 @@ import Foundation
 
 // The decider's board from what Fjord holds of T3 (docs/design/t3-research/decider-board-spec.md, "Inputs per thread"): the
 // listed threads (not settled, snoozed, archived or unlisted), what each is doing from T3's shell, the request it waits on,
-// the project purposes the brief wrote, and what you last said in each candidate (read on demand, kept by thread@updatedAt).
+// the project purposes the brief wrote, and the end of each candidate (your last words and the agent's last reply), read ahead
+// of the decision from a bounded snapshot and kept by thread@latest message.
 
-/// What you last said in a thread, kept until the thread changes (its last activity is the stamp).
-@MainActor final class YouSaidCache {
-    private var kept: [String: (stamp: Date, text: String?)] = [:]
+/// The end of a thread, as the board shows it.
+struct ThreadReads: Equatable, Sendable {
+    /// Your last message there.
+    var youSaid: String?
+    /// The agent's last reply.
+    var reply: String?
+}
 
-    func cached(_ id: String, stamp: Date) -> String?? {
+/// What was read of each thread's end, kept until its latest message changes (`stamp`), and the reads under way.
+@MainActor final class ThreadReadCache {
+    private var kept: [String: (stamp: String, reads: ThreadReads)] = [:]
+    private var inflight: [String: (stamp: String, task: Task<Void, Never>)] = [:]
+
+    func cached(_ id: String, stamp: String) -> ThreadReads? {
         guard let hit = kept[id], hit.stamp == stamp else { return nil }
-        return .some(hit.text)
+        return hit.reads
     }
 
-    func keep(_ id: String, stamp: Date, _ text: String?) { kept[id] = (stamp, text) }
+    func keep(_ id: String, stamp: String, _ reads: ThreadReads) { kept[id] = (stamp, reads) }
+
+    /// Starts `read` for the thread unless one for this stamp is under way. The result is kept when it finishes.
+    @discardableResult
+    func fetch(_ id: String, stamp: String, read: @escaping @Sendable () async -> ThreadReads?) -> Task<Void, Never> {
+        if let running = inflight[id], running.stamp == stamp { return running.task }
+        let task = Task { [weak self] in
+            let reads = await read()
+            guard let self else { return }
+            if let reads { self.keep(id, stamp: stamp, reads) }
+            if self.inflight[id]?.stamp == stamp { self.inflight[id] = nil }
+        }
+        inflight[id] = (stamp, task)
+        return task
+    }
+
+    /// Forgets threads that left.
+    func prune(keeping ids: Set<String>) {
+        for id in Set(kept.keys).subtracting(ids) { kept[id] = nil }
+    }
 }
 
 extension Store {
@@ -39,8 +68,8 @@ extension Store {
         return r.isUserInput ? "a question" : "a permission (\(r.kind))"
     }
 
-    /// The board now. `youSaid`: your last message in a thread, by its id, for those known.
-    func deciderBoard(now: Date = Date(), youSaid: [String: String] = [:]) -> DeciderBoard {
+    /// The board now. `reads`: the end of a thread, by its id, for those known.
+    func deciderBoard(now: Date = Date(), reads: [String: ThreadReads] = [:]) -> DeciderBoard {
         let live = threads.values.filter { t in
             if let until = t.snoozedUntil, until > now { return false }
             return !(t.settled && !t.running && !t.waitsForYou)
@@ -62,7 +91,7 @@ extension Store {
         }
         var short: [String: String] = [:]
         var taken = Set<String>()
-        let ordered = live.sorted { $0.lastActivity != $1.lastActivity ? $0.lastActivity > $1.lastActivity : $0.id < $1.id }
+        let ordered = live.sorted { $0.activityAt != $1.activityAt ? $0.activityAt > $1.activityAt : $0.id < $1.id }
         for t in ordered {
             let plain = t.id.lowercased().filter { $0.isLetter || $0.isNumber }
             var n = min(8, plain.count)
@@ -83,57 +112,59 @@ extension Store {
             guard let project = names[t.projectID], let id = short[t.id] else { return nil }
             let flag: DeciderBoard.Flag = t.waitsForYou ? .waiting : t.running ? .running : .finished
             let work = threadWork[t.id]
+            let read = reads[t.id]
             return DeciderBoard.Thread(
                 id: id, key: t.id, project: project, title: t.title, flag: flag, running: t.running,
-                minutesIdle: max(0, Int(now.timeIntervalSince(t.lastActivity) / 60)),
+                minutesIdle: max(0, Int(now.timeIntervalSince(t.activityAt) / 60)),
                 step: t.running ? (work?.todo?.active ?? work?.text ?? "") : "",
-                said: t.latestMessage ?? "", youSaid: youSaid[t.id] ?? t.lastUserText,
+                said: t.latestMessage ?? read?.reply ?? "", youSaid: t.lastUserText ?? read?.youSaid,
+                youSaidLast: t.lastUserText != nil,
+                branch: t.branch ?? "", pullRequests: t.pullRequests.compactMap(Self.pullRequestWords),
                 waiting: t.waitsForYou ? (requests[t.id].map(Self.requestText) ?? Self.requestWords(t)) : nil)
         }
         return board
     }
 
-    /// Your last message in each candidate of the board, read when it isn't known: from the held projection, else from T3 (a
-    /// subscription held until its snapshot arrives). The ones not read within `within` seconds are left out. Kept by
-    /// thread@lastActivity in `cache`.
-    func youSaidReads(for board: DeciderBoard, cache: YouSaidCache, within: TimeInterval = 1.2) async -> [String: String] {
-        var out: [String: String] = [:]
-        var missing: [(id: String, stamp: Date)] = []
-        for t in board.candidates {
-            guard let thread = threads[t.key] else { continue }
-            if thread.lastUserText != nil { continue }
-            if let hit = cache.cached(t.key, stamp: thread.lastActivity) {
-                if let text = hit { out[t.key] = text }
-            } else if let p = self.t3.store.projections[t.key] {
-                let text = T3Store.lastUserMessage(in: p)
-                cache.keep(t.key, stamp: thread.lastActivity, text)
-                if let text { out[t.key] = text }
-            } else {
-                missing.append((t.key, thread.lastActivity))
-            }
-        }
-        guard !missing.isEmpty else { return out }
+    /// `#12 open`, from a pull request's shell snapshot; nil without a number.
+    static func pullRequestWords(_ pr: T3PullRequest) -> String? {
+        guard let number = pr.number else { return nil }
+        return "#\(number)" + (pr.state.map { " " + $0.lowercased() } ?? "")
+    }
+
+    /// How a thread's end is known: the held projection, else the cache, else nothing (a read is started for next time).
+    private func knownReads(for t: DeciderBoard.Thread) -> (reads: ThreadReads?, stamp: String)? {
+        guard let thread = threads[t.key] else { return nil }
+        let stamp = thread.latestMessageID ?? "-"
+        if let p = t3.store.projections[t.key] { return (T3Store.tail(of: p), stamp) }
+        return (deciderReads.cached(t.key, stamp: stamp), stamp)
+    }
+
+    /// Starts the reads the board's candidates still need: the end of a thread (the agent's last reply when the latest message
+    /// is yours, your last words when it is the agent's) through a bounded snapshot. Off the decision path: called when the shell
+    /// changes, and a read already under way for the same latest message is not started again.
+    @discardableResult
+    func prefetchDeciderReads() -> [Task<Void, Never>] {
+        guard t3.store.hasClient else { return [] }
+        let board = deciderBoard()
+        deciderReads.prune(keeping: Set(threads.keys))
+        var tasks: [Task<Void, Never>] = []
         let t3 = self.t3.store
-        let read = await withTaskGroup(of: (String, String?)?.self) { group -> [(String, String?)] in
-            for m in missing { group.addTask { (m.id, await t3.readLastUserMessage(m.id)) } }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(within * 1e9))
-                return nil
-            }
-            var done: [(String, String?)] = []
-            var pending = missing.count
-            for await item in group {
-                guard let item else { group.cancelAll(); break }
-                done.append(item)
-                pending -= 1
-                if pending == 0 { group.cancelAll(); break }
-            }
-            return done
+        for t in board.candidates {
+            guard let known = knownReads(for: t), known.reads == nil else { continue }
+            let id = t.key
+            tasks.append(deciderReads.fetch(id, stamp: known.stamp) { await t3.readTail(id) })
         }
-        for (id, text) in read {
-            if let stamp = missing.first(where: { $0.id == id })?.stamp { cache.keep(id, stamp: stamp, text) }
-            if let text { out[id] = text }
+        return tasks
+    }
+
+    /// The board for a decision: what is known now (cache, held projections) and nothing waited for. A candidate whose read has
+    /// not landed goes without it; the reads it needs are started for the next decision.
+    func deciderBoardWithReads() async -> DeciderBoard {
+        prefetchDeciderReads()
+        var reads: [String: ThreadReads] = [:]
+        for t in deciderBoard().candidates {
+            if let r = knownReads(for: t)?.reads { reads[t.key] = r }
         }
-        return out
+        return deciderBoard(reads: reads)
     }
 }

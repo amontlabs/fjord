@@ -112,6 +112,6 @@ extension AgentThread {
     init(id: String, title: String, folder: String? = nil, lastActivity: Date = Date(), running: Bool = false,
          unseen: Bool = false, latestMessage: String? = nil, lastRunEndedAt: Date? = nil) {
         self.init(id: id, projectID: "p:\(folder ?? "")", title: title, folder: folder, status: running ? .running : .completed,
-                  unseen: unseen, lastActivity: lastActivity, lastRunEndedAt: lastRunEndedAt, latestMessage: latestMessage)
+                  unseen: unseen, lastActivity: lastActivity, activityAt: lastActivity, lastRunEndedAt: lastRunEndedAt, latestMessage: latestMessage)
     }
 }

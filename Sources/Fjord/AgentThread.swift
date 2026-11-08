@@ -22,13 +22,18 @@ struct AgentThread: Identifiable, Hashable {
     /// T3 settled it (every imported thread is): only work still live or waiting on you lists it.
     var settled = false
     var snoozedUntil: Date?
+    /// `updatedAt`: T3 moves it on pin, settle, snooze and unarchive too, so it says when the row changed, not when the work did.
     var lastActivity: Date
+    /// When the thread last had a message or a run end (see `realActivity`): what the decider's ages and order use.
+    var activityAt: Date
     var lastUserMessage: Date?
     var lastRunEndedAt: Date?
     /// The latest words the thread shows (the agent's last message), as T3's shell carries them.
     var latestMessage: String?
     /// The latest words you sent it, when that is its latest message.
     var lastUserText: String?
+    /// Its latest visible message (either role): a change of it is what makes a cached read stale.
+    var latestMessageID: String?
     var lastError: String?
     /// The run stopped on a usage limit and won't pick up again by itself.
     var limitStopped = false
@@ -72,14 +77,28 @@ extension AgentThread {
             pendingRequest: t.pendingRuntimeRequest, hasPlan: t.hasActionableProposedPlan, unseen: t.isUnseen,
             settled: t.settledAt != nil, snoozedUntil: t.snoozedUntil.flatMap(Self.date),
             lastActivity: t.updatedAt.flatMap(Self.date) ?? t.createdAt.flatMap(Self.date) ?? .distantPast,
+            activityAt: Self.realActivity(t),
             lastUserMessage: t.latestUserMessageAt.flatMap(Self.date), lastRunEndedAt: t.latestRunCompletedAt.flatMap(Self.date),
             latestMessage: t.latestVisibleMessage.flatMap { $0.role == "assistant" && !$0.text.isEmpty ? $0.text : nil },
             lastUserText: t.latestVisibleMessage.flatMap { $0.role == "user" && !$0.text.isEmpty ? $0.text : nil },
+            latestMessageID: t.latestVisibleMessage?.id,
             lastError: t.lastError,
             limitStopped: t.status == .failed && raw.str("lastErrorClass") == "usage_limit" && recovery?["autoResume"]?.bool != true,
             limitResetAt: (raw.ts("usageLimitResetAt") ?? recovery?.ts("resetAt")).flatMap(Self.date),
             usageLimit: t.status == .failed && raw.str("lastErrorClass") == "usage_limit",
             branch: t.branch, pullRequests: t.pullRequests, tags: t.tags, provider: t.providerInstanceId)
+    }
+
+    /// When the thread last had real activity: the latest of its last run's end, the last words you wrote and its latest visible
+    /// message, never `updatedAt` (J3, gap 1). An imported thread stamps its messages with the import time, so until it has run on
+    /// T3 it counts from its creation (old), and after that from its last run alone.
+    static func realActivity(_ t: T3ThreadShell) -> Date {
+        let created = t.createdAt.flatMap(date)
+        let run = t.latestRunCompletedAt.flatMap(date)
+        if t.historyOrigin == "v1_import" { return run ?? created ?? .distantPast }
+        let times = [run, (t.latestUserAuthoredMessageAt ?? t.latestUserMessageAt).flatMap(date),
+                     t.latestVisibleMessage?.updatedAt.flatMap(date)].compactMap { $0 }
+        return times.max() ?? created ?? .distantPast
     }
 
     /// What it left running after its turn that it picks up again from (`pendingBackgroundTasks`, by T3's own rule

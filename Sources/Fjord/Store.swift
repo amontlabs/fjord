@@ -9,6 +9,9 @@ final class Store {
     /// Demo and snapshot runs: never touch the Keychain (a new build would stop on an access prompt).
     nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots", "--window", "--window-shots"].contains($0) }
 
+    /// The end of each thread the decider's board shows (your last words, the agent's last reply), read ahead of the decision.
+    @ObservationIgnored let deciderReads = ThreadReadCache()
+
     init() {
         wireThreads()
     }

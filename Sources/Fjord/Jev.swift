@@ -81,6 +81,11 @@ struct JevClient {
     /// A dictionary has none: the Router's checks (`RouterActionChecks`) were measured in the order they are asked.
     @TaskLocal static var questionOrder: [String]?
 
+    /// The model the calls made in this task go to. Nil: `jev-latest`. The routing question pins a version (the bars are tuned on it).
+    @TaskLocal static var model: String?
+    /// The version the routing question is asked of (J3: `jev-latest` moves; E4 and the thresholds are on 1.14).
+    static let routingModel = "jev-1.14.0"
+
     /// Asks every question about `state` in one call.
     func ask(_ questions: [String: Question], about state: Any) async throws -> [String: Answer] {
         let (body, keys, ordered) = try Self.request(questions)
@@ -98,7 +103,7 @@ struct JevClient {
 
     /// The request body, its questions written in `questionOrder` when one is set.
     private static func wire(body: [String: Any], state: Any, ordered: [String: Data]) -> ([String: Any], [String: Data]) {
-        let plain: [String: Any] = ["model": "jev-latest", "state": state, "questions": body]
+        let plain: [String: Any] = ["model": model ?? "jev-latest", "state": state, "questions": body]
         guard let order = questionOrder else { return (plain, ordered) }
         let listed = order.filter { body[$0] != nil }
         let keys = listed + body.keys.filter { !listed.contains($0) }.sorted()
@@ -106,7 +111,7 @@ struct JevClient {
         guard let object = try? orderedObject(keys.map { ($0, body[$0] ?? NSNull()) }) else { return (plain, ordered) }
         var all = ordered
         all[placeholder] = object
-        return (["model": "jev-latest", "state": state, "questions": placeholder], all)
+        return (["model": model ?? "jev-latest", "state": state, "questions": placeholder], all)
     }
 
     private static func request(_ questions: [String: Question]) throws

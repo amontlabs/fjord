@@ -180,6 +180,7 @@ import Testing
         let intent = try await RouterProjectDecider(jev: Self.jev("question", 0.99, calls: calls), sonnet: nil).decide("x", in: Self.board())
         guard case .ask(let rest) = intent.kind else { Issue.record("expected an ask"); return }
         #expect(rest.count == 3 && intent.decider == .jev)
+        #expect(!Self.jevRequest(false).options.contains { ["question", "unclear", "compound", "change_fjord"].contains($0.name) })
     }
 
     @Test func jevOrdersTheAskByHisProbabilities() {
@@ -216,18 +217,31 @@ import Testing
 
     // MARK: Jev's options and redaction
 
-    @Test func jevsOptionsAreTheBoardsThreadsThenNewThreadsThenIntents() throws {
+    @Test func jevsOptionsAreTheBoardsThreadsThenNewThreadsAndNoIntents() throws {
         var b = Self.board()
         b.threads.append(.init(id: "d1", key: "t3-dup", project: "silo", title: "Router redesign", flag: .finished, minutesIdle: 5))
         let r = RouterProjectDecider.jevRequest("hi", b)
         #expect(r.options.map(\.name) == ["Router redesign (fjord)", "Router redesign (silo)", "Disk quota", "Old login fix",
-                                           "new in fjord", "new in silo", "new in empty", "change_fjord", "question", "compound", "unclear"])
+                                           "new in fjord", "new in silo", "new in empty"])
         guard case .structuredChoice(_, let criteria, _) = r.question else { Issue.record("not a structured choice"); return }
         let now = (criteria["Router redesign (fjord)"] as? [String: Any])?["now"] as? String
         #expect(now?.hasPrefix("- f1 | Router redesign | running (a message would interrupt it), 3m ago") == true)
         #expect((criteria["new in fjord"] as? [String: Any])?["about"] as? String == "Fjord, the Mac app")
         #expect((criteria["new in empty"] as? [String: Any])?["about"] as? String == "no description")
         #expect(r.state == ["message": "hi"])
+    }
+
+    @Test func jevAsksWhichPlaceInThreadsWordsOnAPinnedModel() throws {
+        let r = RouterProjectDecider.jevRequest("hi", Self.board())
+        guard case .structuredChoice(_, let criteria, let instructions) = r.question else { Issue.record("not a structured choice"); return }
+        let words = String(decoding: try JSONSerialization.data(withJSONObject: instructions), as: UTF8.self)
+        #expect(!words.contains("session") && !words.contains("`question`") && words.contains("thread"))
+        #expect((criteria["Disk quota"] as? [String: Any])?["kind"] as? String == "thread")
+        let data = try JevClient.$model.withValue(JevClient.routingModel) { try JevClient.requestData(["route": r.question], about: r.state) }
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["model"] as? String == "jev-1.14.0")
+        let other = try JevClient.requestData(["route": r.question], about: r.state)
+        #expect((try JSONSerialization.jsonObject(with: other) as? [String: Any])?["model"] as? String == "jev-latest")
     }
 
     @Test func everythingIsRedactedBeforeAnyModel() throws {

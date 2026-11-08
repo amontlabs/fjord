@@ -456,6 +456,7 @@ extension Store {
         }
         // Only on change: the views observing these redraw on every assignment.
         if next != threads { threads = next }
+        prefetchDeciderReads()
         if work != backgroundWork { backgroundWork = work }
         var state = agents
         // Entries of threads T3 no longer has (archived, deleted) go, once T3 has said what it has.

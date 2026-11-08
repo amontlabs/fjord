@@ -116,7 +116,98 @@ import Testing
     @Test func yourLastMessageComesFromTheShellOrTheKnownReads() {
         let s = Store.reading([T3Fixture.shell("aaaa1111", minutes: 1)])
         #expect(s.deciderBoard().threads.first?.youSaid == nil)
-        #expect(s.deciderBoard(youSaid: ["aaaa1111": "ship it"]).threads.first?.youSaid == "ship it")
+        #expect(s.deciderBoard(reads: ["aaaa1111": ThreadReads(youSaid: "ship it", reply: "not shown")]).threads.first?.youSaid == "ship it")
+    }
+
+    // MARK: Real activity, the reply, git, the read-ahead
+
+    @Test func theAgeIsRealActivityNotTheRowsUpdatedAt() {
+        // Pinned just now (updatedAt moves), but the last message and run are hours old.
+        let old = T3Fixture.ago(180), ran = T3Fixture.ago(120)
+        let s = Store.reading([T3Fixture.shell("aaaa1111", minutes: 0, extra: [
+            "latestVisibleMessage": ["id": "m0", "role": "assistant", "text": "done", "updatedAt": .string(old)],
+            "latestUserMessageAt": .string(old), "latestUserAuthoredMessageAt": .string(old), "latestRunCompletedAt": .string(ran)]),
+            T3Fixture.shell("bbbb2222", minutes: 0, extra: [
+                "latestVisibleMessage": ["id": "m1", "role": "assistant", "text": "done", "updatedAt": .string(T3Fixture.ago(30))],
+                "latestUserMessageAt": .string(T3Fixture.ago(30)), "latestUserAuthoredMessageAt": .string(T3Fixture.ago(30))])])
+        let b = s.deciderBoard()
+        let a = b.threads.first { $0.key == "aaaa1111" }, c = b.threads.first { $0.key == "bbbb2222" }
+        #expect(a.map { (119...121).contains($0.minutesIdle) } == true)
+        #expect(c.map { (29...31).contains($0.minutesIdle) } == true)
+        // Ordered by it, not by updatedAt (both 0m).
+        #expect(b.threads.map(\.key) == ["bbbb2222", "aaaa1111"])
+    }
+
+    @Test func anImportedThreadWithNoRunOnT3IsOldWhateverItsMessagesSay() {
+        let now = T3Fixture.ago(1)
+        let s = Store.reading([T3Fixture.shell("aaaa1111", minutes: 1, extra: [
+            "historyOrigin": "v1_import", "createdAt": .string(T3Fixture.ago(60 * 24 * 9)),
+            "latestUserAuthoredMessageAt": .string(now), "latestVisibleMessage": ["id": "m", "role": "assistant", "text": "x", "updatedAt": .string(now)]])])
+        #expect(s.deciderBoard().threads.first.map { $0.minutesIdle > 60 * 24 * 8 } == true)
+    }
+
+    @Test func gitAndTheReplyAndWhatYouSaidAfterItAreOnTheThreadsLines() {
+        let t = DeciderBoard.Thread(id: "t1", project: "p", title: "T", flag: .finished, minutesIdle: 4, said: "Done, see the diff.",
+                                    youSaid: "Now squash it", youSaidLast: true, branch: "feat/squash", pullRequests: ["#12 open", "#9 merged"])
+        #expect(DeciderBoard.lines(t) == [
+            "- t1 | T | finished, 4m ago", "  last message: Done, see the diff.", "  you said after that: Now squash it",
+            "  git: branch feat/squash, pull requests #12 open, #9 merged"])
+        var plain = t; plain.youSaidLast = false; plain.branch = ""; plain.pullRequests = []
+        #expect(DeciderBoard.lines(plain).contains("  you last said there: Now squash it"))
+    }
+
+    @Test func theBranchAndPullRequestsComeFromTheShell() {
+        let pr: T3JSON = ["url": "https://x/pull/12", "number": 12, "snapshot": ["state": "OPEN", "title": "t"]]
+        let s = Store.reading([T3Fixture.shell("aaaa1111", extra: ["branch": "feat/x", "pullRequests": [pr]])])
+        let t = s.deciderBoard().threads.first
+        #expect(t?.branch == "feat/x" && t?.pullRequests == ["#12 open"])
+    }
+
+    @Test func whenYourMessageIsLatestTheReadsReplyShowsBesideIt() {
+        let s = Store.reading([T3Fixture.shell("aaaa1111", extra: [
+            "latestVisibleMessage": ["id": "m9", "role": "user", "text": "also add tests", "updatedAt": .string(T3Fixture.ago(2))]])])
+        let t = s.deciderBoard(reads: ["aaaa1111": ThreadReads(youSaid: "older", reply: "Implemented the parser.")]).threads.first
+        #expect(t?.said == "Implemented the parser." && t?.youSaid == "also add tests" && t?.youSaidLast == true)
+        #expect(s.deciderBoard().threads.first?.said == "")
+    }
+
+    @Test func theBoardForADecisionUsesTheCacheAndNeverWaitsWithoutARead() async {
+        let s = Store.reading([T3Fixture.shell("aaaa1111", extra: [
+            "latestVisibleMessage": ["id": "m9", "role": "user", "text": "also add tests", "updatedAt": .string(T3Fixture.ago(2))]])])
+        // No T3 behind it: nothing to read, nothing waited for.
+        let started = Date()
+        let none = await s.deciderBoardWithReads()
+        #expect(none.threads.first?.said == "" && Date().timeIntervalSince(started) < 0.2)
+        s.deciderReads.keep("aaaa1111", stamp: "m9", ThreadReads(youSaid: nil, reply: "Implemented the parser."))
+        #expect(await s.deciderBoardWithReads().threads.first?.said == "Implemented the parser.")
+        // A new latest message makes the kept read stale.
+        s.deciderReads.keep("aaaa1111", stamp: "m8", ThreadReads(youSaid: nil, reply: "stale"))
+        s.deciderReads.prune(keeping: [])
+        #expect(await s.deciderBoardWithReads().threads.first?.said == "")
+    }
+
+    @Test func aReadIsStartedOncePerLatestMessageAndKeptWhenItEnds() async {
+        let cache = ThreadReadCache()
+        let count = Counter()
+        let read: @Sendable () async -> ThreadReads? = {
+            await count.bump()
+            try? await Task.sleep(for: .milliseconds(30))
+            return ThreadReads(youSaid: "y", reply: "r")
+        }
+        let first = cache.fetch("t", stamp: "m1", read: read)
+        _ = cache.fetch("t", stamp: "m1", read: read)
+        await first.value
+        #expect(await count.value == 1)
+        #expect(cache.cached("t", stamp: "m1") == ThreadReads(youSaid: "y", reply: "r"))
+        #expect(cache.cached("t", stamp: "m2") == nil)
+    }
+
+    @Test func aProjectionYieldsTheLastReply() {
+        let p = T3Projection(json: [
+            "thread": T3Fixture.thread("t1"), "runs": [], "messages": [T3Fixture.message("m1", text: "q"), T3Fixture.message("m2", role: "assistant", text: " first "),
+                                                                       T3Fixture.message("m3", role: "assistant", text: " second \n"), T3Fixture.message("m4", text: "next")],
+            "runtimeRequests": [], "plans": [], "turnItems": [], "providerSessions": [], "updatedAt": "2026-01-02T03:04:05.000Z"])
+        #expect(T3Store.tail(of: p) == ThreadReads(youSaid: "next", reply: "second"))
     }
 
     @Test func aProjectionYieldsTheLastUserMessage() {
@@ -126,4 +217,9 @@ import Testing
             "runtimeRequests": [], "plans": [], "turnItems": [], "providerSessions": [], "updatedAt": "2026-01-02T03:04:05.000Z"])
         #expect(T3Store.lastUserMessage(in: p) == "second one")
     }
+}
+
+private actor Counter {
+    private(set) var value = 0
+    func bump() { value += 1 }
 }

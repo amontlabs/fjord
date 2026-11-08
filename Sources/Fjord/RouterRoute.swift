@@ -15,8 +15,8 @@ extension RouterTools {
 
     /// The project decider's question to Jev (`RouterProjectDecider.jevRequest`), as measured.
     static let routeQuestion: [String: Any] = [
-        "question": "Where does the user's `message` go?",
-        "focus": "Decide about `message` alone; `earlier messages` only say what it refers to. A message addressed to a session (\"tell the CI one to…\", \"lcu: …\") goes to that existing session. A question about a session or about what is going on (\"is the CI one done?\") is `question`, not a message to the session. A message that starts a task none of the sessions has been doing goes to a new session in its project, even when that project has sessions; one that continues, corrects or answers a session's own work goes to that session.",
+        "question": "Which place does the user's `message` belong to: one of the existing threads, or a new thread in a project?",
+        "focus": "Decide about `message` alone. A message addressed to a thread (\"tell the CI one to…\", \"lcu: …\") goes to that existing thread. A message that starts a task none of the threads has been doing goes to a new thread in its project, even when that project has threads; one that continues, corrects or answers a thread's own work goes to that thread.",
     ]
 }
 

@@ -151,8 +151,6 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var asker: JevAsker?
     /// Every decision and what became of it, for the benchmark (nil in a test or a demo).
     @ObservationIgnored var decisionLog: DeciderLog?
-    /// What you last said in each thread, kept by thread@lastActivity.
-    @ObservationIgnored let youSaid = YouSaidCache()
     /// Sonnet's client; tests don't reach it (they stand in `Effects.decide`).
     @ObservationIgnored lazy var anthropic = RouterProjectDecider.makeClient()
 
@@ -832,9 +830,8 @@ extension RouterDispatcher.Effects {
             decide: { [weak dispatcher] tools, message, action, stage in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
-                // The board, then what you last said in each candidate that isn't known, then the board again with it.
-                let youSaid = await store.youSaidReads(for: store.deciderBoard(), cache: dispatcher.youSaid)
-                let board = store.deciderBoard(youSaid: youSaid)
+                // The board with the thread ends read ahead of time (cache and held projections); nothing is waited for.
+                let board = await store.deciderBoardWithReads()
                 var decider = RouterProjectDecider.app(store, client: dispatcher.anthropic)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
                 decider.jev = action != nil ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)

@@ -176,6 +176,8 @@ final class T3Store {
         onThread?(id)
     }
 
+    var hasClient: Bool { client != nil }
+
     func setEnvironment(_ id: String?) { environmentID = id }
 
     func stop() {
@@ -216,13 +218,37 @@ final class T3Store {
         return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// Reads a thread's last message of yours through a subscription held only until its snapshot arrives.
-    func readLastUserMessage(_ id: String) async -> String? {
+    /// The thread's last assistant reply, from a projection (capped for a prompt).
+    nonisolated static func lastAssistantMessage(in p: T3Projection) -> String? {
+        let text = p.messages.last { $0.role == "assistant" && !$0.text.isEmpty }?.text
+            ?? p.turnItems.lazy.reversed().compactMap { i -> String? in if case .assistantMessage(_, let t, _) = i.detail, !t.isEmpty { t } else { nil } }.first
+        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The end of a thread, as the decider's board reads it: your last words and the agent's last reply.
+    nonisolated static func tail(of p: T3Projection) -> ThreadReads {
+        ThreadReads(youSaid: lastUserMessage(in: p), reply: lastAssistantMessage(in: p))
+    }
+
+    /// Reads a thread's end through a bounded snapshot (T3 caps it at the last 10 user turns, 75 items and 1 MiB), held only
+    /// until it arrives and given up after `timeout` seconds.
+    func readTail(_ id: String, timeout: TimeInterval = 5) async -> ThreadReads? {
         guard let client else { return nil }
-        for await item in await client.subscribeThread(id) {
-            if case .snapshot(_, let p) = item { return Self.lastUserMessage(in: p) }
+        return await withTaskGroup(of: ThreadReads?.self) { group in
+            group.addTask {
+                for await item in await client.subscribeThread(id, bounded: true) {
+                    if case .snapshot(_, let p) = item { return Self.tail(of: p) }
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
-        return nil
     }
 
     /// Reads a thread's first message through a subscription held only until its snapshot arrives.

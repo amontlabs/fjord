@@ -297,6 +297,8 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
     var pendingRuntimeRequest: T3PendingRequest?
     var latestVisibleMessage: T3VisibleMessage?
     var latestUserMessageAt: T3Timestamp?
+    /// Your own words only: wakes and agent messages that go through the user role do not move it.
+    var latestUserAuthoredMessageAt: T3Timestamp?
     var hasActionableProposedPlan: Bool
     var pendingBackgroundTaskCount: Int
     var createdAt: T3Timestamp?
@@ -330,6 +332,7 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
         pendingRuntimeRequest = T3PendingRequest(json: j["pendingRuntimeRequest"])
         latestVisibleMessage = T3VisibleMessage(json: j["latestVisibleMessage"])
         latestUserMessageAt = j.ts("latestUserMessageAt")
+        latestUserAuthoredMessageAt = j.ts("latestUserAuthoredMessageAt")
         hasActionableProposedPlan = j.flag("hasActionableProposedPlan")
         pendingBackgroundTaskCount = j["pendingBackgroundTasks"]?.array?.count ?? 0
         createdAt = j.ts("createdAt"); updatedAt = j.ts("updatedAt"); archivedAt = j.ts("archivedAt")

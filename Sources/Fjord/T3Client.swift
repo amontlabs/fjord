@@ -238,8 +238,11 @@ actor T3Client {
     }
 
     /// One thread: a snapshot, then events.
-    func subscribeThread(_ threadId: String) -> AsyncStream<T3ThreadItem> {
-        subscribe(tag: "orchestration.subscribeThread", payload: ["threadId": .string(threadId)]) { T3ThreadItem(json: $0) } sequence: { $0.sequence }
+    /// `bounded`: T3 caps the snapshot at the last 10 user turns, 75 items and 1 MiB (for reads that need the end of a thread).
+    func subscribeThread(_ threadId: String, bounded: Bool = false) -> AsyncStream<T3ThreadItem> {
+        var payload: [String: T3JSON] = ["threadId": .string(threadId)]
+        if bounded { payload["acceptBoundedSnapshot"] = .bool(true) }
+        return subscribe(tag: "orchestration.subscribeThread", payload: payload) { T3ThreadItem(json: $0) } sequence: { $0.sequence }
     }
 
     /// Sends a command and returns the sequence it committed at, or a typed error. A retry after a dropped

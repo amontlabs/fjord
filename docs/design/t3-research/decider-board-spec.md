@@ -8,12 +8,22 @@ Reference implementation: `render_board(moment)` and `candidates(moment)` in `de
 | id | thread id (short form for the model) | |
 | title | `title` | first 80 chars |
 | status | running / waiting on you / waiting on you, running / finished | |
-| age | time since last activity, `Nm` under 60, `Nh` under 24 h, else `Nd` | |
-| last message | `latestVisibleMessage` | last 600 chars; if none, the thread summary (300) |
-| you last said there | your last authored message in the thread (read on demand, cached by thread@updatedAt) | first 200 |
+| age | time since real activity, `Nm` under 60, `Nh` under 24 h, else `Nd`. Real activity is the latest of the last run's end (`latestRunCompletedAt`), your last authored message (`latestUserAuthoredMessageAt`) and the latest visible message's `updatedAt`; never the row's `updatedAt`, which pin, settle, snooze and unarchive also move. An imported thread (`historyOrigin: v1_import`) counts from its last run on T3, else from its creation. The same time orders threads and applies the 12 h cut. | |
+| last message | the agent's latest reply: `latestVisibleMessage` when it is the agent's; when the latest message is yours, the last assistant message of the thread, read ahead (below) | last 600 chars; if none, the thread summary (300) |
+| you last said there | your last message in the thread: the shell when it is the latest message, else the read-ahead. Labelled `you said after that` when it came after the reply shown, else `you last said there` | first 200 |
+| git | the shell's `branch` and `pullRequests` (`#12 open`, at most 3); a line left out when there are none | branch 60 |
 | current step | the current todo or plan step, only for a running thread | first 200 |
 | waiting request | the pending question, approval or plan, as text | first 300 |
-In the eval, "current step" is the session's activity line and "you last said there" comes from the board's routing history; the 182 moments have no T3 todo records. Dropped, as R1 says: branch and PR, model, runtime mode, tags, worktree, tokens, full todo lists. Not tested here (no data): branch and PR.
+In the eval, "current step" is the session's activity line and "you last said there" comes from the board's routing history; the 182 moments have no T3 todo records. Dropped, as R1 says: model, runtime mode, tags, worktree, tokens, full todo lists. Branch and PR were not tested in the eval (no data); they come from the shell at no cost.
+
+## Reading the end of a thread (off the decision path)
+- The reply and your last words come from the shell when the latest message is of that role; the other one needs the thread. Fjord reads it ahead: when the shell changes, a bounded snapshot (`acceptBoundedSnapshot`: last 10 user turns, 75 items, 1 MiB) is requested for each candidate that lacks it, held until it arrives, with a 5 s cap, and kept by thread@latest message id. A held projection (a thread on screen) is used as is.
+- The decision takes the board from the cache and held projections. Nothing is waited for: a candidate whose read has not landed goes without it, and the read it needs is started for the next decision. Before this the decision waited up to 1.2 s on full-thread reads.
+
+## Jev (ranker only)
+- Options: the board's threads (most recent first, `kind: "thread"`, the same lines as `now`), then `new in <project>`. No intents (`question`, `unclear`, `compound`, `change_fjord`): on the 182 moments he took one on 54, every one a miss (J1, J2). The question is purely which place, worded in threads.
+- Model pinned to `jev-1.14.0` for the routing question only (the thresholds and E4 are on it); the inbox and icon uses keep `jev-latest`.
+- Twins (one conversation under two ids, J2: 14% of the eval moments): checked on the live T3 (2026-11-08) and not collapsed, since none exist there; see J2 for the corpus artifact.
 
 ## Candidate rules
 1. Every thread that is running or waiting (pending request or actionable plan).
@@ -29,7 +39,8 @@ Gold thread present among the candidates: 161 of 163 existing-thread moments (E1
 - new in {project} | start a new thread here | purpose: {purpose} | last threads: {title1}; {title2}; {title3}
 - {id} | {title} | {status}, {age} ago
   last message: {last message}
-  you last said there: {your last message}
+  you last said there: {your last message}      (or "you said after that: …" when it came after the reply)
+  git: branch {branch}, pull requests {#n state, …}
   current step: {step}
   waiting request: {request}
 ...

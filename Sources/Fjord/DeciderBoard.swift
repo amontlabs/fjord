@@ -34,11 +34,18 @@ struct DeciderBoard: Equatable, Sendable {
         var said = ""
         /// Your last message there; nil: none known.
         var youSaid: String?
+        /// Your message is the latest one in the thread, so it came after `said`.
+        var youSaidLast = false
+        /// Its git branch, when it has one.
+        var branch = ""
+        /// Its pull requests, each as `#12 open`.
+        var pullRequests: [String] = []
         /// The request it waits on, as text; nil: none.
         var waiting: String?
 
         init(id: String, key: String? = nil, project: String, title: String, flag: Flag, running: Bool? = nil, minutesIdle: Int,
-             summary: String = "", step: String = "", said: String = "", youSaid: String? = nil, waiting: String? = nil) {
+             summary: String = "", step: String = "", said: String = "", youSaid: String? = nil, youSaidLast: Bool = false,
+             branch: String = "", pullRequests: [String] = [], waiting: String? = nil) {
             self.id = id
             self.key = key ?? id
             self.project = project
@@ -50,6 +57,9 @@ struct DeciderBoard: Equatable, Sendable {
             self.step = step
             self.said = said
             self.youSaid = youSaid
+            self.youSaidLast = youSaidLast
+            self.branch = branch
+            self.pullRequests = pullRequests
             self.waiting = waiting
         }
     }
@@ -172,7 +182,15 @@ struct DeciderBoard: Equatable, Sendable {
         var last = tail(t.said, 600)
         if last.isEmpty { last = one(t.summary, 300) }
         if !last.isEmpty { out.append("  last message: \(last)") }
-        if let you = t.youSaid { out.append("  you last said there: \(one(you, 200))") }
+        if let you = t.youSaid {
+            out.append("  \(t.youSaidLast && !last.isEmpty ? "you said after that" : "you last said there"): \(one(you, 200))")
+        }
+        if !t.branch.isEmpty || !t.pullRequests.isEmpty {
+            var line = "  git:"
+            if !t.branch.isEmpty { line += " branch \(one(t.branch, 60))" }
+            if !t.pullRequests.isEmpty { line += (t.branch.isEmpty ? "" : ",") + " pull requests " + t.pullRequests.prefix(3).map { one($0, 40) }.joined(separator: ", ") }
+            out.append(line)
+        }
         if t.flag == .running, !t.step.isEmpty { out.append("  current step: \(one(t.step, 200))") }
         if let waiting = t.waiting { out.append("  waiting request: \(one(waiting, 300))") }
         return out

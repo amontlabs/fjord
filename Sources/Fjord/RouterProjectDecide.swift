@@ -138,8 +138,10 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
         if let jev {
             stage(.jev)
             let request = Self.jevRequest(message, board, tagged: tagged, unattended: action != nil)
-            let answer = try? await JevClient.$questionOrder.withValue(["route"]) {
-                try await jev(["route": request.question], request.state)
+            let answer = try? await JevClient.$model.withValue(JevClient.routingModel) {
+                try await JevClient.$questionOrder.withValue(["route"]) {
+                    try await jev(["route": request.question], request.state)
+                }
             }
             try Task.checkCancellation()
             if let choice = answer?["route"]?.choice, let decision = jevAsk(choice, board: board, options: request.options, action: action) {
@@ -155,8 +157,6 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
     enum Option: Equatable {
         case thread(String)
         case newThread(project: String)
-        /// An intent or `unclear`: never taken from Jev.
-        case other(String)
     }
 
     struct JevRequest {
@@ -166,19 +166,13 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
         var options: [(name: String, option: Option)]
     }
 
-    /// rund.py's intents: options Jev may pick that are never taken.
-    static let intents: [(String, String)] = [
-        ("change_fjord", "The user wants to change Fjord itself: its inbox categories, groups or settings"),
-        ("question", "A question about what is going on now (what needs the user, working threads, the inbox, settings), not for any thread"),
-        ("compound", "Several different things in one message, such as changing Fjord and telling a thread something"),
-        ("unclear", "none of these: small talk, a fragment, or nothing says where it goes"),
-    ]
     /// How many thread titles a project's option names, and how much of its purpose.
     static let projectThreads = 6
     static let projectPurpose = 140
 
-    /// Every thread on the board (most recent first) with the lines Sonnet reads, then a new thread per project, then the
-    /// intents; the message alone (redacted) as the state.
+    /// Every thread on the board (most recent first) with the lines Sonnet reads, then a new thread per project; the message
+    /// alone (redacted) as the state. No intents: he only ranks places (J1, J2: on the 182 moments he took one on 54 of them, every
+    /// one a miss), so the question is purely which place.
     static func jevRequest(_ message: String, _ board: DeciderBoard, tagged: String? = nil, unattended: Bool = false) -> JevRequest {
         var seen = Set<String>()
         func name(_ base: String) -> String {
@@ -191,11 +185,10 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
         let titles = Dictionary(grouping: shown.map(title), by: { $0 }).mapValues(\.count)
         var options: [(String, Option)] = []
         var criteria: [String: Any] = [:]
-        for intent in intents { _ = seen.insert(JevClient.key(for: intent.0)) }
         for t in shown {
             let base = title(t)
             let n = name((titles[base] ?? 0) > 1 ? "\(base) (\(t.project))" : base)
-            criteria[n] = ["kind": "thread in a T3 project", "project": t.project, "now": DeciderBoard.lines(t).joined(separator: "\n")]
+            criteria[n] = ["kind": "thread", "project": t.project, "now": DeciderBoard.lines(t).joined(separator: "\n")]
             options.append((n, .thread(t.key)))
         }
         for p in board.projects {
@@ -208,10 +201,6 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
             criteria[n] = c
             options.append((n, .newThread(project: board.projectID(p))))
         }
-        for (n, words) in intents {
-            criteria[n] = words
-            options.append((n, .other(n)))
-        }
         var state = ["message": RouterTools.redacted(message)]
         if let tagged, !tagged.isEmpty { state["tagged"] = RouterTools.redacted(tagged) }
         if unattended { state["note"] = unattendedNote }
@@ -219,7 +208,7 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
                           state: state, options: options)
     }
 
-    /// Jev never sends: an ask with his three likeliest places, best first (by probability; the intents are left out). Unattended,
+    /// Jev never sends: an ask with his three likeliest places, best first (by probability). Unattended,
     /// the item's project as a new thread comes first when the repository maps to one. Nil when no place is left.
     func jevAsk(_ choice: JevClient.Choice, board: DeciderBoard, options: [(name: String, option: Option)],
                 action: RouterActionSource? = nil) -> RouterProjectDecision? {
@@ -236,7 +225,6 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
             switch o.option {
             case .thread(let id): if board.threads.contains(where: { $0.key == id }) { add(.thread(id)) }
             case .newThread(let project): add(.newThread(project: project))
-            case .other: break
             }
         }
         guard !places.isEmpty else { return nil }
