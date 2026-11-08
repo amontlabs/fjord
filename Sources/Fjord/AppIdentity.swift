@@ -1,12 +1,11 @@
 import Foundation
 
 /// Which Fjord this process is, for everything that two running Fjords would otherwise share: the support folder (state,
-/// forms, plugin, relay key), the engine socket and the engine's LaunchAgent. The installed app keeps `Fjord`,
-/// `~/.silo/engine.sock` and `org.silo.preview.engine`; a debug build, or any run started with a test or E2E flag or
-/// environment, gets its own so it can never overwrite the installed app's settings or reach its engine.
+/// forms, plugin, relay key). The installed app keeps `Fjord`; a debug build, or any run started with a test or E2E flag or
+/// environment, gets its own so it can never overwrite the installed app's settings.
 enum AppIdentity {
     /// Environment that marks a run as development even in a release build.
-    static let devEnvironmentKeys = ["FJORD_SILO_SOCKET_PATH", "FJORD_E2E", "FJORD_SUPPORT_FOLDER"]
+    static let devEnvironmentKeys = ["FJORD_E2E", "FJORD_SUPPORT_FOLDER"]
 
     static func isDevelopment(environment: [String: String] = ProcessInfo.processInfo.environment,
                               arguments: [String] = CommandLine.arguments) -> Bool {
@@ -33,19 +32,5 @@ enum AppIdentity {
     static func supportDirectory(base: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0],
                                  folder: String = supportFolderName) -> URL {
         base.appendingPathComponent(folder, isDirectory: true)
-    }
-
-    /// The Silo engine socket: `FJORD_SILO_SOCKET_PATH`, else `~/.silo-dev/engine.sock` for development, else `~/.silo/engine.sock`.
-    static func engineSocketPath(environment: [String: String] = ProcessInfo.processInfo.environment,
-                                 home: URL = FileManager.default.homeDirectoryForCurrentUser,
-                                 development: Bool? = nil) -> String {
-        if let path = environment["FJORD_SILO_SOCKET_PATH"], !path.isEmpty { return path }
-        let dev = development ?? isDevelopment(environment: environment)
-        return home.appendingPathComponent(dev ? ".silo-dev/engine.sock" : ".silo/engine.sock").path
-    }
-
-    /// The LaunchAgent plist in the app bundle. A development build never names the installed app's agent.
-    static func engineAgentPlistName(development: Bool? = nil) -> String {
-        (development ?? isDevelopment()) ? "org.silo.dev.engine.plist" : "org.silo.preview.engine.plist"
     }
 }

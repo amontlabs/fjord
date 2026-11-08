@@ -67,8 +67,6 @@ struct OnboardingView: View {
                 TypeSafeKeyField(store: store)
                 SettingsNote("Optional. With a key, Jev (TypeSafe's classifier) routes what you send and reads how each turn ended. Keys come from console.typesafe.ai.")
             }
-        case .computers:
-            EmptyView()
         }
     }
 }

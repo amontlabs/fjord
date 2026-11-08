@@ -1,7 +1,0 @@
-{
-  "capabilities": ["computers.*", "operations.*"],
-  "clientId": "fjord-debug-client",
-  "deviceId": "device-1",
-  "name": "Silo on Mac",
-  "protocol": 1
-}

@@ -14,10 +14,9 @@ import Testing
         let hub = HubState()
         var went: [AppDestination] = []
 
-        init(router: Bool = false, triage: Bool = true, computers: Bool = false) {
+        init(router: Bool = false, triage: Bool = true) {
             Demo.populate(store, .router)
             store.settings.triage = triage
-            store.settings.computers = computers
             // The demo has the Router on: each test says whether it wants it.
             store.router.enabled = router
             store.agents.enabled = router
@@ -33,9 +32,9 @@ import Testing
     }
 
     @Test func pagesFollowTheToolsThatAreOn() {
-        let all = Rig(router: true, computers: true)
+        let all = Rig(router: true)
         let ids = Set(all.items.filter { $0.kind == .page }.map(\.id))
-        #expect(ids == ["page:done", "page:router", "page:computers", "page:snippets", "page:settings", "page:categories"])
+        #expect(ids == ["page:done", "page:router", "page:snippets", "page:settings", "page:categories"])
 
         let none = Rig(router: false, triage: false)
         #expect(Set(none.items.filter { $0.kind == .page }.map(\.id)) == ["page:settings"])
@@ -46,7 +45,7 @@ import Testing
     }
 
     @Test func pagesAreNamedAsTheWindowNamesThemAndGoThere() throws {
-        let rig = Rig(router: true, computers: true)
+        let rig = Rig(router: true)
         let router = try #require(rig.item("page:router"))
         #expect(router.title == "Router" && router.weight == 1)
         #expect(try #require(rig.item("page:done")).title == "Archive")
@@ -69,12 +68,10 @@ import Testing
         #expect(offIDs.contains("setting:github.token"))
         #expect(offIDs.contains("setting:general.interval"))
         #expect(!offIDs.contains { $0.hasPrefix("setting:claude.") })
-        #expect(!offIDs.contains { $0.hasPrefix("setting:computer-defaults.") || $0.hasPrefix("setting:connected-macs.") })
 
-        let on = Rig(router: true, computers: true)
+        let on = Rig(router: true)
         let onIDs = Set(on.items.filter { $0.kind == .setting }.map(\.id))
         #expect(onIDs.contains("setting:claude.key") && onIDs.contains("setting:claude.comments"))
-        #expect(onIDs.contains("setting:computer-defaults.launch") && onIDs.contains("setting:connected-macs.add"))
         // Shortcuts follow the tools too.
         #expect(onIDs.contains("setting:shortcuts.router"))
         #expect(!offIDs.contains("setting:shortcuts.router"))
@@ -109,7 +106,7 @@ import Testing
     }
 
     @Test func everySettingsRowHasAnAnchorInSettings() {
-        let rig = Rig(router: true, computers: true)
+        let rig = Rig(router: true)
         var sections = Set<String>()
         for item in rig.items where item.kind == .setting {
             item.actions[0].run()
@@ -122,7 +119,7 @@ import Testing
     }
 
     @Test func idsAreUniqueAndStable() {
-        let rig = Rig(router: true, computers: true)
+        let rig = Rig(router: true)
         let first = rig.items.map(\.id)
         #expect(Set(first).count == first.count)
         #expect(rig.items.map(\.id) == first)
@@ -159,28 +156,6 @@ import Testing
         #expect(plain.actions.map(\.title) == ["Show snippets", "Copy text"])
     }
 
-    @Test func computersAreListedOnlyWithTheToolOnAndTheEngineUp() throws {
-        let rig = Rig(computers: true)
-        let rows = try #require(rig.store.computers.inventory?.allComputers)
-        #expect(!rows.isEmpty)
-        let items = rig.items.filter { $0.kind == .computer }
-        #expect(items.map(\.id) == rows.map { "computer:" + GuestReference.thisMac($0.id).key })
-        let row = rows[0]
-        let item = try #require(items.first)
-        #expect(item.title == row.name && item.subtitle == "\(row.kind.title) · \(row.displayState.title)")
-        item.actions[0].run()
-        #expect(rig.went == [.computerDetail(.thisMac(row.id))])
-        #expect(Rig(computers: false).items.filter { $0.kind == .computer }.isEmpty)
-    }
-
-    @Test func aRunningComputerHasTheRunningDot() throws {
-        let rig = Rig(computers: true)
-        let rows = try #require(rig.store.computers.inventory?.allComputers)
-        for item in rig.items where item.kind == .computer {
-            let row = try #require(rows.first { "computer:" + GuestReference.thisMac($0.id).key == item.id })
-            #expect((item.dot == .running) == (row.displayState == .running))
-        }
-    }
 
     @Test func projectsAskTheRouterWhileItIsOn() throws {
         let rig = Rig(router: true)
@@ -240,23 +215,10 @@ import Testing
         #expect(rig.item("setting:claude.key") != nil)
     }
 
-    @Test func theRetentionRowIsOfferedOnlyWhileAutomaticCheckpointsAreOn() {
-        let rig = Rig(computers: true)
-        #expect(rig.item("setting:computer-defaults.retention") != nil)
-        var snapshot = rig.store.computers.engineSettings
-            ?? SiloWireSettingsSnapshot(onboardingDraft: .null, revision: 1,
-                                        settings: SiloWireSettingsValues(automaticCheckpointRetentionCount: 3,
-                                                                         startComputersAtLaunch: false, startupComputerIds: []),
-                                        writeProtected: false)
-        snapshot.settings.automaticCheckpointRetentionCount = 0
-        rig.store.computers.engineSettings = snapshot
-        #expect(rig.item("setting:computer-defaults.retention") == nil)
-        #expect(rig.item("setting:computer-defaults.checkpoints") != nil && rig.item("setting:computer-defaults.launch") != nil)
-    }
 
     /// How far Settings scrolls when asked for a section, in a window too short to show the page.
     private func scrollOffset(toward anchor: String) async -> CGFloat {
-        let rig = Rig(router: true, computers: true)
+        let rig = Rig(router: true)
         rig.hub.settingsScroll = ScrollRequest(id: anchor, seq: 1)
         let size = CGSize(width: 520, height: 400)
         let hosting = NSHostingView(rootView: SettingsView(store: rig.store, hub: rig.hub).frame(width: size.width, height: size.height))
@@ -298,7 +260,7 @@ import Testing
     }
 
     @Test func buildingItIsCheap() {
-        let rig = Rig(router: true, computers: true)
+        let rig = Rig(router: true)
         _ = rig.items
         let clock = ContinuousClock()
         let took = clock.measure { _ = rig.items }

@@ -509,25 +509,6 @@ enum LaunchAtLogin {
 // MARK: - App delegate
 
 @MainActor
-enum AppTermination {
-    private static var bypassNextRequest = false
-
-    static func terminateWithoutPrompt() {
-        bypassNextRequest = true
-        NSApp.terminate(nil)
-    }
-
-    static func consumeBypass() -> Bool {
-        defer { bypassNextRequest = false }
-        return bypassNextRequest
-    }
-
-    static func shouldInspectComputers(computersEnabled: Bool, engineAvailable: Bool) -> Bool {
-        computersEnabled && engineAvailable
-    }
-}
-
-@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store!
     private var hub: HubController?
@@ -537,36 +518,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appWindow: AppWindowController?
     private var sigtermSource: DispatchSourceSignal?
     private var motion: MotionScriptPlayer?
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !AppTermination.consumeBypass(), let store, store.persists, !Store.isDemo else { return .terminateNow }
-        guard AppTermination.shouldInspectComputers(computersEnabled: store.computersOn,
-                                                   engineAvailable: store.hasEngineConnection) else { return .terminateNow }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                try await self.store.computers.connect()
-                guard let inventory = self.store.computers.inventory else {
-                    throw EngineClientError.invalidAction("The computer list was empty.")
-                }
-                guard let prompt = ComputerQuitPrompt.make(inventory: inventory) else {
-                    try await self.store.engineClient.engineDisconnect()
-                    NSApp.reply(toApplicationShouldTerminate: true)
-                    return
-                }
-                self.showWindow(nil)
-                self.store.computers.presentQuitPrompt(prompt) { choice in
-                    NSApp.reply(toApplicationShouldTerminate: choice != .cancel)
-                }
-            } catch {
-                self.showWindow(nil)
-                self.store.computers.presentQuitPrompt(.checkFailed(error.localizedDescription)) { choice in
-                    NSApp.reply(toApplicationShouldTerminate: choice != .cancel)
-                }
-            }
-        }
-        return .terminateLater
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
@@ -814,7 +765,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleSigterm() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler { AppTermination.terminateWithoutPrompt() }
+        source.setEventHandler { NSApp.terminate(nil) }
         source.resume()
         sigtermSource = source
     }

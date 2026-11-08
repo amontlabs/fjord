@@ -98,7 +98,7 @@ Acts: ThreadSender / ThreadLauncher / ThreadActs → T3Command via T3Client.disp
 | 16 | Courier and native host sweep | 12, 13, 15 | — |
 | 17 | Demo and shots sweep | 16 | 18 |
 | 18 | README and DEVELOPMENT | 16 | 17 |
-| 19 | *Later phase:* Silo computers as T3 environments | 18 | — |
+| 19 | ~~*Later phase:* Silo computers as T3 environments~~ **Dropped for now:** the Computers feature is removed while Silo is rewritten | 18 | — |
 
 ### Step 1: neutral names (`refactor:`)
 A pure rename with no behaviour change, done with `sed` plus fixes:
@@ -333,6 +333,7 @@ Run it alone, because it touches almost everything.
   agent's config. Remove the Claude-only flags.
 
 ### Step 19 (later phase): Silo computers as T3 environments
+- **Dropped for now (2026-11-08):** Fjord's Computers feature was removed outright while Silo is rewritten; nothing below is built.
 - Silo's agent tools install `t3` and the provider CLIs on the guest. Fjord mints a token with `guest.exec t3 auth session issue …`
   and reaches the guest's port through Silo's SSH forward. This needs a spike first: `t3 serve` bind address and forward lifetime
   (map §9.6).

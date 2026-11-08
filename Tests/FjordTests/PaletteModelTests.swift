@@ -473,19 +473,13 @@ import Testing
         #expect(PaletteModel.owner(of: nil) == nil)
     }
 
-    @Test func itDoesNotOpenOverTheQuitDialogAndFollowsTheWindowsPlace() {
+    @Test func itFollowsTheWindowsPlace() {
         let store = InboxFixture.store([])
         let navigator = AppNavigator(fallback: .done, defaults: nil)
         let model = make(.fixed([item("page:1", "Router", kind: .page)]), store: store, navigator: navigator)
         let place = model.navigationSelection
         navigator.go(.router)
         #expect(model.navigationSelection != place)
-        if let prompt = ComputerQuitPrompt.make(inventory: MockEngineClient.demoInventory) {
-            store.computers.presentQuitPrompt(prompt)
-            #expect(model.quitPromptUp)
-            model.open()
-            #expect(!model.isOpen)
-        }
     }
 
     @Test func keycapsAreGlyphsWhereTheKeyHasOne() {

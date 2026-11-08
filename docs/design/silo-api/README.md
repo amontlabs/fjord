@@ -1,5 +1,7 @@
 # Silo engine API: a spec for Fjord's frontend
 
+> **Fjord no longer has a Computers feature (2026-11-08).** It was removed outright while Silo is rewritten, so this spec describes an integration Fjord does not contain.
+
 Silo becomes an engine: a Rust library run by `silod`, a long-running LaunchAgent in the Mac user’s GUI login session. Hosts and controllers are Macs only; they manage both Linux and macOS computers (95 §3). Fjord becomes the macOS app that drives it. This folder specifies the engine's full API: everything Silo can do today except drawing UI, plus what Fjord and the missing macOS features need.
 
 Status as of 2026-10-13: drafted, citation-checked, reconciled and audited. It's against Silo `94d81937` and Fjord `87b3623`. **0 owner decisions are open**: all 37 are decided by [95](95-decisions.md), including its §3 amendments. Live evidence is folded into the contracts: **8 probes SETTLED, 15 PARTLY, 10 OPEN for implementation, 4 CLOSED**. The 25 remaining probe/remainder items and 9 research items are tracked in [80 §4](80-coverage-and-consistency.md#4-consolidated-open-questions).

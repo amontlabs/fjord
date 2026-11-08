@@ -969,8 +969,6 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         case .category(let id): store.categories.first { $0.id == id }?.title ?? "Inbox"
         case .done: "Archive"
         case .router: "Router"
-        case .computers: "Computers"
-        case .computerDetail(let target): store.computers.row(target)?.name ?? "Computer"
         case .settings: "Settings"
         case .categories: "Inbox categories"
         case .snippets: "Snippets"
@@ -1263,13 +1261,6 @@ struct AppRootView: View {
             .modifier(AppRootRouterOffer(store: store, openInRouter: actions.openInRouter))
             // Its content put back in after a close draws what changed meanwhile as it is (`WindowArrival`).
             .windowArrival()
-            .overlay {
-                if let prompt = store.computers.quitPrompt {
-                    ComputersQuitDialog(prompt: prompt, working: store.computers.isQuitWorking,
-                                        error: store.computers.quitError, choose: store.computers.chooseQuit)
-                        .zIndex(100)
-                }
-            }
             .overlay { PaletteOverlay(palette: palette, store: store) }
     }
 }

@@ -47,7 +47,7 @@ import Testing
     }
 
     @Test func tokensRoundTrip() {
-        for d in [AppDestination.category(a), .done, .router, .computers, .computerDetail(.thisMac("computer-1")), .settings, .categories, .snippets] {
+        for d in [AppDestination.category(a), .done, .router, .settings, .categories, .snippets] {
             #expect(AppDestination(token: d.token) == d)
         }
         #expect(AppDestination(token: "category:nope") == nil)
@@ -82,7 +82,6 @@ import Testing
         #expect(AppDestination.all(shown: [a, b], tools: [.triage])
             == [.category(a), .category(b), .done, .snippets, .settings, .categories])
         #expect(AppDestination.all(shown: [a, b], tools: [.router]) == [.router, .snippets, .settings])
-        #expect(AppDestination.all(shown: [a, b], tools: [.computers]) == [.computers, .snippets, .settings])
         #expect(AppDestination.all(shown: [a, b], tools: []) == [.settings])
     }
 

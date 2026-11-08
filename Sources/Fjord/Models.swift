@@ -78,8 +78,6 @@ struct CIStatus: Codable, Hashable {
 struct AppSettings: Codable {
     /// Triage's switch (Tools.swift); the Router's is its own state's. Off until switched on.
     var triage: Bool?
-    /// The Computers tool's switch (Tools.swift); off until switched on.
-    var computers: Bool?
     /// The tools were picked on first launch: until then the window shows the onboarding.
     var toolsPicked: Bool?
     var pollInterval: Double = 60

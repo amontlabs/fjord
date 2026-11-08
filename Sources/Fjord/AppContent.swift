@@ -275,14 +275,6 @@ struct AppContent: View {
             case .router:
                 RouterCodeView(store: store, model: routerModel, checksClaudeCode: checksClaudeCode, embedded: true,
                                leadingInset: leadingInset)
-            case .computers:
-                ComputersView(store: store, navigator: navigator, leadingInset: leadingInset)
-            case .computerDetail(let target):
-                if store.computersEngineReady {
-                    ComputerDetailView(store: store, navigator: navigator, target: target, leadingInset: leadingInset)
-                } else {
-                    ComputersView(store: store, navigator: navigator, leadingInset: leadingInset)
-                }
             case .settings:
                 AppPage(title: "Settings", leadingInset: leadingInset, trailing: { EmptyView() }) {
                     column { SettingsView(store: store, hub: hub) }
@@ -302,29 +294,6 @@ struct AppContent: View {
         // Under the window's top bar only, where it has a ground of its own (before macOS 26): the header shows it.
         .background { CDS.Surface.s1.padding(.top, Self.groundTop) }
         .clipped()
-        .overlay(alignment: .top) {
-            if let receipt = store.computers.currentJobReceipt {
-                ComputerJobReceiptBanner(receipt: receipt) {
-                    Task { await store.computers.acknowledgePresentedJob(receipt.jobId) }
-                }
-                .padding(.top, CDS.TitleBar.header + 8)
-                .padding(.horizontal, 20)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(20)
-            }
-        }
-        .task(id: navigator.selection) {
-            switch navigator.selection {
-            case .computers:
-                await store.computers.activate()
-            case .computerDetail(let target):
-                await store.computers.activate()
-                await store.computers.loadCheckpoints(for: target)
-            default:
-                await store.computers.deactivate()
-            }
-        }
-        .onDisappear { Task { await store.computers.deactivate() } }
     }
 
     /// Where the page's own ground starts: under the top bar before macOS 26, at the top on 26, where the page runs under
@@ -339,44 +308,5 @@ struct AppContent: View {
         content()
             .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
-    }
-}
-
-private struct ComputerJobReceiptBanner: View {
-    let receipt: ComputerJobReceipt
-    let acknowledge: () -> Void
-
-    private var ink: Color {
-        switch receipt.tone {
-        case .success: CDS.Text.secondary
-        case .warning: CDS.Text.warning
-        case .danger: CDS.Text.danger
-        }
-    }
-
-    private var symbol: String {
-        switch receipt.tone {
-        case .success: "checkmark.circle.fill"
-        case .warning: "exclamationmark.circle.fill"
-        case .danger: "xmark.circle.fill"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(ink)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(receipt.action).font(CDS.sans(12, .medium)).foregroundStyle(CDS.Text.primary)
-                Text(receipt.message).font(CDS.sans(11)).foregroundStyle(CDS.Text.secondary)
-            }
-            Spacer(minLength: 10)
-            ActionButton("Acknowledge", action: acknowledge)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: 640)
-        .background(CDS.Surface.s2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(CDS.border, lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
     }
 }

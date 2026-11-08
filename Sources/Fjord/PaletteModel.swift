@@ -184,27 +184,17 @@ final class PaletteModel {
     /// Where the window is: a change while the palette is open came from outside it (an action closes it first).
     var navigationSelection: AppDestination { navigator.selection }
 
-    /// Whether the computers' quit dialog is up, which the palette gives way to.
-    var quitPromptUp: Bool { store.computers.quitPrompt != nil }
-
     /// What the sources are made of, as numbers that move when it does: the store's revisions (the inbox and its categories,
     /// the brief's entries, Claude's sessions and agents, the actions' runs, the snippets, the project folders), the Router's
-    /// and the tools' switches, whether the Router can send, and the computers (a few). Cheap, so the view can watch it.
+    /// and the tools' switches, whether the Router can send. Cheap, so the view can watch it.
     struct Stamp: Equatable {
         var inbox: Int, display: Int, router: Int, corpus: Int
         var routerOn: Bool, canSend: Bool, tools: Set<Tool>
-        var computers: Int
         /// The brief: its threads, what needs you and your marks.
         var brief: Int
     }
 
     var sourceStamp: Stamp {
-        var computers = Hasher()
-        for computer in store.computers.inventory?.allComputers ?? [] {
-            computers.combine(computer.id)
-            computers.combine(computer.name)
-            computers.combine(computer.displayState.title)
-        }
         let briefs = store.routerBriefs
         var brief = Hasher()
         for (project, doc) in briefs.docs.sorted(by: { $0.key < $1.key }) {
@@ -216,7 +206,7 @@ final class PaletteModel {
         brief.combine(briefs.archived)
         return Stamp(inbox: store.inboxRevision, display: store.inboxDisplayRevision, router: store.routerRevision,
                      corpus: store.corpusRevision, routerOn: store.routerOn, canSend: routerModel.canSend(store),
-                     tools: store.tools, computers: computers.finalize(), brief: brief.finalize())
+                     tools: store.tools, brief: brief.finalize())
     }
 
     /// Lists the data again soon, once for the changes that come together (Claude's sessions change by the second).
@@ -257,8 +247,7 @@ final class PaletteModel {
     /// keyboard.
     func open(replaying event: NSEvent? = nil, pointer: Bool = false) {
         if let event { pendingKeys.append(event) }
-        // Not over the quit dialog: the keyboard is its own.
-        guard !isOpen, store.computers.quitPrompt == nil else { return }
+        guard !isOpen else { return }
         let span = LatencySignposts.signposter.beginInterval("Palette open to first flush")
         previousWindow = NSApp?.keyWindow
         previousResponder = Self.owner(of: previousWindow?.firstResponder)

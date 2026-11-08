@@ -138,26 +138,13 @@ struct AppSidebar: View {
                         }
                         RouterSidebarRow(store: store, navigator: navigator)
                     }
-                    if store.computersOn {
-                        if store.triageOn || store.routerOn {
-                            rule.padding(.top, 4)
-                            Color.clear.frame(height: M.groupTop - 4)
-                        }
-                        AppSidebarRow(title: "Computers",
-                                      on: navigator.selection == .computers || isComputerDetail,
-                                      tip: "Computers", action: { navigator.go(.computers) }) { on in
-                            Image(systemName: "desktopcomputer")
-                                .font(.system(size: M.symbol, weight: .medium))
-                                .chromeInk(on ? .primary : .tertiary, glass: onGlass)
-                        }
-                    }
                 }
                 .padding(.bottom, 12)
             }
             .scrollIndicators(.never)
             VStack(alignment: .leading, spacing: rowGap) {
                 // The snippets serve both tools: there while either is on.
-                if store.triageOn || store.routerOn || store.computersOn {
+                if store.triageOn || store.routerOn {
                     AppSidebarRow(title: "Snippets", on: navigator.selection == .snippets, tip: "Snippets", action: { navigator.go(.snippets) }) { on in
                         Image(systemName: Snippet.symbol).font(.system(size: M.symbol, weight: .medium))
                             .chromeInk(on ? .primary : .secondary, glass: onGlass)
@@ -183,11 +170,6 @@ struct AppSidebar: View {
         // Always laid out at its full width: the frame around it narrows, so nothing here reflows or moves.
         .frame(width: AppRootView.sidebarWidth, alignment: .topLeading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var isComputerDetail: Bool {
-        if case .computerDetail = navigator.selection { return true }
-        return false
     }
 
     private func categoryRow(_ category: InboxCategory, nested: Bool = false) -> some View {

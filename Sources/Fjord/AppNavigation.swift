@@ -9,9 +9,6 @@ enum AppDestination: Hashable {
     case category(UUID)
     case done
     case router
-    case computers
-    /// A computer of This Mac or of a connected device; ids are owner-local, so the owner is part of the place.
-    case computerDetail(GuestReference)
     case settings
     case categories
     case snippets
@@ -22,8 +19,6 @@ enum AppDestination: Hashable {
         case .category(let id): "category:" + id.uuidString
         case .done: "done"
         case .router: "router"
-        case .computers: "computers"
-        case .computerDetail(let target): "computer-detail:" + target.key
         case .settings: "settings"
         case .categories: "categories"
         case .snippets: "snippets"
@@ -34,22 +29,12 @@ enum AppDestination: Hashable {
         switch token {
         case "done": self = .done
         case "router": self = .router
-        case "computers": self = .computers
         case "settings": self = .settings
         case "categories": self = .categories
         case "snippets": self = .snippets
         default:
-            if token.hasPrefix("computer-detail:") {
-                let key = String(token.dropFirst("computer-detail:".count))
-                guard let separator = key.firstIndex(of: "/") else { return nil }
-                let owner = String(key[..<separator])
-                let computerId = String(key[key.index(after: separator)...])
-                guard !owner.isEmpty, !computerId.isEmpty else { return nil }
-                self = .computerDetail(GuestReference(deviceId: owner == "local" ? nil : owner, computerId: computerId))
-            } else {
-                guard token.hasPrefix("category:"), let id = UUID(uuidString: String(token.dropFirst("category:".count))) else { return nil }
-                self = .category(id)
-            }
+            guard token.hasPrefix("category:"), let id = UUID(uuidString: String(token.dropFirst("category:".count))) else { return nil }
+            self = .category(id)
         }
     }
 
@@ -75,7 +60,6 @@ enum AppDestination: Hashable {
         switch self {
         case .category, .done, .categories: .triage
         case .router: .router
-        case .computers, .computerDetail: .computers
         case .settings, .snippets: nil
         }
     }
@@ -89,7 +73,7 @@ enum AppDestination: Hashable {
     /// The sidebar's destinations in order: the categories shown, the archive, the Router, the snippets, Settings, Inbox
     /// categories; those of a tool that is off left out.
     static func all(shown: [UUID], tools: Set<Tool>) -> [AppDestination] {
-        (shown.map { .category($0) } + [.done, .router, .computers, .snippets, .settings, .categories]).filter { $0.isOn(tools) }
+        (shown.map { .category($0) } + [.done, .router, .snippets, .settings, .categories]).filter { $0.isOn(tools) }
     }
 
     /// Where this really goes: a category that is gone or hidden lands on the first category shown (the archive when there is none);
@@ -97,7 +81,7 @@ enum AppDestination: Hashable {
     func resolved(shown: [UUID], tools: Set<Tool>) -> AppDestination {
         let inbox: AppDestination = shown.first.map { .category($0) } ?? .done
         if !isOn(tools) {
-            return tools.contains(.triage) ? inbox : tools.contains(.router) ? .router : tools.contains(.computers) ? .computers : .settings
+            return tools.contains(.triage) ? inbox : tools.contains(.router) ? .router : .settings
         }
         if case .category(let id) = self, !shown.contains(id) { return inbox }
         return self

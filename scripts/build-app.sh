@@ -57,7 +57,6 @@ elif [ -n "${SIGN_IDENTITY:-}" ]; then
 else
   SIGNING_IDENTITY="-"
 fi
-scripts/build-silod.sh "$APP" "$SIGNING_IDENTITY"
 if [ "$SIGNING_IDENTITY" = "-" ]; then
   codesign --force --sign - "$APP"
 else

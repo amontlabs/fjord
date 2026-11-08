@@ -14,7 +14,7 @@ enum Palette {
 /// One thing the palette can list: a brief's thread, a session, an inbox item, a place, a setting, a command.
 struct PaletteItem: Identifiable {
     enum Kind: String, CaseIterable {
-        case thread, session, entry, project, category, computer, snippet, page, setting, command, send
+        case thread, session, entry, project, category, snippet, page, setting, command, send
     }
 
     /// Stable across opens, prefixed with the kind ("thread:<project>/<thread>", "session:<id>", "entry:<thing id>", "page:<token>",

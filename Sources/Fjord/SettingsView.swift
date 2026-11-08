@@ -22,14 +22,12 @@ struct SettingsView: View {
     static let notificationsID = "notifications"
     static let generalID = "general"
     static let toolsID = "tools"
-    static let computerDefaultsID = "computer-defaults"
-    static let connectedMacsID = "connected-macs"
     static let githubID = "github"
     static let claudeID = "claude"
     static let codeFoldersID = "code-folders"
     static let shortcutsID = "shortcuts"
     /// Every section's anchor, in page order (the ⌘K palette scrolls to one for each of its rows).
-    static let anchors = [toolsID, computerDefaultsID, connectedMacsID, githubID, notificationsID, claudeID, codeFoldersID,
+    static let anchors = [toolsID, githubID, notificationsID, claudeID, codeFoldersID,
                           shortcutsID, updatesID, generalID]
 
     var body: some View {
@@ -37,7 +35,6 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: CDS.Settings.sectionGap) {
                     tools.id(Self.toolsID)
-                    if store.computersOn && store.computersEngineReady { ComputerHostSettings(store: store) }
                     if store.triageOn { account.id(Self.githubID) }
                     notifications.id(Self.notificationsID)
                     // The Router's own sections read the Router's state in views of their own: what changes with every read of
@@ -150,11 +147,6 @@ struct SettingsView: View {
             }
             SettingsDivider()
             RouterSettings(store: store, part: .tool)
-            SettingsDivider()
-            SettingsRow("Computers", adornment: Self.toolMark(.computers),
-                        info: ("Computers", "Manage Linux and macOS computers, lifecycle actions, displays and checkpoints.")) {
-                SettingsSwitch("Computers", isOn: Binding(get: { store.computersOn }, set: { store.setTool(.computers, on: $0) }))
-            }
         }
     }
 
@@ -471,7 +463,7 @@ private struct RouterSettings: View {
                         } else {
                             SettingsNest {
                                 ForEach(muted, id: \.self) { folder in
-                                    SettingsRow(name(folder), description: folder.isEmpty || folder.hasPrefix("guest-project:") ? nil : folder) {
+                                    SettingsRow(name(folder), description: folder.isEmpty ? nil : folder) {
                                         Button("Unmute") { store.setFolderMuted(folder, false) }
                                             .buttonStyle(SettingsButtonStyle(size: .sm))
                                             .accessibilityLabel("Unmute \(name(folder))")

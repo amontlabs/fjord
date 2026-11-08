@@ -75,10 +75,6 @@ final class Updater {
         return try await Task.detached(priority: .utility) { try Updater.unpack(zip, version: release.version) }.value
     }
     @ObservationIgnored var installer: (URL) throws -> Void = Updater.swapIn
-    /// The engine inside an app bundle: the staged update's and the running app's. A different one means the update
-    /// carries a new silod, which the new Fjord hands the running engine off to on its first launch (EngineHandoff.swift).
-    @ObservationIgnored var engineVersion: (URL) -> String? = EngineHandoffMarker.engineVersion(in:)
-    @ObservationIgnored var handoffMarks: UserDefaults = .standard
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var work: Task<Void, Never>?
     @ObservationIgnored private var staged: URL?
@@ -332,12 +328,9 @@ final class Updater {
         // Failed: the restart itself did, so the verified app is still here to try again with.
         guard phase == .ready || phase.isFailed, let staged else { return }
         phase = .installing
-        let carriesEngine = engineVersion(staged).map { $0 != engineVersion(Bundle.main.bundleURL) } ?? false
-        if carriesEngine { EngineHandoffMarker.set(handoffMarks) }
         do {
             try installer(staged)
         } catch {
-            if carriesEngine { EngineHandoffMarker.clear(handoffMarks) }
             phase = .failed(error.localizedDescription)
         }
     }
@@ -364,7 +357,7 @@ final class Updater {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script, "sh", String(ProcessInfo.processInfo.processIdentifier), target.path, staged.path]
         try process.run()
-        AppTermination.terminateWithoutPrompt()
+        NSApp.terminate(nil)
     }
 
     /// Screenshots and demos: show a release in a given phase without touching the network.

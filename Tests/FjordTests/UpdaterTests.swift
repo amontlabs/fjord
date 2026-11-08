@@ -231,42 +231,6 @@ import Testing
         #expect(rig.transfers.count == 2)
     }
 
-    @MainActor @Test(arguments: [("2.0.0", true), ("1.0.0", false)]) func anUpdateWithANewSiloMarksTheEngineHandoffForTheNextLaunch(
-        staged: String, marks: Bool
-    ) async throws {
-        let defaults = try #require(UserDefaults(suiteName: "fjord-handoff-\(UUID().uuidString)"))
-        let rig = Rig(delivers: true)
-        rig.updater.handoffMarks = defaults
-        let app = rig.app
-        rig.updater.engineVersion = { $0 == app ? staged : "1.0.0" }
-        await rig.updater.check(manual: true)
-        rig.updater.download()
-        try await rig.settle { rig.updater.phase == .ready }
-
-        rig.updater.install()
-
-        #expect(rig.installed == [rig.app])
-        #expect(defaults.bool(forKey: EngineHandoffMarker.key) == marks)
-        #expect(EngineHandoffMarker.take(defaults) == marks)
-        #expect(!EngineHandoffMarker.take(defaults))
-    }
-
-    @MainActor @Test func aFailedSwapTakesTheHandoffMarkBack() async throws {
-        let defaults = try #require(UserDefaults(suiteName: "fjord-handoff-\(UUID().uuidString)"))
-        let rig = Rig(delivers: true)
-        rig.installFailures = ["Can't write to /Applications"]
-        rig.updater.handoffMarks = defaults
-        let app = rig.app
-        rig.updater.engineVersion = { $0 == app ? "2.0.0" : "1.0.0" }
-        await rig.updater.check(manual: true)
-        rig.updater.download()
-        try await rig.settle { rig.updater.phase == .ready }
-
-        rig.updater.install()
-
-        #expect(!defaults.bool(forKey: EngineHandoffMarker.key))
-    }
-
     @MainActor @Test func aFailedRestartIsRetriedWithTheVerifiedAppNotDownloadedAgain() async throws {
         let rig = Rig(delivers: true)
         rig.installFailures = ["Can't write to /Applications"]

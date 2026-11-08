@@ -78,7 +78,7 @@ struct RouterAskBack: Identifiable, Equatable {
 @Observable @MainActor final class RouterDispatcher {
     /// Where a message goes without asking a model, or that it needs the decider.
     enum Plan: Equatable {
-        /// A thread of this Mac (or a remote computer's Desktop session) you replied to: its session id.
+        /// A thread you replied to: its session id.
         case reply(project: String, thread: String, session: String)
         /// A T3 thread you tagged, or a Retry's confirmed place.
         case send(String)

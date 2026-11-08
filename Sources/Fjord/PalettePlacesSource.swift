@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 // The palette's source for places (docs/design/palette/DESIGN.md, Sources): the window's pages, the rows of Settings (each takes
-// you to its section), the few commands that hang off no row, the computers, the snippets and the projects. Made once when the
+// you to its section), the few commands that hang off no row, the snippets and the projects. Made once when the
 // palette opens, from what is on screen now: a tool that is off, or a section Settings doesn't show, has no items.
 
 @MainActor
@@ -12,7 +12,6 @@ enum PalettePlacesSource {
         items += pages(context)
         items += commands(context)
         items += settingsRows(context)
-        items += computers(context)
         items += snippets(context)
         items += projects(context)
         return PaletteSourceOutput(items: items)
@@ -26,12 +25,11 @@ enum PalettePlacesSource {
         switch destination {
         case .done: ("Archive", "archivebox", ["done", "finished", "archived", "inbox"])
         case .router: ("Router", Tool.router.symbol, ["claude", "sessions", "chat", "agents"])
-        case .computers: ("Computers", Tool.computers.symbol, ["machines", "vms", "virtual machines", "linux", "macos"])
         case .snippets: ("Snippets", Snippet.symbol, ["saved prompts", "prompts", "text"])
         case .settings: ("Settings", "gearshape", ["preferences", "options", "configuration"])
         case .categories: ("Inbox categories", "tray.2", ["inbox", "rules", "groups", "sections", "triage"])
-        // A category is a Triage item's; a computer, a run or the rest of them are reached from their own rows.
-        case .category, .computerDetail: nil
+        // A category is a Triage item's, reached from its own row.
+        case .category: nil
         }
     }
 
@@ -85,22 +83,7 @@ enum PalettePlacesSource {
         sections.append(SettingsSectionSpec(anchor: SettingsView.toolsID, title: "Tools", keywords: ["switch", "on", "off", "enable", "disable"], rows: [
             SettingsRowSpec(slug: "triage", title: "Triage", keywords: ["github", "inbox", "tool"]),
             SettingsRowSpec(slug: "router", title: "Router", keywords: ["claude", "sessions", "tool", "hook", "plugin"], anchor: SettingsView.routerID),
-            SettingsRowSpec(slug: "computers", title: "Computers", keywords: ["silo", "vms", "machines", "tool"]),
         ]))
-        if store.computersOn && store.computersEngineReady {
-            var defaults = [SettingsRowSpec(slug: "checkpoints", title: "Automatic checkpoints", keywords: ["snapshots", "backup"])]
-            // Off (a count of zero), the retention row is hidden, as in Settings.
-            if (store.computers.engineSettings?.settings.automaticCheckpointRetentionCount ?? 3) > 0 {
-                defaults.append(SettingsRowSpec(slug: "retention", title: "Retain automatic checkpoints", keywords: ["snapshots", "keep", "how many"]))
-            }
-            defaults.append(SettingsRowSpec(slug: "launch", title: "Start computers at launch", keywords: ["autostart", "boot", "startup"]))
-            sections.append(SettingsSectionSpec(anchor: SettingsView.computerDefaultsID, title: "Computer defaults", keywords: ["computers"], rows: defaults))
-            sections.append(SettingsSectionSpec(anchor: SettingsView.connectedMacsID, title: "Connected Macs", keywords: ["computers", "remote"], rows: [
-                SettingsRowSpec(slug: "allow", title: "Allow other Macs to connect", keywords: ["host", "ssh", "remote", "share"]),
-                SettingsRowSpec(slug: "add", title: "Add a Mac", keywords: ["ssh", "address", "connect", "remote", "host"]),
-                SettingsRowSpec(slug: "ssh", title: "SSH setup", keywords: ["key", "host key", "address", "remote"]),
-            ]))
-        }
         if store.triageOn {
             sections.append(SettingsSectionSpec(anchor: SettingsView.githubID, title: "GitHub", keywords: ["account"], rows: [
                 SettingsRowSpec(slug: "token", title: "Personal access token",
@@ -212,32 +195,10 @@ enum PalettePlacesSource {
             }
         }
         command("tools", "Turn tools on or off", "Command · Settings", "switch.2",
-                keywords: ["tools", "triage", "router", "computers", "enable", "disable", "switch", "settings"]) {
+                keywords: ["tools", "triage", "router", "enable", "disable", "switch", "settings"]) {
             showSettings(context, section: SettingsView.toolsID)
         }
         return items
-    }
-
-    // MARK: Computers
-
-    private static func computers(_ context: PaletteContext) -> [PaletteItem] {
-        let store = context.store
-        guard store.computersOn && store.computersEngineReady, store.computers.inventory != nil else { return [] }
-        return store.computers.ownerGroups.flatMap { group in
-            group.inventory.allComputers.map { row in
-                let state = row.displayState
-                let target = GuestReference(deviceId: group.deviceId, computerId: row.id)
-                let owner = group.deviceId == nil ? "" : " · \(group.name)"
-                return PaletteItem(
-                    id: "computer:" + target.key, kind: .computer, title: row.name,
-                    subtitle: "\(row.kind.title) · \(state.title)\(owner)",
-                    keywords: ["computer", "machine", "vm", row.kind.title, state.title] + (group.deviceId == nil ? [] : [group.name]),
-                    icon: .symbol(Tool.computers.symbol), dot: state == .running ? .running : nil, weight: 1,
-                    actions: [PaletteAction(id: "show", title: "Show", symbol: Tool.computers.symbol) {
-                        context.go(.computerDetail(target))
-                    }])
-            }
-        }
     }
 
     // MARK: Snippets

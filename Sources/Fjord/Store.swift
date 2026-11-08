@@ -9,95 +9,8 @@ final class Store {
     /// Demo and snapshot runs: never touch the Keychain (a new build would stop on an access prompt).
     nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots", "--window", "--window-shots"].contains($0) }
 
-    @ObservationIgnored private(set) var engineClient: any EngineClient
-    private(set) var hasEngineConnection: Bool
-    @ObservationIgnored let engineLauncher: EngineLauncher?
-    @ObservationIgnored let computers: ComputersModel
-    @ObservationIgnored private var engineConnectAttempt: Task<Void, Never>?
-
-    init(engineClient: (any EngineClient)? = nil, engineLauncher: EngineLauncher? = nil) {
-        let offlineContext = Store.isDemo || UnderTest.isRunning
-        let socketPath = SocketEngineClient.defaultSocketPath
-        let defaultClient: any EngineClient
-        if offlineContext { defaultClient = MockEngineClient() }
-        else { defaultClient = UnavailableEngineClient() }
-        let selectedClient = engineClient ?? defaultClient
-        self.engineClient = selectedClient
-        self.hasEngineConnection = selectedClient is MockEngineClient || selectedClient is SocketEngineClient
-        self.engineLauncher = engineLauncher ?? (offlineContext ? nil : EngineLauncher(socketPath: socketPath))
-        let computers = ComputersModel(client: selectedClient, initialInventory: (selectedClient as? MockEngineClient)?.inventory)
-        self.computers = computers
+    init() {
         wireThreads()
-    }
-
-    var computersEngineReady: Bool { hasEngineConnection }
-
-    /// Probe an engine only when the user opens Computers. This can attach to Silo.app's shared owner but never registers
-    /// Fjord's LaunchAgent.
-    func inspectComputersEngine() async {
-        guard let engineLauncher else { return }
-        await engineLauncher.inspect()
-        await attachConnectedEngine()
-        await runEngineUpdate(automatic: true)
-    }
-
-    /// Connects to a running engine without the Computers page (never registers anything): the Router's guest delivery
-    /// needs it at launch and on first use. Concurrent callers share one attempt; an engine already attached is left alone.
-    func ensureEngineConnected() async {
-        if hasEngineConnection { return }
-        if let attempt = engineConnectAttempt { await attempt.value; return }
-        guard let engineLauncher else { return }
-        let attempt = Task { @MainActor [weak self] in
-            await engineLauncher.inspect()
-            await self?.attachConnectedEngine()
-        }
-        engineConnectAttempt = attempt
-        await attempt.value
-        engineConnectAttempt = nil
-    }
-
-    /// The Computers page's Update button, and the retry after a blocked update.
-    func updateComputersEngine() async {
-        await runEngineUpdate(automatic: false)
-    }
-
-    /// The engine handoff (see EngineHandoff.swift). The Computers page keeps showing the old engine's computers until the
-    /// old engine leaves, then the new engine's.
-    private func runEngineUpdate(automatic: Bool) async {
-        guard let engineLauncher else { return }
-        if automatic { await engineLauncher.continueUpdateIfAutomatic() } else { await engineLauncher.updateEngine() }
-        await attachConnectedEngine()
-    }
-
-    /// The first launch after a Fjord update that carries a new silod: connect without registering anything and hand off.
-    func resumeEngineHandoffIfPending() async {
-        guard EngineHandoffMarker.take() else { return }
-        await inspectComputersEngine()
-    }
-
-    /// The Computers page calls this only from its visible Enable action.
-    func enableComputersEngine() async {
-        guard let engineLauncher else { return }
-        await engineLauncher.enable()
-        await attachConnectedEngine()
-    }
-
-    func openEngineApprovalSettings() {
-        engineLauncher?.openApprovalSettings()
-    }
-
-    private func attachConnectedEngine() async {
-        guard let client = engineLauncher?.client else {
-            hasEngineConnection = false
-            return
-        }
-        engineClient = client
-        hasEngineConnection = true
-        await computers.replaceClient(client)
-        do { try await computers.connect() }
-        catch { computers.actionError = error.localizedDescription }
-        // Right after an engine update its saved items are typically refused until the user allows them.
-        await computers.refreshKeychainStatus()
     }
 
     // The inbox: categories of things (see InboxModel.swift, InboxStore.swift).
@@ -564,7 +477,6 @@ final class Store {
         updater.skipped = { [weak self] in self?.settings.skippedVersion }
         updater.onSkip = { [weak self] in self?.settings.skippedVersion = $0 }
         updater.start()
-        if !UnderTest.isRunning { Task { await resumeEngineHandoffIfPending() } }
         observeSleep()
         if triageOn { restartPolling() }
         // The Router is the only reader of T3's threads, and they have no switch of their own: they follow it.

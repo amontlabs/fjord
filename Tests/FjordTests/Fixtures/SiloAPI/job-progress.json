@@ -1,9 +1,0 @@
-{
-  "jobId": "job:123",
-  "source": "lifecycle",
-  "data": {
-    "computerId": "computer-1",
-    "action": "start",
-    "step": "network"
-  }
-}

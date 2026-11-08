@@ -17,7 +17,7 @@ Every T3 fact below was read in source. Items marked **unverified** were not run
 - **Fjord becomes a client of the T3 server.** One WebSocket per T3 environment gives every thread's state, already computed. That one feed replaces all six private Claude sources Fjord reads today (Desktop session JSON, transcripts, process registry, LevelDB unread dots, the `/private/tmp/claude-<uid>` task folder, and Fjord's own hook and plugin).
 - **Acting gets simpler and more honest.** T3 commands send your words as yours, answer questions, approve or decline permissions (which Fjord can't do today), implement plans, interrupt, cancel or edit a queued message, archive, and mark read. The plugin, the hook, the relay key, the carriers, the leases and the `claude://` deep links all go.
 - **Not supported:** claude.ai Projects and cloud threads, sessions in the Claude desktop app, and following a terminal `claude` live. T3 can import old Claude Code sessions once and resume them. The Courier (Chrome extension) has no T3 counterpart, and I recommend dropping it rather than keeping it next to T3.
-- **Fjord keeps:** the brief, routing, Jev, Triage, the GitHub client, Silo computers and every UI surface. Its own model calls also stay, because T3's text generation isn't exposed over RPC.
+- **Fjord keeps:** the brief, routing, Jev, Triage, the GitHub client and every UI surface. Its own model calls also stay, because T3's text generation isn't exposed over RPC.
 - **No fork is needed to ship.** Two small server changes would be worth upstreaming or forking later (§7).
 
 ## 1. How Fjord connects
@@ -100,6 +100,8 @@ Today every call is a fresh `claude -p` through the Claude Code that ships insid
 Jev (TypeSafe) is unaffected. Its inputs (titles, first message, a turn's final message) now come from T3 records instead of transcript heads (`SF/Jev.swift:318-331`, `Agents.swift:544-579`).
 
 ## 5. Computers (Silo) and remote work
+
+> **Dropped for now (2026-11-08):** Fjord's Computers feature is removed outright while Silo is rewritten. Nothing below is built; this section is the old plan.
 
 Today: the Claude app on the Mac runs Claude Code on the guest over SSH. Fjord writes `sshConfigs` into `~/.claude/settings.json` and installs a guest plugin, a Node form hook, a relay key and a pinned Node. It watches guest files through Silo, matches the session after **you press Send in the Claude app**, and can only answer questions and plans there (`F2-part-C`; `SF/GuestRouterInstaller.swift`, `ClaudeSSHSettings.swift`, `GuestDesktopStart.swift`).
 

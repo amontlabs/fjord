@@ -24,8 +24,7 @@ struct RouterPaths: Equatable, Sendable {
 
 // MARK: - Persisted state
 
-/// What the Router keeps across launches: its switch, the log of what it did and changed, where projects run, and the
-/// deliveries and remote computers' forms under way. What you act on is the brief's entries (RouterBriefs.swift), never
+/// What the Router keeps across launches: its switch, the log of what it did and changed, and how it writes to you. What you act on is the brief's entries (RouterBriefs.swift), never
 /// kept here. A file of an older version, cards and all, is read for these keys only: the rest is dropped at the next save.
 struct RouterSaved: Codable, Equatable {
     /// Off by default; only offered while the Claude sessions extension is on.

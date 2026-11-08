@@ -1,7 +1,0 @@
-{
-  "jobId": "job:123",
-  "result": {
-    "computerId": "computer-1",
-    "state": "running"
-  }
-}
