@@ -167,6 +167,24 @@ enum AppWindowShots {
             model.pointers = [.project(folder)]
             model.draft = "check the failing tests in \(MentionText.markString) and tell me what you find"
         }),
+        // The preview while you type: the fused path is sure (P ≥ 0.90) the draft goes to the finished "bar's needs-you
+        // count" thread, so the composer names it and the brief marks it, dashed.
+        Shot(name: "router-preview", destination: { _ in .router }, compose: { model, store in
+            let id = "th_bar"
+            if var t = store.threads.values.sorted(by: { $0.id < $1.id }).first {
+                t.id = id; t.projectID = "chan_demo_fjord"; t.folder = "/Users/me/code/fjord"
+                t.title = "Count untold needs-you on the bar"; t.status = .completed; t.pendingRequest = nil; t.hasPlan = false
+                store.threads[id] = t
+            }
+            model.draft = "also show the count on the hub's badge"
+            let rows = [JevPath.Row(place: .thread(id), name: "Count untold needs-you on the bar", jev: 0.81,
+                                    features: JevPath.Features(lp: log(0.81), fin0: 1, nc: 0.97, an: 0.93, ncLead: 0.9), p: 0.96, running: false),
+                        JevPath.Row(place: .newThread(project: "chan_demo_fjord"), name: "new in fjord", jev: 0.12,
+                                    features: JevPath.Features(lp: log(0.12), new: 1), p: 0.03, running: false)]
+            let result = JevPath.Result(rows: rows, ans: [id: 0.93], next: [id: 0.97], fjord: 0.02, runningMass: 0, bm25: [id: 1],
+                                        twins: [], requestHash: "demo", key: "demo")
+            store.routerPreview.show(JevPath.Shown(text: model.draft, target: RouteTarget.thread(id).targetID, p: 0.96, result: result))
+        }),
         // A reply to a thread that is running: the pick line reads "steer … (running)" (⌥Return would queue instead).
         Shot(name: "router-steer", destination: { _ in .router }, compose: { model, store in
             let target = BriefTarget(project: "local:lookout", thread: "local_demo-lookout")

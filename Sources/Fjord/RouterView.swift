@@ -325,6 +325,7 @@ final class RouterModel {
         caret = nil
         pointers = []
         draft = ""
+        store.routerPreview.reset()
         store.routerBriefs.focus(nil)
     }
 

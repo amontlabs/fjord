@@ -21,6 +21,11 @@ extension JevClient {
     }
 }
 
+extension Store {
+    /// Settings' "Let Jev send when sure": E5's fused path sends without Sonnet at P ≥ 0.90 (off: shadow, logged only).
+    var jevSends: Bool { settings.jevSends ?? false }
+}
+
 extension RouterModel {
     /// What the draft goes with: the reply and the pills.
     func context(_ store: Store) -> RouterContext { context(store, sent: sentDraft(store)) }
@@ -28,8 +33,11 @@ extension RouterModel {
     /// The same, for the draft as it will be sent, worked out once by the caller (`sentDraft` writes every pill's name).
     func context(_ store: Store, sent: (text: String, mentions: [RouterMention])) -> RouterContext {
         let reply = store.routerBriefs.focused.flatMap { t in store.routerBriefs.docs[t.project]?.thread(t.thread) != nil ? t : nil }
-        var context = RouterContext(replyTo: reply)
+        // The preview's place picked from its menu is where it goes; the one waved off is never sent to unasked.
+        let preview = store.routerPreview
+        var context = RouterContext(replyTo: reply, target: preview.pinned, notTo: preview.dismissed)
         context.tag(sent.mentions)
+        (context.preview, context.reuse) = preview.carried(for: sent.text)
         return context
     }
 

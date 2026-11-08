@@ -475,6 +475,17 @@ enum BriefKeys {
         names[project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(project)
     }
 
+    /// The words the project's brief highlights the thread with ("the bar's needs-you count"), when its prose names it.
+    func highlightName(_ t: BriefTarget) -> String? {
+        for line in docs[t.project]?.now ?? [] {
+            for case .thread(let id, let text) in BriefMarkup.parse(line) where id == t.thread {
+                let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !words.isEmpty { return words }
+            }
+        }
+        return nil
+    }
+
     func title(_ t: BriefTarget) -> String {
         return docs[t.project]?.thread(t.thread)?.title.nonEmpty ?? "Untitled thread"
     }

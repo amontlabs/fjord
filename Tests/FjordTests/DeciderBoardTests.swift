@@ -207,7 +207,7 @@ import Testing
             "thread": T3Fixture.thread("t1"), "runs": [], "messages": [T3Fixture.message("m1", text: "q"), T3Fixture.message("m2", role: "assistant", text: " first "),
                                                                        T3Fixture.message("m3", role: "assistant", text: " second \n"), T3Fixture.message("m4", text: "next")],
             "runtimeRequests": [], "plans": [], "turnItems": [], "providerSessions": [], "updatedAt": "2026-01-02T03:04:05.000Z"])
-        #expect(T3Store.tail(of: p) == ThreadReads(youSaid: "next", reply: "second"))
+        #expect(T3Store.tail(of: p) == ThreadReads(youSaid: "next", reply: "second", first: "q", earlier: ["q", "next"]))
     }
 
     @Test func aProjectionYieldsTheLastUserMessage() {

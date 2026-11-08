@@ -6,7 +6,7 @@ import Foundation
 /// Return and Esc; ↑↓ walk its entries and put the keyboard on the brief, where 1–9, O, A and R are its keys too (in the
 /// composer, letters and digits are your words). In the composer: Return sends (steering a thread that runs), ⌥Return sends to wait for the turn under way, ⇧Return starts a new line; with @
 /// suggestions showing, ↑↓ walk them and Return or Tab picks one; Backspace at the very start takes the reply chip off.
-/// ⌘1–⌘4 pick a place on "Where should this go?". Esc dismisses the suggestions, then drops a proposed project, then the reply
+/// ⌘1–⌘4 pick a place on "Where should this go?". Esc dismisses the suggestions, then the preview's menu, then the preview (waved off for this draft), then drops a proposed project, then the reply
 /// chip; it never closes the window: with nothing left to step out of, it goes on to what has the keyboard. ⌘F opens the
 /// palette. Typing elsewhere goes to the composer.
 @MainActor
@@ -71,6 +71,9 @@ final class RouterKeys {
         if code == kVK_Escape, flags.isEmpty {
             // The suggestions shown (an @ word that names nothing shows none, and Esc goes on to what is there).
             if !model.suggestions(store).isEmpty { model.dismissMention() }
+            // The preview's menu, then the preview itself: waved off for this draft.
+            else if store.routerPreview.menuOpen { store.routerPreview.menuOpen = false }
+            else if store.routerPreview.shown != nil { store.routerPreview.dismiss() }
             else if briefs.focused != nil { briefs.focus(nil) }
             // Nothing to step out of: a field keeps it (an NSTextView's own Esc would offer completions), anything else
             // gets it.

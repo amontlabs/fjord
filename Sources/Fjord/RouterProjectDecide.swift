@@ -39,8 +39,11 @@ struct RouterProjectDecision: Equatable, Sendable {
     /// The board it read, for the decision log (the app fills it in).
     var board: DeciderBoard?
     var boardText = ""
-    /// The model's own words for its action (`follow_up`, `new_work`, `answer_here`, `ask`).
+    /// The model's own words for its action (`follow_up`, `new_work`, `answer_here`, `ask`; `fused` for E5's path).
     var action = ""
+    /// E5's Jev-led path for this message (`JevPath`): its answer, which in shadow may land after the decision; nil when it
+    /// didn't run (an unattended action, no Jev).
+    var fused: Task<JevPath.Result?, Never>?
 
     /// Where it sends, for a thread or a new thread (nil for the others).
     var target: RouteTarget? {
@@ -108,6 +111,11 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
     /// An unattended action's follow-up is taken at this or more; below it, a new thread. Unmeasured: there is no benchmark data
     /// for actions yet, the live decision logs will tell.
     var actionFollowUpBar = 0.95
+    /// Run E5's Jev-led path (`JevPath`) on attended messages: in shadow beside Sonnet, or deciding first (`jevSends`).
+    var fusedPath = false
+    /// The fused path sends when it is sure, and Sonnet isn't asked then. Off (shadow): it only runs and is logged, in
+    /// parallel with Sonnet and never delaying it.
+    var jevSends = false
 
     init(jev: JevAsker?, sonnet: Sonnet?) {
         self.jev = jev
@@ -119,8 +127,65 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
 
     /// Sonnet, else Jev's ordered ask. Never blocks the main actor (both are awaited); cancelling the task stops it. A failed
     /// Sonnet call falls to Jev when there is one, else asks with nothing to offer.
+    /// `notTo`: a place you waved off (the fused path never sends there). `reuse`: the preview's answer for these words, used
+    /// when the board is still the one it read (`JevPath.Request.key`), so Jev isn't asked again.
     func decide(_ message: String, in board: DeciderBoard, tagged: String? = nil,
-                  action: RouterActionSource? = nil, stage: (Stage) -> Void = { _ in }) async throws -> RouterProjectDecision {
+                  action: RouterActionSource? = nil, notTo: String? = nil, reuse: JevPath.Result? = nil,
+                  stage: (Stage) -> Void = { _ in }) async throws -> RouterProjectDecision {
+        // E5's path, attended messages only (an unattended action keeps its own policy: new thread by default).
+        var fused: Task<JevPath.Result?, Never>?
+        if fusedPath, action == nil, let jev {
+            let request = JevPath.request(message, board, tagged: tagged)
+            if var reused = reuse, reused.key == request.key {
+                reused.reused = true
+                reused.latency = 0
+                let answer = reused
+                fused = Task { answer }
+            } else {
+                fused = Task { await JevPath.run(request, message: message, jev: jev) }
+            }
+        }
+        let path = fused
+        return try await withTaskCancellationHandler {
+            var decision = try await decideAfterFused(message, in: board, tagged: tagged, action: action, notTo: notTo, fused: path,
+                                                      stage: stage)
+            decision.fused = path
+            return decision
+        } onCancel: {
+            path?.cancel()
+        }
+    }
+
+    /// The fused path's send when it decides first and is sure (`JevPath.Result.send`): to that idle thread, by Jev.
+    static func fusedSend(_ r: JevPath.Result, board: DeciderBoard, notTo: String?) -> RouterProjectDecision? {
+        guard let id = r.send(notTo: notTo), board.threads.contains(where: { $0.key == id }) else { return nil }
+        var d = RouterProjectDecision(kind: .thread(id), confidence: r.p, decider: .jev, reason: "")
+        d.latency = r.latency
+        d.action = "fused"
+        return d
+    }
+
+    /// The fused path's ask: its three likeliest places, best first (E5: its top 1 is 79% against Jev's raw 63%).
+    static func fusedAsk(_ r: JevPath.Result, board: DeciderBoard) -> RouterProjectDecision? {
+        var places: [RouterProjectDecision.Kind] = []
+        for place in r.rows.map(\.place) where places.count < 3 {
+            switch place {
+            case .thread(let id): if board.threads.contains(where: { $0.key == id }) { places.append(.thread(id)) }
+            case .newThread(let p): places.append(.newThread(project: p))
+            }
+        }
+        guard !places.isEmpty else { return nil }
+        return ask(places, confidence: r.p, decider: .jev)
+    }
+
+    private func decideAfterFused(_ message: String, in board: DeciderBoard, tagged: String?, action: RouterActionSource?,
+                                  notTo: String?, fused: Task<JevPath.Result?, Never>?,
+                                  stage: (Stage) -> Void) async throws -> RouterProjectDecision {
+        if jevSends, let fused {
+            stage(.jev)
+            if let r = await fused.value, let d = Self.fusedSend(r, board: board, notTo: notTo) { return d }
+            try Task.checkCancellation()
+        }
         var failure = ""
         if let sonnet {
             stage(.sonnet)
@@ -135,7 +200,13 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
                 failure = error.localizedDescription
             }
         }
-        if let jev {
+        // Without Sonnet, the fused path's ranking orders the ask when it answered.
+        if let fused {
+            stage(.jev)
+            if let r = await fused.value, let d = Self.fusedAsk(r, board: board) { return d }
+            try Task.checkCancellation()
+        }
+        if let jev, fused == nil {
             stage(.jev)
             let request = Self.jevRequest(message, board, tagged: tagged, unattended: action != nil)
             let answer = try? await JevClient.$model.withValue(JevClient.routingModel) {
@@ -343,6 +414,9 @@ extension RouterProjectDecider {
     /// The app's decider: Sonnet when there is an Anthropic key (looked up at each decision, so a key saved later counts), and
     /// Jev through the gate with your key.
     static func app(_ store: Store, client: AnthropicClient = makeClient()) -> RouterProjectDecider {
-        RouterProjectDecider(jev: store.jevAsker(.routing, base: nil), sonnet: AnthropicClient.keychainKey() == nil ? nil : api(client))
+        var d = RouterProjectDecider(jev: store.jevAsker(.routing, base: nil), sonnet: AnthropicClient.keychainKey() == nil ? nil : api(client))
+        d.fusedPath = true
+        d.jevSends = store.jevSends
+        return d
     }
 }

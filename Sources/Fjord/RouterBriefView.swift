@@ -446,8 +446,15 @@ struct BriefSpan: View {
             .background {
                 if !state.quiet { shape.fill(state.tint.opacity(hovered ? 0.24 : 0.12)) }
             }
-            // The thread your next words go to (the composer's chip names it too).
-            .overlay { if mentioned { shape.strokeBorder(state.tint.opacity(0.7), lineWidth: 1) } }
+            // The thread your next words go to (the composer's chip names it too), and the one the preview says the draft
+            // will go to, dashed.
+            .overlay {
+                if mentioned {
+                    shape.strokeBorder(state.tint.opacity(0.7), lineWidth: 1)
+                } else if store.routerPreview.markedThread == target.thread {
+                    shape.strokeBorder(CDS.Text.accent.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                }
+            }
             .contentShape(shape)
         }
         .buttonStyle(.plain)

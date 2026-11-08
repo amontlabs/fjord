@@ -32,6 +32,11 @@ struct RouterContext: Equatable {
     var action: RouterActionSource?
     /// Your words wait for the turn under way instead of steering it (⌥Return). An action's message never steers.
     var queue = false
+    /// The place the composer's preview showed for the draft (`RouterPreview`), or the one a pick from its menu replaced:
+    /// logged with the decision, and a decision elsewhere is a preview miss.
+    var preview: JevPath.Shown?
+    /// The preview's answer for these words: the decider reuses it on the same board instead of asking Jev again.
+    var reuse: JevPath.Result?
 
     init(replyTo: BriefTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
         self.replyTo = replyTo
@@ -107,7 +112,7 @@ struct RouterAskBack: Identifiable, Equatable {
     struct Effects {
         /// Where a message goes among T3's threads (`RouterProjectDecider`), its stage told as it goes. `action`:
         /// an action's message (unattended), read by Jev only as an inbox action may be.
-        var decide: @MainActor (RouterTools, _ message: String, _ action: RouterActionSource?,
+        var decide: @MainActor (RouterTools, _ message: String, _ context: RouterContext,
                                 _ stage: @escaping @MainActor (RouterProjectDecider.Stage) -> Void) async throws -> RouterProjectDecision
         /// The `message.dispatch` to the thread, through the gate: what T3 took and what it did with it.
         var send: @MainActor (RouterTools, Delivery) async throws -> RouterDecision.Delivered
@@ -431,8 +436,9 @@ struct RouterAskBack: Identifiable, Equatable {
             chosen(job)
             try await reply(job, to: BriefTarget(project: project, thread: thread), session: session)
         case .send(let target):
-            // A place you tagged (or a Retry's): yours, as a pick is.
+            // A place you tagged (or a Retry's, or one picked from the preview's menu): yours, as a pick is.
             confirm(job, target)
+            if let shown = job.context.preview { decisionLog?.previewPick(id: job.id, shown: shown, picked: target) }
             try await route(job, to: target)
         case .answer:
             try await think(job, .question)
@@ -503,7 +509,9 @@ struct RouterAskBack: Identifiable, Equatable {
         guard let store else { return }
         let unattended = job.context.action != nil
         stage(job, RouterProjectDecider.Stage.sonnet.words)
-        let decision = try await effects.decide(job.tools, job.text, job.context.action) { [weak self] in self?.stage(job, $0.words) }
+        // What was on screen as you sent (E5's focus signals), read before anything is awaited.
+        let focus = Self.focus(store)
+        let decision = try await effects.decide(job.tools, job.text, job.context) { [weak self] in self?.stage(job, $0.words) }
         try Task.checkCancellation()
         try linked(job.context)
         store.updateDecision(job.id) {
@@ -513,8 +521,15 @@ struct RouterAskBack: Identifiable, Equatable {
         }
         var sent = "asked"
         defer {
-            decisionLog?.decision(id: job.id, message: job.text, decision: decision, board: decision.boardText,
-                                  candidates: (decision.board?.candidates ?? []).map { ($0.id, $0.key) }, sent: sent)
+            let log = decisionLog
+            let (text, preview, sends) = (job.text, job.context.preview, store.jevSends)
+            let candidates = (decision.board?.candidates ?? []).map { ($0.id, $0.key) }
+            let write = { [sent] (fused: JevPath.Result?) in
+                log?.decision(id: job.id, message: text, decision: decision, board: decision.boardText, candidates: candidates,
+                              sent: sent, fused: fused, jevSends: sends, preview: preview, focus: focus)
+            }
+            // In shadow the fused answer may still be on its way: the record waits for it, the send never does.
+            if let fused = decision.fused { Task { write(await fused.value) } } else { write(nil) }
         }
         switch decision.kind {
         case .thread, .newThread:
@@ -536,6 +551,14 @@ struct RouterAskBack: Identifiable, Equatable {
         case .ask:
             askBack(job, decision)
         }
+    }
+
+    /// The focus signals at send time: the thread open in Fjord, the one your latest message went to, the unseen candidates.
+    static func focus(_ store: Store) -> DeciderLog.Focus {
+        let board = store.deciderBoard()
+        return DeciderLog.Focus(open: store.routerBriefs.focused.map { store.routerBriefs.threadID($0) },
+                                lastTold: board.threads.first(where: \.youLatest)?.key,
+                                unseen: board.candidates.filter { store.threads[$0.key]?.unseen == true }.map(\.key))
     }
 
     /// Acts on a target: a thread gets the words (a waiting request is answered deterministically first, see `reply`), a new
@@ -827,15 +850,17 @@ extension RouterDispatcher.Effects {
             (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
         }
         return Self(
-            decide: { [weak dispatcher] tools, message, action, stage in
+            decide: { [weak dispatcher] tools, message, context, stage in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
+                let action = context.action
                 // The board with the thread ends read ahead of time (cache and held projections); nothing is waited for.
                 let board = await store.deciderBoardWithReads()
                 var decider = RouterProjectDecider.app(store, client: dispatcher.anthropic)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
                 decider.jev = action != nil ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
-                var decision = try await decider.decide(message, in: board, tagged: tools.tagged, action: action, stage: stage)
+                var decision = try await decider.decide(message, in: board, tagged: tools.tagged, action: action,
+                                                        notTo: context.notTo, reuse: context.reuse, stage: stage)
                 decision.board = board
                 decision.boardText = board.render()
                 return decision

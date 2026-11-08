@@ -227,7 +227,17 @@ final class T3Store {
 
     /// The end of a thread, as the decider's board reads it: your last words and the agent's last reply.
     nonisolated static func tail(of p: T3Projection) -> ThreadReads {
-        ThreadReads(youSaid: lastUserMessage(in: p), reply: lastAssistantMessage(in: p))
+        ThreadReads(youSaid: lastUserMessage(in: p), reply: lastAssistantMessage(in: p), first: firstUserMessage(in: p),
+                    earlier: lastUserMessages(in: p, 3))
+    }
+
+    /// Your last `n` messages in a thread, oldest first (each capped for a prompt).
+    nonisolated static func lastUserMessages(in p: T3Projection, _ n: Int) -> [String] {
+        var texts = p.messages.filter { $0.role == "user" && !$0.text.isEmpty }.map(\.text)
+        if texts.isEmpty {
+            texts = p.turnItems.compactMap { i -> String? in if case .userMessage(_, let t) = i.detail, !t.isEmpty { t } else { nil } }
+        }
+        return texts.suffix(n).map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.filter { !$0.isEmpty }
     }
 
     /// Reads a thread's end through a bounded snapshot (T3 caps it at the last 10 user turns, 75 items and 1 MiB), held only

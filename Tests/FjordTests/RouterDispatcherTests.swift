@@ -11,6 +11,8 @@ import Testing
         var decisions: [RouterProjectDecision] = [RouterProjectDecider.ask([], confidence: 0, decider: .none)]
         var stages: [RouterProjectDecider.Stage] = [.sonnet]
         var decided: [(message: String, unattended: Bool)] = []
+        /// What each decision was handed besides the words (the preview, the place waved off).
+        var decidedContexts: [RouterContext] = []
         /// What the decider was handed of the message's tags (`RouterTools.tagged`).
         var decidedTagged: [String?] = []
         /// Holds the decider until the test lets it go.
@@ -29,8 +31,9 @@ import Testing
         func install(_ d: RouterDispatcher) {
             d.onFinish = { [self] in finished.append($0) }
             d.effects = RouterDispatcher.Effects(
-                decide: { [self] tools, message, action, stage in
-                    decided.append((message, action != nil))
+                decide: { [self] tools, message, context, stage in
+                    decided.append((message, context.action != nil))
+                    decidedContexts.append(context)
                     decidedTagged.append(tools.tagged)
                     for s in stages { stage(s) }
                     if holdDecide { await withCheckedContinuation { decideHeld = $0 } }

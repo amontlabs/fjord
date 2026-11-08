@@ -393,6 +393,13 @@ final class Store {
         dispatcher.claudePath = { [weak self] in self?.routerStatus.latestPath() }
         return dispatcher
     }()
+    /// Where the draft will go, shown while you type (RouterPreview.swift).
+    @ObservationIgnored lazy var routerPreview: RouterPreview = {
+        let preview = RouterPreview()
+        preview.read = { [weak self] text, tagged in await self?.readDraft(text, tagged: tagged) }
+        preview.allowed = { [weak self] in self?.previewsDrafts == true }
+        return preview
+    }()
     /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
     @ObservationIgnored lazy var routerBriefs: RouterBriefs = {
         let briefs = RouterBriefs()

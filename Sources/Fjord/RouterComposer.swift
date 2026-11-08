@@ -51,6 +51,9 @@ struct RouterComposer: View {
             // Who your words go to, as the Code tab's strip over its composer: the thread you reply to.
             if store.routerBriefs.focused != nil {
                 strip.padding(.bottom, C.dockGap)
+            } else if store.routerPreview.shown != nil || store.routerPreview.pinned != nil {
+                // Where the draft will go, as the fused path reads it (or the place you picked from its menu).
+                RouterPreviewChip(store: store).padding(.bottom, C.dockGap).transition(.opacity)
             }
             card(on: on, working: working)
                 // Over the card, so it never pushes the chat about.
@@ -69,6 +72,12 @@ struct RouterComposer: View {
                 .zIndex(1)
         }
         .motion(.fade, value: suggestions.map(\.id))
+        .motion(.fade, value: store.routerPreview.shown?.target)
+        // The preview follows the draft as it will be sent (never waiting on it: a read runs after a pause, cancelled by the
+        // next keystroke).
+        .onChange(of: model.draft) { model.previewDraft(store: store) }
+        .onChange(of: model.pointers) { model.previewDraft(store: store) }
+        .onChange(of: store.routerBriefs.focused) { model.previewDraft(store: store) }
         .onAppear {
             if on { requestFocus() }
         }
@@ -498,5 +507,88 @@ struct RouterAskPill: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(CDS.border))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Where should “\(ask.message)” go?")
+    }
+}
+
+/// The preview over the composer: "Goes to <thread>" while the fused path is sure (P ≥ 0.90) of an idle thread, or the place
+/// you picked from its menu. A click opens the menu of its three likeliest places; the × waves the preview off (as Esc does)
+/// or takes the pick back.
+struct RouterPreviewChip: View {
+    let store: Store
+
+    var body: some View {
+        let preview = store.routerPreview
+        let shape = RoundedRectangle(cornerRadius: CDS.Density.compact.radius, style: .continuous)
+        let target = preview.pinned ?? preview.shown?.target
+        // The name the brief highlights the thread with, so the chip and the outlined item read as one; else its title.
+        let title = target.flatMap { Self.name($0, store: store) } ?? preview.pinnedTitle ?? ""
+        let detail = target.flatMap { store.routerDispatcher.option($0, store: store)?.detail } ?? ""
+        let d = CDS.Density.compact
+        HStack(spacing: 4) {
+            Button { if preview.pinned == nil { preview.menuOpen.toggle() } } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: preview.pinned == nil ? "arrow.right" : "pin.fill").font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(CDS.Text.accent).accessibilityHidden(true)
+                    Text(preview.pinned == nil ? "Goes to" : "Sending to").font(CDS.sans(d.body.0)).foregroundStyle(CDS.Text.muted)
+                    Text(title).font(CDS.sans(d.body.0, .medium)).foregroundStyle(CDS.Text.primary).lineLimit(1).truncationMode(.tail)
+                    if !detail.isEmpty {
+                        Text(detail).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+                    }
+                    if preview.pinned == nil {
+                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(CDS.Text.muted)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(preview.pinned == nil ? "Where Jev will send it. Click for other places; Esc waves it off." : "You picked this place.")
+            .popover(isPresented: Binding(get: { preview.menuOpen }, set: { preview.menuOpen = $0 }), arrowEdge: .top) {
+                RouterPreviewMenu(store: store)
+            }
+            ChipClose(label: preview.pinned == nil ? "Not there" : "Unpick") {
+                if preview.pinned == nil { preview.dismiss() } else { preview.unpin() }
+            }
+        }
+        .padding(.leading, CDS.Density.compact.pad.md)
+        .padding(.trailing, 3)
+        .frame(height: CDS.Density.compact.control)
+        .background(shape.fill(CDS.Fill.secondary).shadow(color: CDS.fieldShadow, radius: 1, y: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(preview.pinned == nil ? "Goes to \(title)" : "Sending to \(title)")
+    }
+}
+
+extension RouterPreviewChip {
+    /// A place's name as the page shows it: the brief's highlight words for a thread its brief names, else the place's title.
+    static func name(_ target: String, store: Store) -> String? {
+        if let t = RouteTarget(target)?.briefTarget(store: store), let words = store.routerBriefs.highlightName(t) { return words }
+        return store.routerDispatcher.option(target, store: store)?.title
+    }
+}
+
+/// The preview's menu: its three likeliest places, best first; a click sends the message there.
+private struct RouterPreviewMenu: View {
+    let store: Store
+
+    var body: some View {
+        let d = CDS.Density.compact
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(store.routerPreview.menu(store: store)) { option in
+                Button { store.routerPreview.pick(option.target, store: store) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: d.gap.xs) {
+                        Text(option.title).font(CDS.sans(d.body.0)).foregroundStyle(CDS.Text.primary).lineLimit(1)
+                        Text(option.detail).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, d.pad.md)
+                    .frame(height: d.control)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(d.pad.xs)
+        .frame(width: 320)
     }
 }

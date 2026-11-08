@@ -42,10 +42,20 @@ struct DeciderBoard: Equatable, Sendable {
         var pullRequests: [String] = []
         /// The request it waits on, as text; nil: none.
         var waiting: String?
+        // What only Jev's board reads (E5, `RouterJevPath.swift`); Sonnet's text above doesn't show them.
+        /// The thread's first ask, when it is known.
+        var first = ""
+        /// Your last few messages there, oldest first.
+        var earlier: [String] = []
+        /// How long ago your last message there was; nil: not known.
+        var youSaidMinutes: Int?
+        /// Your latest message (across all threads) went to this one.
+        var youLatest = false
 
         init(id: String, key: String? = nil, project: String, title: String, flag: Flag, running: Bool? = nil, minutesIdle: Int,
              summary: String = "", step: String = "", said: String = "", youSaid: String? = nil, youSaidLast: Bool = false,
-             branch: String = "", pullRequests: [String] = [], waiting: String? = nil) {
+             branch: String = "", pullRequests: [String] = [], waiting: String? = nil, first: String = "", earlier: [String] = [],
+             youSaidMinutes: Int? = nil, youLatest: Bool = false) {
             self.id = id
             self.key = key ?? id
             self.project = project
@@ -61,6 +71,10 @@ struct DeciderBoard: Equatable, Sendable {
             self.branch = branch
             self.pullRequests = pullRequests
             self.waiting = waiting
+            self.first = first
+            self.earlier = earlier
+            self.youSaidMinutes = youSaidMinutes
+            self.youLatest = youLatest
         }
     }
 

@@ -21,9 +21,19 @@ final class DeciderLog: @unchecked Sendable {
         SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// A decision: the entry it belongs to (`id`), the message, the board, and what the decider did.
+    /// What was on screen when you sent (E5's focus signals): the thread open in Fjord, the one your latest message went to,
+    /// and the candidates you haven't seen since their last update (T3's `lastVisitedAt` as its read state).
+    struct Focus: Equatable {
+        var open: String?
+        var lastTold: String?
+        var unseen: [String] = []
+    }
+
+    /// A decision: the entry it belongs to (`id`), the message, the board, and what the decider did. `fused`: E5's Jev-led
+    /// path's answer (shadow or not); `preview`: what the composer showed while you typed. The fields are E5's "Live logging".
     func decision(id: UUID, message: String, decision d: RouterProjectDecision, board: String, candidates: [(id: String, key: String)],
-                  sent: String, now: Date = Date()) {
+                  sent: String, fused: JevPath.Result? = nil, jevSends: Bool = false, preview: JevPath.Shown? = nil,
+                  focus: Focus? = nil, now: Date = Date()) {
         var kind: String
         var target = ""
         var places: [String] = []
@@ -51,6 +61,57 @@ final class DeciderLog: @unchecked Sendable {
         if let latency = d.latency { record["latencyMs"] = Int(latency * 1000) }
         if let u = d.usage {
             record["usage"] = ["input": u.inputTokens, "output": u.outputTokens, "cacheRead": u.cacheReadTokens, "cacheCreation": u.cacheCreationTokens]
+        }
+        // Which path decided: E5's fused path alone, or Sonnet (or Jev's ask without a key).
+        record["path"] = d.action == "fused" ? "fused" : d.decider.rawValue
+        let final = d.target?.targetID
+        if let f = fused {
+            var out = Self.fused(f)
+            out["mode"] = jevSends ? "on" : "shadow"
+            // Agreement with where it went now (an ask's pick comes later, as its outcome).
+            if let final { out["agrees"] = f.top?.place.targetID == final }
+            out["wouldSend"] = f.send() != nil
+            record["fused"] = out
+        }
+        if let preview {
+            var shown: [String: Any] = ["target": preview.target, "p": preview.p, "forTheseWords": preview.text == message]
+            // The final decision differs from the place shown: a preview miss.
+            shown["miss"] = final != preview.target
+            record["preview"] = shown
+        }
+        if let focus {
+            var out: [String: Any] = ["unseen": focus.unseen]
+            if let open = focus.open { out["open"] = open }
+            if let told = focus.lastTold { out["lastTold"] = told }
+            record["focus"] = out
+        }
+        append(record)
+    }
+
+    /// The fused path's answer as the log keeps it: every place with its features, Jev's answers, the BM25, the gates.
+    static func fused(_ f: JevPath.Result) -> [String: Any] {
+        var out: [String: Any] = [
+            "model": f.model, "requestHash": f.requestHash, "reused": f.reused,
+            "pick": f.top?.place.targetID ?? "", "p": f.p, "runningMass": f.runningMass,
+            "abstain": f.abstain?.rawValue ?? "", "ans": f.ans, "nextChoice": f.next, "bm25": f.bm25, "twins": f.twins,
+            "rows": f.rows.map { r -> [String: Any] in
+                ["target": r.place.targetID, "jev": r.jev, "p": r.p, "running": r.running, "features": r.features.named]
+            },
+        ]
+        if let fjord = f.fjord { out["fjord"] = fjord }
+        if let latency = f.latency { out["latencyMs"] = Int(latency * 1000) }
+        return out
+    }
+
+    /// A message that went where you fixed it from the preview's menu (no decision ran): what was shown and what you picked.
+    func previewPick(id: UUID, shown: JevPath.Shown?, picked: String, now: Date = Date()) {
+        var record: [String: Any] = ["type": "preview", "id": id.uuidString, "at": ISO8601DateFormatter().string(from: now),
+                                     "picked": picked]
+        if let shown {
+            record["shown"] = shown.target
+            record["p"] = shown.p
+            record["changed"] = shown.target != picked
+            record["fused"] = Self.fused(shown.result)
         }
         append(record)
     }

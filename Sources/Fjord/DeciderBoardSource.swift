@@ -11,6 +11,10 @@ struct ThreadReads: Equatable, Sendable {
     var youSaid: String?
     /// The agent's last reply.
     var reply: String?
+    /// The thread's first ask, as far as the read reaches (a bounded snapshot holds the last 10 user turns).
+    var first: String? = nil
+    /// Your last few messages there, oldest first.
+    var earlier: [String] = []
 }
 
 /// What was read of each thread's end, kept until its latest message changes (`stamp`), and the reads under way.
@@ -108,6 +112,8 @@ extension Store {
                 board.purposes[names[p.id] ?? ""] = purpose.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             }
         }
+        // The thread your latest message went to: Jev's board says so (E5's "your latest message went to this thread").
+        let latestTold = live.filter { $0.lastUserMessage != nil }.max { $0.lastUserMessage! < $1.lastUserMessage! }?.id
         board.threads = ordered.compactMap { t in
             guard let project = names[t.projectID], let id = short[t.id] else { return nil }
             let flag: DeciderBoard.Flag = t.waitsForYou ? .waiting : t.running ? .running : .finished
@@ -120,7 +126,10 @@ extension Store {
                 said: t.latestMessage ?? read?.reply ?? "", youSaid: t.lastUserText ?? read?.youSaid,
                 youSaidLast: t.lastUserText != nil,
                 branch: t.branch ?? "", pullRequests: t.pullRequests.compactMap(Self.pullRequestWords),
-                waiting: t.waitsForYou ? (requests[t.id].map(Self.requestText) ?? Self.requestWords(t)) : nil)
+                waiting: t.waitsForYou ? (requests[t.id].map(Self.requestText) ?? Self.requestWords(t)) : nil,
+                first: read?.first ?? "", earlier: read?.earlier ?? t.lastUserText.map { [$0] } ?? [],
+                youSaidMinutes: t.lastUserMessage.map { max(0, Int(now.timeIntervalSince($0) / 60)) },
+                youLatest: t.id == latestTold)
         }
         return board
     }

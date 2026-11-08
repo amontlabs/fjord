@@ -63,6 +63,13 @@ struct JevClient {
         case structuredNoul(instructions: Any)
     }
 
+    /// A JSON object written with its keys in this order, at any depth of a question's instructions or criteria (Jev reads
+    /// what he is given as written; E5's checks were measured in Python's insertion order).
+    struct Ordered: @unchecked Sendable {
+        var pairs: [(String, Any)]
+        init(_ pairs: [(String, Any)]) { self.pairs = pairs }
+    }
+
     enum Answer {
         case choice(Choice)
         /// The probability of yes.
@@ -140,9 +147,9 @@ struct JevClient {
                 keys[id] = map
                 let placeholder = "\u{1}ordered-criteria-\(ordered.count)\u{1}"
                 ordered[placeholder] = try Self.orderedObject(options.map { (Self.key(for: $0), criteria[$0] ?? NSNull()) })
-                body[id] = ["type": "choice", "instructions": instructions, "criteria": placeholder]
+                body[id] = ["type": "choice", "instructions": try Self.placed(instructions, &ordered), "criteria": placeholder]
             case .structuredNoul(let instructions):
-                body[id] = ["type": "noul", "instructions": instructions, "criteria": NSNull()]
+                body[id] = ["type": "noul", "instructions": try Self.placed(instructions, &ordered), "criteria": NSNull()]
             }
         }
         return (body, keys, ordered)
@@ -179,26 +186,58 @@ struct JevClient {
         return choice
     }
 
-    /// A JSON object with its keys in the order given.
+    /// A JSON object with its keys in the order given (an `Ordered` value inside it is written in its own order too).
     static func orderedObject(_ pairs: [(String, Any)]) throws -> Data {
         var out = Data("{".utf8)
         for (i, (key, value)) in pairs.enumerated() {
             if i > 0 { out.append(contentsOf: Array(",".utf8)) }
             out.append(try JSONSerialization.data(withJSONObject: key, options: .fragmentsAllowed))
             out.append(contentsOf: Array(":".utf8))
-            out.append(try JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed))
+            out.append(try json(value))
         }
         out.append(contentsOf: Array("}".utf8))
         return out
     }
 
+    /// A value as JSON: `Ordered` objects (and arrays holding them) in their order, anything else as `JSONSerialization` writes it.
+    private static func json(_ value: Any) throws -> Data {
+        if let o = value as? Ordered { return try orderedObject(o.pairs) }
+        if let list = value as? [Any], list.contains(where: { $0 is Ordered }) {
+            var out = Data("[".utf8)
+            for (i, item) in list.enumerated() {
+                if i > 0 { out.append(contentsOf: Array(",".utf8)) }
+                out.append(try json(item))
+            }
+            out.append(contentsOf: Array("]".utf8))
+            return out
+        }
+        return try JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed)
+    }
+
+    /// Instructions as the body holds them: an `Ordered` object stands as a placeholder its bytes replace (`encode`).
+    private static func placed(_ value: Any, _ ordered: inout [String: Data]) throws -> Any {
+        guard value is Ordered else { return value }
+        let placeholder = "\u{1}ordered-instructions-\(ordered.count)\u{1}"
+        ordered[placeholder] = try json(value)
+        return placeholder
+    }
+
     /// The body as JSON, each placeholder string of `ordered` replaced by its ordered object.
     static func encode(_ body: [String: Any], ordered: [String: Data] = [:]) throws -> Data {
         var data = try JSONSerialization.data(withJSONObject: body)
-        for (placeholder, object) in ordered {
-            let quoted = try JSONSerialization.data(withJSONObject: placeholder, options: .fragmentsAllowed)
-            guard let range = data.range(of: quoted) else { continue }
-            data.replaceSubrange(range, with: object)
+        // A placeholder can sit inside another's object (a choice's criteria inside the ordered questions): passes go on until
+        // none is left to replace, whatever order the dictionary hands them in.
+        var left = ordered
+        while !left.isEmpty {
+            var replaced = false
+            for (placeholder, object) in left {
+                let quoted = try JSONSerialization.data(withJSONObject: placeholder, options: .fragmentsAllowed)
+                guard let range = data.range(of: quoted) else { continue }
+                data.replaceSubrange(range, with: object)
+                left[placeholder] = nil
+                replaced = true
+            }
+            if !replaced { break }
         }
         return data
     }

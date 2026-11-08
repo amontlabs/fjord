@@ -96,6 +96,9 @@ struct AppSettings: Codable {
     var jevReadsInbox: Bool?
     /// The folders your code is in, looked through for git repos (CodeFolders.swift); nil is none.
     var codeFolders: [String]?
+    /// E5's Jev-led path sends on its own when it is sure (`JevPath`); off (the default), it runs in shadow beside Sonnet and
+    /// is only logged and previewed.
+    var jevSends: Bool?
 }
 
 struct PersistedState: Codable {
