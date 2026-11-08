@@ -1,5 +1,7 @@
 # Decider board: spec for the Swift port (2026-11-07)
 
+> **2026-11-08: Sonnet no longer reads this board.** It reads N4's full context (`DeciderContext`, see [N4](N4-full-context.md) §5 and `docs/design/t3-code-map.md` §12) through `claude -p`, with N4b's schema and N4's 1% bars. This board and its reads remain what Jev's fused path and his ask read, and its candidates are still read ahead (now together with the full context's live threads). The Request and Gates sections below are history.
+
 Reference implementation: `render_board(moment)` and `candidates(moment)` in `deciders-t3/common.py` (scratchpad of the E3 run). Example text below is invented. Every text field goes through `redact()` first; whitespace runs collapse to one space (`one`), `tail` keeps the end of the text and `one` the start.
 
 ## Inputs per thread (all from T3's shell row, or read on demand)
@@ -72,7 +74,7 @@ Invented example:
 ```
 The user message follows as `Board:\n{board}\n\nMessage:\n<message>{redacted message}</message>`.
 
-## Request
+## Request (until 2026-11-08)
 - Messages API, `claude-sonnet-5-5`, `anthropic-version: 2023-06-01`, `max_tokens` 700.
 - `system`: one text block with the role below, `cache_control: ephemeral` (about 720 tokens, cached after the first call: reads of 720 tokens on every call after).
 - `thinking: {"type": "between_tools"}`. This model thinks by default and a default call takes about 4.3 s p50 (thinking tokens count against `max_tokens`: about 5% of calls came back cut off at 700). The model rejects `disabled`.
@@ -92,7 +94,7 @@ Always return need as an empty list: everything you can know is already in the b
 ```
 Schema (strict, all keys required, `additionalProperties: false`), in this order: `analysis` (string: two or three short sentences before deciding), `related_session` (string), `session_task` (string), `extends` (boolean), `action` (follow_up | new_work | answer_here | ask), `project` (string), `session` (string), `reason` (string), `confidence` (number), `project_confidence` (number), `alternatives` (string array), `need` (string array), `p_new` (number: chance the message is new work for a new session, whatever the action). `max_tokens` stays 700: the answer took 272 output tokens at the median and 397 at most (646 calls, N2).
 
-## Gates applied after the model
+## Gates applied after the model (until 2026-11-08; now N4's rule, `RouterProjectDecider.contextDecision`)
 - Send when `action` is follow_up or new_work and `confidence` is at least the bar: 0.80 for an idle target, 0.90 when the target is running (steer). New thread: the idle bar.
 - N2: a new thread also starts when `p_new` is at least 0.85, whatever the action, in the answer's `project` when it names a known project (attended messages only; an unattended action keeps its own policy). Logged: `pNew`, `extends`, `relatedSession`.
 - Waiting target: the deterministic mapping from R1 (question: option picked by Jev; approval: typed words decline with feedback; plan: "No" plus your words).

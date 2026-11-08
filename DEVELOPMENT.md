@@ -30,7 +30,7 @@ Without `SIGN_IDENTITY`, local builds are signed with the release certificate (d
 
 The debug flags below run the debug binary: `swift build`, then `.build/debug/Fjord …`.
 
-**Credentials.** GitHub access comes from `gh auth token`, `GH_TOKEN` / `GITHUB_TOKEN`, or a token pasted in Settings, which is stored in the Keychain. The Anthropic API key (the Router's decider, set in Settings, Keychain service `fjord-anthropic-key`) and the optional TypeSafe key (for Jev, TypeSafe's classifier) are kept in the Keychain too. Fjord's T3 token (minted with `t3 auth session issue`) is stored there as well. Demo, snapshot and playground runs never touch the Keychain, so a new build doesn't stop on an access prompt.
+**Credentials.** GitHub access comes from `gh auth token`, `GH_TOKEN` / `GITHUB_TOKEN`, or a token pasted in Settings, which is stored in the Keychain. The optional TypeSafe key (for Jev, TypeSafe's classifier) is kept in the Keychain too; the Router's Sonnet and Haiku calls run through `claude -p` on your subscription and need no key. Fjord's T3 token (minted with `t3 auth session issue`) is stored there as well. Demo, snapshot and playground runs never touch the Keychain, so a new build doesn't stop on an access prompt.
 
 **State** lives in `~/Library/Application Support/Fjord/state.json`.
 
@@ -84,11 +84,10 @@ FJORD_THEME=dark .build/debug/Fjord --window
 ### The Router's routing
 
 Every message goes to a T3 thread as one `message.dispatch` over T3's WebSocket API (`T3Link`, `T3Client`). A reply armed on a brief entry (or one focused) goes to that
-thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Sonnet over the
-Anthropic API, `AnthropicClient`, at 0.80 for an idle thread and 0.90 for a running one), whose stage shows on the message's pill. E5's Jev-led path
+thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Sonnet through `claude -p` (`ClaudePrint`) on N4's full context, `DeciderContext`, at N4's 1% bars), whose stage shows on the message's pill. E5's Jev-led path
 (`JevPath`, RouterJevPath.swift: one Jev call, two yes/no checks on the 3 latest idle threads, recency and BM25 fused in code) runs first (always on,
 no setting, no shadow) and is logged in `decider-log.jsonl`; it sends to an idle thread at fused P ≥ 0.90
-without Sonnet, and below that Sonnet decides. While you type, the composer previews the same pick at P ≥ 0.90 (`RouterPreview`; shot `router-preview`). Refit its weights from
+without Sonnet, and below that Sonnet decides. Your own messages are decided in the composer before they go (`RouterPreview`): Jev after 600 ms, Sonnet after 1.2 s; sure, "→ <thread>" and Return sends; unsure, the guess and 2 alternatives (shots `router-destination-sure`, `router-destination-unsure`). The context's thread cards, BM25 text and the day's archive are kept off the decision path in `Application Support/Fjord/thread-cards` (`ThreadCardStore`); every model call's tokens and cost go to `model-usage.jsonl`, shown in Settings › T3 Code (shot `settings-model-usage`). Refit its weights from
 the log with `evals/router/t3/refit.py`. A project that fits nothing is proposed under the
 composer (`RouterProjectProposal`, revised by Sonnet). The brief's entries are the one model of what needs you (no cards):
 mark read and archive are Fjord changes with a Revert in the history drawer, kept with the Told marks in briefs.db. Each history entry keeps who decided (`decision.decider`) and a
