@@ -21,11 +21,6 @@ extension JevClient {
     }
 }
 
-extension Store {
-    /// Settings' "Let Jev send when sure": E5's fused path sends without Sonnet at P ≥ 0.90 (off: shadow, logged only).
-    var jevSends: Bool { settings.jevSends ?? false }
-}
-
 extension RouterModel {
     /// What the draft goes with: the reply and the pills.
     func context(_ store: Store) -> RouterContext { context(store, sent: sentDraft(store)) }

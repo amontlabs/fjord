@@ -27,6 +27,7 @@ In the eval, "current step" is the session's activity line and "you last said th
 
 ## Jev's fused path (E5)
 The fused path (`JevPath`, Sources/Fjord/RouterJevPath.swift) asks Jev on E5's board, not the text above: each thread's `now` adds "thread started with" (first ask, 200), "your earlier messages" (last 3, 100 each), "latest reply began" (300, when the reply runs past 600) and "you last said there (N ago)", marked when your latest message went there. The first ask and earlier messages come from the same read-ahead (the bounded snapshot's earliest user turn stands in for the first ask on threads with more than 10). The checks (`ans`, `nx_choice`) go to the 3 most recent idle candidates; see E5 for the gates and weights.
+It is always on: it runs first for every attended message and sends when sure (fused P ≥ 0.90 to an idle thread), else Sonnet decides. There is no setting and no shadow mode; its answer is logged for every attended message.
 
 ## Candidate rules
 1. Every thread that is running or waiting (pending request or actionable plan).

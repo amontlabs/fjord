@@ -522,13 +522,13 @@ struct RouterAskBack: Identifiable, Equatable {
         var sent = "asked"
         defer {
             let log = decisionLog
-            let (text, preview, sends) = (job.text, job.context.preview, store.jevSends)
+            let (text, preview) = (job.text, job.context.preview)
             let candidates = (decision.board?.candidates ?? []).map { ($0.id, $0.key) }
             let write = { [sent] (fused: JevPath.Result?) in
                 log?.decision(id: job.id, message: text, decision: decision, board: decision.boardText, candidates: candidates,
-                              sent: sent, fused: fused, jevSends: sends, preview: preview, focus: focus)
+                              sent: sent, fused: fused, preview: preview, focus: focus)
             }
-            // In shadow the fused answer may still be on its way: the record waits for it, the send never does.
+            // The fused answer may still be on its way (Sonnet decided): the record waits for it, the send never does.
             if let fused = decision.fused { Task { write(await fused.value) } } else { write(nil) }
         }
         switch decision.kind {

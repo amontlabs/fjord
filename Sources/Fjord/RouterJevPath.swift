@@ -11,8 +11,8 @@ import Foundation
 // "for Fjord itself?" check is under 0.30. On the 182 moments that sent 36-37% of messages with 1 wrong (0.55%), and the
 // preview at the same bar never disagreed with the final place.
 //
-// It runs in shadow until the decision log shows about 200 decisions with no wrong send (`Store.jevSends`): its answer is
-// logged beside Sonnet's for every attended message, and the weights are refit from that log (evals/router/t3/README.md).
+// It is on: it decides first for every attended message and sends when sure, else Sonnet decides. Its answer is logged
+// beside the decision for every attended message, and the weights are refit from that log (evals/router/t3/README.md).
 // Unattended Triage actions never take this path.
 
 enum JevPath {

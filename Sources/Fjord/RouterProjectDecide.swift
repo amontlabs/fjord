@@ -41,7 +41,7 @@ struct RouterProjectDecision: Equatable, Sendable {
     var boardText = ""
     /// The model's own words for its action (`follow_up`, `new_work`, `answer_here`, `ask`; `fused` for E5's path).
     var action = ""
-    /// E5's Jev-led path for this message (`JevPath`): its answer, which in shadow may land after the decision; nil when it
+    /// E5's Jev-led path for this message (`JevPath`): its answer; nil when it
     /// didn't run (an unattended action, no Jev).
     var fused: Task<JevPath.Result?, Never>?
 
@@ -111,11 +111,8 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
     /// An unattended action's follow-up is taken at this or more; below it, a new thread. Unmeasured: there is no benchmark data
     /// for actions yet, the live decision logs will tell.
     var actionFollowUpBar = 0.95
-    /// Run E5's Jev-led path (`JevPath`) on attended messages: in shadow beside Sonnet, or deciding first (`jevSends`).
+    /// Run E5's Jev-led path (`JevPath`) first on attended messages: it sends when it is sure, and Sonnet isn't asked then.
     var fusedPath = false
-    /// The fused path sends when it is sure, and Sonnet isn't asked then. Off (shadow): it only runs and is logged, in
-    /// parallel with Sonnet and never delaying it.
-    var jevSends = false
 
     init(jev: JevAsker?, sonnet: Sonnet?) {
         self.jev = jev
@@ -181,7 +178,7 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
     private func decideAfterFused(_ message: String, in board: DeciderBoard, tagged: String?, action: RouterActionSource?,
                                   notTo: String?, fused: Task<JevPath.Result?, Never>?,
                                   stage: (Stage) -> Void) async throws -> RouterProjectDecision {
-        if jevSends, let fused {
+        if let fused {
             stage(.jev)
             if let r = await fused.value, let d = Self.fusedSend(r, board: board, notTo: notTo) { return d }
             try Task.checkCancellation()
@@ -416,7 +413,6 @@ extension RouterProjectDecider {
     static func app(_ store: Store, client: AnthropicClient = makeClient()) -> RouterProjectDecider {
         var d = RouterProjectDecider(jev: store.jevAsker(.routing, base: nil), sonnet: AnthropicClient.keychainKey() == nil ? nil : api(client))
         d.fusedPath = true
-        d.jevSends = store.jevSends
         return d
     }
 }

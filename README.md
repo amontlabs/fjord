@@ -78,7 +78,7 @@ Fjord has no server and no account. What leaves your Mac:
 
 - **GitHub**: Triage reads your pull requests, issues and workflows through GitHub's API; updates come from this repo's Releases.
 - **Anthropic**: routing decisions go to the Anthropic API (Claude Sonnet) with your API key, with the project and thread titles, recent messages and your words. The Router's briefs and summaries are written by Claude Haiku through `claude -p`, on your own subscription.
-- **TypeSafe** *(optional)*: with a [TypeSafe](https://typesafe.ai) API key, its classifier (Jev) helps route your messages, read how each session's turn ended, label new comments (*asks you*, *to do*, *FYI*, *noise*) and pick icons. It receives your messages and drafts, sessions' titles, activity and final messages, project names and, for labels, the comment and its pull request or issue details. Without a key, nothing is sent there.
+- **TypeSafe** *(optional)*: with a [TypeSafe](https://typesafe.ai) API key, its classifier (Jev) helps route your messages (it sends one to a thread by itself only when it is very sure, otherwise Claude decides), read how each session's turn ended, label new comments (*asks you*, *to do*, *FYI*, *noise*) and pick icons. It receives your messages and drafts, sessions' titles, activity and final messages, project names and, for labels, the comment and its pull request or issue details. Without a key, nothing is sent there.
 
 Everything else stays on your Mac, in `~/Library/Application Support/Fjord/`. Code folders you add in Settings are scanned locally for git clones.
 

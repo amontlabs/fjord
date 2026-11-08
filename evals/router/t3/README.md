@@ -9,6 +9,6 @@ python3 evals/router/t3/refit.py                       # the default log
 python3 evals/router/t3/refit.py path/to/log.jsonl --bar 0.9 --guard 0.25
 ```
 
-It needs `numpy` and `scipy`. It prints how the shipped weights did on the log, leave-one-day-out refits (each day scored by weights fit without it), and the refit on everything as a Swift line for `JevPath.weights`. Change the weights only when the leave-one-day-out line keeps 0 wrong sends at the bar. Turn on Settings › T3 Code › "Let Jev send when sure" once the shipped weights show about 200 decisions with no wrong send. Certifying 0.5% wrong takes about 600.
+It needs `numpy` and `scipy`. It prints how the shipped weights did on the log, leave-one-day-out refits (each day scored by weights fit without it), and the refit on everything as a Swift line for `JevPath.weights`. Change the weights only when the leave-one-day-out line keeps 0 wrong sends at the bar. The path is always on (no setting, no shadow mode), so watch the log for wrong sends: about 200 decisions with none is the first check, and certifying 0.5% wrong takes about 600.
 
 Where each message went comes from the log's outcomes: an ask's pick, or a send that was never moved with Send elsewhere. Dismissed asks, answers in Fjord and picks from the preview's menu aren't used for the fit.

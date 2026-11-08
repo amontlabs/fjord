@@ -4,7 +4,7 @@ import Testing
 
 /// E5's Jev-led path: the fusion and the BM25 give the Python's numbers (`deciders-t3/e5/fusion.py`, `build.py`, on synthetic
 /// rows), the gates send only to an idle thread at P ≥ 0.90 with little route mass on running threads, the decider runs it in
-/// shadow beside Sonnet (or first, when it may send) and never for an unattended action, the log keeps its answer, and the
+/// first (it sends when sure, else Sonnet decides) and never for an unattended action, the log keeps its answer, and the
 /// composer's preview reads a draft once after a pause, drops stale reads and hands its answer to the send. Invented boards only.
 @MainActor
 @Suite(.serialized) struct RouterJevPathTests {
@@ -174,26 +174,15 @@ import Testing
         }
     }
 
-    func decider(_ calls: Calls, sends: Bool, sonnet: Bool = true) -> RouterProjectDecider {
+    func decider(_ calls: Calls, sonnet: Bool = true) -> RouterProjectDecider {
         var d = RouterProjectDecider(jev: Self.jev(calls), sonnet: sonnet ? Self.sonnet(calls) : nil)
         d.fusedPath = true
-        d.jevSends = sends
         return d
-    }
-
-    @Test func inShadowSonnetDecidesAndTheFusedAnswerRidesAlong() async throws {
-        let calls = Calls()
-        let d = try await decider(calls, sends: false).decide(Self.message, in: Self.board())
-        #expect(d.decider == .sonnet && d.kind == .thread("T-i2"))
-        #expect(calls.sonnet == 1)
-        let fused = try #require(await d.fused?.value)
-        #expect(fused.send() == "T-i1")
-        #expect(calls.jev == 1 && calls.questions[0].contains("route") && calls.questions[0].contains("fjord"))
     }
 
     @Test func whenItMaySendASureAnswerSkipsSonnet() async throws {
         let calls = Calls()
-        let d = try await decider(calls, sends: true).decide(Self.message, in: Self.board())
+        let d = try await decider(calls, ).decide(Self.message, in: Self.board())
         #expect(d.decider == .jev && d.kind == .thread("T-i1") && d.action == "fused")
         #expect(calls.sonnet == 0)
         // Not sure: Sonnet as today.
@@ -201,12 +190,14 @@ import Testing
         var u = RouterProjectDecider(jev: Self.jev(unsure, route: [.thread("T-i1"): 0.4, .thread("T-i2"): 0.6], ans: [:], next: [:]),
                                      sonnet: Self.sonnet(unsure))
         u.fusedPath = true
-        u.jevSends = true
         let ud = try await u.decide(Self.message, in: Self.board())
         #expect(ud.decider == .sonnet && unsure.sonnet == 1)
+        // Sonnet decided: the fused answer rides along for the log.
+        let ride = try #require(await ud.fused?.value)
+        #expect(ride.send() == nil && unsure.jev == 1)
         // A place waved off isn't sent to by the path.
         let off = Calls()
-        let od = try await decider(off, sends: true).decide(Self.message, in: Self.board(), notTo: RouteTarget.thread("T-i1").targetID)
+        let od = try await decider(off, ).decide(Self.message, in: Self.board(), notTo: RouteTarget.thread("T-i1").targetID)
         #expect(od.decider == .sonnet && off.sonnet == 1)
     }
 
@@ -214,7 +205,7 @@ import Testing
         let calls = Calls()
         let action = RouterActionSource(origin: SessionOrigin(category: "PRs", thing: "PR 1", actionID: "a", runID: "r", runtimeMode: nil),
                                         repo: "acme/silo")
-        let d = try await decider(calls, sends: true).decide(Self.message, in: Self.board(), action: action)
+        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), action: action)
         #expect(d.fused == nil && d.decider == .sonnet && calls.jev == 0)
     }
 
@@ -231,16 +222,16 @@ import Testing
 
     @Test func thePreviewsAnswerIsReusedOnTheSameBoardOnly() async throws {
         let first = Calls()
-        let shown = try #require(await (try decider(first, sends: false).decide(Self.message, in: Self.board())).fused?.value)
+        let shown = try #require(await (try decider(first, ).decide(Self.message, in: Self.board())).fused?.value)
         let calls = Calls()
-        let d = try await decider(calls, sends: true).decide(Self.message, in: Self.board(), reuse: shown)
+        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), reuse: shown)
         #expect(d.decider == .jev && calls.jev == 0 && calls.sonnet == 0)
         #expect(try #require(await d.fused?.value).reused)
         // The board moved on (a new reply): asked again.
         var moved = Self.board()
         moved.threads[0].said += " Now it is fixed."
         let again = Calls()
-        _ = try await decider(again, sends: true).decide(Self.message, in: moved, reuse: shown)
+        _ = try await decider(again, ).decide(Self.message, in: moved, reuse: shown)
         #expect(again.jev == 1)
     }
 
@@ -260,7 +251,7 @@ import Testing
         let json = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
         #expect(json["path"] as? String == "sonnet")
         let fused = try #require(json["fused"] as? [String: Any])
-        #expect(fused["mode"] as? String == "shadow" && fused["agrees"] as? Bool == false && fused["wouldSend"] as? Bool == true)
+        #expect(fused["agrees"] as? Bool == false && fused["wouldSend"] as? Bool == true)
         #expect(fused["pick"] as? String == "t3-thread:T-i1" && fused["model"] as? String == "jev-1.14.0")
         let rows = try #require(fused["rows"] as? [[String: Any]])
         #expect((rows.first?["features"] as? [String: Double])?["fin0"] == 1)

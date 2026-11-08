@@ -6,9 +6,8 @@ import Observation
 // that thread in a chip and the brief marks it; below that nothing shows (E5: under 0.90 it misled on 5-7% of drafts). A click
 // opens a menu of its three likeliest places, and picking one fixes where the message goes; Esc (or the chip's ×) waves it off
 // for this draft, and the message then never goes there without an ask. Sending the same words on the same board reuses the
-// answer: the decider asks Jev nothing again. A keystroke cancels the read under way; typing never waits on it. In shadow
-// (`Store.jevSends` off) the chip still shows: at 0.90 it never disagreed with the final place on the 182 moments, and a
-// decision elsewhere is logged as a preview miss.
+// answer: the decider asks Jev nothing again. A keystroke cancels the read under way; typing never waits on it. At 0.90 it
+// never disagreed with the final place on the 182 moments, and a decision elsewhere is logged as a preview miss.
 
 @Observable @MainActor
 final class RouterPreview {

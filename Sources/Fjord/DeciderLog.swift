@@ -30,9 +30,9 @@ final class DeciderLog: @unchecked Sendable {
     }
 
     /// A decision: the entry it belongs to (`id`), the message, the board, and what the decider did. `fused`: E5's Jev-led
-    /// path's answer (shadow or not); `preview`: what the composer showed while you typed. The fields are E5's "Live logging".
+    /// path's answer ; `preview`: what the composer showed while you typed. The fields are E5's "Live logging".
     func decision(id: UUID, message: String, decision d: RouterProjectDecision, board: String, candidates: [(id: String, key: String)],
-                  sent: String, fused: JevPath.Result? = nil, jevSends: Bool = false, preview: JevPath.Shown? = nil,
+                  sent: String, fused: JevPath.Result? = nil, preview: JevPath.Shown? = nil,
                   focus: Focus? = nil, now: Date = Date()) {
         var kind: String
         var target = ""
@@ -67,7 +67,6 @@ final class DeciderLog: @unchecked Sendable {
         let final = d.target?.targetID
         if let f = fused {
             var out = Self.fused(f)
-            out["mode"] = jevSends ? "on" : "shadow"
             // Agreement with where it went now (an ask's pick comes later, as its outcome).
             if let final { out["agrees"] = f.top?.place.targetID == final }
             out["wouldSend"] = f.send() != nil

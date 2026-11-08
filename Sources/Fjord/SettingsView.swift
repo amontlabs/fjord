@@ -380,7 +380,6 @@ private struct RouterSettings: View {
             SettingsDivider()
             mutedFolders
             SettingsDivider()
-            jevSends
             if store.triageOn {
                 SettingsDivider()
                 inboxJev
@@ -414,15 +413,6 @@ private struct RouterSettings: View {
     /// Said only when it is missing: the briefs and the Router's answers run on the `claude` command.
     private var claudeCodeStatus: (String, Color)? {
         store.routerStatus.claudeCode == nil ? ("Claude Code (`claude`) not found: the Router's briefs and answers need it", Theme.amber) : nil
-    }
-
-    /// Whether E5's Jev-led path may send on its own (`JevPath`); off, it runs in shadow beside Sonnet and is only logged.
-    private var jevSends: some View {
-        SettingsRow("Let Jev send when sure",
-                    description: "Off: Jev's pick is logged beside Sonnet's. On: at 90% sure of an idle thread, it sends without Sonnet.",
-                    info: ("Let Jev send when sure", "With a TypeSafe key, one Jev call ranks where each message goes and checks whether it continues one of your three latest idle threads; Fjord fuses that with recency and word overlap into one probability. At 0.90 or more for an idle thread (never a running one, never a new thread), it can send without asking Sonnet: faster and cheaper. Off, it only runs beside Sonnet and is written to the local decision log, so its picks can be checked against where your messages really went before it is trusted (about 200 decisions with no wrong send). Either way the composer shows where a draft will go when Jev is that sure. Triage's actions never take this path.")) {
-            SettingsSwitch("Let Jev send when sure", isOn: Binding(get: { store.jevSends }, set: { store.settings.jevSends = $0 }))
-        }
     }
 
     /// Whether Jev labels the inbox's new comments and rates its review requests (InboxJev.swift), which sends them to TypeSafe.
