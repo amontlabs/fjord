@@ -28,11 +28,11 @@ extension RouterModel {
     /// The same, for the draft as it will be sent, worked out once by the caller (`sentDraft` writes every pill's name).
     func context(_ store: Store, sent: (text: String, mentions: [RouterMention])) -> RouterContext {
         let reply = store.routerBriefs.focused.flatMap { t in store.routerBriefs.docs[t.project]?.thread(t.thread) != nil ? t : nil }
-        // The preview's place picked from its menu is where it goes; the one waved off is never sent to unasked.
+        // The place picked in the composer is where it goes; the one waved off is never sent to unasked.
         let preview = store.routerPreview
         var context = RouterContext(replyTo: reply, target: preview.pinned, notTo: preview.dismissed)
         context.tag(sent.mentions)
-        (context.preview, context.reuse) = preview.carried(for: sent.text)
+        context.preview = preview.carried(for: sent.text)
         return context
     }
 

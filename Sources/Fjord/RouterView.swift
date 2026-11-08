@@ -313,10 +313,30 @@ final class RouterModel {
             }
             return
         }
-        let (text, _) = sentDraft(store)
+        let sent = sentDraft(store)
+        let text = sent.text
         guard !text.isEmpty, canSend(store) else { return }
-        var context = context(store)
+        var context = context(store, sent: sent)
         context.queue = queue
+        // Where it goes is decided before it is sent (RouterPreview.swift): the composer's answer for these words on this
+        // board, the place picked, or, with none yet, the words wait here for the decision.
+        let preview = store.routerPreview
+        let decides = RouterDispatcher.plan(text: text, context: context, store: store) == .decide
+        if decides || preview.pinned != nil, store.previewsDrafts, preview.decide != nil {
+            if let d = preview.ready(for: text) {
+                context.decided = d.decision
+                if !d.sure || preview.pinned != nil {
+                    // Not sure: Return sends to the highlighted place; with none, a click picks one.
+                    guard let target = preview.highlighted else { return }
+                    context.target = target
+                }
+            } else if decides {
+                preview.waitAndSend(text, tagged: RouterPointers.context(sent.mentions, store: store)) { [weak self] in
+                    self?.send(store: store, queue: queue)
+                }
+                return
+            }
+        }
         guard store.sendToRouter(text, context: context) else {
             sendRefused = Self.goneTarget
             Announce.say(Self.goneTarget)

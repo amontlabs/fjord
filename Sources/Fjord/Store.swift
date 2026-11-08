@@ -397,9 +397,18 @@ final class Store {
     @ObservationIgnored lazy var routerPreview: RouterPreview = {
         let preview = RouterPreview()
         preview.read = { [weak self] text, tagged in await self?.readDraft(text, tagged: tagged) }
+        preview.decide = { [weak self] text, tagged, notTo, reuse in await self?.decideDraft(text, tagged: tagged, notTo: notTo, reuse: reuse) }
+        preview.search = { [weak self] text in await self?.searchDraft(text) ?? [] }
+        preview.boardKey = { [weak self] in self?.deciderBoardKey() ?? "" }
+        preview.eligible = { [weak self] target in self.map { $0.routerDispatcher.eligible(target, store: $0) } ?? false }
         preview.allowed = { [weak self] in self?.previewsDrafts == true }
         return preview
     }()
+    /// A shot's model usage, shown in Settings instead of the log.
+    @ObservationIgnored var modelUsageShown: [ModelUsageLog.Entry]?
+    /// Every thread's turns and Haiku card, the BM25 index and the day's archive: the decider's context, kept off its path
+    /// (ThreadCards.swift). On disk under Application Support/Fjord/thread-cards; in memory only in a test or a demo.
+    @ObservationIgnored lazy var threadCards = ThreadCardStore(folder: routerFiles?.support)
     /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
     @ObservationIgnored lazy var routerBriefs: RouterBriefs = {
         let briefs = RouterBriefs()
@@ -462,6 +471,8 @@ final class Store {
     /// `load()`, then `startServices()`: launch can run them a turn apart (the bar shown between them).
     func start() {
         load()
+        // Every model call's tokens and cost, for Settings › T3 Code (never in a test or a demo: no paths).
+        if ModelUsageLog.shared == nil, !UnderTest.isRunning { ModelUsageLog.shared = ModelUsageLog.live(routerFiles) }
         wireNotifications()
         startServices()
     }

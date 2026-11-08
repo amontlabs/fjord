@@ -129,7 +129,8 @@ import Testing
             "latestUserMessageAt": .string(old), "latestUserAuthoredMessageAt": .string(old), "latestRunCompletedAt": .string(ran)]),
             T3Fixture.shell("bbbb2222", minutes: 0, extra: [
                 "latestVisibleMessage": ["id": "m1", "role": "assistant", "text": "done", "updatedAt": .string(T3Fixture.ago(30))],
-                "latestUserMessageAt": .string(T3Fixture.ago(30)), "latestUserAuthoredMessageAt": .string(T3Fixture.ago(30))])])
+                "latestUserMessageAt": .string(T3Fixture.ago(30)), "latestUserAuthoredMessageAt": .string(T3Fixture.ago(30)),
+                "latestRunCompletedAt": .null])])
         let b = s.deciderBoard()
         let a = b.threads.first { $0.key == "aaaa1111" }, c = b.threads.first { $0.key == "bbbb2222" }
         #expect(a.map { (119...121).contains($0.minutesIdle) } == true)
@@ -141,7 +142,7 @@ import Testing
     @Test func anImportedThreadWithNoRunOnT3IsOldWhateverItsMessagesSay() {
         let now = T3Fixture.ago(1)
         let s = Store.reading([T3Fixture.shell("aaaa1111", minutes: 1, extra: [
-            "historyOrigin": "v1_import", "createdAt": .string(T3Fixture.ago(60 * 24 * 9)),
+            "historyOrigin": "v1_import", "createdAt": .string(T3Fixture.ago(60 * 24 * 9)), "latestRunCompletedAt": .null,
             "latestUserAuthoredMessageAt": .string(now), "latestVisibleMessage": ["id": "m", "role": "assistant", "text": "x", "updatedAt": .string(now)]])])
         #expect(s.deciderBoard().threads.first.map { $0.minutesIdle > 60 * 24 * 8 } == true)
     }

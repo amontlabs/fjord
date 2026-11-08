@@ -4,9 +4,11 @@ import Observation
 // What you type (docs/design/router-redesign.md, "How a message flows"). Each message is a run of its own (several can be in
 // flight), one entry of the decision log, its stage shown on its pill over the composer. Where it goes is decided once, among
 // T3's threads: a reply armed on a thread goes to that thread; a thread you tagged goes there with no model; anything else is
-// for the decider (`RouterProjectDecider`: Sonnet on the board, Jev without a key), whose decision is acted on as it is: a
-// thread gets the words (a waiting request is answered by its own rules first), a new thread starts with them, the Router
-// answers here, or you're asked where it goes. Nothing is sent when it isn't sure.
+// for the decider (`RouterProjectDecider`: Jev's sure send, else Sonnet on the full context), whose decision is acted on as it
+// is: a thread gets the words (a waiting request is answered by its own rules first), a new thread starts with them, or the
+// Router answers here. Your own messages are decided in the composer before they go (`RouterPreview`): what reaches here
+// carries that decision, or the place you picked among its guesses. Only an unattended action, a wrong send asked again, or a
+// sure place that went away meanwhile asks "Where should this go?". Nothing is sent when it isn't sure.
 
 /// What a message of yours comes with besides its text: the thread you're replying to (it is the target), the T3
 /// place a Retry goes to again or one waved off, and its pills.
@@ -32,11 +34,11 @@ struct RouterContext: Equatable {
     var action: RouterActionSource?
     /// Your words wait for the turn under way instead of steering it (⌥Return). An action's message never steers.
     var queue = false
-    /// The place the composer's preview showed for the draft (`RouterPreview`), or the one a pick from its menu replaced:
-    /// logged with the decision, and a decision elsewhere is a preview miss.
-    var preview: JevPath.Shown?
-    /// The preview's answer for these words: the decider reuses it on the same board instead of asking Jev again.
-    var reuse: JevPath.Result?
+    /// What the composer showed for the draft (`RouterPreview`): logged with the decision, and a send elsewhere is a miss.
+    var preview: RouterPreview.Shown?
+    /// The composer's decision for these words on this board: acted on (or, with `target`, logged with your pick) instead of
+    /// deciding again.
+    var decided: RouterProjectDecision?
 
     init(replyTo: BriefTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
         self.replyTo = replyTo
@@ -156,8 +158,6 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var asker: JevAsker?
     /// Every decision and what became of it, for the benchmark (nil in a test or a demo).
     @ObservationIgnored var decisionLog: DeciderLog?
-    /// Sonnet's client; tests don't reach it (they stand in `Effects.decide`).
-    @ObservationIgnored lazy var anthropic = RouterProjectDecider.makeClient()
 
     init(store: Store) {
         self.store = store
@@ -438,7 +438,18 @@ struct RouterAskBack: Identifiable, Equatable {
         case .send(let target):
             // A place you tagged (or a Retry's, or one picked from the preview's menu): yours, as a pick is.
             confirm(job, target)
-            if let shown = job.context.preview { decisionLog?.previewPick(id: job.id, shown: shown, picked: target) }
+            if let decided = job.context.decided {
+                // The composer's guesses, and your pick among them (or of another place): logged as a decision and its outcome.
+                logDecision(job, decided, sent: "picked")
+                let guess = decided.places.first.flatMap { RouterProjectDecision(kind: $0, confidence: 0, decider: .none).target?.targetID }
+                store.updateDecision(job.id) {
+                    $0.decision.decider = decided.decider.rawValue
+                    $0.decision.confidence = decided.confidence
+                }
+                decisionLog?.outcome(id: job.id, "picked", target: target, guess: guess == target)
+            } else if let shown = job.context.preview {
+                decisionLog?.previewPick(id: job.id, shown: shown, picked: target)
+            }
             try await route(job, to: target)
         case .answer:
             try await think(job, .question)
@@ -511,7 +522,10 @@ struct RouterAskBack: Identifiable, Equatable {
         stage(job, RouterProjectDecider.Stage.sonnet.words)
         // What was on screen as you sent (E5's focus signals), read before anything is awaited.
         let focus = Self.focus(store)
-        let decision = try await effects.decide(job.tools, job.text, job.context) { [weak self] in self?.stage(job, $0.words) }
+        let decision: RouterProjectDecision
+        if let decided = job.context.decided { decision = decided } else {
+            decision = try await effects.decide(job.tools, job.text, job.context) { [weak self] in self?.stage(job, $0.words) }
+        }
         try Task.checkCancellation()
         try linked(job.context)
         store.updateDecision(job.id) {
@@ -520,17 +534,7 @@ struct RouterAskBack: Identifiable, Equatable {
             if !decision.reason.isEmpty { $0.note = RouterDecision.clip(decision.reason, 200) }
         }
         var sent = "asked"
-        defer {
-            let log = decisionLog
-            let (text, preview) = (job.text, job.context.preview)
-            let candidates = (decision.board?.candidates ?? []).map { ($0.id, $0.key) }
-            let write = { [sent] (fused: JevPath.Result?) in
-                log?.decision(id: job.id, message: text, decision: decision, board: decision.boardText, candidates: candidates,
-                              sent: sent, fused: fused, preview: preview, focus: focus)
-            }
-            // The fused answer may still be on its way (Sonnet decided): the record waits for it, the send never does.
-            if let fused = decision.fused { Task { write(await fused.value) } } else { write(nil) }
-        }
+        defer { logDecision(job, decision, sent: sent, focus: focus) }
         switch decision.kind {
         case .thread, .newThread:
             guard let target = decision.target?.targetID, target != job.context.notTo, eligible(target, store: store) else {
@@ -551,6 +555,20 @@ struct RouterAskBack: Identifiable, Equatable {
         case .ask:
             askBack(job, decision)
         }
+    }
+
+    /// A decision in the benchmark log. The fused answer may still be on its way (Sonnet decided): the record waits for it,
+    /// the send never does.
+    private func logDecision(_ job: Job, _ decision: RouterProjectDecision, sent: String, focus: DeciderLog.Focus? = nil) {
+        let log = decisionLog
+        let focus = focus ?? store.map(Self.focus)
+        let (text, preview) = (job.text, job.context.preview)
+        let candidates = (decision.board?.candidates ?? []).map { ($0.id, $0.key) }
+        let write = { (fused: JevPath.Result?) in
+            log?.decision(id: job.id, message: text, decision: decision, board: decision.boardText, candidates: candidates,
+                          sent: sent, fused: fused, preview: preview, focus: focus)
+        }
+        if let fused = decision.fused { Task { write(await fused.value) } } else { write(nil) }
     }
 
     /// The focus signals at send time: the thread open in Fjord, the one your latest message went to, the unseen candidates.
@@ -854,16 +872,10 @@ extension RouterDispatcher.Effects {
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
                 let action = context.action
-                // The board with the thread ends read ahead of time (cache and held projections); nothing is waited for.
-                let board = await store.deciderBoardWithReads()
-                var decider = RouterProjectDecider.app(store, client: dispatcher.anthropic)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
-                decider.jev = action != nil ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
-                var decision = try await decider.decide(message, in: board, tagged: tools.tagged, action: action,
-                                                        notTo: context.notTo, reuse: context.reuse, stage: stage)
-                decision.board = board
-                decision.boardText = board.render()
-                return decision
+                let jev = action != nil ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
+                return try await store.decideDestination(message, tagged: tools.tagged, action: action, notTo: context.notTo,
+                                                         jev: jev, stage: stage)
             },
             send: { [weak dispatcher] tools, delivery in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }

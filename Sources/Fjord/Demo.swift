@@ -240,9 +240,12 @@ enum Demo {
         if let last = state.decisions.indices.last, changes.last?.isReverted == true {
             state.decisions[last].outcome = .reverted
         }
-        // A message the Router couldn't place: asks where it goes (its run's entry waits for the pick), and one run under way.
-        var asking = RouterDecision(at: now.addingTimeInterval(-15), trigger: .you("ship it tomorrow morning"), decision: .init(intent: "message", label: "unclear", confidence: 0.48))
+        // A Triage action's message the Router couldn't place (your own are placed in the composer before they go): asks where
+        // it goes (its run's entry waits for the pick), and one run under way.
+        let origin = SessionOrigin(category: "CI", thing: "lcu#212 · CI failed", actionID: "demo-action", runID: "demo-run")
+        var asking = RouterDecision(at: now.addingTimeInterval(-15), trigger: .you("CI failed on lcu#212: look into it"), decision: .init(intent: "message", label: "unclear", confidence: 0.48))
         asking.decision.decider = "sonnet"
+        asking.fromAction = origin
         asking.add(.asked(["CI failure diagnosis", "Repository ownership transfer setup", "lcu"]))
         let running = RouterDecision(at: now.addingTimeInterval(-4), trigger: .you("archive the old fork once the transfer is done"), decision: .init(intent: "message"))
         state.decisions += [asking, running]
@@ -252,7 +255,11 @@ enum Demo {
                       RouteTarget.newThread(project: "demo-project-lcu-research").targetID]
         let options = places.compactMap { store.routerDispatcher.option($0, store: store) }
         store.routerDispatcher.preview(
-            ask: RouterAskBack(id: asking.id, message: "ship it tomorrow morning", context: RouterContext(),
+            ask: RouterAskBack(id: asking.id, message: "CI failed on lcu#212: look into it", context: {
+                var c = RouterContext()
+                c.action = RouterActionSource(origin: origin, repo: nil)
+                return c
+            }(),
                                options: options, suggestion: ci, at: now.addingTimeInterval(-15)),
             progress: [running.id: RouterProjectDecider.Stage.sonnet.words])
     }

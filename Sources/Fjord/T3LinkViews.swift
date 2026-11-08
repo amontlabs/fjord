@@ -17,11 +17,9 @@ struct T3Notice: View {
     }
 }
 
-/// The link's rows in Settings: its state and button, then the Anthropic key the decider will use.
+/// The link's rows in Settings: its state and button, then what the Router's models used.
 struct T3SettingsRows: View {
     let store: Store
-    @State private var key = ""
-    @State private var hasKey = false
 
     var body: some View {
         let link = store.t3
@@ -42,7 +40,7 @@ struct T3SettingsRows: View {
             SettingsStatusLine(text: status.text, color: color(status))
         }
         SettingsDivider()
-        anthropicKey
+        ModelUsageRows(store: store)
     }
 
     private func description(_ status: T3LinkStatus) -> String? {
@@ -55,35 +53,71 @@ struct T3SettingsRows: View {
         return Theme.tertiary
     }
 
-    private var anthropicKey: some View {
-        Group {
-            if hasKey {
-                SettingsRow("Anthropic API key", info: ("Anthropic API key", "Saved in the Keychain. The Router's decider asks Sonnet through it.")) {
-                    ActionButton("Remove") { AnthropicClient.deleteKey(); hasKey = false }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        SettingsTextField(placeholder: "Paste an Anthropic API key", text: $key, secure: true,
-                                          accessibilityLabel: "Anthropic API key", onSubmit: save)
-                        ActionButton("Save", height: CDS.Settings.field, action: save).disabled(key.isEmpty)
-                    }
-                    SettingsNote("For the decider that picks where a message goes.")
-                }
-            }
-        }
-        .task { hasKey = await Task.detached { AnthropicClient.readKeychain() != nil }.value }
-        .onDisappear { key = "" }
-    }
-
-    private func save() {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, AnthropicClient.saveKey(trimmed) else { return }
-        key = ""
-        hasKey = true
-    }
 }
 
 extension T3LinkStatus {
     var isMintFailure: Bool { if case .mintFailed = self { true } else { false } }
+}
+
+/// What the Router's model calls used (`ModelUsageLog`): today, the last 7 days or all time, per model, as plain numbers.
+struct ModelUsageRows: View {
+    let store: Store
+    @State private var span = ModelUsageLog.Span.today
+    @State private var entries: [ModelUsageLog.Entry] = []
+
+    var body: some View {
+        let totals = ModelUsageLog.totals(entries, now: Date())[span] ?? [:]
+        SettingsRow("Model usage", info: ("Model usage", "Every call the Router makes: the decider (Sonnet), the thread cards and briefs (Haiku) through Claude Code on your subscription, and Jev. Cost is Claude Code's own figure at API prices when it gives one, else the API price estimate; Jev's is his input tokens at $0.042 per million.")) {
+            Picker("", selection: $span) {
+                ForEach(ModelUsageLog.Span.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .accessibilityLabel("Span")
+        }
+        Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 6) {
+            GridRow {
+                ForEach(["", "Calls", "Input", "Cache read", "Cache write", "Output", "Cost"], id: \.self) { h in
+                    Text(h).font(CDS.sans(11, .medium)).foregroundStyle(CDS.Text.muted)
+                        .gridColumnAlignment(h.isEmpty ? .leading : .trailing)
+                }
+            }
+            ForEach(ModelUsageLog.Role.allCases, id: \.self) { role in
+                let t = totals[role] ?? ModelUsageLog.Totals()
+                GridRow {
+                    Text(role.title).font(CDS.sans(12)).foregroundStyle(CDS.Text.primary).gridColumnAlignment(.leading)
+                    ForEach([Self.count(t.calls), Self.tokens(t.input), Self.tokens(t.cacheRead), Self.tokens(t.cacheWrite),
+                             Self.tokens(t.output), Self.cost(t.cost)], id: \.self) { v in
+                        Text(v).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.secondary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Model usage, \(span.rawValue)")
+        SettingsNote("Cost is an API price estimate; on your subscription it is not billed per call.")
+            .task { entries = await Self.load(store) }
+    }
+
+    static func load(_ store: Store) async -> [ModelUsageLog.Entry] {
+        if let shown = store.modelUsageShown { return shown }
+        guard let log = ModelUsageLog.shared else { return [] }
+        return await Task.detached(priority: .utility) { log.entries() }.value
+    }
+
+    static func count(_ n: Int) -> String { n == 0 ? "–" : "\(n)" }
+
+    /// `840`, `12.4k`, `3.1M`.
+    static func tokens(_ n: Int) -> String {
+        if n == 0 { return "–" }
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return String(format: "%.1fk", Double(n) / 1000) }
+        return String(format: "%.1fM", Double(n) / 1_000_000)
+    }
+
+    static func cost(_ c: Double) -> String {
+        if c == 0 { return "–" }
+        return c < 0.01 ? String(format: "$%.4f", c) : String(format: "$%.2f", c)
+    }
 }

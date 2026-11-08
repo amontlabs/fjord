@@ -167,12 +167,15 @@ import Testing
         }
     }
 
-    static func sonnet(_ calls: Calls, session: String = "i2") -> RouterProjectDecider.Sonnet {
-        { _, _, _ in
+    static func sonnet(_ calls: Calls, session: String = "T-i2") -> RouterProjectDecider.Sonnet {
+        { _ in
             await MainActor.run { calls.sonnet += 1 }
-            return RouterProjectSonnetAnswer(action: "follow_up", project: "silo", session: session, confidence: 0.85)
+            return RouterContextAnswer(action: "follow_up", project: "silo", session: session, confidence: 0.85)
         }
     }
+
+    /// A context with nothing in it: these tests are about who decides, not what the context says.
+    static let ctx = DeciderContext.Built(system: "", blocks: [], ids: [:], live: [], archive: [], key: "k", sizes: [:])
 
     func decider(_ calls: Calls, sonnet: Bool = true) -> RouterProjectDecider {
         var d = RouterProjectDecider(jev: Self.jev(calls), sonnet: sonnet ? Self.sonnet(calls) : nil)
@@ -182,7 +185,7 @@ import Testing
 
     @Test func whenItMaySendASureAnswerSkipsSonnet() async throws {
         let calls = Calls()
-        let d = try await decider(calls, ).decide(Self.message, in: Self.board())
+        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), context: { Self.ctx })
         #expect(d.decider == .jev && d.kind == .thread("T-i1") && d.action == "fused")
         #expect(calls.sonnet == 0)
         // Not sure: Sonnet as today.
@@ -190,14 +193,14 @@ import Testing
         var u = RouterProjectDecider(jev: Self.jev(unsure, route: [.thread("T-i1"): 0.4, .thread("T-i2"): 0.6], ans: [:], next: [:]),
                                      sonnet: Self.sonnet(unsure))
         u.fusedPath = true
-        let ud = try await u.decide(Self.message, in: Self.board())
+        let ud = try await u.decide(Self.message, in: Self.board(), context: { Self.ctx })
         #expect(ud.decider == .sonnet && unsure.sonnet == 1)
         // Sonnet decided: the fused answer rides along for the log.
         let ride = try #require(await ud.fused?.value)
         #expect(ride.send() == nil && unsure.jev == 1)
         // A place waved off isn't sent to by the path.
         let off = Calls()
-        let od = try await decider(off, ).decide(Self.message, in: Self.board(), notTo: RouteTarget.thread("T-i1").targetID)
+        let od = try await decider(off, ).decide(Self.message, in: Self.board(), context: { Self.ctx }, notTo: RouteTarget.thread("T-i1").targetID)
         #expect(od.decider == .sonnet && off.sonnet == 1)
     }
 
@@ -205,7 +208,7 @@ import Testing
         let calls = Calls()
         let action = RouterActionSource(origin: SessionOrigin(category: "PRs", thing: "PR 1", actionID: "a", runID: "r", runtimeMode: nil),
                                         repo: "acme/silo")
-        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), action: action)
+        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), context: { Self.ctx }, action: action)
         #expect(d.fused == nil && d.decider == .sonnet && calls.jev == 0)
     }
 
@@ -214,7 +217,7 @@ import Testing
         var d = RouterProjectDecider(jev: Self.jev(calls, route: [.thread("T-i2"): 0.5, .thread("T-i1"): 0.3, .newThread(project: "P-silo"): 0.2],
                                                    ans: [:], next: [:]), sonnet: nil)
         d.fusedPath = true
-        let out = try await d.decide(Self.message, in: Self.board())
+        let out = try await d.decide(Self.message, in: Self.board(), context: { Self.ctx })
         guard case .ask(let places) = out.kind else { Issue.record("expected an ask"); return }
         #expect(places.count == 3 && out.decider == .jev)
         #expect(calls.jev == 1)
@@ -222,16 +225,16 @@ import Testing
 
     @Test func thePreviewsAnswerIsReusedOnTheSameBoardOnly() async throws {
         let first = Calls()
-        let shown = try #require(await (try decider(first, ).decide(Self.message, in: Self.board())).fused?.value)
+        let shown = try #require(await (try decider(first, ).decide(Self.message, in: Self.board(), context: { Self.ctx })).fused?.value)
         let calls = Calls()
-        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), reuse: shown)
+        let d = try await decider(calls, ).decide(Self.message, in: Self.board(), context: { Self.ctx }, reuse: shown)
         #expect(d.decider == .jev && calls.jev == 0 && calls.sonnet == 0)
         #expect(try #require(await d.fused?.value).reused)
         // The board moved on (a new reply): asked again.
         var moved = Self.board()
         moved.threads[0].said += " Now it is fixed."
         let again = Calls()
-        _ = try await decider(again, ).decide(Self.message, in: moved, reuse: shown)
+        _ = try await decider(again, ).decide(Self.message, in: moved, context: { Self.ctx }, reuse: shown)
         #expect(again.jev == 1)
     }
 
@@ -243,7 +246,7 @@ import Testing
         let log = DeciderLog(url: url)
         let f = result(route: Self.sure, ans: ["T-i1": 0.95], next: ["T-i1": 0.97])
         let decision = RouterProjectDecision(kind: .thread("T-i2"), confidence: 0.85, decider: .sonnet)
-        let shown = JevPath.Shown(text: Self.message, target: RouteTarget.thread("T-i1").targetID, p: f.p, result: f)
+        let shown = RouterPreview.Shown(text: Self.message, target: RouteTarget.thread("T-i1").targetID, p: f.p, decider: "jev", sure: true)
         log.decision(id: UUID(), message: Self.message, decision: decision, board: "b", candidates: [], sent: "sent", fused: f,
                      preview: shown, focus: .init(open: "T-i2", lastTold: "T-i1", unseen: ["T-i3"]))
         log.flush()
@@ -261,7 +264,7 @@ import Testing
         #expect((json["focus"] as? [String: Any])?["lastTold"] as? String == "T-i1")
     }
 
-    // MARK: The preview
+    // MARK: The destination in the composer
 
     func store() -> Store {
         let s = Store.reading([
@@ -279,16 +282,28 @@ import Testing
         return JevPath.Result(rows: rows, ans: [:], next: [:], fjord: nil, runningMass: 0, bm25: [:], twins: [], requestHash: "h", key: "k")
     }
 
-    final class Reads { var words: [String] = [] }
+    final class Reads { var words: [String] = []; var decided: [String] = []; var reused: [Bool] = []; var board = "b1" }
 
-    func preview(_ reads: Reads, p: Double = 0.95, thread: String = "th-login") -> RouterPreview {
+    /// Jev at `p` for th-login; Sonnet (when Jev isn't sure) answers `sonnet`.
+    func preview(_ reads: Reads, p: Double = 0.95, sonnet: RouterProjectDecision.Kind? = nil) -> RouterPreview {
         let preview = RouterPreview()
-        preview.delay = .milliseconds(30)
-        preview.read = { text, _ in reads.words.append(text); return Self.answer(thread, p: p) }
+        preview.jevDelay = .milliseconds(20)
+        preview.sonnetDelay = .milliseconds(60)
+        preview.boardKey = { reads.board }
+        preview.read = { text, _ in reads.words.append(text); return Self.answer("th-login", p: p) }
+        preview.decide = { text, _, _, reuse in
+            reads.decided.append(text)
+            reads.reused.append(reuse != nil)
+            return RouterProjectDecision(kind: sonnet ?? .ask([]), confidence: 0.6, decider: .sonnet)
+        }
         return preview
     }
 
-    @Test func aDraftIsReadOnceAfterThePauseAndAStaleReadIsDropped() async throws {
+    static let login = RouteTarget.thread("th-login").targetID
+    static let docs = RouteTarget.thread("th-docs").targetID
+    static let newInP1 = RouteTarget.newThread(project: "p1").targetID
+
+    @Test func jevSureShowsTheThreadAndSonnetIsNotAsked() async throws {
         let s = store()
         let reads = Reads()
         let p = preview(reads)
@@ -298,55 +313,109 @@ import Testing
         // Keystrokes inside the pause: only the last words are read.
         p.update(text: "fix the login red", context: RouterContext(), store: s)
         p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { p.shown != nil }
-        #expect(reads.words == ["fix the login redirect"])
-        #expect(p.shown?.target == RouteTarget.thread("th-login").targetID && p.markedThread == "th-login")
-        // The same words again: not read again.
+        await waitUntil { p.destination != nil }
+        #expect(reads.words == ["fix the login redirect"] && reads.decided.isEmpty)
+        #expect(p.destination?.sure == true && p.highlighted == Self.login && p.markedThread == "th-login")
+        // The same words again: nothing read again.
         p.update(text: "fix the login redirect", context: RouterContext(), store: s)
         #expect(p.asking == nil && reads.words.count == 1)
-        // A send of these words carries the shown place and its answer to reuse; other words carry no answer.
-        #expect(p.carried(for: "fix the login redirect").reuse != nil)
-        #expect(p.carried(for: "fix the login redirect!").reuse == nil)
     }
 
-    @Test func belowTheBarNothingShows() async throws {
+    @Test func notSureSonnetDecidesAfterTheLongerPauseOnceReusingJev() async throws {
         let s = store()
         let reads = Reads()
-        let p = preview(reads, p: 0.85)
-        p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { !reads.words.isEmpty && p.asking == nil }
-        #expect(p.shown == nil)
-        // Still reused at the send: the answer is for these words.
-        #expect(p.carried(for: "fix the login redirect").reuse != nil)
+        let p = preview(reads, p: 0.5, sonnet: .ask([.thread("th-docs"), .thread("th-login"), .newThread(project: "p1")]))
+        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
+        await waitUntil { p.destination != nil }
+        #expect(reads.words.count == 1 && reads.decided == ["the readme needs a section"] && reads.reused == [true])
+        // The guess highlighted, up to 2 alternatives; Return would send to the guess.
+        #expect(p.destination?.sure == false && p.destination?.options == [Self.docs, Self.login, Self.newInP1])
+        #expect(p.highlighted == Self.docs)
+        // A click picks another; the menu always offers a new thread.
+        p.pick(Self.login, store: s)
+        #expect(p.highlighted == Self.login)
+        #expect(p.menu(store: s).map(\.target).contains(Self.newInP1))
+        // Sending carries what was shown, not sure since you picked.
+        #expect(p.carried(for: "the readme needs a section")?.sure == false)
     }
 
-    @Test func escWavesItOffAndAMenuPickFixesWhereItGoes() async throws {
+    @Test func aKeystrokeCancelsTheDecisionUnderWay() async throws {
+        let s = store()
+        let reads = Reads()
+        let p = preview(reads, p: 0.5, sonnet: .thread("th-docs"))
+        // The first words' decision is held until it is cancelled.
+        let decide = p.decide!
+        var started: [String] = []
+        p.decide = { text, tagged, notTo, reuse in
+            started.append(text)
+            if text == "the readme needs a section" { try? await Task.sleep(for: .seconds(30)) }
+            return await decide(text, tagged, notTo, reuse)
+        }
+        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
+        await waitUntil { started.count == 1 }
+        p.update(text: "the readme needs a section on setup", context: RouterContext(), store: s)
+        await waitUntil { p.destination != nil }
+        #expect(started == ["the readme needs a section", "the readme needs a section on setup"])
+        #expect(p.destination?.text == "the readme needs a section on setup" && p.destination?.sure == true)
+    }
+
+    @Test func theSameWordsOnTheSameBoardReuseTheAnswer() async throws {
+        let s = store()
+        let reads = Reads()
+        let p = preview(reads, p: 0.5, sonnet: .thread("th-docs"))
+        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
+        await waitUntil { p.destination != nil }
+        #expect(p.ready(for: "the readme needs a section")?.decision.kind == .thread("th-docs"))
+        #expect(p.ready(for: "the readme needs a section!") == nil)
+        // The board moved on: no answer to reuse.
+        reads.board = "b2"
+        #expect(p.ready(for: "the readme needs a section") == nil)
+    }
+
+    @Test func returnBeforeAnAnswerWaitsThenSendsWhenSure() async throws {
+        let s = store()
+        let reads = Reads()
+        let p = preview(reads, p: 0.5, sonnet: .thread("th-docs"))
+        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
+        var sent = 0
+        p.waitAndSend("the readme needs a section", tagged: nil) { sent += 1 }
+        #expect(p.deciding && p.waiting == "the readme needs a section")
+        await waitUntil { sent == 1 }
+        #expect(p.waiting == nil && p.destination?.sure == true && reads.decided.count == 1)
+    }
+
+    @Test func returnBeforeAnUnsureAnswerShowsThePlacesAndWaitsForASecondReturnOrAClick() async throws {
+        let s = store()
+        let reads = Reads()
+        let p = preview(reads, p: 0.5, sonnet: .ask([.thread("th-docs"), .thread("th-login")]))
+        var sent = 0
+        p.waitAndSend("the readme needs a section", tagged: nil) { sent += 1 }
+        await waitUntil { p.destination != nil }
+        #expect(sent == 0 && p.waiting == nil && p.highlighted == Self.docs)
+        // A second Return finds the answer for these words: the guess.
+        #expect(p.ready(for: "the readme needs a section")?.sure == false)
+        // Or a click on another place sends the words there.
+        #expect(p.clickSends == "the readme needs a section")
+        p.pick(Self.login, store: s)
+        #expect(sent == 1 && p.pinned == Self.login && p.clickSends == nil)
+    }
+
+    @Test func escWavesTheGuessOffAndAPickedPlaceHolds() async throws {
         let s = store()
         let reads = Reads()
         let p = preview(reads)
         p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { p.shown != nil }
-        let target = try #require(p.shown?.target)
-        #expect(p.menu(store: s).map(\.target) == [target, RouteTarget.newThread(project: "p1").targetID])
+        await waitUntil { p.destination != nil }
         p.dismiss()
-        #expect(p.shown == nil && p.dismissed == target)
-        // A read of the next words that picks it again shows nothing.
-        p.update(text: "fix the login redirect now", context: RouterContext(), store: s)
-        await waitUntil { reads.words.count == 2 && p.asking == nil }
-        #expect(p.shown == nil)
+        #expect(p.dismissed == Self.login && p.destination == nil)
         // Cleared draft: starts over.
         p.update(text: "", context: RouterContext(), store: s)
         #expect(p.dismissed == nil)
-        // A pick from the menu fixes the target; the shown place goes with the send for the log.
+        // A pick holds: nothing is read again while it is there.
         p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { p.shown != nil }
-        let shown = p.shown
-        p.pick(RouteTarget.thread("th-docs").targetID, store: s)
-        #expect(p.pinned == RouteTarget.thread("th-docs").targetID && p.shown == nil)
-        #expect(p.carried(for: "fix the login redirect").shown == shown)
-        // With the target fixed, the plan sends there without a model: nothing is read.
-        let fixed = RouterContext(target: p.pinned)
-        p.update(text: "fix the login redirect again", context: fixed, store: s)
-        #expect(p.asking == nil)
+        await waitUntil { p.destination != nil }
+        p.pick(Self.docs, store: s)
+        p.update(text: "fix the login redirect again", context: RouterContext(target: p.pinned), store: s)
+        #expect(p.asking == nil && p.pinned == Self.docs)
     }
 }

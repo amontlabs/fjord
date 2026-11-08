@@ -17,7 +17,8 @@ struct AgentThread: Identifiable, Hashable {
     var pendingRequest: T3PendingRequest?
     /// A proposed plan to approve or send back.
     var hasPlan = false
-    /// Not visited since its last update (`lastVisitedAt` null or older), the read state T3's sidebar and phone share.
+    /// A reply finished that you haven't opened since (`lastVisitedAt` null or before `latestRunCompletedAt`), the read state
+    /// T3's sidebar and phone share.
     var unseen = false
     /// T3 settled it (every imported thread is): only work still live or waiting on you lists it.
     var settled = false
@@ -28,6 +29,12 @@ struct AgentThread: Identifiable, Hashable {
     var activityAt: Date
     var lastUserMessage: Date?
     var lastRunEndedAt: Date?
+    /// When T3 made it, settled it, and when you last opened it (`lastVisitedAt`, shared by T3's sidebar and phone).
+    var createdAt: Date?
+    var settledAt: Date?
+    var lastVisitedAt: Date?
+    /// Your own last words there (`latestUserAuthoredMessageAt`: wakes and agent sends don't move it).
+    var lastAuthoredAt: Date?
     /// The latest words the thread shows (the agent's last message), as T3's shell carries them.
     var latestMessage: String?
     /// The latest words you sent it, when that is its latest message.
@@ -87,6 +94,10 @@ extension AgentThread {
             limitResetAt: (raw.ts("usageLimitResetAt") ?? recovery?.ts("resetAt")).flatMap(Self.date),
             usageLimit: t.status == .failed && raw.str("lastErrorClass") == "usage_limit",
             branch: t.branch, pullRequests: t.pullRequests, tags: t.tags, provider: t.providerInstanceId)
+        createdAt = t.createdAt.flatMap(Self.date)
+        settledAt = t.settledAt.flatMap(Self.date)
+        lastVisitedAt = t.lastVisitedAt.flatMap(Self.date)
+        lastAuthoredAt = t.latestUserAuthoredMessageAt.flatMap(Self.date)
     }
 
     /// When the thread last had real activity: the latest of its last run's end, the last words you wrote and its latest visible

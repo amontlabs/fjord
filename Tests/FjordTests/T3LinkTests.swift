@@ -36,7 +36,9 @@ struct T3LinkTests {
             }
         }
         defer { T3HTTPStub.handler = nil }
-        let session = AnthropicClient.makeSession(protocolClasses: [T3HTTPStub.self])
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [T3HTTPStub.self]
+        let session = URLSession(configuration: config)
         return try await T3Discovery.endpoint(origin: URL(string: "http://127.0.0.1:3773")!, token: "tok", session: session, timeout: 30)
     }
 

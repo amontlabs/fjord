@@ -73,7 +73,7 @@ final class RouterKeys {
             if !model.suggestions(store).isEmpty { model.dismissMention() }
             // The preview's menu, then the preview itself: waved off for this draft.
             else if store.routerPreview.menuOpen { store.routerPreview.menuOpen = false }
-            else if store.routerPreview.shown != nil { store.routerPreview.dismiss() }
+            else if store.routerPreview.destination != nil { store.routerPreview.dismiss() }
             else if briefs.focused != nil { briefs.focus(nil) }
             // Nothing to step out of: a field keeps it (an NSTextView's own Esc would offer completions), anything else
             // gets it.

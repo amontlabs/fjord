@@ -457,6 +457,7 @@ extension Store {
         // Only on change: the views observing these redraw on every assignment.
         if next != threads { threads = next }
         prefetchDeciderReads()
+        refreshThreadCards()
         if work != backgroundWork { backgroundWork = work }
         var state = agents
         // Entries of threads T3 no longer has (archived, deleted) go, once T3 has said what it has.
@@ -499,7 +500,7 @@ extension Store {
         }
     }
 
-    /// Opens the thread in T3 Code (its deep link) and tells T3 it was opened, so it reads as seen everywhere. A test's
+    /// Opens the thread in T3 Code (its deep link): T3 itself records the visit when it shows it; Fjord marks nothing. A test's
     /// intercept sees the open instead. Whether there was a link to open.
     @discardableResult
     func openThread(_ id: String) -> Bool {
@@ -509,7 +510,6 @@ extension Store {
         }
         guard let url = t3.store.deepLink(id) else { return false }
         Link.open(url)
-        t3.store.markOpened(id)
         return true
     }
 

@@ -158,7 +158,11 @@ extension Store {
         deciderReads.prune(keeping: Set(threads.keys))
         var tasks: [Task<Void, Never>] = []
         let t3 = self.t3.store
-        for t in board.candidates {
+        // Jev's candidates and the full context's live threads (N4b rules: 24 h, each project's newest, just created).
+        let live = Set(DeciderContext.liveThreads(contextThreads(board), now: Date()).map(\.key))
+        var wanted = board.candidates
+        for t in board.threads where live.contains(t.key) && !wanted.contains(where: { $0.key == t.key }) { wanted.append(t) }
+        for t in wanted {
             guard let known = knownReads(for: t), known.reads == nil else { continue }
             let id = t.key
             tasks.append(deciderReads.fetch(id, stamp: known.stamp) { await t3.readTail(id) })
@@ -171,7 +175,7 @@ extension Store {
     func deciderBoardWithReads() async -> DeciderBoard {
         prefetchDeciderReads()
         var reads: [String: ThreadReads] = [:]
-        for t in deciderBoard().candidates {
+        for t in deciderBoard().threads {
             if let r = knownReads(for: t)?.reads { reads[t.key] = r }
         }
         return deciderBoard(reads: reads)

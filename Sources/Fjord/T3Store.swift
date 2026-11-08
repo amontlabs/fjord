@@ -306,12 +306,6 @@ final class T3Store {
         return URL(string: "t3code://threads/\(environmentID)/\(thread)")
     }
 
-    /// Tells T3 the thread was opened, so its sidebar and phone app show it read. Nothing without a link.
-    func markOpened(_ id: String) {
-        guard client != nil else { return }
-        Task { _ = try? await send(.threadVisit(threadId: id, visitedAt: T3Timestamp(date: Date()), opened: true)) }
-    }
-
     /// A unary request (for example `server.getConfig`).
     func call(tag: String, payload: T3JSON = [:]) async throws -> T3JSON {
         guard let client else { throw T3Error(kind: .disconnected, message: "Not connected") }
@@ -324,3 +318,35 @@ final class T3Store {
         return try await client.dispatch(command, commandId: commandId)
     }
 }
+
+// The decider's thread cards read a thread's turns (DeciderContextSource.swift, ThreadCards.swift).
+extension T3Store {
+    /// A thread's turns (yours and the agent's, with their times) through a bounded snapshot, given up after `timeout` seconds.
+    func readTurns(_ id: String, timeout: TimeInterval = 8) async -> [ThreadTurn]? {
+        guard let client else { return nil }
+        return await withTaskGroup(of: [ThreadTurn]?.self) { group in
+            group.addTask {
+                for await item in await client.subscribeThread(id, bounded: true) {
+                    if case .snapshot(_, let p) = item { return Self.turns(of: p) }
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    nonisolated static func turns(of p: T3Projection) -> [ThreadTurn] {
+        p.messages.compactMap { m -> ThreadTurn? in
+            guard m.role == "user" || m.role == "assistant", !m.text.isEmpty, !m.streaming,
+                  let at = (m.createdAt ?? m.updatedAt).flatMap(AgentThread.date) else { return nil }
+            return ThreadTurn(role: m.role, at: at, text: m.text)
+        }
+    }
+}
+

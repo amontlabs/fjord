@@ -92,6 +92,24 @@ import Testing
 
     // MARK: No model
 
+    @Test func theComposersSureDecisionIsActedOnWithoutDecidingAgain() async {
+        let (_, d, f) = setup()
+        var context = RouterContext()
+        context.decided = RouterProjectDecision(kind: .thread("th-docs"), confidence: 0.95, decider: .sonnet)
+        let id = d.submit("add the setup section", context: context)
+        await finish(f, id)
+        #expect(f.decided.isEmpty && f.sent.map(\.thread) == ["th-docs"] && d.askBacks.isEmpty)
+    }
+
+    @Test func aPlacePickedAmongTheComposersGuessesGoesThereWithNoAsk() async {
+        let (_, d, f) = setup()
+        var context = RouterContext(target: RouteTarget.thread("th-login").targetID)
+        context.decided = RouterProjectDecision(kind: .ask([.thread("th-docs"), .thread("th-login")]), confidence: 0.6, decider: .sonnet)
+        let id = d.submit("the count is wrong again", context: context)
+        await finish(f, id)
+        #expect(f.decided.isEmpty && f.sent.map(\.thread) == ["th-login"] && d.askBacks.isEmpty)
+    }
+
     @Test func aTaggedThreadGetsTheWordsWithNoModel() async {
         let (s, d, f) = setup()
         var context = RouterContext()

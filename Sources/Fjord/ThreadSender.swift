@@ -141,6 +141,9 @@ extension Store {
         let command = T3Command.messageDispatch(threadId: id, messageId: message.messageID, text: message.text,
                                                 dispatch: plan.dispatch, context: message.records)
         try await dispatch(command, commandId: message.commandID)
+        // Your words went there: you have read what it said (T3's read state, which its sidebar and phone share). Fjord marks a
+        // thread read only then and on Mark read, never for showing it. An action's message isn't yours: nothing is marked.
+        if !unattended { try? await dispatch(.threadVisit(threadId: id, visitedAt: T3Timestamp(date: Date()))) }
         return RouterDecision.Delivered(thread: id, messageID: message.messageID, commandID: message.commandID,
                                         outcome: plan.outcome, note: plan.note, at: Date())
     }

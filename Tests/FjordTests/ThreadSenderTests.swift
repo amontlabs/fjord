@@ -90,7 +90,9 @@ import Testing
         let (s, sent) = store()
         let message = ThreadMessage(text: "use postgres")
         let delivered = try await s.sendToThread("t1", message, mode: .steer)
-        #expect(sent.commands.count == 1 && sent.commands[0].id == message.commandID)
+        // The message, then the thread marked read (your words went there).
+        #expect(sent.commands.count == 2 && sent.commands[0].id == message.commandID)
+        #expect(dispatchObject(sent, 1)["type"] == "thread.visit" && dispatchObject(sent, 1)["threadId"] == "t1")
         let o = dispatchObject(sent)
         #expect(o["type"] == "message.dispatch" && o["threadId"] == "t1" && o["text"] == "use postgres")
         #expect(o["dispatchMode"] == ["type": "start_immediately"] && o["deliveryIntent"] == "steer")
@@ -109,6 +111,8 @@ import Testing
         let (s, sent) = store()
         let delivered = try await s.sendToThread("t1", ThreadMessage(text: "CI failed"), mode: .steer, unattended: true)
         #expect(dispatchObject(sent)["dispatchMode"] == ["type": "queue_after_active"] && delivered.outcome == .queued)
+        // An action's message isn't yours: the thread's read state is left alone.
+        #expect(sent.commands.count == 1)
     }
 
     @Test func aThreadWhoseAgentCantSteerQueuesAndTheEntrySaysWhy() async throws {
@@ -133,7 +137,7 @@ import Testing
         await #expect(throws: T3Error.self) { try await s.sendToThread("t1", message, mode: .steer) }
         sent.failing = nil
         _ = try await s.sendToThread("t1", message, mode: .steer)
-        #expect(sent.commands.map(\.id) == [message.commandID])
+        #expect(sent.commands.filter { if case .threadVisit = $0.command { false } else { true } }.map(\.id) == [message.commandID])
         #expect(ThreadMessage(text: "go").commandID != message.commandID)
     }
 

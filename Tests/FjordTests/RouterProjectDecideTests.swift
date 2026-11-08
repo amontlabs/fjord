@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import Fjord
 
-/// The decider on T3's board: Sonnet at 0.80 for an idle thread and 0.90 for a running one, without Sonnet Jev only orders the ask.
-/// A stub stands in for Sonnet; the one test of its transport answers from a stub URL protocol. Invented boards only.
+/// The decider on T3's board: Jev's sure send first, then Sonnet on the full context by N4's rule at its 1% bars, and without
+/// Sonnet Jev only orders the ask. A stub stands in for Sonnet; the transport (`claude -p`) is stubbed too. Invented boards only.
 @MainActor
 @Suite struct RouterProjectDecideTests {
     static let secret = "sk-abcdefghijklmnopqrstuvwxyz0123"
@@ -19,7 +19,12 @@ import Testing
         return b
     }
 
-    final class Calls { var jev = 0; var sonnet = 0; var prompt = ""; var role = "" }
+    /// The context's names for the board's threads.
+    static let ctx = DeciderContext.Built(system: "role", blocks: ["B", "D", "E"],
+                                          ids: ["t-s1": "t3-silo-1", "t-f2": "t3-fjord-2", "t-f1": "t3-fjord-1", "t-old": "t3-archived"],
+                                          live: [], archive: [], key: "key", sizes: ["A": 4])
+
+    final class Calls { var jev = 0; var sonnet = 0; var user = ""; var system = "" }
 
     static func jev(_ pick: String, _ p: Double, calls: Calls) -> JevAsker {
         { _, _ in
@@ -28,29 +33,93 @@ import Testing
         }
     }
 
-    static func sonnet(_ answer: RouterProjectSonnetAnswer, calls: Calls) -> RouterProjectDecider.Sonnet {
-        { role, prompt, _ in
-            await MainActor.run { calls.sonnet += 1; calls.prompt = prompt; calls.role = role }
+    static func sonnet(_ answer: RouterContextAnswer, calls: Calls) -> RouterProjectDecider.Sonnet {
+        { built in
+            await MainActor.run { calls.sonnet += 1; calls.user = built.user; calls.system = built.system }
             return answer
         }
     }
 
-    func decision(_ a: RouterProjectSonnetAnswer, _ board: DeciderBoard? = nil) -> RouterProjectDecision {
-        RouterProjectDecider(jev: nil, sonnet: nil).sonnetDecision(a, board: board ?? Self.board())
+    func decision(_ a: RouterContextAnswer, _ board: DeciderBoard? = nil) -> RouterProjectDecision {
+        RouterProjectDecider(jev: nil, sonnet: nil).contextDecision(a, context: Self.ctx, board: board ?? Self.board())
     }
 
-    // MARK: Sonnet's bars
-
-    @Test func anIdleThreadIsSentAtEightTenthsAndARunningOneOnlyAtNineTenths() {
-        func a(_ session: String, _ p: Double) -> RouterProjectSonnetAnswer { .init(action: "follow_up", project: "x", session: session, confidence: p) }
-        #expect(decision(a("f2", 0.80)).kind == .thread("t3-fjord-2"))
-        #expect(decision(a("f2", 0.79)).kind == .ask([.thread("t3-fjord-2")]))
-        // f1 is running: a message steers it, so 0.85 only asks.
-        #expect(decision(a("f1", 0.85)).kind == .ask([.thread("t3-fjord-1")]))
-        #expect(decision(a("f1", 0.90)).kind == .thread("t3-fjord-1"))
+    /// A follow-up its thread owns, alone in `fits`.
+    static func follow(_ session: String, _ p: Double, owned: String? = nil, unique: Bool = true, pNew: Double = 0) -> RouterContextAnswer {
+        .init(action: "follow_up", project: "fjord", session: session, confidence: p, pNew: pNew,
+              fits: [.init(thread: session, how: "reacts_to_its_result", stateOK: true)], ownedBy: owned ?? session, referentUnique: unique)
     }
 
-    // MARK: Unattended actions
+    // MARK: N4's rule at its 1% bars
+
+    @Test func aFollowUpItsThreadOwnsAloneIsSentAtNinetyIdleOrRunning() {
+        #expect(decision(Self.follow("t-f2", 0.90)).kind == .thread("t3-fjord-2"))
+        #expect(decision(Self.follow("t-f2", 0.89)).kind == .ask([.thread("t3-fjord-2"), .newThread(project: "P-fjord")]))
+        #expect(decision(Self.follow("t-f1", 0.90)).kind == .thread("t3-fjord-1"))
+        // An archive thread (named in the context, not on the board) can be sent to as well.
+        #expect(decision(Self.follow("t-old", 0.95)).kind == .thread("t3-archived"))
+    }
+
+    @Test func theOwnershipGuardAsksWhenAnotherThreadOwnsItOrSeveralFit() {
+        #expect(decision(Self.follow("t-f2", 0.97, owned: "none")).kind == .ask([.thread("t3-fjord-2"), .newThread(project: "P-fjord")]))
+        #expect(decision(Self.follow("t-f2", 0.97, unique: false)).kind == .ask([.thread("t3-fjord-2"), .newThread(project: "P-fjord")]))
+    }
+
+    @Test func pNewOrNewWorkAtSeventyStartsANewThreadInTheModelsProject() {
+        func a(_ action: String, conf: Double, pNew: Double, project: String = "silo") -> RouterContextAnswer {
+            .init(action: action, project: project, session: "", confidence: conf, pNew: pNew)
+        }
+        #expect(decision(a("ask", conf: 0.3, pNew: 0.70)).kind == .newThread(project: "P-silo"))
+        #expect(decision(Self.follow("t-s1", 0.99, pNew: 0.75)).kind == .newThread(project: "P-fjord"))
+        #expect(decision(a("new_work", conf: 0.70, pNew: 0.1)).kind == .newThread(project: "P-silo"))
+        #expect(decision(a("new_work", conf: 0.69, pNew: 0.69)).kind == .ask([.newThread(project: "P-silo")]))
+        // Only a known project.
+        #expect(decision(a("new_work", conf: 0.99, pNew: 0.99, project: "garden planner")).kind == .ask([]))
+    }
+
+    @Test func anAnswerHereGoesAtEighty() {
+        #expect(decision(.init(action: "answer_here", project: "", session: "", confidence: 0.8)).kind == .answer)
+        #expect(decision(.init(action: "answer_here", project: "", session: "", confidence: 0.7)).kind == .ask([]))
+    }
+
+    @Test func anAskListsTheGuessThenTheFitsThenTheAlternativesEachOnce() {
+        var a = RouterContextAnswer(action: "ask", project: "fjord", session: "t-f1", confidence: 0.4, alternatives: ["t-s1", "silo", "nowhere", "t-f1"],
+                                    fits: [.init(thread: "t-f2", how: "next_step_same_deliverable", stateOK: true),
+                                           .init(thread: "t-s1", how: "topic_only", stateOK: true)])
+        a.referentUnique = false
+        let d = decision(a)
+        #expect(d.kind == .ask([.thread("t3-fjord-1"), .thread("t3-fjord-2"), .thread("t3-silo-1"), .newThread(project: "P-silo")]))
+        #expect(d.decider == .sonnet)
+    }
+
+    @Test func anUnknownThreadIsNeverSent() {
+        #expect(decision(Self.follow("ghost", 0.99)).kind == .ask([.newThread(project: "P-fjord")]))
+    }
+
+    @Test func theAnswerDecodesN4bsSchemaAndTheDecisionKeepsItForTheLog() throws {
+        let json = #"{"message_deliverable":"fix the quota","fits":[{"thread":"t-s1","how":"reacts_to_its_result","state_ok":true}],"owned_by":"t-s1","referent_unique":true,"action":"follow_up","project":"silo","session":"t-s1","reason":"r","alternatives":[],"confidence":0.93,"project_confidence":0.9,"p_new":0.04}"#
+        var a = try JSONDecoder().decode(RouterContextAnswer.self, from: Data(json.utf8))
+        a.latency = 1.5
+        #expect(a.messageDeliverable == "fix the quota" && a.fits == [.init(thread: "t-s1", how: "reacts_to_its_result", stateOK: true)])
+        let d = decision(a)
+        #expect(d.kind == .thread("t3-silo-1") && d.pNew == 0.04 && d.deliverable == "fix the quota" && d.ownedBy == "t-s1")
+        #expect(d.referentUnique == true && d.fits.count == 1 && d.latency == 1.5 && d.projectConfidence == 0.9 && d.action == "follow_up")
+    }
+
+    @Test func theSchemaIsN4bsInItsOrder() throws {
+        let schema = DeciderContext.schema
+        let keys = ["message_deliverable", "fits", "owned_by", "referent_unique", "action", "project", "session", "reason", "alternatives",
+                    "confidence", "project_confidence", "p_new"]
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any])
+        #expect(json["required"] as? [String] == keys && json["additionalProperties"] as? Bool == false)
+        let at = keys.map { (schema.range(of: "\"\($0)\": {")?.lowerBound).map { schema.distance(from: schema.startIndex, to: $0) } ?? -1 }
+        #expect(at == at.sorted() && !at.contains(-1))
+        let props = try #require(json["properties"] as? [String: Any])
+        let fit = try #require(((props["fits"] as? [String: Any])?["items"] as? [String: Any])?["properties"] as? [String: Any])
+        #expect(((fit["how"] as? [String: Any])?["enum"] as? [String])?.last == "topic_only")
+    }
+
+    // MARK: Unattended actions keep their policy
 
     static func actionBoard() -> DeciderBoard {
         var b = Self.board()
@@ -60,54 +129,32 @@ import Testing
     static func action(_ repo: String? = "acme/fjord") -> RouterActionSource {
         RouterActionSource(origin: SessionOrigin(category: "PRs", thing: "PR 1", actionID: "a", runID: "r", runtimeMode: nil), repo: repo)
     }
-    func acted(_ a: RouterProjectSonnetAnswer, repo: String? = "acme/fjord") -> RouterProjectDecision {
-        RouterProjectDecider(jev: nil, sonnet: nil).sonnetDecision(a, board: Self.actionBoard(), action: Self.action(repo))
+    func acted(_ a: RouterContextAnswer, repo: String? = "acme/fjord") -> RouterProjectDecision {
+        RouterProjectDecider(jev: nil, sonnet: nil).contextDecision(a, context: Self.ctx, board: Self.actionBoard(), action: Self.action(repo))
     }
 
     @Test func anActionsFollowUpIsTakenOnlyAtNinetyFiveAndOtherwiseStartsANewThreadInTheProject() {
-        func a(_ p: Double, project: String = "fjord", pc: Double = 0) -> RouterProjectSonnetAnswer {
-            .init(action: "follow_up", project: project, session: "f2", confidence: p, projectConfidence: pc)
-        }
+        func a(_ p: Double, pc: Double = 0) -> RouterContextAnswer { .init(action: "follow_up", project: "fjord", session: "t-f2", confidence: p, projectConfidence: pc) }
         #expect(acted(a(0.9)).kind == .newThread(project: "P-fjord"))
         #expect(acted(a(0.96)).kind == .thread("t3-fjord-2"))
-        // The same answer from the owner is a follow-up at the idle bar.
-        #expect(decision(a(0.9)).kind == .thread("t3-fjord-2"))
-        // Without a repo that maps to a project: the model's project, at the idle bar.
         #expect(acted(a(0.9, pc: 0.85), repo: nil).kind == .newThread(project: "P-fjord"))
-        #expect(acted(a(0.9, pc: 0.5), repo: nil).kind == .ask([.thread("t3-fjord-2")]))
+        #expect(acted(a(0.9, pc: 0.5), repo: nil).kind == .ask([.thread("t3-fjord-2"), .newThread(project: "P-fjord")]))
+        // p_new doesn't change it.
+        #expect(acted(.init(action: "follow_up", project: "fjord", session: "t-f1", confidence: 0.99, pNew: 0.95)).kind == .thread("t3-fjord-1"))
     }
 
-    @Test func anActionsNewWorkStartsAThreadAtTheIdleBarInTheItemsRepoProject() {
-        func a(_ project: String, _ p: Double) -> RouterProjectSonnetAnswer { .init(action: "new_work", project: project, session: "", confidence: p) }
+    @Test func anActionsNewWorkStartsAThreadAtEightyInTheItemsRepoProject() {
+        func a(_ project: String, _ p: Double) -> RouterContextAnswer { .init(action: "new_work", project: project, session: "", confidence: p) }
         #expect(acted(a("fjord", 0.8)).kind == .newThread(project: "P-fjord"))
         #expect(acted(a("fjord", 0.79)).kind == .ask([.newThread(project: "P-fjord")]))
-        // The repo's project fills in a missing one, and blocks a different one.
         #expect(acted(a("", 0.85)).kind == .newThread(project: "P-fjord"))
         #expect(acted(a("silo", 0.99)).kind == .ask([.newThread(project: "P-silo")]))
-        // A repo that no project has (or two do) decides nothing.
-        #expect(acted(a("silo", 0.9), repo: "acme/other").kind == .newThread(project: "P-silo"))
-        var twice = Self.actionBoard()
-        twice.projectRepos["silo"] = "acme/fjord"
-        let d = RouterProjectDecider(jev: nil, sonnet: nil).sonnetDecision(a("silo", 0.9), board: twice, action: Self.action())
-        #expect(d.kind == .newThread(project: "P-silo"))
     }
 
-    @Test func anActionsFollowUpInAnotherProjectThanTheItemsIsNotTaken() {
-        let a = RouterProjectSonnetAnswer(action: "follow_up", project: "silo", session: "s1", confidence: 0.99)
-        #expect(acted(a).kind == .ask([.thread("t3-silo-1")]))
-    }
-
-    @Test func anActionIsToldItIsAutomatedInTheSonnetPromptAndJevsState() async throws {
-        let calls = Calls()
-        let answer = RouterProjectSonnetAnswer(action: "new_work", project: "fjord", session: "", confidence: 0.9)
-        let d = RouterProjectDecider(jev: nil, sonnet: Self.sonnet(answer, calls: calls))
-        let out = try await d.decide("do it", in: Self.actionBoard(), action: Self.action())
-        #expect(out.kind == .newThread(project: "P-fjord"))
-        #expect(calls.prompt.contains("<automated>"))
-        _ = try await d.decide("do it", in: Self.actionBoard())
-        #expect(!calls.prompt.contains("<automated>"))
-        #expect(Self.jevRequest(true).state["note"] != nil)
-        #expect(Self.jevRequest(false).state["note"] == nil)
+    @Test func anActionIsToldItIsAutomatedInTheContextAndJevsState() {
+        #expect(DeciderContextTests.build("do it", threads: [], unattended: true).user.contains("<automated>"))
+        #expect(!DeciderContextTests.build("do it", threads: []).user.contains("<automated>"))
+        #expect(Self.jevRequest(true).state["note"] != nil && Self.jevRequest(false).state["note"] == nil)
     }
 
     static func jevRequest(_ unattended: Bool) -> RouterProjectDecider.JevRequest {
@@ -121,146 +168,52 @@ import Testing
         let out = d.jevAsk(JevClient.Choice(choice: "Disk quota", confidence: 0.5, probabilities: probs), board: Self.actionBoard(),
                            options: req.options, action: Self.action())
         #expect(out?.kind == .ask([.newThread(project: "P-fjord"), .thread("t3-silo-1"), .thread("t3-fjord-2")]))
-        #expect(out?.decider == .jev)
-    }
-
-    @Test func newWorkAndAnAnswerHereGoAtTheIdleBar() {
-        func a(_ action: String, _ project: String, _ p: Double) -> RouterProjectSonnetAnswer { .init(action: action, project: project, session: "", confidence: p) }
-        #expect(decision(a("new_work", "silo", 0.8)).kind == .newThread(project: "P-silo"))
-        #expect(decision(a("new_work", "silo", 0.79)).kind == .ask([.newThread(project: "P-silo")]))
-        #expect(decision(a("answer_here", "", 0.8)).kind == .answer)
-        #expect(decision(a("answer_here", "", 0.7)).kind == .ask([]))
-    }
-
-    @Test func pNewAtEightyFiveStartsANewThreadInTheModelsProjectWhateverTheAction() {
-        func a(_ action: String, _ pNew: Double, project: String = "silo", session: String = "") -> RouterProjectSonnetAnswer {
-            .init(action: action, project: project, session: session, confidence: 0.5, pNew: pNew)
-        }
-        #expect(decision(a("ask", 0.85)).kind == .newThread(project: "P-silo"))
-        #expect(decision(a("follow_up", 0.9, session: "s1")).kind == .newThread(project: "P-silo"))
-        #expect(decision(a("answer_here", 0.9)).kind == .newThread(project: "P-silo"))
-        #expect(decision(a("ask", 0.84)).kind == .ask([]))
-        // Only a known project; and new_work keeps its own bar of 0.80.
-        #expect(decision(a("ask", 0.99, project: "garden planner")).kind == .ask([]))
-        #expect(decision(.init(action: "new_work", project: "silo", session: "", confidence: 0.8, pNew: 0.1)).kind == .newThread(project: "P-silo"))
-        #expect(decision(.init(action: "new_work", project: "silo", session: "", confidence: 0.79, pNew: 0.84)).kind == .ask([.newThread(project: "P-silo")]))
-        // Other bars unchanged: a follow-up below its bar with a low p_new still asks.
-        #expect(decision(.init(action: "follow_up", project: "silo", session: "s1", confidence: 0.79, pNew: 0.2)).kind == .ask([.thread("t3-silo-1")]))
-    }
-
-    @Test func pNewDoesNotChangeAnUnattendedActionsPolicy() {
-        // A follow-up on the item's own thread below 0.95 starts a new thread by the action policy, whatever p_new says.
-        let sure = acted(.init(action: "follow_up", project: "fjord", session: "f1", confidence: 0.99, pNew: 0.95))
-        #expect(sure.kind == .thread("t3-fjord-1"))
-    }
-
-    @Test func theAnswerDecodesN2sFieldsAndTheDecisionKeepsThemForTheLog() throws {
-        let json = #"{"analysis":"a","related_session":"s1","session_task":"quota","extends":true,"action":"follow_up","project":"silo","session":"s1","reason":"r","confidence":0.9,"project_confidence":0.9,"alternatives":[],"need":[],"p_new":0.12}"#
-        let a = try JSONDecoder().decode(RouterProjectSonnetAnswer.self, from: Data(json.utf8))
-        #expect(a.analysis == "a" && a.relatedSession == "s1" && a.sessionTask == "quota" && a.extends && a.pNew == 0.12)
-        let d = decision(a)
-        #expect(d.pNew == 0.12 && d.extends == true && d.relatedSession == "s1")
-        // An older answer without them decodes, with p_new at 0 so it never starts a thread.
-        let old = try JSONDecoder().decode(RouterProjectSonnetAnswer.self, from: Data(#"{"action":"ask","confidence":0.3}"#.utf8))
-        #expect(old.pNew == 0 && !old.extends && old.relatedSession.isEmpty)
-    }
-
-    @Test func theRoleIsN2sTextAndTheSchemaAsksItsFieldsFirstThenPNewLast() throws {
-        let role = RouterProjectDecider.role
-        #expect(role.contains("new_work: it asks for a different deliverable than any session's task, even in the same project or on the same topic, files or feature."))
-        #expect(role.contains("a question about the board or all sessions, or a board action. Work on any project, Fjord's own code included, is never answer_here."))
-        #expect(role.contains("Give new_work the same confidence you would give a follow_up when the message plainly asks for a different deliverable."))
-        #expect(!role.contains("recency") && !role.contains("bare reaction usually"))
-        let schema = RouterProjectDecider.schema
-        let keys = ["analysis", "related_session", "session_task", "extends", "action", "project", "session", "reason", "confidence",
-                    "project_confidence", "alternatives", "need", "p_new"]
-        let json = try #require(try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any])
-        #expect(json["required"] as? [String] == keys)
-        let props = try #require(json["properties"] as? [String: Any])
-        #expect(Set(props.keys) == Set(keys))
-        // Property order is the text order: the four first, p_new last.
-        let at = keys.map { (schema.range(of: "\"\($0)\": {")?.lowerBound).map { schema.distance(from: schema.startIndex, to: $0) } ?? -1 }
-        #expect(at == at.sorted() && !at.contains(-1))
-        #expect(RouterProjectDecider.maxTokens == 700)
-    }
-
-    @Test func aProjectThatIsSureWithAThreadThatIsNotDoesNotStartANewThread() {
-        // E3 rejected that rule: 29 duplicate threads in 182 moments. The thread bar is the thread's alone.
-        let d = decision(.init(action: "follow_up", project: "fjord", session: "f2", confidence: 0.6, projectConfidence: 0.97))
-        #expect(d.kind == .ask([.thread("t3-fjord-2")]))
-    }
-
-    @Test func anUnknownThreadOrProjectIsNeverSent() {
-        #expect(decision(.init(action: "follow_up", project: "fjord", session: "ghost", confidence: 0.99)).kind == .ask([]))
-        #expect(decision(.init(action: "new_work", project: "garden planner", session: "", confidence: 0.99)).kind == .ask([]))
-    }
-
-    @Test func anAskListsTheGuessThenTheAlternativesEachOnce() {
-        let d = decision(.init(action: "ask", project: "fjord", session: "f1", confidence: 0.4, alternatives: ["s1", "silo", "nowhere", "f1"]))
-        #expect(d.kind == .ask([.thread("t3-fjord-1"), .thread("t3-silo-1"), .newThread(project: "P-silo")]))
-    }
-
-    @Test func theDecisionKeepsWhatTheLogNeeds() {
-        var a = RouterProjectSonnetAnswer(action: "follow_up", project: "fjord", session: "f2", reason: "same work", confidence: 0.9, projectConfidence: 0.95)
-        a.latency = 1.5
-        let d = decision(a)
-        #expect(d.decider == .sonnet && d.action == "follow_up" && d.projectConfidence == 0.95 && d.latency == 1.5 && d.reason == "same work")
     }
 
     // MARK: The cascade
 
-    @Test func sonnetIsAskedFirstAndItsPromptIsTheSpecs() async throws {
+    @Test func sonnetDecidesOnTheContextAndTheDecisionKeepsIt() async throws {
         let calls = Calls()
-        let d = RouterProjectDecider(jev: Self.jev("Disk quota", 0.99, calls: calls),
-                                     sonnet: Self.sonnet(.init(action: "follow_up", project: "silo", session: "s1", confidence: 0.9), calls: calls))
+        let d = RouterProjectDecider(jev: Self.jev("Disk quota", 0.99, calls: calls), sonnet: Self.sonnet(Self.follow("t-s1", 0.95), calls: calls))
         var stages: [RouterProjectDecider.Stage] = []
-        let out = try await d.decide("quota?", in: Self.board()) { stages.append($0) }
+        let out = try await d.decide("quota?", in: Self.board(), context: { Self.ctx }) { stages.append($0) }
         #expect(out.kind == .thread("t3-silo-1") && out.decider == .sonnet && calls.jev == 0 && stages == [.sonnet])
-        #expect(calls.prompt == "Board:\n\(Self.board().render())\n\nMessage:\n<message>quota?</message>")
-        #expect(calls.role.hasPrefix("You route one message from the owner") && !calls.role.contains("new project"))
+        #expect(calls.user == Self.ctx.user && calls.system == "role")
+        #expect(out.boardText == Self.ctx.user && out.contextKey == "key" && out.contextSizes == ["A": 4])
     }
 
     @Test func withoutSonnetJevNeverSendsAndOnlyOrdersTheAsk() async throws {
         let calls = Calls()
-        // Even at 0.99 on an idle thread: an ask, his pick first (the stub gives only the pick's probability).
-        let a = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.99, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(a.kind == .ask([.thread("t3-silo-1"), .thread("t3-fjord-1"), .thread("t3-fjord-2")]) && a.decider == .jev && a.confidence == 0.99)
-        let new = try await RouterProjectDecider(jev: Self.jev("new in silo", 0.8, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        guard case .ask(let places) = new.kind else { Issue.record("expected an ask"); return }
-        #expect(places.first == .newThread(project: "P-silo") && places.count == 3)
-        // An intent is never offered.
-        let intent = try await RouterProjectDecider(jev: Self.jev("question", 0.99, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        guard case .ask(let rest) = intent.kind else { Issue.record("expected an ask"); return }
-        #expect(rest.count == 3 && intent.decider == .jev)
+        let a = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.99, calls: calls), sonnet: nil).decide("x", in: Self.board(), context: { Self.ctx })
+        #expect(a.kind == .ask([.thread("t3-silo-1"), .thread("t3-fjord-1"), .thread("t3-fjord-2")]) && a.decider == .jev)
         #expect(!Self.jevRequest(false).options.contains { ["question", "unclear", "compound", "change_fjord"].contains($0.name) })
     }
 
     @Test func jevOrdersTheAskByHisProbabilities() {
         let req = Self.jevRequest(false)
-        let d = RouterProjectDecider(jev: nil, sonnet: nil)
         let probs = ["Old login fix": 0.6, "new in silo": 0.25, "question": 0.1, "Disk quota": 0.05]
-        let out = d.jevAsk(JevClient.Choice(choice: "Old login fix", confidence: 0.6, probabilities: probs), board: Self.actionBoard(), options: req.options)
+        let out = RouterProjectDecider(jev: nil, sonnet: nil).jevAsk(JevClient.Choice(choice: "Old login fix", confidence: 0.6, probabilities: probs),
+                                                                      board: Self.actionBoard(), options: req.options)
         #expect(out?.kind == .ask([.thread("t3-fjord-2"), .newThread(project: "P-silo"), .thread("t3-silo-1")]))
     }
 
     @Test func aFailedSonnetFallsToJevsAskElseAsksWithWhy() async throws {
-        let broken: RouterProjectDecider.Sonnet = { _, _, _ in throw AnthropicError.noKey }
+        let broken: RouterProjectDecider.Sonnet = { _ in throw ClaudePrint.Failure(message: "Claude Code wasn't found") }
         let calls = Calls()
         var stages: [RouterProjectDecider.Stage] = []
-        let viaJev = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.9, calls: calls), sonnet: broken).decide("x", in: Self.board()) { stages.append($0) }
-        #expect(viaJev.kind == .ask([.thread("t3-silo-1"), .thread("t3-fjord-1"), .thread("t3-fjord-2")]) && viaJev.decider == .jev && stages == [.sonnet, .jev])
-        let alone = try await RouterProjectDecider(jev: nil, sonnet: broken).decide("x", in: Self.board())
-        #expect(alone.kind == .ask([]) && alone.decider == .none && alone.reason == AnthropicError.noKey.localizedDescription)
-        let nothing = try await RouterProjectDecider(jev: nil, sonnet: nil).decide("x", in: Self.board())
-        #expect(nothing == RouterProjectDecision(kind: .ask([]), confidence: 0, decider: .none))
+        let viaJev = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.9, calls: calls), sonnet: broken)
+            .decide("x", in: Self.board(), context: { Self.ctx }) { stages.append($0) }
+        #expect(viaJev.decider == .jev && stages == [.sonnet, .jev])
+        let alone = try await RouterProjectDecider(jev: nil, sonnet: broken).decide("x", in: Self.board(), context: { Self.ctx })
+        #expect(alone.kind == .ask([]) && alone.decider == .none && alone.reason == "Claude Code wasn't found")
     }
 
     @Test func cancellingStopsTheDecision() async {
-        let slow: RouterProjectDecider.Sonnet = { _, _, _ in
+        let slow: RouterProjectDecider.Sonnet = { _ in
             try await Task.sleep(for: .seconds(30))
             return .init(action: "answer_here", project: "", session: "", confidence: 1)
         }
-        let task = Task { try await RouterProjectDecider(jev: nil, sonnet: slow).decide("x", in: Self.board()) }
+        let task = Task { try await RouterProjectDecider(jev: nil, sonnet: slow).decide("x", in: Self.board(), context: { Self.ctx }) }
         try? await Task.sleep(for: .milliseconds(50))
         task.cancel()
         let result = await task.result
@@ -304,66 +257,50 @@ import Testing
         let request = RouterProjectDecider.jevRequest("my key is \(Self.secret)", b, tagged: "@CI \(Self.secret)")
         let wire = String(decoding: try JevClient.requestData(["route": request.question], about: request.state), as: UTF8.self)
         #expect(!wire.contains(Self.secret) && wire.contains("[redacted]"))
-        let prompt = RouterProjectDecider.sonnetPrompt("my key is \(Self.secret)", b, tagged: "@CI \(Self.secret)")
-        #expect(!prompt.contains(Self.secret) && prompt.contains("<message>my key is [redacted]</message>"))
+        let ctx = DeciderContextTests.build("my key is \(Self.secret)", threads: [DeciderContextTests.thread("a", title: "Keys \(Self.secret)", said: "set \(Self.secret)")],
+                                            tagged: "@CI \(Self.secret)")
+        #expect(!ctx.user.contains(Self.secret) && ctx.user.contains("<message>my key is [redacted]</message>"))
     }
 
-    // MARK: The transport
+    // MARK: The transport: `claude -p`, stubbed
 
-    @Test func theApiSonnetSendsTheRoleAsTheCachedSystemBlockWithThinkingOffAndReadsTheTypedAnswer() async throws {
-        let seen = DecideSeen()
-        DecideStub.handler = { body in
-            seen.body = body
-            let text = #"{"action":"follow_up","project":"silo","session":"s1","reason":"r","confidence":0.91,"project_confidence":0.95,"alternatives":[],"need":[]}"#
-            let escaped = String(data: try! JSONEncoder().encode(text), encoding: .utf8)!
-            return #"{"stop_reason":"end_turn","content":[{"type":"text","text":\#(escaped)}],"usage":{"input_tokens":10,"output_tokens":4}}"#
+    @Test func sonnetGoesThroughClaudeCodeWithTheSchemaThinkingOffAndItsUsageLogged() async throws {
+        let seen = PrintSeen()
+        let runner: ClaudePrint.Runner = { binary, args, input, timeout in
+            seen.set(binary, args, String(decoding: input, as: UTF8.self), timeout)
+            let out = #"{"type":"result","is_error":false,"total_cost_usd":0.021,"usage":{"input_tokens":7400,"output_tokens":300,"cache_read_input_tokens":27800,"cache_creation_input_tokens":0},"structured_output":{"message_deliverable":"m","fits":[],"owned_by":"none","referent_unique":false,"action":"new_work","project":"silo","session":"","reason":"r","alternatives":[],"confidence":0.8,"project_confidence":0.9,"p_new":0.8}}"#
+            return OneShot.Output(stdout: Data(out.utf8), stderr: Data(), status: 0)
         }
-        let client = AnthropicClient(session: AnthropicClient.makeSession(protocolClasses: [DecideStub.self]), baseURL: URL(string: "https://stub.test")!,
-                                     apiKey: { "sk-test" }, effort: nil)
-        let sonnet = RouterProjectDecider.api(client)
-        let answer = try await sonnet(RouterProjectDecider.role, "Board:\nx", RouterProjectDecider.schema)
-        #expect(answer.session == "s1" && answer.confidence == 0.91 && answer.projectConfidence == 0.95 && answer.usage?.inputTokens == 10)
-        let json = try #require(try JSONSerialization.jsonObject(with: seen.body) as? [String: Any])
-        #expect(json["model"] as? String == "claude-sonnet-5-5" && json["max_tokens"] as? Int == 700)
-        #expect((json["thinking"] as? [String: Any])?["type"] as? String == "between_tools")
-        let output = json["output_config"] as? [String: Any]
-        #expect(output?["effort"] == nil && (output?["format"] as? [String: Any])?["type"] as? String == "json_schema")
-        let system = (json["system"] as? [[String: Any]])?.first
-        #expect(system?["text"] as? String == RouterProjectDecider.role && (system?["cache_control"] as? [String: Any])?["type"] as? String == "ephemeral")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("usage-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ModelUsageLog(url: dir.appendingPathComponent("model-usage.jsonl"))
+        let sonnet = RouterProjectDecider.claude(binary: { "/bin/claude" }, runner: runner, log: log)
+        let a = try await sonnet(Self.ctx)
+        #expect(a.action == "new_work" && a.pNew == 0.8 && a.usage?.cacheReadTokens == 27800 && a.usage?.costUSD == 0.021)
+        let args = seen.args
+        func value(_ flag: String) -> String? { args.firstIndex(of: flag).map { args[$0 + 1] } }
+        #expect(seen.binary == "/bin/claude" && args.first == "-p" && value("--model") == "claude-sonnet-5-5")
+        #expect(value("--json-schema") == DeciderContext.schema && value("--system-prompt") == "role")
+        #expect(value("--settings") == #"{"alwaysThinkingEnabled":false}"# && value("--effort") == "high" && value("--tools") == "")
+        #expect(args.contains("--no-session-persistence") && args.contains("--strict-mcp-config") && value("--output-format") == "json")
+        #expect(seen.input == Self.ctx.user)
+        log.flush()
+        let entries = log.entries()
+        #expect(entries.count == 1 && entries[0].role == .decider && entries[0].usage.inputTokens == 7400 && entries[0].usage.costUSD == 0.021)
     }
 
-    /// FJORD_ANTHROPIC_LIVE=1: one real call on an invented board (a fraction of a cent).
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["FJORD_ANTHROPIC_LIVE"] == "1"))
-    func liveSmokeOnAnInventedBoard() async throws {
-        let b = DeciderBoard(projects: ["harbor-notes"], purposes: ["harbor-notes": "A note-taking app for sailors."], threads: [
-            .init(id: "7f3a9c21", project: "harbor-notes", title: "Tide table import", flag: .finished, minutesIdle: 120,
-                  said: "The importer now reads both CSV layouts. Two stations still fail on a trailing comma.", youSaid: "Add the second layout too"),
-        ])
-        let d = RouterProjectDecider(jev: nil, sonnet: RouterProjectDecider.api(RouterProjectDecider.makeClient()))
-        let out = try await d.decide("fix the trailing comma in the tide importer", in: b)
-        print("live decision:", out.kind, out.confidence, out.latency ?? 0)
-        #expect(out.decider == .sonnet && out.latency != nil)
+    @Test func aClaudeCodeErrorOrNoStructuredOutputFails() {
+        let err = OneShot.Output(stdout: Data(#"{"is_error":true,"result":"usage limit reached"}"#.utf8), stderr: Data(), status: 1)
+        #expect(throws: ClaudePrint.Failure.self) { _ = try ClaudePrint.parse(err) }
+        let none = OneShot.Output(stdout: Data(#"{"is_error":false,"result":"hi"}"#.utf8), stderr: Data(), status: 0)
+        #expect(throws: ClaudePrint.Failure.self) { _ = try ClaudePrint.parse(none) }
+        let garbage = OneShot.Output(stdout: Data("nope".utf8), stderr: Data("boom".utf8), status: 1)
+        #expect(throws: ClaudePrint.Failure(message: "Claude Code: boom")) { _ = try ClaudePrint.parse(garbage) }
     }
 }
 
-final class DecideSeen: @unchecked Sendable { var body = Data() }
-
-final class DecideStub: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: ((Data) -> String)?
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
-    override func startLoading() {
-        var body = request.httpBody ?? Data()
-        if let stream = request.httpBodyStream {
-            stream.open(); defer { stream.close() }
-            var buf = [UInt8](repeating: 0, count: 4096)
-            while stream.hasBytesAvailable { let n = stream.read(&buf, maxLength: buf.count); if n <= 0 { break }; body.append(buf, count: n) }
-        }
-        let reply = Self.handler?(body) ?? "{}"
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/2", headerFields: [:])!,
-                            cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(reply.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
+final class PrintSeen: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var binary = "", args: [String] = [], input = "", timeout: TimeInterval = 0
+    func set(_ b: String, _ a: [String], _ i: String, _ t: TimeInterval) { lock.withLock { binary = b; args = a; input = i; timeout = t } }
 }

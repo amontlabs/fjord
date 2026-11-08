@@ -343,11 +343,12 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
         raw = j
     }
 
-    /// Unseen = never visited, or visited before the last update (S1 j).
+    /// Unread: a run finished after you last opened the thread, or you never did (T3's own rule: "mark unread" sets
+    /// `lastVisitedAt` just before `latestRunCompletedAt`). Not `updatedAt`, which pin, settle and snooze move too (N4b §2.1).
     var isUnseen: Bool {
-        guard let updatedAt else { return false }
+        guard let run = latestRunCompletedAt else { return false }
         guard let lastVisitedAt else { return true }
-        return lastVisitedAt < updatedAt
+        return lastVisitedAt < run
     }
     var isListed: Bool { lineage.isListed }
     var isLive: Bool { status.isLive }

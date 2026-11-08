@@ -98,7 +98,18 @@ struct JevClient {
         let (body, keys, ordered) = try Self.request(questions)
         let (wire, all) = Self.wire(body: body, state: state, ordered: ordered)
         let data = try await post(wire, ordered: all)
+        Self.recordUsage(data)
         return try Self.answers(data, questions: questions, keys: keys)
+    }
+
+    /// His `usage{input_tokens, output_tokens}` in the model-usage log, priced at $0.042 per million input tokens (J3).
+    static func recordUsage(_ data: Data, log: ModelUsageLog? = ModelUsageLog.shared) {
+        guard let log, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let u = json["usage"] as? [String: Any] else { return }
+        let input = (u["input_tokens"] as? NSNumber)?.intValue ?? 0
+        let output = (u["output_tokens"] as? NSNumber)?.intValue ?? 0
+        log.record(role: .jev, model: json["model"] as? String ?? "jev",
+                   ModelUsage(inputTokens: input, outputTokens: output, costUSD: Double(input) * 0.042 / 1e6))
     }
 
     /// The request's bytes as `ask` posts them (the routing trace keeps them, so evals can replay real traffic exactly).

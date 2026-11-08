@@ -13,7 +13,7 @@ enum T3Fixture {
             "lineage": ["parentThreadId": nil, "relationshipToParent": relationship.map(T3JSON.string) ?? nil, "rootThreadId": .string(id)],
             "latestRunId": nil, "activeRunId": nil, "status": .string(status), "pendingRuntimeRequest": pending,
             "latestVisibleMessage": ["id": "m0", "role": "assistant", "text": "Done with the beds.", "updatedAt": .string(updatedAt)],
-            "latestUserMessageAt": .string(updatedAt), "hasActionableProposedPlan": false, "pendingBackgroundTasks": [],
+            "latestUserMessageAt": .string(updatedAt), "latestRunCompletedAt": .string(updatedAt), "hasActionableProposedPlan": false, "pendingBackgroundTasks": [],
             "itemCount": 3, "visibleItemCount": 3, "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": .string(updatedAt),
             "archivedAt": nil, "settledOverride": nil, "settledAt": nil, "deletedAt": nil, "tags": ["garden"],
         ]

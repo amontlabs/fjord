@@ -22,7 +22,7 @@ final class DeciderLog: @unchecked Sendable {
     }
 
     /// What was on screen when you sent (E5's focus signals): the thread open in Fjord, the one your latest message went to,
-    /// and the candidates you haven't seen since their last update (T3's `lastVisitedAt` as its read state).
+    /// and the candidates with a reply you haven't opened (T3's `lastVisitedAt` before `latestRunCompletedAt`).
     struct Focus: Equatable {
         var open: String?
         var lastTold: String?
@@ -32,7 +32,7 @@ final class DeciderLog: @unchecked Sendable {
     /// A decision: the entry it belongs to (`id`), the message, the board, and what the decider did. `fused`: E5's Jev-led
     /// path's answer ; `preview`: what the composer showed while you typed. The fields are E5's "Live logging".
     func decision(id: UUID, message: String, decision d: RouterProjectDecision, board: String, candidates: [(id: String, key: String)],
-                  sent: String, fused: JevPath.Result? = nil, preview: JevPath.Shown? = nil,
+                  sent: String, fused: JevPath.Result? = nil, preview: RouterPreview.Shown? = nil,
                   focus: Focus? = nil, now: Date = Date()) {
         var kind: String
         var target = ""
@@ -58,13 +58,22 @@ final class DeciderLog: @unchecked Sendable {
             "message": message, "boardHash": Self.hash(board), "board": board,
             "candidates": candidates.map { ["id": $0.id, "thread": $0.key] },
         ]
-        // N2's fields of Sonnet's answer.
+        // N4b's fields of Sonnet's answer, and the context it read.
         if let p = d.pNew { record["pNew"] = p }
-        if let e = d.extends { record["extends"] = e }
-        if !d.relatedSession.isEmpty { record["relatedSession"] = d.relatedSession }
+        if !d.deliverable.isEmpty { record["deliverable"] = d.deliverable }
+        if d.pNew != nil {
+            record["fits"] = d.fits.map { ["thread": $0.thread, "how": $0.how, "stateOK": $0.stateOK] }
+            record["ownedBy"] = d.ownedBy
+        }
+        if let u = d.referentUnique { record["referentUnique"] = u }
+        if !d.contextKey.isEmpty { record["contextKey"] = d.contextKey }
+        if !d.contextSizes.isEmpty { record["contextSizes"] = d.contextSizes }
         if let latency = d.latency { record["latencyMs"] = Int(latency * 1000) }
         if let u = d.usage {
-            record["usage"] = ["input": u.inputTokens, "output": u.outputTokens, "cacheRead": u.cacheReadTokens, "cacheCreation": u.cacheCreationTokens]
+            var usage: [String: Any] = ["input": u.inputTokens, "output": u.outputTokens, "cacheRead": u.cacheReadTokens,
+                                        "cacheCreation": u.cacheCreationTokens]
+            if let c = u.costUSD { usage["costUSD"] = c }
+            record["usage"] = usage
         }
         // Which path decided: E5's fused path alone, or Sonnet (or Jev's ask without a key).
         record["path"] = d.action == "fused" ? "fused" : d.decider.rawValue
@@ -77,7 +86,8 @@ final class DeciderLog: @unchecked Sendable {
             record["fused"] = out
         }
         if let preview {
-            var shown: [String: Any] = ["target": preview.target, "p": preview.p, "forTheseWords": preview.text == message]
+            var shown: [String: Any] = ["target": preview.target, "p": preview.p, "forTheseWords": preview.text == message,
+                                        "decider": preview.decider, "sure": preview.sure]
             // The final decision differs from the place shown: a preview miss.
             shown["miss"] = final != preview.target
             record["preview"] = shown
@@ -107,14 +117,14 @@ final class DeciderLog: @unchecked Sendable {
     }
 
     /// A message that went where you fixed it from the preview's menu (no decision ran): what was shown and what you picked.
-    func previewPick(id: UUID, shown: JevPath.Shown?, picked: String, now: Date = Date()) {
+    func previewPick(id: UUID, shown: RouterPreview.Shown?, picked: String, now: Date = Date()) {
         var record: [String: Any] = ["type": "preview", "id": id.uuidString, "at": ISO8601DateFormatter().string(from: now),
                                      "picked": picked]
         if let shown {
             record["shown"] = shown.target
             record["p"] = shown.p
             record["changed"] = shown.target != picked
-            record["fused"] = Self.fused(shown.result)
+            record["decider"] = shown.decider
         }
         append(record)
     }

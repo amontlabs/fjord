@@ -31,6 +31,13 @@ enum RouterBriefer {
             let output = try await OneShot.run(binary, ["-p", "--model", model, "--tools", "", "--setting-sources", "", "--strict-mcp-config",
                                                         "--no-session-persistence", "--output-format", "json"] + typed + ["--system-prompt", system],
                                                cwd: home, input: Data(context.utf8), timeout: timeout)
+            if let parsed = try? ClaudePrint.parse(output) { ModelUsageLog.shared?.record(role: .brief, model: model, parsed.usage) }
+            else if let obj = (try? JSONSerialization.jsonObject(with: output.stdout)) as? [String: Any], let u = obj["usage"] as? [String: Any] {
+                func n(_ k: String) -> Int { (u[k] as? NSNumber)?.intValue ?? 0 }
+                ModelUsageLog.shared?.record(role: .brief, model: model, ModelUsage(
+                    inputTokens: n("input_tokens"), outputTokens: n("output_tokens"), cacheReadTokens: n("cache_read_input_tokens"),
+                    cacheCreationTokens: n("cache_creation_input_tokens"), costUSD: (obj["total_cost_usd"] as? NSNumber)?.doubleValue))
+            }
             // The typed answer as JSON; without it (an older Claude Code), its text, which `read` checks all the same.
             if schema != nil, let obj = (try? JSONSerialization.jsonObject(with: output.stdout)) as? [String: Any],
                obj["is_error"] as? Bool != true, let typed = obj["structured_output"] as? [String: Any],

@@ -390,13 +390,4 @@ enum JevPath {
         out?.latency = Date().timeIntervalSince(start)
         return out
     }
-
-    /// What the composer showed while you typed, as a send carries it: the place, its P and the result behind it.
-    struct Shown: Equatable, Sendable {
-        /// The words it was read for, as they would be sent.
-        var text: String
-        var target: String
-        var p: Double
-        var result: Result
-    }
 }

@@ -167,23 +167,26 @@ enum AppWindowShots {
             model.pointers = [.project(folder)]
             model.draft = "check the failing tests in \(MentionText.markString) and tell me what you find"
         }),
-        // The preview while you type: the fused path is sure (P ≥ 0.90) the draft goes to the finished "bar's needs-you
-        // count" thread, so the composer names it and the brief marks it, dashed.
-        Shot(name: "router-preview", destination: { _ in .router }, compose: { model, store in
-            let id = "th_bar"
-            if var t = store.threads.values.sorted(by: { $0.id < $1.id }).first {
-                t.id = id; t.projectID = "chan_demo_fjord"; t.folder = "/Users/me/code/fjord"
-                t.title = "Count untold needs-you on the bar"; t.status = .completed; t.pendingRequest = nil; t.hasPlan = false
-                store.threads[id] = t
-            }
+        // Where the draft goes, shown in the composer before it is sent: sure, "→ <thread>" (Return sends there) and the brief
+        // marks the thread, dashed.
+        Shot(name: "router-destination-sure", destination: { _ in .router }, compose: { model, store in
+            let id = Self.destinationThread(store)
+            store.routerDispatcher.preview()
             model.draft = "also show the count on the hub's badge"
-            let rows = [JevPath.Row(place: .thread(id), name: "Count untold needs-you on the bar", jev: 0.81,
-                                    features: JevPath.Features(lp: log(0.81), fin0: 1, nc: 0.97, an: 0.93, ncLead: 0.9), p: 0.96, running: false),
-                        JevPath.Row(place: .newThread(project: "chan_demo_fjord"), name: "new in fjord", jev: 0.12,
-                                    features: JevPath.Features(lp: log(0.12), new: 1), p: 0.03, running: false)]
-            let result = JevPath.Result(rows: rows, ans: [id: 0.93], next: [id: 0.97], fjord: 0.02, runningMass: 0, bm25: [id: 1],
-                                        twins: [], requestHash: "demo", key: "demo")
-            store.routerPreview.show(JevPath.Shown(text: model.draft, target: RouteTarget.thread(id).targetID, p: 0.96, result: result))
+            store.routerPreview.show(RouterPreview.Destination(
+                text: model.draft, key: "", decision: RouterProjectDecision(kind: .thread(id), confidence: 0.96, decider: .sonnet),
+                options: [RouteTarget.thread(id).targetID], sure: true))
+        }),
+        // Not sure: the best guess highlighted (Return sends there), an alternative thread and a new thread beside it.
+        Shot(name: "router-destination-unsure", destination: { _ in .router }, compose: { model, store in
+            let id = Self.destinationThread(store)
+            store.routerDispatcher.preview()
+            let other = store.threads.values.filter { $0.id != id && $0.folder != nil }.sorted { $0.id < $1.id }.first?.id
+            model.draft = "the count is wrong again"
+            let places: [RouterProjectDecision.Kind] = [.thread(id)] + (other.map { [.thread($0)] } ?? []) + [.newThread(project: "chan_demo_fjord")]
+            store.routerPreview.show(RouterPreview.Destination(
+                text: model.draft, key: "", decision: RouterProjectDecision(kind: .ask(places), confidence: 0.62, decider: .sonnet),
+                options: places.compactMap { RouterProjectDecision(kind: $0, confidence: 0, decider: .none).target?.targetID }, sure: false))
         }),
         // A reply to a thread that is running: the pick line reads "steer … (running)" (⌥Return would queue instead).
         Shot(name: "router-steer", destination: { _ in .router }, compose: { model, store in
@@ -196,6 +199,11 @@ enum AppWindowShots {
             model.draft = "use the staging database instead of production"
         }),
         Shot(name: "settings") { _ in .settings },
+        // What the Router's models used, in Settings › T3 Code: today's calls, tokens and the API price estimate per model.
+        Shot(name: "settings-model-usage", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in
+            store.t3.demoStatus = .connected(threads: store.threads.count)
+            store.modelUsageShown = Self.demoUsage(Date())
+        }),
         Shot(name: "settings-t3-not-linked", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .notLinked }),
         Shot(name: "settings-t3-refused", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .tokenRejected }),
         Shot(name: "settings-t3-not-installed", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in store.t3.demoStatus = .notInstalled }),
@@ -429,5 +437,30 @@ private extension UUID {
             "thread": ["id": .string(thread), "projectId": .string(shell?.projectId ?? "")], "runs": .array(runs), "messages": [],
             "runtimeRequests": [], "plans": [], "turnItems": [], "providerSessions": [],
         ]), for: thread)
+    }
+}
+
+extension AppWindowShots {
+    /// The demo's finished "Count untold needs-you on the bar" thread, which the destination shots name.
+    @MainActor static func destinationThread(_ store: Store) -> String {
+        let id = "th_bar"
+        if store.threads[id] == nil, var t = store.threads.values.sorted(by: { $0.id < $1.id }).first {
+            t.id = id; t.projectID = "chan_demo_fjord"; t.folder = "/Users/me/code/fjord"
+            t.title = "Count untold needs-you on the bar"; t.status = .completed; t.pendingRequest = nil; t.hasPlan = false
+            store.threads[id] = t
+        }
+        return id
+    }
+
+    /// A day of the Router's model calls, for the usage shot.
+    static func demoUsage(_ now: Date) -> [ModelUsageLog.Entry] {
+        func e(_ role: ModelUsageLog.Role, _ model: String, _ n: Int, _ u: ModelUsage, ago: TimeInterval) -> [ModelUsageLog.Entry] {
+            (0..<n).map { i in ModelUsageLog.Entry(at: now.addingTimeInterval(-ago - Double(i) * 60), role: role, model: model, usage: u) }
+        }
+        return e(.decider, "claude-sonnet-5-5", 14, ModelUsage(inputTokens: 7400, outputTokens: 300, cacheReadTokens: 27800, cacheCreationTokens: 0, costUSD: 0.024), ago: 600)
+            + e(.cards, "claude-haiku-5-5", 31, ModelUsage(inputTokens: 3100, outputTokens: 150, cacheReadTokens: 1400, cacheCreationTokens: 0, costUSD: 0.0004), ago: 300)
+            + e(.brief, "claude-haiku-5-5", 22, ModelUsage(inputTokens: 5200, outputTokens: 420, cacheReadTokens: 2100, cacheCreationTokens: 300, costUSD: 0.0008), ago: 200)
+            + e(.jev, "jev-1.14.0", 40, ModelUsage(inputTokens: 3200, outputTokens: 40, costUSD: 3200 * 0.042 / 1e6), ago: 100)
+            + e(.decider, "claude-sonnet-5-5", 60, ModelUsage(inputTokens: 7000, outputTokens: 290, cacheReadTokens: 26000, cacheCreationTokens: 900, costUSD: 0.026), ago: 3 * 86400)
     }
 }
