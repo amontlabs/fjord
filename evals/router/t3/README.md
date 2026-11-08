@@ -28,3 +28,16 @@ python3 evals/router/t3/score.py      # tables; follow-ups reweighted to the nat
 ```
 
 `board.py` ports `DeciderBoard`, the Sonnet request and gates, and `JevPath` from the Swift. The test days are sealed: tune on dev only.
+
+# N2: new-work fixes
+
+[N2](../../../docs/design/t3-research/N2-new-work-fixes.md). Same data folder; model calls are disk-cached.
+
+```sh
+python3 evals/router/t3/n2.py <variant> pilot|dev|test   # v2 v3 v2r v4 base3 stage_s stage_h jev2 -> data/n2_<variant>_<split>.jsonl
+python3 evals/router/t3/n2probe.py                       # written Fjord-intent probes on Jev's path -> data/n2_probe_jev.jsonl
+python3 evals/router/t3/n2eval.py bars|single|stage|jev|probe|fuse   # dev tables
+python3 evals/router/t3/n2eval.py final dev|test         # the finalists end to end, paired against the N1 app
+```
+
+`n2score.py` holds the decision rules (per-action bars, stage, p_new), the table and the paired day bootstrap.
