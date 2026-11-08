@@ -36,7 +36,7 @@ Fjord has two tools, the Router and Triage. Each works alone, and the first laun
 ### Router: one chat above all your T3 Code threads
 
 - **See who needs you.** One brief over every project, from any provider T3 runs: what needs you first, then what finished, what is working and what is quiet. Each question or plan to approve is an entry you answer right there, by its option or in your own words; mark it read or archive it, with Revert in the history.
-- **Type once.** The Router picks the T3 thread your message is for, or starts one, and delivers your exact words as your own message. A running thread is steered by default; <kbd>⌥Return</kbd> queues it. When it isn't sure, it asks *Where should this go?*
+- **Type once.** The Router picks the T3 thread your message is for, or starts one, and delivers your exact words as your own message. A running thread is steered by default; <kbd>⌥Return</kbd> queues it. When it isn't sure, it asks *Where should this go?* With a TypeSafe key, it shows where a draft will go while you type, once it is sure.
 - **Change your mind.** Cancel a message, edit and resend it, or send it somewhere else.
 - **Look away.** Working threads show what they're doing in the brief; the bar's panel lists what needs you and what works.
 - **Bring things in.** `@` adds a project, a session, a GitHub item or a saved prompt to your message.

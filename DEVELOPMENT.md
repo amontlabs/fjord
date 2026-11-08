@@ -84,8 +84,12 @@ FJORD_THEME=dark .build/debug/Fjord --window
 ### The Router's routing
 
 Every message goes to a T3 thread as one `message.dispatch` over T3's WebSocket API (`T3Link`, `T3Client`). A reply armed on a brief entry (or one focused) goes to that
-thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Jev first at 0.7, else
-Sonnet over the Anthropic API, `AnthropicClient`), whose stage shows on the message's pill. A project that fits nothing is proposed under the
+thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Sonnet over the
+Anthropic API, `AnthropicClient`, at 0.80 for an idle thread and 0.90 for a running one), whose stage shows on the message's pill. E5's Jev-led path
+(`JevPath`, RouterJevPath.swift: one Jev call, two yes/no checks on the 3 latest idle threads, recency and BM25 fused in code) runs beside it in
+shadow and is logged in `decider-log.jsonl`; with Settings › T3 Code › "Let Jev send when sure" on, it sends to an idle thread at fused P ≥ 0.90
+without Sonnet. While you type, the composer previews the same pick at P ≥ 0.90 (`RouterPreview`; shot `router-preview`). Refit its weights from
+the log with `evals/router/t3/refit.py`. A project that fits nothing is proposed under the
 composer (`RouterProjectProposal`, revised by Sonnet). The brief's entries are the one model of what needs you (no cards):
 mark read and archive are Fjord changes with a Revert in the history drawer, kept with the Told marks in briefs.db. Each history entry keeps who decided (`decision.decider`) and a
 correction (Send elsewhere, a different pick on an ask, a proposal you changed) as its outcome, for measurement.

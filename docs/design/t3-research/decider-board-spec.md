@@ -20,10 +20,13 @@ In the eval, "current step" is the session's activity line and "you last said th
 - The reply and your last words come from the shell when the latest message is of that role; the other one needs the thread. Fjord reads it ahead: when the shell changes, a bounded snapshot (`acceptBoundedSnapshot`: last 10 user turns, 75 items, 1 MiB) is requested for each candidate that lacks it, held until it arrives, with a 5 s cap, and kept by thread@latest message id. A held projection (a thread on screen) is used as is.
 - The decision takes the board from the cache and held projections. Nothing is waited for: a candidate whose read has not landed goes without it, and the read it needs is started for the next decision. Before this the decision waited up to 1.2 s on full-thread reads.
 
-## Jev (ranker only)
+## Jev (ranker only, without Sonnet and outside the fused path)
 - Options: the board's threads (most recent first, `kind: "thread"`, the same lines as `now`), then `new in <project>`. No intents (`question`, `unclear`, `compound`, `change_fjord`): on the 182 moments he took one on 54, every one a miss (J1, J2). The question is purely which place, worded in threads.
 - Model pinned to `jev-1.14.0` for the routing question only (the thresholds and E4 are on it); the inbox and icon uses keep `jev-latest`.
 - Twins (one conversation under two ids, J2: 14% of the eval moments): checked on the live T3 (2026-11-08) and not collapsed, since none exist there; see J2 for the corpus artifact.
+
+## Jev's fused path (E5)
+The fused path (`JevPath`, Sources/Fjord/RouterJevPath.swift) asks Jev on E5's board, not the text above: each thread's `now` adds "thread started with" (first ask, 200), "your earlier messages" (last 3, 100 each), "latest reply began" (300, when the reply runs past 600) and "you last said there (N ago)", marked when your latest message went there. The first ask and earlier messages come from the same read-ahead (the bounded snapshot's earliest user turn stands in for the first ask on threads with more than 10). The checks (`ans`, `nx_choice`) go to the 3 most recent idle candidates; see E5 for the gates and weights.
 
 ## Candidate rules
 1. Every thread that is running or waiting (pending request or actionable plan).
