@@ -3,14 +3,14 @@ import Foundation
 // Where a message goes among T3's threads: an existing thread, a new thread in a project, Fjord itself, or you're asked
 // (docs/design/t3-research/decider-board-spec.md, E3, R1). Sonnet reads the board (`DeciderBoard`) through the Messages API
 // (`AnthropicClient`, thinking off) and is acted on at 0.80 for an idle target and 0.90 for a running one, where a message
-// would steer it. Without an Anthropic key, or when that call fails, Jev decides alone from the same threads at his bars, and
-// below them you're asked. Jev-first is gone: on the T3 board he has not been measured against Sonnet (R1 D: keep him first
-// only with zero wrong answers), so he is no longer put ahead of it. The rule "the project is sure, the thread is not, so a
+// would steer it. Without an Anthropic key, or when that call fails, Jev never sends: he only orders the ask, which lists his
+// three likeliest places (threads and new threads, never intents), best first, by his probabilities. On the T3 board no Jev bar
+// was free of wrong sends while his top 3 held the right place 81-83% of the time (E4). He is not put ahead of Sonnet either. The rule "the project is sure, the thread is not, so a
 // new thread" was measured and rejected (E3: 29 duplicate threads); it is not here.
 //
 // An unattended message (a Triage action about one GitHub item, `RouterActionSource`) is mostly new work, so it is decided
 // differently: it is told so, a follow-up is taken only at `actionFollowUpBar`, and a follow-up below it starts a new thread in
-// the project instead of asking. The item's repository, when exactly one T3 project has it (`DeciderBoard.project(forRepo:)`),
+// the project instead of asking (with Jev, it asks too: the item's project, as a new thread, first). The item's repository, when exactly one T3 project has it (`DeciderBoard.project(forRepo:)`),
 // is the project: used when the model's is missing or unsure, and a model project that differs from it asks.
 
 /// What the decider decided, and who.
@@ -101,8 +101,6 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
     var jev: JevAsker?
     /// Nil without an Anthropic key: Jev alone, and you're asked when he isn't sure.
     var sonnet: Sonnet?
-    /// Jev's choice is taken at this when Sonnet isn't there (the lowest bar with no wrong Jev answer on the dev moments).
-    var jevBar = 0.7
     /// Sonnet's answer is acted on at this for an idle target, a new thread and Fjord (E3).
     var idleBar = 0.80
     /// And at this for a running target, where a message steers the run (E3: not measurable on the 182, so a margin over 0.8).
@@ -119,8 +117,8 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
     /// The bar a thread has to clear.
     func bar(for thread: DeciderBoard.Thread) -> Double { thread.running ? runningBar : idleBar }
 
-    /// Sonnet, else Jev. Never blocks the main actor (both are awaited); cancelling the task stops it. A failed Sonnet call falls
-    /// to Jev when there is one, else asks.
+    /// Sonnet, else Jev's ordered ask. Never blocks the main actor (both are awaited); cancelling the task stops it. A failed
+    /// Sonnet call falls to Jev when there is one, else asks with nothing to offer.
     func decide(_ message: String, in board: DeciderBoard, tagged: String? = nil,
                   action: RouterActionSource? = nil, stage: (Stage) -> Void = { _ in }) async throws -> RouterProjectDecision {
         var failure = ""
@@ -144,7 +142,7 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
                 try await jev(["route": request.question], request.state)
             }
             try Task.checkCancellation()
-            if let choice = answer?["route"]?.choice, let decision = jevDecision(choice, board: board, options: request.options, action: action) {
+            if let choice = answer?["route"]?.choice, let decision = jevAsk(choice, board: board, options: request.options, action: action) {
                 return decision
             }
         }
@@ -221,34 +219,28 @@ struct RouterProjectSonnetAnswer: Equatable, Sendable, Decodable {
                           state: state, options: options)
     }
 
-    /// Jev's choice, when it is a place at `jevBar` or more (a running thread at `runningBar`); nil asks. Unattended, a thread
-    /// needs `actionFollowUpBar` too, and below it (or when it isn't in the item's project) the item's project starts a new
-    /// thread when it is known; a new thread in any other project than the item's asks.
-    func jevDecision(_ choice: JevClient.Choice, board: DeciderBoard, options: [(name: String, option: Option)],
-                     action: RouterActionSource? = nil) -> RouterProjectDecision? {
-        guard let picked = options.first(where: { $0.name == choice.choice })?.option else { return nil }
-        let repoProject = action.flatMap { board.project(forRepo: $0.repo) }
-        func fresh(_ project: String) -> RouterProjectDecision {
-            RouterProjectDecision(kind: .newThread(project: board.projectID(project)), confidence: choice.confidence, decider: .jev)
+    /// Jev never sends: an ask with his three likeliest places, best first (by probability; the intents are left out). Unattended,
+    /// the item's project as a new thread comes first when the repository maps to one. Nil when no place is left.
+    func jevAsk(_ choice: JevClient.Choice, board: DeciderBoard, options: [(name: String, option: Option)],
+                action: RouterActionSource? = nil) -> RouterProjectDecision? {
+        var places: [RouterProjectDecision.Kind] = []
+        func add(_ k: RouterProjectDecision.Kind) { if !places.contains(k) { places.append(k) } }
+        if let repoProject = action.flatMap({ board.project(forRepo: $0.repo) }) { add(.newThread(project: board.projectID(repoProject))) }
+        // Highest probability first; his pick leads a tie, then the order he read them in.
+        let ranked = options.enumerated().sorted { a, b in
+            let pa = choice.probabilities[a.element.name] ?? (a.element.name == choice.choice ? choice.confidence : 0)
+            let pb = choice.probabilities[b.element.name] ?? (b.element.name == choice.choice ? choice.confidence : 0)
+            return pa != pb ? pa > pb : a.offset < b.offset
         }
-        let kind: RouterProjectDecision.Kind
-        switch picked {
-        case .thread(let id):
-            guard let t = board.threads.first(where: { $0.key == id }), choice.confidence >= (t.running ? runningBar : jevBar) else { return nil }
-            if action != nil {
-                if choice.confidence < actionFollowUpBar || (repoProject != nil && t.project != repoProject) {
-                    guard let repoProject else { return nil }
-                    return fresh(repoProject)
-                }
+        for (_, o) in ranked {
+            switch o.option {
+            case .thread(let id): if board.threads.contains(where: { $0.key == id }) { add(.thread(id)) }
+            case .newThread(let project): add(.newThread(project: project))
+            case .other: break
             }
-            kind = .thread(id)
-        case .newThread(let project):
-            guard choice.confidence >= jevBar else { return nil }
-            if let repoProject, board.projectID(repoProject) != project { return nil }
-            kind = .newThread(project: project)
-        case .other: return nil
         }
-        return RouterProjectDecision(kind: kind, confidence: choice.confidence, decider: .jev)
+        guard !places.isEmpty else { return nil }
+        return Self.ask(Array(places.prefix(3)), confidence: choice.confidence, decider: .jev)
     }
 
     // MARK: Sonnet

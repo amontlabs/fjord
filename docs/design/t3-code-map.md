@@ -86,7 +86,7 @@ Today every call is a fresh `claude -p` through the Claude Code that ships insid
 |---|---|---|
 | Project brief, purpose, general lead | Haiku 5.5 | `SF/RouterBrief.swift:21-41`, `RouterBriefEngine.swift:468-655` |
 | Router run (answers about Fjord, changes Fjord's settings through Fjord's MCP server) | Haiku, streaming | `SF/RouterRun.swift:84-205`, `RouterMCP.swift` |
-| Where a message goes (after Jev under 0.7) | Sonnet 5.5 | `SF/RouterProjectDecide.swift:104-323` |
+| Where a message goes (without a key, Jev only orders the ask) | Sonnet 5.5 | `SF/RouterProjectDecide.swift:104-323` |
 | New-project proposal reviser | Sonnet | `SF/RouterProjectProposal.swift:985-1111` |
 
 **T3 can't run these for Fjord.** Its text generation does five fixed jobs (commit message, PR text, branch name, thread title, review guide) and has no RPC (`T3:packages/provider-core/src/server/textGeneration.ts:100-120`; no method in `rpc.ts:408-601`).

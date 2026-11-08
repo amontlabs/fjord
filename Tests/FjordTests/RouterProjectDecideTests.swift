@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Fjord
 
-/// The decider on T3's board: Sonnet at 0.80 for an idle thread and 0.90 for a running one, Jev alone without Sonnet, else ask.
+/// The decider on T3's board: Sonnet at 0.80 for an idle thread and 0.90 for a running one, without Sonnet Jev only orders the ask.
 /// A stub stands in for Sonnet; the one test of its transport answers from a stub URL protocol. Invented boards only.
 @MainActor
 @Suite struct RouterProjectDecideTests {
@@ -114,18 +114,14 @@ import Testing
         RouterProjectDecider.jevRequest("x", actionBoard(), unattended: unattended)
     }
 
-    @Test func jevOnAnActionTakesAThreadOnlyAtNinetyFiveElseTheRepoProject() {
+    @Test func jevOnAnActionAsksWithTheRepoProjectsNewThreadFirst() {
         let req = Self.jevRequest(true)
         let d = RouterProjectDecider(jev: nil, sonnet: nil)
-        func pick(_ name: String, _ p: Double) -> RouterProjectDecision? {
-            d.jevDecision(JevClient.Choice(choice: name, confidence: p, probabilities: [name: p]), board: Self.actionBoard(),
-                          options: req.options, action: Self.action())
-        }
-        #expect(pick("Old login fix", 0.9)?.kind == .newThread(project: "P-fjord"))
-        #expect(pick("Old login fix", 0.96)?.kind == .thread("t3-fjord-2"))
-        #expect(pick("Disk quota", 0.99)?.kind == .newThread(project: "P-fjord"))
-        #expect(pick("new in silo", 0.99) == nil)
-        #expect(pick("new in fjord", 0.8)?.kind == .newThread(project: "P-fjord"))
+        let probs = ["Disk quota": 0.5, "Old login fix": 0.3, "new in silo": 0.1, "Router redesign": 0.05]
+        let out = d.jevAsk(JevClient.Choice(choice: "Disk quota", confidence: 0.5, probabilities: probs), board: Self.actionBoard(),
+                           options: req.options, action: Self.action())
+        #expect(out?.kind == .ask([.newThread(project: "P-fjord"), .thread("t3-silo-1"), .thread("t3-fjord-2")]))
+        #expect(out?.decider == .jev)
     }
 
     @Test func newWorkAndAnAnswerHereGoAtTheIdleBar() {
@@ -172,29 +168,34 @@ import Testing
         #expect(calls.role.hasPrefix("You route one message from the owner") && !calls.role.contains("new project"))
     }
 
-    @Test func withoutSonnetJevDecidesAtSevenTenthsAndARunningThreadNeedsNineTenths() async throws {
+    @Test func withoutSonnetJevNeverSendsAndOnlyOrdersTheAsk() async throws {
         let calls = Calls()
-        let a = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.7, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(a == RouterProjectDecision(kind: .thread("t3-silo-1"), confidence: 0.7, decider: .jev))
-        let low = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.69, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(low.kind == .ask([]) && low.decider == .none)
-        let running = try await RouterProjectDecider(jev: Self.jev("Router redesign", 0.85, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(running.kind == .ask([]))
-        let steer = try await RouterProjectDecider(jev: Self.jev("Router redesign", 0.9, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(steer.kind == .thread("t3-fjord-1"))
+        // Even at 0.99 on an idle thread: an ask, his pick first (the stub gives only the pick's probability).
+        let a = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.99, calls: calls), sonnet: nil).decide("x", in: Self.board())
+        #expect(a.kind == .ask([.thread("t3-silo-1"), .thread("t3-fjord-1"), .thread("t3-fjord-2")]) && a.decider == .jev && a.confidence == 0.99)
         let new = try await RouterProjectDecider(jev: Self.jev("new in silo", 0.8, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(new.kind == .newThread(project: "P-silo"))
-        // An intent is never taken from him.
+        guard case .ask(let places) = new.kind else { Issue.record("expected an ask"); return }
+        #expect(places.first == .newThread(project: "P-silo") && places.count == 3)
+        // An intent is never offered.
         let intent = try await RouterProjectDecider(jev: Self.jev("question", 0.99, calls: calls), sonnet: nil).decide("x", in: Self.board())
-        #expect(intent.kind == .ask([]))
+        guard case .ask(let rest) = intent.kind else { Issue.record("expected an ask"); return }
+        #expect(rest.count == 3 && intent.decider == .jev)
     }
 
-    @Test func aFailedSonnetFallsToJevElseAsksWithWhy() async throws {
+    @Test func jevOrdersTheAskByHisProbabilities() {
+        let req = Self.jevRequest(false)
+        let d = RouterProjectDecider(jev: nil, sonnet: nil)
+        let probs = ["Old login fix": 0.6, "new in silo": 0.25, "question": 0.1, "Disk quota": 0.05]
+        let out = d.jevAsk(JevClient.Choice(choice: "Old login fix", confidence: 0.6, probabilities: probs), board: Self.actionBoard(), options: req.options)
+        #expect(out?.kind == .ask([.thread("t3-fjord-2"), .newThread(project: "P-silo"), .thread("t3-silo-1")]))
+    }
+
+    @Test func aFailedSonnetFallsToJevsAskElseAsksWithWhy() async throws {
         let broken: RouterProjectDecider.Sonnet = { _, _, _ in throw AnthropicError.noKey }
         let calls = Calls()
         var stages: [RouterProjectDecider.Stage] = []
         let viaJev = try await RouterProjectDecider(jev: Self.jev("Disk quota", 0.9, calls: calls), sonnet: broken).decide("x", in: Self.board()) { stages.append($0) }
-        #expect(viaJev.kind == .thread("t3-silo-1") && viaJev.decider == .jev && stages == [.sonnet, .jev])
+        #expect(viaJev.kind == .ask([.thread("t3-silo-1"), .thread("t3-fjord-1"), .thread("t3-fjord-2")]) && viaJev.decider == .jev && stages == [.sonnet, .jev])
         let alone = try await RouterProjectDecider(jev: nil, sonnet: broken).decide("x", in: Self.board())
         #expect(alone.kind == .ask([]) && alone.decider == .none && alone.reason == AnthropicError.noKey.localizedDescription)
         let nothing = try await RouterProjectDecider(jev: nil, sonnet: nil).decide("x", in: Self.board())
