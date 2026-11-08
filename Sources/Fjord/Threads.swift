@@ -448,7 +448,11 @@ extension Store {
         // The snapshot's later parts carry projects alone (their repository, S1 10): only their threads change.
         case .snapshot(let snap)? where snap.threads.isEmpty && snap.archivedThreads.isEmpty:
             project(Set(snap.projects.map(\.id)))
-        case .synchronized?, .unknown?:
+        // T3 has said everything it has: what briefs.db holds of anything else can go (`RouterBriefs.purgeUnlisted`).
+        case .synchronized?:
+            routerBriefs.threadsChanged(store: self)
+            return
+        case .unknown?:
             return
         case .snapshot?, nil:
             next = [:]; work = [:]

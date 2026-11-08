@@ -63,6 +63,11 @@ final class RouterKeys {
                 return true
             }
         }
+        // The app's Refresh now chord (⌘R by default) rewrites the briefs here: the Router has nothing on GitHub to refresh.
+        if flags == .command, Shortcut(event) == store.shortcut(.refresh), store.routerOn {
+            briefs.rewriteAll()
+            return true
+        }
         // ⌘F: the palette opens (by key position, as the inbox's).
         if flags == .command, code == kVK_ANSI_F {
             openPalette()

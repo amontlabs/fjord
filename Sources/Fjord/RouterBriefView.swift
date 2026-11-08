@@ -27,6 +27,9 @@ struct RouterBriefView: View {
         let now = briefs.clock().timeIntervalSince1970
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
+                if briefs.rewriting {
+                    Text("Rewriting…").cdsText(CDS.Density.compact.footnote, .medium, CDS.Text.muted)
+                }
                 BriefLead(store: store, page: page)
                 if page.sections.isEmpty {
                     Text(store.router.enabled || !briefs.docs.isEmpty

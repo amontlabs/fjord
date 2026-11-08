@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Fjord
@@ -200,6 +201,9 @@ import Testing
 @Suite struct SessionIconsOffMain {
     @Test func theIconsOfferedOffTheMainThreadAreThoseOfferedOnIt() async {
         let excluded: Set<String> = ["hammer", "ladybug"]
+        // AppKit's first-time display setup (NSApplication.shared) must be done, on the main thread, before symbols are looked
+        // up off it: another suite making it at that moment crashed the test process (SIGSEGV in SkyLight).
+        await MainActor.run { _ = NSApplication.shared }
         let off = await Task.detached { await SessionIcons.openOffMain(excluding: excluded) }.value
         let on = SessionIcons.open(excluding: excluded)
         #expect(off.map(\.category) == on.map(\.category) && off.map(\.icons) == on.map(\.icons))

@@ -680,6 +680,7 @@ final class Store {
         agents = state.agents ?? ThreadsState()
         var router = state.router ?? RouterSaved()
         router.settleInterrupted()
+        router.dropClaudeEra()
         self.router = router
         changingInbox(.load) {
             if let c = state.categories { categories = c }

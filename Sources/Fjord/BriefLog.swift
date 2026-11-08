@@ -131,6 +131,21 @@ final class BriefLog: @unchecked Sendable {
         sqlite3_step(stmt)
     }
 
+    /// Drops the log rows of projects, and the seen rows of threads, that are not listed.
+    func purge(keepingProjects projects: Set<String>, threads: Set<String>) {
+        for p in self.projects() where !projects.contains(p) {
+            lock.lock()
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "delete from brief_log where project = ?", -1, &stmt, nil) == SQLITE_OK, let stmt {
+                bind(stmt, 1, p)
+                sqlite3_step(stmt)
+            }
+            sqlite3_finalize(stmt)
+            lock.unlock()
+        }
+        for t in seen().keys where !threads.contains(t) { forget(t) }
+    }
+
     // MARK: Transitions
 
     /// What happened to a thread between what the log saw (`old`) and the shell now (`t`): pure. A thread the log never saw

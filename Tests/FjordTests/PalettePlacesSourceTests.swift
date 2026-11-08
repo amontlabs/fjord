@@ -184,7 +184,7 @@ import Testing
         #expect(Set(none.items.filter { $0.kind == .command }.map(\.id)) == ["command:tools"])
 
         let routerOnly = Rig(router: true, triage: false)
-        #expect(Set(routerOnly.items.filter { $0.kind == .command }.map(\.id)) == ["command:add-code-folder", "command:tools"])
+        #expect(Set(routerOnly.items.filter { $0.kind == .command }.map(\.id)) == ["command:add-code-folder", "command:rewrite-briefs", "command:tools"])
 
         let refresh = try #require(triage.item("command:refresh"))
         #expect(refresh.actions[0].caps == triage.store.shortcut(.refresh).caps)

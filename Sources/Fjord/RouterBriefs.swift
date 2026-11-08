@@ -269,8 +269,48 @@ enum BriefKeys {
     /// T3 stopped answering at this time (`watch: "stale:"`).
     @ObservationIgnored private var downSince: Double?
 
-    var docs: [String: BriefDoc] { engine?.docs ?? demoDocs }
-    var general: GeneralBrief { engine?.general ?? demoGeneral }
+    /// The engine's documents of the projects T3 lists now (briefs.db may hold others from before; they are purged, and
+    /// never shown). A demo's documents are shown as they are.
+    var docs: [String: BriefDoc] {
+        guard let engine else { return demoDocs }
+        guard let listing = t3Listing() else { return [:] }
+        return engine.docs.filter { listing.projects.contains($0.key) }
+    }
+
+    /// The lead, unless it speaks of a project T3 doesn't list (it is rewritten once the purge has run).
+    var general: GeneralBrief {
+        guard let engine else { return demoGeneral }
+        guard let listing = t3Listing() else { return GeneralBrief() }
+        let lead = engine.general
+        let tagged = BriefMarkup.ids(lead.forYou) + BriefMarkup.ids(lead.worthALook)
+        return tagged.allSatisfy({ id in BriefTarget(key: id).map { listing.projects.contains($0.project) } ?? false }) ? lead : GeneralBrief()
+    }
+
+    /// T3's projects and threads now, once its shell has arrived with something in it (nil before: an empty or unreachable T3
+    /// is not a reason to drop anything).
+    func t3Listing() -> (projects: Set<String>, threads: Set<String>)? {
+        guard let store, store.t3.store.shell.synchronized else { return nil }
+        let projects = Set(store.t3.store.shell.projects.keys).union(store.threads.values.map(\.projectID))
+        return projects.isEmpty ? nil : (projects, Set(store.threads.keys))
+    }
+
+    /// Rewrites every current project's brief and the lead now (⌘R on the Router page, the menu, the palette).
+    func rewriteAll() {
+        guard let engine, let listing = t3Listing() else { return }
+        engine.rewrite(projects: listing.projects)
+    }
+    var rewriting: Bool { engine?.rewriting ?? false }
+
+    /// What briefs.db holds of projects and threads T3 doesn't list goes, once the listing is known and when it changes.
+    @ObservationIgnored private var purged: (projects: Set<String>, threads: Set<String>)?
+    private func purgeUnlisted() {
+        guard let engine, let listing = t3Listing(), purged?.projects != listing.projects || purged?.threads != listing.threads else { return }
+        purged = listing
+        log?.purge(keepingProjects: listing.projects, threads: listing.threads)
+        seen = seen.filter { listing.threads.contains($0.key) }
+        engine.purge(projects: listing.projects, threads: listing.threads)
+        marks = engine.marks()
+    }
 
     func page() -> BriefPage {
         BriefPage.make(docs: docs, names: names, lead: general, read: read, told: told, archived: archived,
@@ -291,10 +331,16 @@ enum BriefKeys {
         let source = T3BriefSource(log: log, boards: { [weak self] in self?.currentBoards() ?? [:] })
         let engine = RouterBriefEngine(source: source, store: db, model: RouterBriefer.haiku(store: store),
                                        style: { [weak store] in store?.routerStyle ?? RouterStyle.defaultText })
+        use(engine)
+        if !store.threads.isEmpty { threadsChanged(store: store) }
+    }
+
+    /// Runs on `engine` (and tests run on one of their own).
+    func use(_ engine: RouterBriefEngine, log: BriefLog? = nil) {
         self.engine = engine
+        if let log { self.log = log; seen = log.seen() }
         marks = engine.marks()
         engine.onDocs = { [weak self] in self?.docsChanged() }
-        if !store.threads.isEmpty { threadsChanged(store: store) }
     }
 
     /// The Router switched on or off: the engine runs only while it is on (no model call with it off).
@@ -319,6 +365,7 @@ enum BriefKeys {
     /// engine hears of the projects with new items (a call) or another board (the deterministic part only).
     func threadsChanged(store: Store) {
         guard let engine, let log else { return }
+        purgeUnlisted()
         let now = clock()
         let boards = T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince, now: now)
         var named = names

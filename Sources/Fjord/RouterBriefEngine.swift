@@ -58,6 +58,18 @@ protocol BriefStore: AnyObject {
     /// The general brief's lead, as last written.
     func lead() -> GeneralBrief?
     func setLead(_ lead: GeneralBrief)
+    /// Deletes the briefs and cursors of projects not in `projects`, and the marks of threads not in `threads`: the projects removed.
+    func purge(projects: Set<String>, threads: Set<String>) -> Set<String>
+}
+
+extension BriefMarks {
+    /// The thread a mark is about: a told key is `<thread>@<age>`, a notified one `<kind>:<thread>@<time>`; a request's key has none.
+    static func thread(of key: String, _ kind: Kind) -> String? {
+        guard let at = key.lastIndex(of: "@") else { return nil }
+        let head = key[..<at]
+        guard kind == .notified else { return String(head) }
+        return head.firstIndex(of: ":").map { String(head[head.index(after: $0)...]) }
+    }
 }
 
 /// What Fjord keeps of the brief: finished threads told, and entries a banner was posted for. Read state and archive are T3's
@@ -87,6 +99,14 @@ final class MemoryBriefStore: BriefStore {
     func lead() -> GeneralBrief? { keptLead }
     func setLead(_ lead: GeneralBrief) { keptLead = lead }
     func marks() -> BriefMarks { kept }
+    func purge(projects: Set<String>, threads: Set<String>) -> Set<String> {
+        let gone = Set(rows.keys).union(cursors.keys).subtracting(projects)
+        for p in gone { rows[p] = nil; cursors[p] = nil }
+        for k in BriefMarks.Kind.allCases {
+            kept[k] = kept[k].filter { key in BriefMarks.thread(of: key, k).map(threads.contains) ?? true }
+        }
+        return gone
+    }
     func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
         if on { kept[kind].insert(key) } else { kept[kind].remove(key) }
     }
@@ -185,6 +205,22 @@ final class SQLiteBriefStore: BriefStore {
     func setLead(_ lead: GeneralBrief) {
         let text = (try? JSONEncoder().encode(lead)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         exec("insert or replace into brief_lead (id, at, lead) values (1, \(lead.at), ?)", [text])
+    }
+
+    func purge(projects: Set<String>, threads: Set<String>) -> Set<String> {
+        let all = select("select project from briefs union select project from brief_cursors", []) { Self.text($0, 0) }
+        let gone = Set(all).subtracting(projects)
+        for p in gone {
+            exec("delete from briefs where project = ?", [p])
+            exec("delete from brief_cursors where project = ?", [p])
+        }
+        let current = marks()
+        for k in BriefMarks.Kind.allCases {
+            for key in current[k] where BriefMarks.thread(of: key, k).map({ !threads.contains($0) }) ?? false {
+                exec("delete from brief_marks where kind = ? and key = ?", [k.rawValue, key])
+            }
+        }
+        return gone
     }
 
     func setMark(_ kind: BriefMarks.Kind, _ key: String, on: Bool) {
@@ -327,6 +363,45 @@ struct GeneralBrief: Codable, Equatable, Sendable {
 
     /// New items in the log: the project runs.
     func itemsChanged(_ project: String) { spawn { [self] in await refresh(project); await evaluate(project, force: false) } }
+
+    /// T3 listed its projects and threads: what is stored for any other goes (briefs, cursors, marks), and the general lead is
+    /// written again if it was about them. Only called once T3 has answered with something.
+    func purge(projects keep: Set<String>, threads: Set<String>) {
+        let gone = store.purge(projects: keep, threads: threads).union(docs.keys.filter { !keep.contains($0) })
+        for p in gone { docs[p] = nil; self.projects[p] = nil }
+        let lead = general.isEmpty ? store.lead() ?? general : general
+        let tagged = BriefMarkup.ids(lead.forYou) + BriefMarkup.ids(lead.worthALook)
+        let stale = !gone.isEmpty || tagged.contains { id in BriefTarget(key: id).map { !keep.contains($0.project) } ?? true }
+        guard stale, !lead.isEmpty else { return }
+        general = GeneralBrief()
+        store.setLead(general)
+        leadDirty = true
+        spawn { [self] in await batchEnd() }
+    }
+
+    /// A forced rewrite is under way (`rewrite`).
+    private(set) var rewriting = false
+
+    /// Rewrites the brief of each of `listed` (the projects that have one) and then the general lead now: one call per project
+    /// whether or not anything changed, through the same call as an event's (a failure leaves the old prose "being rewritten").
+    func rewrite(projects listed: Set<String>) {
+        guard active, !rewriting else { return }
+        rewriting = true
+        spawn { [self] in
+            defer { rewriting = false }
+            for p in docs.keys.filter(listed.contains).sorted() {
+                // A call already under way for it finishes first.
+                while projects[p]?.running == true, active { try? await Task.sleep(for: .milliseconds(20)) }
+                guard active else { return }
+                var state = projects[p] ?? Project()
+                state.running = true; state.dirty = false; state.failures = 0; state.parkedAt = nil
+                projects[p] = state
+                await runCall(p, items: [], board: await source.board(project: p))
+            }
+            leadDirty = true
+            await batchEnd()
+        }
+    }
 
     /// The Board changed with no new item: the deterministic part only, no model.
     func boardChanged(_ project: String) { spawn { [self] in await refresh(project) } }

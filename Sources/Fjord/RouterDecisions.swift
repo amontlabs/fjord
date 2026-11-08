@@ -388,6 +388,24 @@ extension RouterSaved {
 }
 
 extension RouterSaved {
+    /// Whether a brief project key is from before T3: a claude.ai project (`chan_…`) or a Claude Code folder (`local:…`).
+    static func isClaudeEra(project: String) -> Bool { project.hasPrefix("chan_") || project.hasPrefix("local:") }
+
+    /// Drops what the file holds from before T3: decisions made on claude.ai projects or Claude Code sessions (their targets,
+    /// session ids and triggers), and brief acts on those projects. Nothing in the app can open them now.
+    mutating func dropClaudeEra() {
+        func old(_ d: RouterDecision) -> Bool {
+            if case .session = d.trigger { return true }
+            if let id = d.decision.targetID, ["session:", "answer:", "new:"].contains(where: id.hasPrefix) { return true }
+            return !d.links.sessions.isEmpty
+                || d.links.threads.contains { BriefTarget(key: $0).map { Self.isClaudeEra(project: $0.project) } ?? false }
+        }
+        decisions.removeAll(where: old)
+        changes.removeAll { c in
+            if case .briefAction(let project, _, _, _) = c.patch { Self.isClaudeEra(project: project) } else { false }
+        }
+    }
+
     /// Runs and asks still under way when the app quit (quitting can't wait for them to settle) can't go on in this launch:
     /// they say they were interrupted, rather than "working…" for ever.
     mutating func settleInterrupted() {
