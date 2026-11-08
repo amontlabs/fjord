@@ -132,6 +132,58 @@ import Testing
         #expect(decision(a("answer_here", "", 0.7)).kind == .ask([]))
     }
 
+    @Test func pNewAtEightyFiveStartsANewThreadInTheModelsProjectWhateverTheAction() {
+        func a(_ action: String, _ pNew: Double, project: String = "silo", session: String = "") -> RouterProjectSonnetAnswer {
+            .init(action: action, project: project, session: session, confidence: 0.5, pNew: pNew)
+        }
+        #expect(decision(a("ask", 0.85)).kind == .newThread(project: "P-silo"))
+        #expect(decision(a("follow_up", 0.9, session: "s1")).kind == .newThread(project: "P-silo"))
+        #expect(decision(a("answer_here", 0.9)).kind == .newThread(project: "P-silo"))
+        #expect(decision(a("ask", 0.84)).kind == .ask([]))
+        // Only a known project; and new_work keeps its own bar of 0.80.
+        #expect(decision(a("ask", 0.99, project: "garden planner")).kind == .ask([]))
+        #expect(decision(.init(action: "new_work", project: "silo", session: "", confidence: 0.8, pNew: 0.1)).kind == .newThread(project: "P-silo"))
+        #expect(decision(.init(action: "new_work", project: "silo", session: "", confidence: 0.79, pNew: 0.84)).kind == .ask([.newThread(project: "P-silo")]))
+        // Other bars unchanged: a follow-up below its bar with a low p_new still asks.
+        #expect(decision(.init(action: "follow_up", project: "silo", session: "s1", confidence: 0.79, pNew: 0.2)).kind == .ask([.thread("t3-silo-1")]))
+    }
+
+    @Test func pNewDoesNotChangeAnUnattendedActionsPolicy() {
+        // A follow-up on the item's own thread below 0.95 starts a new thread by the action policy, whatever p_new says.
+        let sure = acted(.init(action: "follow_up", project: "fjord", session: "f1", confidence: 0.99, pNew: 0.95))
+        #expect(sure.kind == .thread("t3-fjord-1"))
+    }
+
+    @Test func theAnswerDecodesN2sFieldsAndTheDecisionKeepsThemForTheLog() throws {
+        let json = #"{"analysis":"a","related_session":"s1","session_task":"quota","extends":true,"action":"follow_up","project":"silo","session":"s1","reason":"r","confidence":0.9,"project_confidence":0.9,"alternatives":[],"need":[],"p_new":0.12}"#
+        let a = try JSONDecoder().decode(RouterProjectSonnetAnswer.self, from: Data(json.utf8))
+        #expect(a.analysis == "a" && a.relatedSession == "s1" && a.sessionTask == "quota" && a.extends && a.pNew == 0.12)
+        let d = decision(a)
+        #expect(d.pNew == 0.12 && d.extends == true && d.relatedSession == "s1")
+        // An older answer without them decodes, with p_new at 0 so it never starts a thread.
+        let old = try JSONDecoder().decode(RouterProjectSonnetAnswer.self, from: Data(#"{"action":"ask","confidence":0.3}"#.utf8))
+        #expect(old.pNew == 0 && !old.extends && old.relatedSession.isEmpty)
+    }
+
+    @Test func theRoleIsN2sTextAndTheSchemaAsksItsFieldsFirstThenPNewLast() throws {
+        let role = RouterProjectDecider.role
+        #expect(role.contains("new_work: it asks for a different deliverable than any session's task, even in the same project or on the same topic, files or feature."))
+        #expect(role.contains("a question about the board or all sessions, or a board action. Work on any project, Fjord's own code included, is never answer_here."))
+        #expect(role.contains("Give new_work the same confidence you would give a follow_up when the message plainly asks for a different deliverable."))
+        #expect(!role.contains("recency") && !role.contains("bare reaction usually"))
+        let schema = RouterProjectDecider.schema
+        let keys = ["analysis", "related_session", "session_task", "extends", "action", "project", "session", "reason", "confidence",
+                    "project_confidence", "alternatives", "need", "p_new"]
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any])
+        #expect(json["required"] as? [String] == keys)
+        let props = try #require(json["properties"] as? [String: Any])
+        #expect(Set(props.keys) == Set(keys))
+        // Property order is the text order: the four first, p_new last.
+        let at = keys.map { (schema.range(of: "\"\($0)\": {")?.lowerBound).map { schema.distance(from: schema.startIndex, to: $0) } ?? -1 }
+        #expect(at == at.sorted() && !at.contains(-1))
+        #expect(RouterProjectDecider.maxTokens == 700)
+    }
+
     @Test func aProjectThatIsSureWithAThreadThatIsNotDoesNotStartANewThread() {
         // E3 rejected that rule: 29 duplicate threads in 182 moments. The thread bar is the thread's alone.
         let d = decision(.init(action: "follow_up", project: "fjord", session: "f2", confidence: 0.6, projectConfidence: 0.97))

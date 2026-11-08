@@ -58,6 +58,10 @@ final class DeciderLog: @unchecked Sendable {
             "message": message, "boardHash": Self.hash(board), "board": board,
             "candidates": candidates.map { ["id": $0.id, "thread": $0.key] },
         ]
+        // N2's fields of Sonnet's answer.
+        if let p = d.pNew { record["pNew"] = p }
+        if let e = d.extends { record["extends"] = e }
+        if !d.relatedSession.isEmpty { record["relatedSession"] = d.relatedSession }
         if let latency = d.latency { record["latencyMs"] = Int(latency * 1000) }
         if let u = d.usage {
             record["usage"] = ["input": u.inputTokens, "output": u.outputTokens, "cacheRead": u.cacheReadTokens, "cacheCreation": u.cacheCreationTokens]

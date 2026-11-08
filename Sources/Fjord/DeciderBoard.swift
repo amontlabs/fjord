@@ -42,7 +42,7 @@ struct DeciderBoard: Equatable, Sendable {
         var pullRequests: [String] = []
         /// The request it waits on, as text; nil: none.
         var waiting: String?
-        // What only Jev's board reads (E5, `RouterJevPath.swift`); Sonnet's text above doesn't show them.
+        // Jev's board reads these (E5, `RouterJevPath.swift`); Sonnet's board shows `first` and the last three `earlier` (N2).
         /// The thread's first ask, when it is known.
         var first = ""
         /// Your last few messages there, oldest first.
@@ -184,8 +184,10 @@ struct DeciderBoard: Equatable, Sendable {
         return lines.joined(separator: "\n")
     }
 
-    /// A thread's line and the lines under it (each indented), as the board writes them.
-    @MainActor static func lines(_ t: Thread) -> [String] {
+    /// A thread's line and the lines under it (each indented), as the board writes them. `firstAsk`: Sonnet's board (N2's
+    /// `lines_first_earlier`) also shows the thread's first ask, and your last 3 messages there when it has more than one;
+    /// Jev's request (`jevRequest`) passes false and reads the older lines.
+    @MainActor static func lines(_ t: Thread, firstAsk: Bool = true) -> [String] {
         let status: String
         switch t.flag {
         case .running: status = "running (a message would interrupt it)"
@@ -193,6 +195,10 @@ struct DeciderBoard: Equatable, Sendable {
         case .finished: status = "finished"
         }
         var out = ["- \(t.id) | \(one(t.title, 80)) | \(status), \(age(t.minutesIdle)) ago"]
+        if firstAsk {
+            if !t.first.isEmpty { out.append("  first ask: \(one(t.first, 200))") }
+            if t.earlier.count > 1 { out.append("  your earlier messages there: " + t.earlier.suffix(3).map { one($0, 100) }.joined(separator: " / ")) }
+        }
         var last = tail(t.said, 600)
         if last.isEmpty { last = one(t.summary, 300) }
         if !last.isEmpty { out.append("  last message: \(last)") }

@@ -156,6 +156,24 @@ import Testing
         #expect(DeciderBoard.lines(plain).contains("  you last said there: Now squash it"))
     }
 
+    @Test func sonnetsBoardShowsEachThreadsFirstAskAndYourLastThreeMessagesThere() {
+        let long = String(repeating: "x", count: 250), msg = String(repeating: "m", count: 130)
+        let t = DeciderBoard.Thread(id: "t1", project: "p", title: "T", flag: .finished, minutesIdle: 4, said: "Done.",
+                                    first: long, earlier: ["one", "two", "three", msg])
+        let lines = DeciderBoard.lines(t)
+        #expect(lines[0] == "- t1 | T | finished, 4m ago")
+        #expect(lines[1] == "  first ask: \(String(repeating: "x", count: 200))")
+        #expect(lines[2] == "  your earlier messages there: two / three / \(String(repeating: "m", count: 100))")
+        #expect(lines[3] == "  last message: Done.")
+        // One earlier message is not repeated, and no first ask shows nothing.
+        let one = DeciderBoard.Thread(id: "t2", project: "p", title: "T", flag: .finished, minutesIdle: 4, first: "ask", earlier: ["only"])
+        #expect(DeciderBoard.lines(one) == ["- t2 | T | finished, 4m ago", "  first ask: ask"])
+        #expect(DeciderBoard.lines(.init(id: "t3", project: "p", title: "T", flag: .finished, minutesIdle: 4)) == ["- t3 | T | finished, 4m ago"])
+        // Jev's request keeps the older lines, and the rendered board has them.
+        #expect(DeciderBoard.lines(t, firstAsk: false) == ["- t1 | T | finished, 4m ago", "  last message: Done."])
+        #expect(DeciderBoard(projects: ["p"], threads: [t]).render().contains("  first ask: "))
+    }
+
     @Test func theBranchAndPullRequestsComeFromTheShell() {
         let pr: T3JSON = ["url": "https://x/pull/12", "number": 12, "snapshot": ["state": "OPEN", "title": "t"]]
         let s = Store.reading([T3Fixture.shell("aaaa1111", extra: ["branch": "feat/x", "pullRequests": [pr]])])
