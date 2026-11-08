@@ -50,6 +50,84 @@ import Testing
         #expect(decision(a("f1", 0.90)).kind == .thread("t3-fjord-1"))
     }
 
+    // MARK: Unattended actions
+
+    static func actionBoard() -> DeciderBoard {
+        var b = Self.board()
+        b.projectRepos = ["fjord": "acme/Fjord", "silo": "acme/silo"]
+        return b
+    }
+    static func action(_ repo: String? = "acme/fjord") -> RouterActionSource {
+        RouterActionSource(origin: SessionOrigin(category: "PRs", thing: "PR 1", actionID: "a", runID: "r", runtimeMode: nil), repo: repo)
+    }
+    func acted(_ a: RouterProjectSonnetAnswer, repo: String? = "acme/fjord") -> RouterProjectDecision {
+        RouterProjectDecider(jev: nil, sonnet: nil).sonnetDecision(a, board: Self.actionBoard(), action: Self.action(repo))
+    }
+
+    @Test func anActionsFollowUpIsTakenOnlyAtNinetyFiveAndOtherwiseStartsANewThreadInTheProject() {
+        func a(_ p: Double, project: String = "fjord", pc: Double = 0) -> RouterProjectSonnetAnswer {
+            .init(action: "follow_up", project: project, session: "f2", confidence: p, projectConfidence: pc)
+        }
+        #expect(acted(a(0.9)).kind == .newThread(project: "P-fjord"))
+        #expect(acted(a(0.96)).kind == .thread("t3-fjord-2"))
+        // The same answer from the owner is a follow-up at the idle bar.
+        #expect(decision(a(0.9)).kind == .thread("t3-fjord-2"))
+        // Without a repo that maps to a project: the model's project, at the idle bar.
+        #expect(acted(a(0.9, pc: 0.85), repo: nil).kind == .newThread(project: "P-fjord"))
+        #expect(acted(a(0.9, pc: 0.5), repo: nil).kind == .ask([.thread("t3-fjord-2")]))
+    }
+
+    @Test func anActionsNewWorkStartsAThreadAtTheIdleBarInTheItemsRepoProject() {
+        func a(_ project: String, _ p: Double) -> RouterProjectSonnetAnswer { .init(action: "new_work", project: project, session: "", confidence: p) }
+        #expect(acted(a("fjord", 0.8)).kind == .newThread(project: "P-fjord"))
+        #expect(acted(a("fjord", 0.79)).kind == .ask([.newThread(project: "P-fjord")]))
+        // The repo's project fills in a missing one, and blocks a different one.
+        #expect(acted(a("", 0.85)).kind == .newThread(project: "P-fjord"))
+        #expect(acted(a("silo", 0.99)).kind == .ask([.newThread(project: "P-silo")]))
+        // A repo that no project has (or two do) decides nothing.
+        #expect(acted(a("silo", 0.9), repo: "acme/other").kind == .newThread(project: "P-silo"))
+        var twice = Self.actionBoard()
+        twice.projectRepos["silo"] = "acme/fjord"
+        let d = RouterProjectDecider(jev: nil, sonnet: nil).sonnetDecision(a("silo", 0.9), board: twice, action: Self.action())
+        #expect(d.kind == .newThread(project: "P-silo"))
+    }
+
+    @Test func anActionsFollowUpInAnotherProjectThanTheItemsIsNotTaken() {
+        let a = RouterProjectSonnetAnswer(action: "follow_up", project: "silo", session: "s1", confidence: 0.99)
+        #expect(acted(a).kind == .ask([.thread("t3-silo-1")]))
+    }
+
+    @Test func anActionIsToldItIsAutomatedInTheSonnetPromptAndJevsState() async throws {
+        let calls = Calls()
+        let answer = RouterProjectSonnetAnswer(action: "new_work", project: "fjord", session: "", confidence: 0.9)
+        let d = RouterProjectDecider(jev: nil, sonnet: Self.sonnet(answer, calls: calls))
+        let out = try await d.decide("do it", in: Self.actionBoard(), action: Self.action())
+        #expect(out.kind == .newThread(project: "P-fjord"))
+        #expect(calls.prompt.contains("<automated>"))
+        _ = try await d.decide("do it", in: Self.actionBoard())
+        #expect(!calls.prompt.contains("<automated>"))
+        #expect(Self.jevRequest(true).state["note"] != nil)
+        #expect(Self.jevRequest(false).state["note"] == nil)
+    }
+
+    static func jevRequest(_ unattended: Bool) -> RouterProjectDecider.JevRequest {
+        RouterProjectDecider.jevRequest("x", actionBoard(), unattended: unattended)
+    }
+
+    @Test func jevOnAnActionTakesAThreadOnlyAtNinetyFiveElseTheRepoProject() {
+        let req = Self.jevRequest(true)
+        let d = RouterProjectDecider(jev: nil, sonnet: nil)
+        func pick(_ name: String, _ p: Double) -> RouterProjectDecision? {
+            d.jevDecision(JevClient.Choice(choice: name, confidence: p, probabilities: [name: p]), board: Self.actionBoard(),
+                          options: req.options, action: Self.action())
+        }
+        #expect(pick("Old login fix", 0.9)?.kind == .newThread(project: "P-fjord"))
+        #expect(pick("Old login fix", 0.96)?.kind == .thread("t3-fjord-2"))
+        #expect(pick("Disk quota", 0.99)?.kind == .newThread(project: "P-fjord"))
+        #expect(pick("new in silo", 0.99) == nil)
+        #expect(pick("new in fjord", 0.8)?.kind == .newThread(project: "P-fjord"))
+    }
+
     @Test func newWorkAndAnAnswerHereGoAtTheIdleBar() {
         func a(_ action: String, _ project: String, _ p: Double) -> RouterProjectSonnetAnswer { .init(action: action, project: project, session: "", confidence: p) }
         #expect(decision(a("new_work", "silo", 0.8)).kind == .newThread(project: "P-silo"))

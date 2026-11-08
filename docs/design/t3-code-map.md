@@ -179,6 +179,8 @@ With claude.ai Projects gone, no coordinator picks the thread, so Fjord's decide
 - the brief writer: Haiku against luna;
 - results go in `t3-research/` and are summarized here.
 
+Unattended Triage actions ("Send to the Router") are told they are automated and new work by default: a follow-up is taken only at 0.95 (`actionFollowUpBar`, unmeasured; the live logs will tell), below it a new thread starts in the project. The item's repository, when exactly one T3 project has it (`repositoryIdentity`), is that project when the model's is missing or unsure, and a different model project asks.
+
 Fable's advice is in [`t3-research/R1-routing-advice.md`](t3-research/R1-routing-advice.md). Its key fact: 439 of T3's 455 threads are imports stamped with the import time, so T3's database can't rebuild past boards. The 182 Claude-transcript moments stay the benchmark, rendered in T3's shell shape, until live decision logs have about 200 moments.
 
 **Model results (2026-11-06):**

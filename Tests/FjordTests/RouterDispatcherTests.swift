@@ -29,8 +29,8 @@ import Testing
         func install(_ d: RouterDispatcher) {
             d.onFinish = { [self] in finished.append($0) }
             d.effects = RouterDispatcher.Effects(
-                decide: { [self] tools, message, unattended, stage in
-                    decided.append((message, unattended))
+                decide: { [self] tools, message, action, stage in
+                    decided.append((message, action != nil))
                     decidedTagged.append(tools.tagged)
                     for s in stages { stage(s) }
                     if holdDecide { await withCheckedContinuation { decideHeld = $0 } }

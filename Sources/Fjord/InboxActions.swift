@@ -866,7 +866,7 @@ extension InboxActions {
                 // Your words and pills, the thing's pill among them: what GitHub wrote goes only in the thing's fenced block.
                 let origin = SessionOrigin(category: job.category.name, thing: sessionTitle(thing), actionID: job.action.id.uuidString,
                                            runID: UUID().uuidString, runtimeMode: job.action.runtimeMode)
-                let source = RouterActionSource(origin: origin)
+                let source = RouterActionSource(origin: origin, repo: thing.repo)
                 // Sent: where it goes is the Router's to say, and the run follows it there.
                 run.message = try await performer.sendToRouter(ActionMessage(parts: prompt.parts(thing: thing.id), source: source))
                 run.state = .running

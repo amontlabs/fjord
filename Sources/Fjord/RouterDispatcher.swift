@@ -105,9 +105,9 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// Everything a run does outside Fjord's own state, so a test stands in for each. The defaults are the real ones.
     struct Effects {
-        /// Where a message goes among T3's threads (`RouterProjectDecider`), its stage told as it goes. `unattended`:
-        /// an action's message, read by Jev only as an inbox action may be.
-        var decide: @MainActor (RouterTools, _ message: String, _ unattended: Bool,
+        /// Where a message goes among T3's threads (`RouterProjectDecider`), its stage told as it goes. `action`:
+        /// an action's message (unattended), read by Jev only as an inbox action may be.
+        var decide: @MainActor (RouterTools, _ message: String, _ action: RouterActionSource?,
                                 _ stage: @escaping @MainActor (RouterProjectDecider.Stage) -> Void) async throws -> RouterProjectDecision
         /// The `message.dispatch` to the thread, through the gate: what T3 took and what it did with it.
         var send: @MainActor (RouterTools, Delivery) async throws -> RouterDecision.Delivered
@@ -505,7 +505,7 @@ struct RouterAskBack: Identifiable, Equatable {
         guard let store else { return }
         let unattended = job.context.action != nil
         stage(job, RouterProjectDecider.Stage.sonnet.words)
-        let decision = try await effects.decide(job.tools, job.text, unattended) { [weak self] in self?.stage(job, $0.words) }
+        let decision = try await effects.decide(job.tools, job.text, job.context.action) { [weak self] in self?.stage(job, $0.words) }
         try Task.checkCancellation()
         try linked(job.context)
         store.updateDecision(job.id) {
@@ -829,7 +829,7 @@ extension RouterDispatcher.Effects {
             (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
         }
         return Self(
-            decide: { [weak dispatcher] tools, message, unattended, stage in
+            decide: { [weak dispatcher] tools, message, action, stage in
                 guard let dispatcher else { throw RouterTools.Failure("Fjord isn't ready") }
                 let store = try store(dispatcher)
                 // The board, then what you last said in each candidate that isn't known, then the board again with it.
@@ -837,8 +837,8 @@ extension RouterDispatcher.Effects {
                 let board = store.deciderBoard(youSaid: youSaid)
                 var decider = RouterProjectDecider.app(store, client: dispatcher.anthropic)
                 // An action's message is read by Jev only as an inbox action may be (`JevUse.actions`): it holds what GitHub wrote.
-                decider.jev = unattended ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
-                var decision = try await decider.decide(message, in: board, tagged: tools.tagged, stage: stage)
+                decider.jev = action != nil ? store.jevAsker(.actions, base: dispatcher.asker) : store.jevAsker(.routing, base: dispatcher.asker)
+                var decision = try await decider.decide(message, in: board, tagged: tools.tagged, action: action, stage: stage)
                 decision.board = board
                 decision.boardText = board.render()
                 return decision

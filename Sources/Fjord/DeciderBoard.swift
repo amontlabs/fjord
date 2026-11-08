@@ -60,6 +60,8 @@ struct DeciderBoard: Equatable, Sendable {
     var purposes: [String: String] = [:]
     /// A project's T3 id by the name the board shows it under; a name missing here stands for itself.
     var projectIDs: [String: String] = [:]
+    /// A project's GitHub repository (`owner/name`) by the name the board shows it under, for those that have one.
+    var projectRepos: [String: String] = [:]
     /// Every thread that may be shown: not archived, settled, snoozed or unlisted.
     var threads: [Thread]
 
@@ -179,6 +181,12 @@ struct DeciderBoard: Equatable, Sendable {
     // MARK: Looking things up
 
     func projectID(_ name: String) -> String { projectIDs[name] ?? name }
+    /// The project whose repository is `repo` (compared without case), when exactly one is; nil: none, or several.
+    func project(forRepo repo: String?) -> String? {
+        guard let repo = repo?.lowercased(), !repo.isEmpty else { return nil }
+        let hits = projects.filter { projectRepos[$0]?.lowercased() == repo }
+        return hits.count == 1 ? hits[0] : nil
+    }
     func thread(id: String) -> Thread? { threads.first { $0.id == id } }
     /// The project a name the model gave stands for (the board shows names as they are).
     func project(named name: String) -> String? {

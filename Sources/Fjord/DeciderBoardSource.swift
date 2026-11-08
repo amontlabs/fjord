@@ -48,6 +48,7 @@ extension Store {
         // A project's name as the board shows it: T3's title, made unique when two share it.
         var names: [String: String] = [:]
         var ids: [String: String] = [:]
+        var repos: [String: String] = [:]
         let projects = t3.store.shell.projects.values.filter { $0.archivedAt == nil }
             .sorted { ($0.title, $0.id) < ($1.title, $1.id) }
         for p in projects {
@@ -57,6 +58,7 @@ extension Store {
             while ids[name] != nil { name = "\(base) (\(n))"; n += 1 }
             names[p.id] = name
             ids[name] = p.id
+            if let repo = p.repoSlug { repos[name] = repo }
         }
         var short: [String: String] = [:]
         var taken = Set<String>()
@@ -71,6 +73,7 @@ extension Store {
         }
         var board = DeciderBoard(projects: projects.compactMap { names[$0.id] }, threads: [])
         board.projectIDs = ids
+        board.projectRepos = repos
         for p in projects {
             if let purpose = routerBriefs.docs[p.id]?.purpose, !purpose.isEmpty {
                 board.purposes[names[p.id] ?? ""] = purpose.split(whereSeparator: \.isWhitespace).joined(separator: " ")
