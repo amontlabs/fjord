@@ -8,3 +8,5 @@ explore/*/out/
 cases/
 heldout/
 gen/
+# T3 history benchmark (N1): moments hold message text, never commit.
+t3/data/
