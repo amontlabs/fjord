@@ -337,7 +337,9 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
         latestUserMessageAt = j.ts("latestUserMessageAt")
         latestUserAuthoredMessageAt = j.ts("latestUserAuthoredMessageAt")
         hasActionableProposedPlan = j.flag("hasActionableProposedPlan")
-        pendingBackgroundTasks = (j["pendingBackgroundTasks"]?.array ?? []).map(T3PendingTask.init)
+        // T3 lists its own watch of a thread's open pull request here too (`pull-request-watch:…`, derivePendingBackgroundWork):
+        // that is T3 waiting on a review or a merge, not work the agent left running.
+        pendingBackgroundTasks = (j["pendingBackgroundTasks"]?.array ?? []).map(T3PendingTask.init).filter { !$0.id.hasPrefix("pull-request-watch:") }
         blockedOnThreadWait = j.flag("blockedOnThreadWait")
         createdAt = j.ts("createdAt"); updatedAt = j.ts("updatedAt"); archivedAt = j.ts("archivedAt")
         settledAt = j.ts("settledAt"); snoozedUntil = j.ts("snoozedUntil"); pinnedAt = j.ts("pinnedAt")

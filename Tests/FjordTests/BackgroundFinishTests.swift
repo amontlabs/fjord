@@ -156,4 +156,12 @@ import Testing
         again.routerBriefs.announce(store: again)
         #expect(old.isEmpty)
     }
+
+    @Test func t3sWatchOfAnOpenPullRequestIsNotWorkStillRunning() {
+        let shell = T3ThreadShell(json: F.thread("t1", status: "completed", extra: ["pendingBackgroundTasks": .array([
+            ["taskId": "pull-request-watch:github.com/o/r#12", "kind": "monitor", "description": "Watching pull request #12"],
+        ])]))
+        let t = AgentThread(shell, project: nil)
+        #expect(t.pendingTasks.isEmpty && !t.running && t.finished)
+    }
 }
