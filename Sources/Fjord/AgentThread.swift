@@ -52,19 +52,33 @@ struct AgentThread: Identifiable, Hashable {
     var tags: [String] = []
     /// The agent's provider instance (`claudeAgent`, `codex`…): what tells whether it can be steered before a session says.
     var provider = ""
+    /// Work the shell says still runs (`pendingBackgroundTasks`): subagents, commands, monitors, background tasks.
+    var pendingTasks: [T3PendingTask] = []
+    /// The run holds until another thread's work ends (`blockedOnThreadWait`).
+    var blockedOnThreadWait = false
 
     var folderName: String { folder.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Scratch" }
     /// Mute and colour key: the folder path, or "" for scratch threads.
     var folderKey: String { folder ?? "" }
 
-    /// A run is under way (or about to start).
-    var running: Bool { [.preparing, .queued, .starting, .running, .waiting].contains(status) }
+    /// The turn itself is under way (or about to start): the status is live.
+    var turnRunning: Bool { status.isLive }
+    /// Working: the turn is under way, or work it left running still is (`pendingBackgroundTasks`, by T3's own rule that a
+    /// shell with pending background tasks is live), or the run holds on another thread. A turn can end while its subagents,
+    /// background commands, monitors or background tasks go on: it isn't done until they are.
+    var running: Bool { turnRunning || !pendingTasks.isEmpty || blockedOnThreadWait }
     /// Stopped on you: a blocking question or permission (the shell keeps `running` meanwhile, S1 e), or a plan.
     var waitsForYou: Bool { pendingRequest?.blocking == true || hasPlan }
     /// Waits on you, or stopped short (failed, or on a usage limit it won't resume from) and not seen since.
     var needsYou: Bool { waitsForYou || (status == .failed || limitStopped) && unseen }
-    /// Its latest run is over.
-    var finished: Bool { [.completed, .interrupted, .cancelled].contains(status) }
+    /// Its latest run is over, and nothing it started is still going.
+    var finished: Bool { [.completed, .interrupted, .cancelled].contains(status) && !running }
+    /// What it is on when the turn is over but its work isn't: "background: Review the changes" for one task, how many run
+    /// for more. Nothing while the turn itself runs.
+    var backgroundStep: String? {
+        guard !turnRunning, !pendingTasks.isEmpty else { return nil }
+        return pendingTasks.count == 1 ? "background: \(pendingTasks[0].label)" : "background: \(pendingTasks.count) running"
+    }
 }
 
 extension AgentThread {
@@ -93,7 +107,8 @@ extension AgentThread {
             limitStopped: t.status == .failed && raw.str("lastErrorClass") == "usage_limit" && recovery?["autoResume"]?.bool != true,
             limitResetAt: (raw.ts("usageLimitResetAt") ?? recovery?.ts("resetAt")).flatMap(Self.date),
             usageLimit: t.status == .failed && raw.str("lastErrorClass") == "usage_limit",
-            branch: t.branch, pullRequests: t.pullRequests, tags: t.tags, provider: t.providerInstanceId)
+            branch: t.branch, pullRequests: t.pullRequests, tags: t.tags, provider: t.providerInstanceId,
+            pendingTasks: t.pendingBackgroundTasks, blockedOnThreadWait: t.blockedOnThreadWait)
         createdAt = t.createdAt.flatMap(Self.date)
         settledAt = t.settledAt.flatMap(Self.date)
         lastVisitedAt = t.lastVisitedAt.flatMap(Self.date)
@@ -101,9 +116,11 @@ extension AgentThread {
     }
 
     /// What stands for the latest message when the shell carries none (T3 0.1.7 always sends `latestVisibleMessage: null`): the
-    /// last run's end, your last message and the run's status, so a read of the thread's end goes stale when any of them moves.
+    /// last run's end, your last message, the run's status and its pending background work, so a read of the thread's end goes
+    /// stale when any of them moves (the work ending after the run did moves no timestamp).
     static func endStamp(_ t: T3ThreadShell) -> String {
-        [t.latestRunCompletedAt?.text ?? "-", t.latestUserMessageAt?.text ?? "-", (t.activityRunStatus ?? t.status).rawValue].joined(separator: "|")
+        [t.latestRunCompletedAt?.text ?? "-", t.latestUserMessageAt?.text ?? "-", (t.activityRunStatus ?? t.status).rawValue,
+         String(t.pendingBackgroundTasks.count + (t.blockedOnThreadWait ? 1 : 0))].joined(separator: "|")
     }
 
     /// When the thread last had real activity: the latest of its last run's end, the last words you wrote and its latest visible

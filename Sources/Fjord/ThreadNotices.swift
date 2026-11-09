@@ -42,8 +42,10 @@ enum ThreadNotices {
     }
 
     /// What deserves a banner for a thread as the shell shows it now: pure. `request` is its held question, permission or plan
-    /// when the projection is open.
-    static func notices(_ t: AgentThread, request: ThreadRequest?, now: Date) -> [ThreadNotice] {
+    /// when the projection is open. `sawRunning` is when the caller last saw the thread working: its background work can run
+    /// long past the run's end, and the finish it makes is fresh as long as that seeing is (a relaunch, which saw nothing,
+    /// keeps the old window on the run's end stamp alone).
+    static func notices(_ t: AgentThread, request: ThreadRequest?, now: Date, sawRunning: Date? = nil) -> [ThreadNotice] {
         func make(_ kind: ThreadNotice.Kind, _ key: String, _ body: String) -> ThreadNotice {
             ThreadNotice(kind: kind, key: key, thread: t.id, project: t.projectID, title: t.title, body: body)
         }
@@ -65,10 +67,11 @@ enum ThreadNotices {
             }
             return [make(.needsYou, "plan:\(t.id)@\(at)", "A plan to approve.")]
         }
-        guard recent else { return [] }
+        let seenWorking = sawRunning.map { now.timeIntervalSince($0) <= fresh } ?? false
+        guard recent || seenWorking else { return [] }
         if t.usageLimit { return [make(.usageLimit, "limit:\(t.id)@\(at)", limitBody(t, resumesBySelf: !t.limitStopped))] }
         if t.status == .failed { return [make(.failed, "failed:\(t.id)@\(at)", clip(t.lastError ?? "", "It stopped with an error."))] }
-        if t.finished, let ended = t.lastRunEndedAt, now.timeIntervalSince(ended) <= fresh {
+        if t.finished, let ended = t.lastRunEndedAt, now.timeIntervalSince(ended) <= fresh || seenWorking {
             return [make(.finished, "done:\(t.id)@\(Int(ended.timeIntervalSince1970))", clip(t.latestMessage ?? "", "It finished."))]
         }
         return []

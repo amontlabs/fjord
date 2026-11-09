@@ -268,6 +268,8 @@ enum BriefKeys {
     @ObservationIgnored private var engineStarted = false
     /// T3 stopped answering at this time (`watch: "stale:"`).
     @ObservationIgnored private var downSince: Double?
+    /// When each thread was last seen working (the banners' freshness for a finish its background work made late).
+    @ObservationIgnored private var sawRunning: [String: Date] = [:]
 
     /// The engine's documents of the projects T3 lists now (briefs.db may hold others from before; they are purged, and
     /// never shown). A demo's documents are shown as they are.
@@ -482,9 +484,17 @@ enum BriefKeys {
     /// change, with no model between.
     func announce(store: Store) {
         let now = clock()
+        // When each thread was last seen working: the finish of one whose background work ran past its run is fresh by this,
+        // though the run's end stamp has gone past the window. Gone threads drop out; a thread neither working nor finished
+        // (idle, waiting on you) keeps no claim.
+        sawRunning = sawRunning.filter { store.threads[$0.key] != nil }
+        for t in store.threads.values {
+            if t.running { sawRunning[t.id] = now } else if !t.finished { sawRunning[t.id] = nil }
+        }
         var fresh: [ThreadNotice] = []
         for t in store.threads.values.sorted(by: { ($0.lastActivity, $0.id) < ($1.lastActivity, $1.id) }) where t.unseen {
-            for n in ThreadNotices.notices(t, request: store.requests[t.id], now: now) where !marks.notified.contains(n.key) {
+            for n in ThreadNotices.notices(t, request: store.requests[t.id], now: now, sawRunning: sawRunning[t.id])
+            where !marks.notified.contains(n.key) {
                 fresh.append(n)
             }
         }

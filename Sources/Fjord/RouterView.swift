@@ -624,7 +624,7 @@ private struct WorkingLine: View {
         // A turn that is over but left things running: how many, since the oldest of them.
         let start = Store.workingStart(row)
         let since = Self.minutes(now.timeIntervalSince(start ?? now))
-        let doing = row.session.running ? row.activity?.text ?? "Working" : row.tasksText ?? "Working"
+        let doing = row.session.running ? row.activity?.text ?? row.session.backgroundStep ?? "Working" : row.tasksText ?? "Working"
         Button { store.openThread(row.id) } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 SessionGlyph(row: row, size: 16, dot: false)

@@ -14,6 +14,9 @@ struct BriefThreadFacts: Codable, Equatable, Sendable {
     var runEnded: Double?
     var userAt: Double?
     var prs: [String]
+    /// The work still pending when the run ended (`pendingBackgroundTasks`, plus a hold on another thread): a finish is only
+    /// told once this is none, and its count in the facts makes that end a change the log sees.
+    var pending = 0
 
     init(_ t: AgentThread) {
         project = t.projectID
@@ -23,6 +26,23 @@ struct BriefThreadFacts: Codable, Equatable, Sendable {
         runEnded = t.lastRunEndedAt?.timeIntervalSince1970
         userAt = t.lastUserMessage?.timeIntervalSince1970
         prs = t.pullRequests.map(\.url).filter { !$0.isEmpty }
+        pending = t.pendingTasks.count + (t.blockedOnThreadWait ? 1 : 0)
+    }
+}
+
+/// Older `brief_seen` rows hold the facts without `pending` (it arrived with the background work): absent reads as none,
+/// so a store written by the last version still reads instead of counting every thread as never seen.
+extension BriefThreadFacts {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        project = try c.decode(String.self, forKey: .project)
+        title = try c.decode(String.self, forKey: .title)
+        running = try c.decode(Bool.self, forKey: .running)
+        stopped = try c.decode(Bool.self, forKey: .stopped)
+        runEnded = try c.decodeIfPresent(Double.self, forKey: .runEnded)
+        userAt = try c.decodeIfPresent(Double.self, forKey: .userAt)
+        prs = try c.decode([String].self, forKey: .prs)
+        pending = try c.decodeIfPresent(Int.self, forKey: .pending) ?? 0
     }
 }
 
@@ -170,7 +190,9 @@ final class BriefLog: @unchecked Sendable {
             }
             return out
         }
-        if let ended = new.runEnded, ended != old.runEnded, !t.running {
+        // The turn's end only finishes the thread once nothing it started still runs: when its background work ends after
+        // the run did, `runEnded` hasn't moved but `running` has, and the finish is told then, stamped with the run's end.
+        if let ended = new.runEnded, !t.running, ended != old.runEnded || old.running {
             out.append(item("done@\(Int(ended))", .message, "finished: " + (reply.map(clip) ?? t.title), at: ended, status: .done))
         }
         if let said = new.userAt, said != old.userAt {
@@ -192,7 +214,8 @@ final class BriefLog: @unchecked Sendable {
     static func needsRead(old: BriefThreadFacts?, thread t: AgentThread) -> Bool {
         let new = BriefThreadFacts(t)
         guard new != old else { return false }
-        let ended = new.runEnded != nil && new.runEnded != old?.runEnded && !t.running
+        // The work ending after the run did reads the end too: it is the finish that gets told, and the reply is its words.
+        let ended = new.runEnded != nil && !t.running && (new.runEnded != old?.runEnded || old?.running == true)
         let sent = new.userAt != nil && new.userAt != old?.userAt
         return (old == nil || ended) && t.latestMessage == nil || sent && t.lastUserText == nil
     }

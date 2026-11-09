@@ -293,8 +293,9 @@ extension Store {
                  // Threads outside the cache (found through search) still show their saved label.
                  label: label ?? entry?.label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
                  color: projectColor(session.folderKey), project: folderName(session.folderKey),
-                 activity: session.running ? threadWork[session.id] : nil,
-                 tasks: session.running ? [] : backgroundWork[session.id] ?? [])
+                 activity: session.turnRunning ? threadWork[session.id] : nil,
+                 // Hidden while the turn itself runs (its work is the activity), shown once it is the turn's leftovers that run.
+                 tasks: session.turnRunning ? [] : backgroundWork[session.id] ?? [])
     }
 
     func projectColor(_ folder: String) -> Color? {

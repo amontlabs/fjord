@@ -122,7 +122,7 @@ extension Store {
             return DeciderBoard.Thread(
                 id: id, key: t.id, project: project, title: t.title, flag: flag, running: t.running,
                 minutesIdle: max(0, Int(now.timeIntervalSince(t.activityAt) / 60)),
-                step: t.running ? (work?.todo?.active ?? work?.text ?? "") : "",
+                step: t.running ? (work?.todo?.active ?? work?.text ?? t.backgroundStep ?? "") : "",
                 said: t.latestMessage ?? read?.reply ?? "", youSaid: t.lastUserText ?? read?.youSaid,
                 youSaidLast: t.lastUserText != nil,
                 branch: t.branch ?? "", pullRequests: t.pullRequests.compactMap(Self.pullRequestWords),

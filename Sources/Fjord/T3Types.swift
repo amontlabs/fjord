@@ -300,7 +300,10 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
     /// Your own words only: wakes and agent messages that go through the user role do not move it.
     var latestUserAuthoredMessageAt: T3Timestamp?
     var hasActionableProposedPlan: Bool
-    var pendingBackgroundTaskCount: Int
+    /// Work the agent left running (`pendingBackgroundTasks`): subagents, background commands, monitors, background tasks.
+    var pendingBackgroundTasks: [T3PendingTask]
+    /// The run holds until another thread's work ends (`blockedOnThreadWait`).
+    var blockedOnThreadWait: Bool
     var createdAt: T3Timestamp?
     var updatedAt: T3Timestamp?
     var archivedAt: T3Timestamp?
@@ -334,7 +337,8 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
         latestUserMessageAt = j.ts("latestUserMessageAt")
         latestUserAuthoredMessageAt = j.ts("latestUserAuthoredMessageAt")
         hasActionableProposedPlan = j.flag("hasActionableProposedPlan")
-        pendingBackgroundTaskCount = j["pendingBackgroundTasks"]?.array?.count ?? 0
+        pendingBackgroundTasks = (j["pendingBackgroundTasks"]?.array ?? []).map(T3PendingTask.init)
+        blockedOnThreadWait = j.flag("blockedOnThreadWait")
         createdAt = j.ts("createdAt"); updatedAt = j.ts("updatedAt"); archivedAt = j.ts("archivedAt")
         settledAt = j.ts("settledAt"); snoozedUntil = j.ts("snoozedUntil"); pinnedAt = j.ts("pinnedAt")
         lastVisitedAt = j.ts("lastVisitedAt")
@@ -352,6 +356,36 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
     }
     var isListed: Bool { lineage.isListed }
     var isLive: Bool { status.isLive }
+}
+
+/// One entry of the shell's `pendingBackgroundTasks`: `{taskId, kind, description?}` — a `subagent` (also
+/// `childThreadId`, `providerInstanceId`), a `command`, a `monitor` or a `background_task`.
+struct T3PendingTask: T3Decodable, Hashable, Sendable {
+    var id: String
+    var kind: String?
+    var description: String?
+
+    init(json j: T3JSON) {
+        id = j.str("taskId") ?? ""
+        kind = j.str("kind")
+        description = j.str("description")
+    }
+
+    /// What it is, in a few words: what T3 named it, else its kind.
+    var label: String {
+        if let d = description, !d.isEmpty { return d }
+        return Self.kindName(kind)
+    }
+
+    /// "Subagent", "Monitor", "Command", or "Task" for a kind Fjord doesn't know.
+    static func kindName(_ kind: String?) -> String {
+        switch kind {
+        case "subagent": "Subagent"
+        case "monitor": "Monitor"
+        case "command": "Command"
+        default: "Task"
+        }
+    }
 }
 
 // MARK: - Shell stream
