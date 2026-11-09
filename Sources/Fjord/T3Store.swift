@@ -221,14 +221,14 @@ final class T3Store {
     nonisolated static func lastUserMessage(in p: T3Projection) -> String? {
         let text = p.messages.last { $0.role == "user" && !$0.text.isEmpty }?.text
             ?? p.turnItems.lazy.reversed().compactMap { i -> String? in if case .userMessage(_, let t) = i.detail, !t.isEmpty { t } else { nil } }.first
-        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
+        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines)) }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// The thread's last assistant reply, from a projection (capped for a prompt).
+    /// The thread's last assistant reply, from a projection, whole (each prompt trims what it shows).
     nonisolated static func lastAssistantMessage(in p: T3Projection) -> String? {
         let text = p.messages.last { $0.role == "assistant" && !$0.text.isEmpty }?.text
             ?? p.turnItems.lazy.reversed().compactMap { i -> String? in if case .assistantMessage(_, let t, _) = i.detail, !t.isEmpty { t } else { nil } }.first
-        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000)) }.flatMap { $0.isEmpty ? nil : $0 }
+        return text.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines)) }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The end of a thread, as the decider's board reads it: your last words and the agent's last reply.

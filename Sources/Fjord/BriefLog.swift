@@ -29,7 +29,8 @@ struct BriefThreadFacts: Codable, Equatable, Sendable {
 /// The log: items stored once by id, in one order for every project (a project's cursor counts these).
 final class BriefLog: @unchecked Sendable {
     static let recentWindow = 86_400.0
-    static let textCap = 600
+    /// A safety limit only, far above any real reply or plan: the brief reads them whole (a Haiku call on the subscription).
+    static let textCap = 100_000
 
     private var db: OpaquePointer?
     private let lock = NSLock()
@@ -196,7 +197,7 @@ final class BriefLog: @unchecked Sendable {
         return (old == nil || ended) && t.latestMessage == nil || sent && t.lastUserText == nil
     }
 
-    /// A message cut to the log's size: its start and its end, where a question or a request for the user usually sits.
+    /// A message whole; one past the safety limit (a dumped log) keeps its start and its end, where an ask usually sits.
     static func clip(_ s: String) -> String {
         let s = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard s.count > textCap else { return s }

@@ -54,8 +54,9 @@ import Testing
         let long = "Yes, it helps. " + String(repeating: "Details. ", count: 200) + "Want me to post it?"
         let items = BriefLog.events(old: BriefThreadFacts(before), thread: after, now: now.timeIntervalSince1970,
                                     reads: ThreadReads(youSaid: "Does it help?", reply: long))
-        #expect(items[0].text.hasPrefix("finished: Yes, it helps.") && items[0].text.hasSuffix("Want me to post it?"))
-        #expect(items[0].text.count <= BriefLog.textCap + 20)
+        #expect(items[0].text == "finished: " + long)
+        let huge = "Start. " + String(repeating: "x", count: BriefLog.textCap) + " Want me to post it?"
+        #expect(BriefLog.clip(huge).hasPrefix("Start.") && BriefLog.clip(huge).hasSuffix("Want me to post it?"))
         #expect(items[1].text == "you sent: Does it help?")
     }
 
