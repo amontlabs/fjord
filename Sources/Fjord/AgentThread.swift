@@ -35,11 +35,11 @@ struct AgentThread: Identifiable, Hashable {
     var lastVisitedAt: Date?
     /// Your own last words there (`latestUserAuthoredMessageAt`: wakes and agent sends don't move it).
     var lastAuthoredAt: Date?
-    /// The latest words the thread shows (the agent's last message), as T3's shell carries them.
+    /// The latest words the thread shows (the agent's last message), as T3's shell carries them (nil on T3 0.1.7: read the end).
     var latestMessage: String?
     /// The latest words you sent it, when that is its latest message.
     var lastUserText: String?
-    /// Its latest visible message (either role): a change of it is what makes a cached read stale.
+    /// Its latest visible message (either role), else `endStamp`: a change of it is what makes a cached read stale.
     var latestMessageID: String?
     var lastError: String?
     /// The run stopped on a usage limit and won't pick up again by itself.
@@ -88,7 +88,7 @@ extension AgentThread {
             lastUserMessage: t.latestUserMessageAt.flatMap(Self.date), lastRunEndedAt: t.latestRunCompletedAt.flatMap(Self.date),
             latestMessage: t.latestVisibleMessage.flatMap { $0.role == "assistant" && !$0.text.isEmpty ? $0.text : nil },
             lastUserText: t.latestVisibleMessage.flatMap { $0.role == "user" && !$0.text.isEmpty ? $0.text : nil },
-            latestMessageID: t.latestVisibleMessage?.id,
+            latestMessageID: t.latestVisibleMessage?.id ?? Self.endStamp(t),
             lastError: t.lastError,
             limitStopped: t.status == .failed && raw.str("lastErrorClass") == "usage_limit" && recovery?["autoResume"]?.bool != true,
             limitResetAt: (raw.ts("usageLimitResetAt") ?? recovery?.ts("resetAt")).flatMap(Self.date),
@@ -98,6 +98,12 @@ extension AgentThread {
         settledAt = t.settledAt.flatMap(Self.date)
         lastVisitedAt = t.lastVisitedAt.flatMap(Self.date)
         lastAuthoredAt = t.latestUserAuthoredMessageAt.flatMap(Self.date)
+    }
+
+    /// What stands for the latest message when the shell carries none (T3 0.1.7 always sends `latestVisibleMessage: null`): the
+    /// last run's end, your last message and the run's status, so a read of the thread's end goes stale when any of them moves.
+    static func endStamp(_ t: T3ThreadShell) -> String {
+        [t.latestRunCompletedAt?.text ?? "-", t.latestUserMessageAt?.text ?? "-", (t.activityRunStatus ?? t.status).rawValue].joined(separator: "|")
     }
 
     /// When the thread last had real activity: the latest of its last run's end, the last words you wrote and its latest visible

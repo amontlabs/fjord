@@ -45,6 +45,31 @@ import Testing
         #expect(BriefLog.events(old: BriefThreadFacts(after), thread: after, now: now.timeIntervalSince1970).isEmpty)
     }
 
+    @Test func theWordsTheShellLacksComeFromTheThreadsEnd() {
+        let before = thread("a", running: true)
+        let after = thread("a", ended: 999_500, user: 999_100)
+        #expect(BriefLog.needsRead(old: BriefThreadFacts(before), thread: after))
+        #expect(!BriefLog.needsRead(old: BriefThreadFacts(after), thread: after))
+        #expect(!BriefLog.needsRead(old: BriefThreadFacts(before), thread: thread("a", running: true, said: "Working.")))
+        let long = "Yes, it helps. " + String(repeating: "Details. ", count: 200) + "Want me to post it?"
+        let items = BriefLog.events(old: BriefThreadFacts(before), thread: after, now: now.timeIntervalSince1970,
+                                    reads: ThreadReads(youSaid: "Does it help?", reply: long))
+        #expect(items[0].text.hasPrefix("finished: Yes, it helps.") && items[0].text.hasSuffix("Want me to post it?"))
+        #expect(items[0].text.count <= BriefLog.textCap + 20)
+        #expect(items[1].text == "you sent: Does it help?")
+    }
+
+    @Test func aRecentlyStoppedThreadShowsItsLastReplyOnTheBoard() {
+        let done = thread("d", ended: 999_500)
+        let old = thread("o", ended: 1, active: 999_000)
+        let board = T3BriefSource.boards(threads: [done, old], requests: [:], ends: ["d": "Want me to post it?", "o": "Old."], now: now)["p1"]!
+        #expect(board.threads.first { $0.id == "d" }?.ends == "Want me to post it?")
+        #expect(board.threads.first { $0.id == "o" }?.ends == nil)
+        var doc = BriefDoc(project: "p1")
+        doc.threads = board.threads
+        #expect(RouterBriefEngine.context(doc, []).contains("its last reply: <session-content untrusted=\"true\">\nWant me to post it?"))
+    }
+
     @Test func aNewRecentThreadIsNewsAndAnOldOneIsNot() {
         let recent = BriefLog.events(old: nil, thread: thread("a", said: "Started."), now: now.timeIntervalSince1970)
         #expect(recent.count == 1 && recent[0].kind == .thread && recent[0].text.contains("Started."))

@@ -140,6 +140,24 @@ extension Store {
         return "#\(number)" + (pr.state.map { " " + $0.lowercased() } ?? "")
     }
 
+    /// A thread's end as known now, with no wait: its held projection, else what was read for its latest message.
+    func knownEnd(_ id: String) -> ThreadReads? {
+        guard let thread = threads[id] else { return nil }
+        if let p = t3.store.projections[id] { return T3Store.tail(of: p) }
+        return deciderReads.cached(id, stamp: thread.latestMessageID ?? "-")
+    }
+
+    /// A thread's end, read through a bounded snapshot when it isn't known (one read per latest message, shared with the
+    /// decider's). Nil when T3 doesn't answer within the read's timeout.
+    func readEnd(_ id: String) async -> ThreadReads? {
+        if let known = knownEnd(id) { return known }
+        guard let thread = threads[id], t3.store.hasClient else { return nil }
+        let stamp = thread.latestMessageID ?? "-"
+        let t3 = self.t3.store
+        await deciderReads.fetch(id, stamp: stamp) { await t3.readTail(id) }.value
+        return deciderReads.cached(id, stamp: stamp)
+    }
+
     /// How a thread's end is known: the held projection, else the cache, else nothing (a read is started for next time).
     private func knownReads(for t: DeciderBoard.Thread) -> (reads: ThreadReads?, stamp: String)? {
         guard let thread = threads[t.key] else { return nil }

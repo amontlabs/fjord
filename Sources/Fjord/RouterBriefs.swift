@@ -302,9 +302,21 @@ enum BriefKeys {
     }
 
     /// Rewrites every current project's brief and the lead now (⌘R on the Router page, the menu, the palette).
+    /// Every brief written again, once the end of each thread that stopped in the last day is read (so the boards carry
+    /// their last replies).
     func rewriteAll() {
-        guard let engine, let listing = liveListing() else { return }
-        engine.rewrite(projects: listing.projects)
+        guard let engine, !engine.rewriting, let listing = liveListing(), let store else { return }
+        let cutoff = clock().addingTimeInterval(-BriefLog.recentWindow)
+        let recent = store.threads.values.filter { !$0.running && ($0.lastRunEndedAt ?? $0.activityAt) >= cutoff }.map(\.id)
+        Task { [weak self, weak store] in
+            guard let store else { return }
+            await withTaskGroup(of: Void.self) { group in
+                for id in recent { group.addTask { @MainActor in _ = await store.readEnd(id) } }
+            }
+            guard let self else { return }
+            self.threadsChanged(store: store)
+            engine.rewrite(projects: listing.projects)
+        }
     }
     var rewriting: Bool { engine?.rewriting ?? false }
 
@@ -365,7 +377,20 @@ enum BriefKeys {
     private func currentBoards() -> [String: BriefBoard] {
         guard let store else { return [:] }
         return T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince,
-                                    now: clock())
+                                    ends: Self.ends(store), now: clock())
+    }
+
+    /// The agent's last reply in each thread whose end is known now (T3's shell doesn't carry it).
+    private static func ends(_ store: Store) -> [String: String] {
+        store.threads.keys.reduce(into: [:]) { out, id in
+            if let reply = store.knownEnd(id)?.reply, !reply.isEmpty { out[id] = reply }
+        }
+    }
+
+    /// A project's name: T3's title, else its folder's.
+    private static func name(_ project: String, store: Store, folder: String) -> String {
+        if let title = store.t3.store.shell.projects[project]?.title, !title.isEmpty { return title }
+        return store.folderName(folder)
     }
 
     /// The shell changed: what happened to each thread since the log last saw it is logged, project names follow, and the
@@ -374,20 +399,37 @@ enum BriefKeys {
         guard let engine, let log else { return }
         purgeUnlisted()
         let now = clock()
-        let boards = T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince, now: now)
+        let boards = T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince,
+                                          ends: Self.ends(store), now: now)
         var named = names
-        for t in store.threads.values where boards[t.projectID] != nil { named[t.projectID] = store.folderName(t.folderKey) }
+        for t in store.threads.values where boards[t.projectID] != nil { named[t.projectID] = Self.name(t.projectID, store: store, folder: t.folderKey) }
+        // Projects with no thread on a board keep a brief too: T3's title, never their id.
+        for p in store.t3.store.shell.projects.values where !p.title.isEmpty { named[p.id] = p.title }
         if named != names { names = named }
         var itemProjects = Set<String>()
         for t in store.threads.values {
             let facts = BriefThreadFacts(t)
             let old = seen[t.id]
             guard facts != old else { continue }
-            for item in BriefLog.events(old: old, thread: t, now: now.timeIntervalSince1970) where log.append(item, project: t.projectID) {
-                itemProjects.insert(t.projectID)
-            }
             seen[t.id] = facts
             log.setSeen(t.id, facts)
+            // T3's shell carries no message text: a finish or a send is logged once the thread's end is read, with its words.
+            if BriefLog.needsRead(old: old, thread: t), store.knownEnd(t.id) == nil, store.t3.store.hasClient {
+                Task { [weak self, weak store] in
+                    guard let store else { return }
+                    let reads = await store.readEnd(t.id)
+                    guard let self, let log = self.log else { return }
+                    var appended = false
+                    for item in BriefLog.events(old: old, thread: t, now: now.timeIntervalSince1970, reads: reads)
+                    where log.append(item, project: t.projectID) { appended = true }
+                    if appended { self.engine?.itemsChanged(t.projectID) }
+                }
+                continue
+            }
+            for item in BriefLog.events(old: old, thread: t, now: now.timeIntervalSince1970, reads: store.knownEnd(t.id))
+            where log.append(item, project: t.projectID) {
+                itemProjects.insert(t.projectID)
+            }
         }
         // What T3 has confirmed is no longer held here.
         let listed = Set(boards.values.flatMap { $0.threads.map(\.id) })

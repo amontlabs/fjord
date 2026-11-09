@@ -150,27 +150,30 @@ final class BriefLog: @unchecked Sendable {
 
     /// What happened to a thread between what the log saw (`old`) and the shell now (`t`): pure. A thread the log never saw
     /// is news only while it is recent (so a first launch writes the last day's briefs, not every old thread's).
-    static func events(old: BriefThreadFacts?, thread t: AgentThread, now: Double) -> [BriefItem] {
+    /// `reads`: the thread's end as read from T3, for the words the shell doesn't carry (the agent's last reply, yours).
+    static func events(old: BriefThreadFacts?, thread t: AgentThread, now: Double, reads: ThreadReads? = nil) -> [BriefItem] {
         let new = BriefThreadFacts(t)
         guard new != old else { return [] }
         var out: [BriefItem] = []
-        func clip(_ s: String) -> String { s.count > textCap ? String(s.prefix(textCap)) + "…" : s }
+        let clip = Self.clip
+        let reply = t.latestMessage ?? reads?.reply
+        let yours = t.lastUserText ?? reads?.youSaid
         func item(_ id: String, _ kind: BriefItem.Kind, _ text: String, at: Double, status: ThreadState? = nil) -> BriefItem {
             BriefItem(seq: 0, id: "\(id):\(t.id)", at: at, kind: kind, thread: t.id, text: text, status: status)
         }
         let active = t.lastActivity.timeIntervalSince1970
         guard let old else {
             if now - active <= recentWindow {
-                let said = t.latestMessage.map { "\n" + clip($0) } ?? ""
+                let said = reply.map { "\n" + clip($0) } ?? ""
                 out.append(item("new", .thread, t.title + said, at: active, status: t.running ? .working : t.finished ? .done : nil))
             }
             return out
         }
         if let ended = new.runEnded, ended != old.runEnded, !t.running {
-            out.append(item("done@\(Int(ended))", .message, "finished: " + (t.latestMessage.map(clip) ?? t.title), at: ended, status: .done))
+            out.append(item("done@\(Int(ended))", .message, "finished: " + (reply.map(clip) ?? t.title), at: ended, status: .done))
         }
         if let said = new.userAt, said != old.userAt {
-            out.append(item("sent@\(Int(said))", .message, "you sent: " + (t.lastUserText.map(clip) ?? "a message"), at: said))
+            out.append(item("sent@\(Int(said))", .message, "you sent: " + (yours.map(clip) ?? "a message"), at: said))
         }
         if new.stopped, !old.stopped {
             out.append(item("stopped@\(Int(active))", .stranded, "stopped: " + (t.lastError.map(clip) ?? "the run stopped before it finished"),
@@ -184,6 +187,22 @@ final class BriefLog: @unchecked Sendable {
     }
 
     /// A request or plan that appeared on a thread (read from its projection): it waits on you.
+    /// Whether the thread's change needs words the shell doesn't carry: a finish, a send or a first sight, with no text.
+    static func needsRead(old: BriefThreadFacts?, thread t: AgentThread) -> Bool {
+        let new = BriefThreadFacts(t)
+        guard new != old else { return false }
+        let ended = new.runEnded != nil && new.runEnded != old?.runEnded && !t.running
+        let sent = new.userAt != nil && new.userAt != old?.userAt
+        return (old == nil || ended) && t.latestMessage == nil || sent && t.lastUserText == nil
+    }
+
+    /// A message cut to the log's size: its start and its end, where a question or a request for the user usually sits.
+    static func clip(_ s: String) -> String {
+        let s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard s.count > textCap else { return s }
+        return String(s.prefix(textCap / 3)) + " … " + String(s.suffix(textCap * 2 / 3))
+    }
+
     static func request(_ r: ThreadRequest, title: String, at: Double) -> BriefItem {
         var text: String, options: [String] = []
         switch r.body {

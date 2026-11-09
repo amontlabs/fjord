@@ -52,8 +52,10 @@ struct T3BriefSource: BriefSource {
 
     /// Every project's board: its threads, the entries that wait on you (a request T3 holds as data, else a plain-words one the
     /// model writes the question of), and the words you sent. `unreachableSince`: T3 stopped answering (`watch: "stale:"`).
+    /// `ends`: the agent's last reply in each thread, where known (T3's shell doesn't carry it): a thread that stopped in the
+    /// last day shows it.
     static func boards(threads: [AgentThread], requests: [String: ThreadRequest], unreachableSince: Double? = nil,
-                       now: Date = Date()) -> [String: BriefBoard] {
+                       ends: [String: String] = [:], now: Date = Date()) -> [String: BriefBoard] {
         var byProject: [String: [AgentThread]] = [:]
         for t in threads where listed(t, now: now) { byProject[t.projectID, default: []].append(t) }
         var out: [String: BriefBoard] = [:]
@@ -64,7 +66,9 @@ struct T3BriefSource: BriefSource {
                 let state = Self.state(t)
                 let since = t.lastActivity.timeIntervalSince1970
                 let age = state == .done ? (t.lastRunEndedAt?.timeIntervalSince1970 ?? since) : since
-                board.threads.append(BriefThread(id: t.id, title: t.title, status: state, age: age, asOf: unreachableSince))
+                let reply = state == .working || now.timeIntervalSince1970 - age > BriefLog.recentWindow
+                    ? nil : (t.latestMessage ?? ends[t.id]).map(BriefLog.clip)
+                board.threads.append(BriefThread(id: t.id, title: t.title, status: state, age: age, asOf: unreachableSince, ends: reply))
                 if state == .needsYou { board.entries.append(entry(t, project: project, request: requests[t.id], since: since, asOf: unreachableSince)) }
                 if let said = t.lastUserText, let at = t.lastUserMessage, now.timeIntervalSince(at) <= 86_400 {
                     board.sent.append(SentLine(intent: t.id, words: said, state: "delivered"))

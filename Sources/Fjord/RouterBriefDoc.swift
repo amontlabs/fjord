@@ -80,8 +80,11 @@ struct BriefThread: Codable, Hashable, Sendable {
     var age: Double
     /// Set when T3 was unreachable: what it last saw, and when.
     var asOf: Double?
+    /// How it ended, for a thread that stopped in the last day: the agent's last reply (its start and its end), so the brief
+    /// sees a question or a request the reply leaves to you.
+    var ends: String? = nil
 
-    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of" }
+    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of", ends }
 }
 
 struct BriefDecision: Codable, Hashable, Sendable {
@@ -198,8 +201,9 @@ struct BriefDoc: Codable, Equatable, Sendable {
             guard let kind = BriefEntry.Kind(rawValue: raw.kind) else { return nil }
             guard exists.contains(raw.thread) else { return nil }
             let th = thread(raw.thread)
-            // A thread working again waits on no one, stranded or not; a stranded session stays on past its done.
-            if let th, th.status == .working || (kind != .stranded && th.status == .done) { return nil }
+            // A thread working again waits on no one, stranded or not. A done thread waits on you when its reply asks (T3 flags
+            // only requests it holds), and a stranded session stays on past its done.
+            if let th, th.status == .working { return nil }
             guard seen.insert(raw.thread + "/" + raw.kind).inserted else { return nil }
             let old = needsYou.first { $0.thread == raw.thread && $0.kind == kind }
             // A card's options are the card's; the model's own are choices only when it gives two or more (one is no choice).

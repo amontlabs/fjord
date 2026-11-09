@@ -43,8 +43,9 @@ import Testing
         engine.itemsChanged("p"); await engine.idle()
         let doc = engine.docs["p"]!
         #expect(doc.now == ["1", "2", "3"])
-        #expect(doc.needsYou.map(\.thread) == ["t1"])
-        #expect(doc.needsYou[0].options == ["red", "blue"])  // the card item's, as data
+        // A done thread whose reply asks waits on you too; a thread the project doesn't have never does.
+        #expect(doc.needsYou.map(\.thread).sorted() == ["t1", "t2"])
+        #expect(doc.needsYou.first { $0.thread == "t1" }?.options == ["red", "blue"])  // the card item's, as data
         #expect(doc.decisions.map(\.thread) == ["send"])
     }
 

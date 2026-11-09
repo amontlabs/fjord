@@ -276,7 +276,10 @@ struct GeneralBrief: Codable, Equatable, Sendable {
     about; three to six words in each tag, never a whole sentence, the rest plain text around it ("<t id=\"th_1\">The \
     layout pick</t> waits on you; <t id=\"th_2\">the install guide</t> is done."). No markdown, no thread titles in \
     quotes, no ids outside tags. Leave out what the current brief already covers: a late report that repeats a thread's \
-    finish adds nothing. Drop an entry once its thread no longer waits on the user. For a request in plain \
+    finish adds nothing. Drop an entry once its thread no longer waits on the user. A thread that finished \
+    with a reply that asks the user something, offers a choice or a next step to approve ("Want me to post it?"), or \
+    leaves something only the user can do, waits on the user even though its run is over: give it an entry of kind \
+    "question" with that ask in plain words, and never call that thread done or say nothing waits. For a request in plain \
     words, write the question from the message the item holds. Use only thread ids that appear in the \
     brief or the items. Write about the work, the way the user would say it: never mention the log, its items or their \
     numbers, statuses or rows. A thread pausing or resuming is news only with what it did or what it waits on; a bare status \
@@ -570,8 +573,9 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         let listed = Set(out.map(\.thread))
         for m in model where !listed.contains(m.thread) {
             let t = board.threads.first { $0.id == m.thread }
-            // A stranded session stays until its thread works again.
-            guard t?.status == .needsYou || (m.kind == .stranded && t?.status != .working) else { continue }
+            // A stranded session stays until its thread works again; so does a thread whose reply leaves the next step to you
+            // (a finished run that asks), which T3 doesn't flag.
+            guard t?.status == .needsYou || (m.kind == .stranded || t != nil) && t?.status != .working else { continue }
             var e = m
             if let t { e.state = t.status; e.asOf = t.asOf }
             out.append(e)
@@ -590,7 +594,12 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         lines += doc.decisions.map { "decision: \($0.thread): " + r($0.text) }
         lines += doc.looseEnds.map { "loose_end: " + r($0) }
         lines.append("Threads:")
-        lines += doc.threads.map { "- \($0.id) \"\(r($0.title))\" \($0.status.rawValue)" }
+        for t in doc.threads {
+            lines.append("- \(t.id) \"\(r(t.title))\" \(t.status.rawValue)")
+            if let ends = t.ends, !ends.isEmpty {
+                lines.append("  its last reply: <session-content untrusted=\"true\">\n\(r(ends))\n</session-content>")
+            }
+        }
         lines.append("New items:")
         for i in items {
             let opts = i.options.isEmpty ? "" : " options: " + i.options.map(r).joined(separator: " / ")

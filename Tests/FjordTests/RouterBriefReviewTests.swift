@@ -131,6 +131,19 @@ import Testing
         }
     }
 
+    // MARK: A finished reply that asks
+
+    @Test func aDoneThreadWhoseReplyAsksWaitsOnYouUntilItWorksAgain() {
+        let ask = [BriefEntry(project: "p", thread: "t1", kind: .question, state: .done, since: 1, question: "Post the reply?")]
+        #expect(RouterBriefEngine.entries(model: ask, board: BriefBoard(threads: [briefThread("t1", .done)])).count == 1)
+        #expect(RouterBriefEngine.entries(model: ask, board: BriefBoard(threads: [briefThread("t1", .working)])).isEmpty)
+        #expect(RouterBriefEngine.entries(model: ask, board: BriefBoard(threads: [])).isEmpty)
+        var doc = BriefDoc(project: "p")
+        doc.threads = [briefThread("t1", .done)]
+        let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"question","question":"Post the reply?","options":[]}],"decisions":[],"loose_ends":[]}"#)
+        #expect(doc.checked(answer, known: [], cards: [:], at: 1).needsYou.map(\.question) == ["Post the reply?"])
+    }
+
     // MARK: Stranded (P2-4)
 
     @Test func aStrandedEntryLeavesOnceItsThreadWorksAgain() {
