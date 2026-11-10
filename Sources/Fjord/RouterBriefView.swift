@@ -865,15 +865,15 @@ struct BriefUpdated: View {
             }
         }
     }
+
+    private func label(_ text: String) -> some View {
+        Text(text).font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+    }
 }
 
 extension EnvironmentValues {
     /// Puts the keyboard in the composer to write to the mentioned thread (`RouterModel.reply`).
     @Entry var briefReply: () -> Void = {}
-
-    private func label(_ text: String) -> some View {
-        Text(text).font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
-    }
 }
 
 /// A highlight's panel, placed at its ideal size under the highlight (or above it), moved `dx` sideways; it takes the
