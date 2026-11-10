@@ -117,7 +117,8 @@ import Testing
                                   told: [BriefPage.finishKey(BriefThread(id: "f2", title: "", status: .done, age: now - 50))], now: now)
         #expect(told.needsYou == 2)
         #expect(told.sections.first?.id == "newNeed")
-        #expect(told.sections.first { $0.id == "finB" }?.group == .quiet)
+        // Told only dims a finish: the thread stays finished until you settle it.
+        #expect(told.sections.first { $0.id == "finB" }?.group == .finished)
     }
 
     @Test func twelveSectionsAtMostTheRestFoldedByName() {
