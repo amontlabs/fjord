@@ -128,6 +128,7 @@ enum AppWindowShots {
         briefShot("brief-needs-you", .aqua, height: 1500, focus: true), briefShot("brief-needs-you-dark", .darkAqua, height: 1500, focus: true),
         briefShot("brief-rewriting", .aqua, rewriting: true), briefShot("brief-rewriting-dark", .darkAqua, rewriting: true),
         briefShot("brief-stale", .aqua, variant: .stale), briefShot("brief-stale-dark", .darkAqua, variant: .stale),
+        briefShot("brief-finished", .aqua, height: 1100), briefShot("brief-finished-dark", .darkAqua, height: 1100),
         briefShot("brief-quiet", .aqua, height: 800, variant: .quiet), briefShot("brief-quiet-dark", .darkAqua, height: 800, variant: .quiet),
         // The history at the right on a wide window, across the bottom on a narrow one.
         briefShot("brief-drawer", .aqua, drawer: true), briefShot("brief-drawer-dark", .darkAqua, drawer: true),
@@ -263,8 +264,8 @@ enum AppWindowShots {
                      store.requests[Demo.briefLocalSession] = request
                  }
                  if queued { Self.queueWords(store) }
-                 if drawer {
                  if rewriting { briefs.demoRewriteProgress = (3, 8) }
+                 if drawer {
                      briefs.drawerOpen = true
                      store.threadAct(.read, on: BriefTarget(project: "chan_demo_docs", thread: "th_guide"),
                                     title: briefs.title(BriefTarget(project: "chan_demo_docs", thread: "th_guide")))

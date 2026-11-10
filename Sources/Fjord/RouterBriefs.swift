@@ -35,6 +35,10 @@ struct BriefPage: Equatable {
         var recent: [BriefThread]
         /// Finished threads not yet told.
         var finished: [BriefThread]
+        /// Threads that finished in the last 24 h and are not settled, told or not (`finished` is the not told ones).
+        var unsettled: [BriefThread] = []
+        /// Threads that finished 1 to 7 days ago and are not settled: shown as a count.
+        var older: [BriefThread] = []
         var staleSince: Double?
     }
 
@@ -68,12 +72,19 @@ struct BriefPage: Equatable {
             let threads = doc.threads.filter { !archived.contains(BriefTarget(project: id, thread: $0.id).key) }
             let recent = threads.filter { now - $0.age <= Self.recent && !waiting.contains($0.id) }.sorted { ($0.age, $0.id) > ($1.age, $1.id) }
             let finished = recent.filter { $0.status == .done && !told.contains(finishKey($0)) }
+            let unsettled = recent.filter { $0.status == .done }
+            let older = threads.filter { $0.status == .done && now - $0.age > Self.recent && !waiting.contains($0.id) }
+                .sorted { ($0.age, $0.id) > ($1.age, $1.id) }
+            // Past 24 h a finished thread is only the count row: prose lines that tag one go from the page.
+            let olderIDs = Set(older.map(\.id))
+            var doc = doc
+            if !olderIDs.isEmpty { doc.now = doc.now.filter { BriefMarkup.ids($0).allSatisfy { !olderIDs.contains($0) } } }
             let group: Group, key: Double
             if let first = entries.first(where: { $0.kind != .stranded }) {
                 group = .needsYou; key = first.since
             } else if let first = entries.first {
                 group = .stranded; key = first.since
-            } else if let newest = finished.first {
+            } else if let newest = unsettled.first {
                 group = .finished; key = -newest.age
             } else if let working = threads.filter({ $0.status == .working }).max(by: { $0.age < $1.age }) {
                 group = .working; key = -working.age
@@ -82,7 +93,7 @@ struct BriefPage: Equatable {
             }
             let name = names[id].flatMap { $0.isEmpty ? nil : $0 } ?? Self.fallbackName(id)
             sections.append((Section(name: name, group: group, doc: doc, entries: entries, recent: recent, finished: finished,
-                                     staleSince: staleSince(doc.watch)), key))
+                                     unsettled: unsettled, older: older, staleSince: staleSince(doc.watch)), key))
         }
         sections.sort { a, b in
             if a.0.group != b.0.group { return a.0.group < b.0.group }
@@ -610,7 +621,9 @@ enum BriefKeys {
     }
 
     /// Whether a project shows its paragraph: one with something for you starts open, one with nothing folded.
-    func isOpen(_ section: BriefPage.Section) -> Bool { section.entries.isEmpty == toggled.contains(section.id) }
+    func isOpen(_ section: BriefPage.Section) -> Bool {
+        (section.entries.isEmpty && section.unsettled.isEmpty && section.older.isEmpty) == toggled.contains(section.id)
+    }
 
     func toggle(_ section: BriefPage.Section) {
         if toggled.contains(section.id) { toggled.remove(section.id) } else { toggled.insert(section.id) }

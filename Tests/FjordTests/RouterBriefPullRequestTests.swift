@@ -53,3 +53,22 @@ actor FakeGitHub {
         #expect(await github.asked.allSatisfy { $0 == "https://github.com/o/r/pull/12" })
     }
 }
+
+@MainActor @Suite struct BriefFinishedTiers {
+    @Test func finishedUnsettledStayUntilSettledAndToldOnlyDimsThem() {
+        let now = 10_000_000.0
+        var doc = BriefDoc(project: "p")
+        doc.threads = [BriefThread(id: "new", title: "N", status: .done, age: now - 3_600),
+                       BriefThread(id: "old", title: "O", status: .done, age: now - 3 * 86_400),
+                       BriefThread(id: "ancient", title: "A", status: .done, age: now - 9 * 86_400)]
+        let told: Set<String> = [BriefPage.finishKey(doc.threads[0])]
+        let page = BriefPage.make(docs: ["p": doc], names: [:], lead: GeneralBrief(), read: [], told: told, now: now)
+        let s = page.sections[0]
+        #expect(s.unsettled.map(\.id) == ["new"] && s.finished.isEmpty && s.older.map(\.id) == ["old", "ancient"])
+        #expect(s.group == .finished)
+        // Prose that tags a thread past 24 h goes from the page.
+        doc.now = [#"<t id="old">Old</t> landed."#, #"<t id="new">New</t> landed."#]
+        let again = BriefPage.make(docs: ["p": doc], names: [:], lead: GeneralBrief(), read: [], told: [], now: now)
+        #expect(again.sections[0].doc.now == [#"<t id="new">New</t> landed."#])
+    }
+}

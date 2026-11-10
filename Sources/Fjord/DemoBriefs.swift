@@ -57,12 +57,13 @@ extension Demo {
 
         var docs = BriefDoc(project: "chan_demo_docs")
         docs.now = ["<t id=\"th_guide\">The install guide</t> was rewritten for the new setup; <a href=\"https://github.com/demo/docs-site/pull/12\">its PR</a> is open."]
-        docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 600)]
+        docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 600,
+                                    prs: [BriefPR(url: "https://github.com/demo/docs-site/pull/12", number: 12, state: .merged)])]
         docs.sent = [SentLine(intent: "39", words: "rewrite the install guide for the Chrome setup", state: "delivered")]
         docs.watch = "live"
 
         var evals = BriefDoc(project: "chan_demo_evals")
-        evals.now = ["Nothing new since <t id=\"th_eval\">yesterday's scoring run</t>."]
+        evals.now = ["Nothing new since yesterday's scoring run."]
         evals.threads = [BriefThread(id: "th_eval", title: "Score the decider on last week's moments", status: .done, age: t - 2 * 86_400)]
         evals.watch = "live"
 

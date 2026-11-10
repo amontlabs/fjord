@@ -168,6 +168,7 @@ struct BriefSectionView: View {
                     Text("Being rewritten").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.muted)
                 }
                 if let sent = doc.sent.last { BriefSentLine(line: sent) }
+                BriefFinishedRows(store: store, section: section, now: now)
             }
         }
     }
@@ -273,7 +274,8 @@ struct BriefProse: View {
                 case .link(let url, let text, let tight):
                     if let destination = URL(string: url) {
                         let linkKey = key + "#link:\(index):" + url
-                        BriefLink(store: store, destination: destination, text: text, size: size, key: linkKey)
+                        BriefLink(store: store, destination: destination, text: text, size: size, key: linkKey,
+                                  state: store.routerBriefs.prState(url, in: project))
                             .layoutValue(key: TightKey.self, value: tight)
                             .zIndex(store.routerBriefs.raised(linkKey) ? 1 : 0)
                     }
@@ -310,13 +312,16 @@ private struct BriefLink: View {
     let text: String
     let size: CGFloat
     let key: String
+    /// Where the pull request it names stands, when the board knows.
+    var state: PRState?
 
     var body: some View {
         let briefs = store.routerBriefs
         let hovered = briefs.hovered == key
         SwiftUI.Link(destination: destination) {
-            Text(text).font(CDS.sans(size, .medium)).foregroundStyle(CDS.Text.accent)
+            (Text(text).font(CDS.sans(size, .medium)).foregroundStyle(CDS.Text.accent)
                 .underline(color: CDS.Text.accent.opacity(hovered ? 0.9 : 0.4))
+                + Text(state.map { " \($0.rawValue)" } ?? "").font(CDS.sans(size * 0.78)).foregroundStyle(PRStateMark.tint(state)))
         }
         .buttonStyle(.plain)
         .onHover { inside in
@@ -887,6 +892,91 @@ struct BriefPanelPlacement: Layout {
             let size = view.sizeThatFits(.unspecified)
             let y = below ? bounds.maxY + gap : bounds.minY - gap - size.height
             view.place(at: CGPoint(x: bounds.minX + dx, y: y), proposal: ProposedViewSize(size))
+        }
+    }
+}
+
+// MARK: - Finished, not settled
+
+/// A pull request's state in a word: small, quiet, merged in the accent, closed muted.
+enum PRStateMark {
+    static func tint(_ s: PRState?) -> Color {
+        switch s {
+        case .merged: CDS.Text.accent
+        default: CDS.Text.muted
+        }
+    }
+}
+
+extension RouterBriefs {
+    /// The state the board holds of the pull request at `url` (any spelling of it), in `project`'s threads or, for the lead, all.
+    func prState(_ url: String, in project: String?) -> PRState? {
+        guard let ref = PullRequestRef.extract(from: url).first else { return nil }
+        let docs = project.flatMap { p in self.docs[p].map { [$0] } } ?? Array(self.docs.values)
+        for doc in docs {
+            for pr in doc.threads.flatMap(\.prs) where PullRequestRef.extract(from: pr.url).first == ref && pr.state != .unknown {
+                return pr.state
+            }
+        }
+        return nil
+    }
+}
+
+/// What finished and is not settled and the prose doesn't name, under a project's paragraph: the last day's threads one quiet
+/// row each (told ones dimmed, never hidden), and older ones (to 7 days) as one count row with Settle all, or their own row
+/// when there is one.
+private struct BriefFinishedRows: View {
+    let store: Store
+    let section: BriefPage.Section
+    let now: Double
+
+    var body: some View {
+        let briefs = store.routerBriefs
+        let named = Set(BriefMarkup.ids(section.doc.now.joined(separator: " ")))
+        let recent = section.unsettled.filter { !named.contains($0.id) }
+        let older = section.older.filter { !named.contains($0.id) }
+        if !recent.isEmpty || !older.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(recent, id: \.id) { t in
+                    let seen = briefs.told.contains(BriefPage.finishKey(t))
+                    row(t, age: BriefAge.short(now - t.age)).opacity(seen ? 0.6 : 1)
+                }
+                if older.count == 1, let t = older.first {
+                    row(t, age: BriefAge.short(now - t.age)).opacity(0.7)
+                } else if older.count > 1 {
+                    HStack(spacing: 8) {
+                        Text("\(older.count) finished, not settled").font(CDS.sans(13)).foregroundStyle(CDS.Text.muted)
+                        Spacer(minLength: 8)
+                        ClaudeButton("Settle all", variant: .ghost, size: .sm) {
+                            for t in older { briefs.settle(BriefTarget(project: section.id, thread: t.id), store: store) }
+                        }
+                        .help("Settles each in T3. Revert in the history")
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func row(_ t: BriefThread, age: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(CDS.Fill.accent)
+            Text(t.title).font(CDS.sans(13.5)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
+            Text("finished " + age).font(CDS.sans(11.5)).foregroundStyle(CDS.Text.muted)
+            ForEach(t.prs.filter { $0.state != .unknown }, id: \.url) { pr in
+                if let url = URL(string: pr.url) {
+                    SwiftUI.Link(destination: url) {
+                        Text("#\(pr.number.map(String.init) ?? "PR") \(pr.state.rawValue)")
+                            .font(CDS.sans(11.5)).foregroundStyle(PRStateMark.tint(pr.state))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Spacer(minLength: 8)
+            ClaudeButton("Settle", variant: .ghost, size: .sm) {
+                store.routerBriefs.settle(BriefTarget(project: section.id, thread: t.id), store: store)
+            }
+            .help("T3's settled: it leaves the brief. Revert in the history")
         }
     }
 }
