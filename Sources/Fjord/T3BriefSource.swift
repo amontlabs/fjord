@@ -6,7 +6,6 @@ import Foundation
 
 /// What the engine is told.
 @MainActor protocol BriefEvents: AnyObject {
-    func itemsChanged(_ project: String)
     func boardChanged(_ project: String)
 }
 

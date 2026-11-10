@@ -306,7 +306,7 @@ enum BriefKeys {
     /// Every brief written again, once the end of each thread that stopped in the last day is read (so the boards carry
     /// their last replies).
     func rewriteAll() {
-        guard let engine, !engine.rewriting, let listing = liveListing(), let store else { return }
+        guard let engine, let listing = liveListing(), let store else { return }
         let cutoff = clock().addingTimeInterval(-BriefLog.recentWindow)
         let recent = store.threads.values.filter { !$0.running && ($0.lastRunEndedAt ?? $0.activityAt) >= cutoff }.map(\.id)
         Task { [weak self, weak store] in
@@ -320,6 +320,9 @@ enum BriefKeys {
         }
     }
     var rewriting: Bool { engine?.rewriting ?? false }
+    var rewriteProgress: (done: Int, total: Int)? { engine?.rewriteProgress }
+    /// When the facts were last checked (a call landed, or the trigger key showed nothing changed).
+    var lastChecked: Double? { engine?.lastChecked }
 
     /// What briefs.db holds of projects and threads T3 doesn't list goes, once the listing is known and when it changes.
     @ObservationIgnored private var purged: (projects: Set<String>, threads: Set<String>)?
@@ -423,7 +426,7 @@ enum BriefKeys {
                     var appended = false
                     for item in BriefLog.events(old: old, thread: t, now: now.timeIntervalSince1970, reads: reads)
                     where log.append(item, project: t.projectID) { appended = true }
-                    if appended { self.engine?.itemsChanged(t.projectID) }
+                    if appended { self.engine?.boardChanged(t.projectID) }
                 }
                 continue
             }
@@ -442,15 +445,15 @@ enum BriefKeys {
         lastBoards = boards
         defer { recount(); announce(store: store) }
         guard engineStarted else { engineStarted = true; engine.start(); return }
-        for p in itemProjects.sorted() { engine.itemsChanged(p) }
-        for p in Set(boards.keys).union(before.keys).subtracting(itemProjects).sorted() where boards[p] != before[p] { engine.boardChanged(p) }
+        let moved = Set(boards.keys).union(before.keys).filter { boards[$0] != before[$0] }
+        for p in itemProjects.union(moved).sorted() { engine.boardChanged(p) }
     }
 
     /// A thread's projection showed a request or plan that waits on you: logged once (by its id), with its words and options.
     func requestAppeared(_ request: ThreadRequest, store: Store) {
         guard let log, let thread = store.threads[request.threadID] else { return }
         if log.append(BriefLog.request(request, title: thread.title, at: clock().timeIntervalSince1970), project: thread.projectID) {
-            engine?.itemsChanged(thread.projectID)
+            engine?.boardChanged(thread.projectID)
         }
         announce(store: store)
     }
@@ -816,7 +819,7 @@ enum BriefKeys {
         if let log {
             let item = BriefItem(seq: 0, id: "answer:\(UUID().uuidString)", at: clock().timeIntervalSince1970, kind: .message, thread: t.thread,
                                  text: "you answered: " + words)
-            if log.append(item, project: t.project) { engine?.itemsChanged(t.project) }
+            if log.append(item, project: t.project) { engine?.boardChanged(t.project) }
         }
         answers.insert(BriefAnswer(target: t, title: title(t), words: words, at: clock()), at: 0)
         if answers.count > 100 { answers.removeLast(answers.count - 100) }

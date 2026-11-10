@@ -388,9 +388,6 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         }
     }
 
-    /// New items in the log: the deterministic part now, and the project runs if its trigger key moved.
-    func itemsChanged(_ project: String) { spawn { [self] in await refresh(project); await evaluate(project, force: false) } }
-
     /// T3 listed its projects and threads: what is stored for any other goes (briefs, cursors, marks), and the general lead is
     /// written again if it was about them. Only called once T3 has answered with something.
     func purge(projects keep: Set<String>, threads: Set<String>) {
@@ -405,32 +402,78 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         spawn { [self] in await batchEnd() }
     }
 
-    /// A forced rewrite is under way (`rewrite`).
+    /// A forced rewrite is under way (`rewrite`), and how many of its projects have landed.
     private(set) var rewriting = false
+    private(set) var rewriteProgress: (done: Int, total: Int)?
+    /// Projects a second press asked for while a pass ran: one more pass follows it.
+    @ObservationIgnored private var queuedRewrite: Set<String>?
+    /// True while a rewrite's project calls run, so no lead is written between them.
+    @ObservationIgnored private var passRunning = false
+    /// Calls at once in a rewrite.
+    static let rewriteCap = 4
 
-    /// Rewrites the brief of each of `listed` (the projects that have one) and then the general lead now: one call per project
-    /// whether or not anything changed, through the same call as an event's (a failure leaves the old prose "being rewritten").
+    /// When each project's facts were last checked: a landed call, or an event whose trigger key was the one the prose was
+    /// written from (no call needed).
+    private(set) var checkedAt: [String: Double] = [:]
+    /// When any project's facts were last checked, or nil before the first.
+    var lastChecked: Double? { checkedAt.values.max() }
+
+    /// Rewrites the brief of each of `listed` (the projects that have one), four at a time, and then the general lead once:
+    /// one call per project whether or not anything changed, through the same call as an event's (a failure leaves the old
+    /// prose "being rewritten"). Pressed again while it runs, it queues one more pass instead of doing nothing.
     func rewrite(projects listed: Set<String>) {
-        guard active, !rewriting else { return }
+        guard active else { return }
+        if rewriting { queuedRewrite = (queuedRewrite ?? []).union(listed); return }
         rewriting = true
+        rewriteProgress = (0, docs.keys.filter(listed.contains).count)
         spawn { [self] in
-            defer { rewriting = false }
-            for p in docs.keys.filter(listed.contains).sorted() {
-                // A call already under way for it finishes first.
-                while projects[p]?.running == true, active { try? await Task.sleep(for: .milliseconds(20)) }
-                guard active else { return }
-                var state = projects[p] ?? Project()
-                state.running = true; state.dirty = false; state.failures = 0; state.parkedKey = nil
-                projects[p] = state
-                let board = await source.board(project: p)
-                await runCall(p, board: board, key: Self.triggerKey(board))
+            defer { rewriting = false; rewriteProgress = nil; queuedRewrite = nil }
+            var batch = listed
+            while true {
+                await rewritePass(batch)
+                guard active, let next = queuedRewrite else { return }
+                queuedRewrite = nil
+                batch = next
             }
-            leadDirty = true
-            await batchEnd()
         }
     }
 
-    /// The Board changed: the deterministic part now, and the model only if the trigger key moved.
+    private func rewritePass(_ listed: Set<String>) async {
+        let names = docs.keys.filter(listed.contains).sorted()
+        rewriteProgress = (0, names.count)
+        passRunning = true
+        await withTaskGroup(of: Void.self) { group in
+            var next = 0
+            func add() {
+                guard next < names.count else { return }
+                let p = names[next]
+                next += 1
+                group.addTask { @MainActor [self] in await rewriteOne(p) }
+            }
+            for _ in 0..<min(Self.rewriteCap, names.count) { add() }
+            while await group.next() != nil {
+                if let done = rewriteProgress?.done { rewriteProgress?.done = done + 1 }
+                add()
+            }
+        }
+        passRunning = false
+        guard active else { return }
+        leadDirty = true
+        await batchEnd()
+    }
+
+    private func rewriteOne(_ p: String) async {
+        // A call already under way for it finishes first.
+        while projects[p]?.running == true, active { try? await Task.sleep(for: .milliseconds(20)) }
+        guard active else { return }
+        var state = projects[p] ?? Project()
+        state.running = true; state.dirty = false; state.failures = 0; state.parkedKey = nil
+        projects[p] = state
+        let board = await source.board(project: p)
+        await runCall(p, board: board, key: Self.triggerKey(board))
+    }
+
+    /// The log or the Board changed: the deterministic part now, and the model only if the trigger key moved.
     func boardChanged(_ project: String) { spawn { [self] in await refresh(project); await evaluate(project, force: false) } }
 
     /// The Router switched off: nothing runs until `start`; calls under way are cancelled and their answers dropped.
@@ -440,6 +483,8 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         tasks = [:]
         for k in projects.keys { projects[k]?.running = false; projects[k]?.dirty = false }
         leadRunning = false
+        passRunning = false
+        queuedRewrite = nil
     }
 
     /// A project's stored versions, oldest first (the drawer's prose history).
@@ -519,7 +564,7 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         if p.running { p.dirty = true; projects[project] = p; return }
         let key = Self.triggerKey(board)
         // Nothing in play, or nothing changed since the stored prose was written: no call.
-        guard !board.threads.isEmpty, key != store.key(project) else { await batchEnd(); return }
+        guard !board.threads.isEmpty, key != store.key(project) else { checkedAt[project] = clock(); await batchEnd(); return }
         if let parked = p.parkedKey {
             // Three failures in a row: it waits for the facts to change (or the end of the next lead batch).
             guard key != parked || force else { return }
@@ -542,6 +587,7 @@ struct GeneralBrief: Codable, Equatable, Sendable {
             let old = doc.prose
             doc.prose = doc.checked(answer, at: clock())
             doc.proseStale = false
+            checkedAt[project] = clock()
             await commit(project, doc: doc, old: old, key: key, changed: doc.prose != old)
             var p = projects[project] ?? Project(); p.failures = 0; projects[project] = p
         } catch {
@@ -693,7 +739,7 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         return GeneralBrief(forYouLines: check(lead.forYouLines), worthALookLines: check(lead.worthALookLines), at: at)
     }
 
-    private var anyBusy: Bool { projects.values.contains { $0.running || $0.dirty } }
+    private var anyBusy: Bool { passRunning || projects.values.contains { $0.running || $0.dirty } }
 
     /// After a batch of project calls (none in flight, none dirty), the lead runs if the batch changed what needs you or what
     /// finished. Mark read, Revert and showing a section never get here.

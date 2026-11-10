@@ -5,7 +5,6 @@ import Testing
 
 @MainActor final class RecordingBriefEvents: BriefEvents {
     var calls: [String] = []
-    func itemsChanged(_ project: String) { calls.append("items " + project) }
     func boardChanged(_ project: String) { calls.append("board " + project) }
 }
 
