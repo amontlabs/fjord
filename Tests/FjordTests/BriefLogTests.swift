@@ -60,12 +60,12 @@ import Testing
         #expect(items[1].text == "you sent: Does it help?")
     }
 
-    @Test func aRecentlyStoppedThreadShowsItsLastReplyOnTheBoard() {
+    @Test func everyThreadOnTheBoardShowsItsLastReply() {
         let done = thread("d", ended: 999_500)
         let old = thread("o", ended: 1, active: 999_000)
         let board = T3BriefSource.boards(threads: [done, old], requests: [:], ends: ["d": "Want me to post it?", "o": "Old."], now: now)["p1"]!
         #expect(board.threads.first { $0.id == "d" }?.ends == "Want me to post it?")
-        #expect(board.threads.first { $0.id == "o" }?.ends == nil)
+        #expect(board.threads.first { $0.id == "o" }?.ends == "Old.")  // however old
         var doc = BriefDoc(project: "p1")
         doc.threads = board.threads
         #expect(RouterBriefEngine.context(doc, []).contains("its last reply: <session-content untrusted=\"true\">\nWant me to post it?"))

@@ -57,10 +57,10 @@ struct T3BriefSource: BriefSource {
 
     /// Every project's board: its threads, the entries that wait on you (a request T3 holds as data, else a plain-words one the
     /// model writes the question of), and the words you sent. `unreachableSince`: T3 stopped answering (`watch: "stale:"`).
-    /// `ends`: the agent's last reply in each thread, where known (T3's shell doesn't carry it): a thread that stopped in the
-    /// last day shows it.
+    /// `ends`: the agent's last reply in each thread, where known (T3's shell doesn't carry it); every thread on the board shows
+    /// it, working ones included. `prStates`: a pull request's state by its URL, where known, over what T3's link says.
     static func boards(threads: [AgentThread], requests: [String: ThreadRequest], unreachableSince: Double? = nil,
-                       ends: [String: String] = [:], now: Date = Date()) -> [String: BriefBoard] {
+                       ends: [String: String] = [:], prStates: [String: PRState] = [:], now: Date = Date()) -> [String: BriefBoard] {
         var byProject: [String: [AgentThread]] = [:]
         for t in threads where listed(t, now: now) { byProject[t.projectID, default: []].append(t) }
         var out: [String: BriefBoard] = [:]
@@ -71,9 +71,16 @@ struct T3BriefSource: BriefSource {
                 let state = Self.state(t)
                 let since = t.lastActivity.timeIntervalSince1970
                 let age = state == .done ? (t.lastRunEndedAt?.timeIntervalSince1970 ?? since) : since
-                let reply = state == .working || now.timeIntervalSince1970 - age > BriefLog.recentWindow
-                    ? nil : (t.latestMessage ?? ends[t.id]).map(BriefLog.clip)
-                board.threads.append(BriefThread(id: t.id, title: t.title, status: state, age: age, asOf: unreachableSince, ends: reply))
+                let reply = (t.latestMessage ?? ends[t.id]).map(BriefLog.clip).flatMap { $0.isEmpty ? nil : $0 }
+                let ran = t.lastRunEndedAt?.timeIntervalSince1970
+                let prs = t.pullRequests.filter { !$0.url.isEmpty }.map { pr in
+                    BriefPR(url: pr.url, number: pr.number,
+                            state: prStates[pr.url] ?? pr.state.flatMap { PRState(rawValue: $0.lowercased()) } ?? .unknown)
+                }
+                var thread = BriefThread(id: t.id, title: t.title, status: state, age: age, asOf: unreachableSince, ends: reply,
+                                         endsAt: reply == nil ? nil : ran ?? t.activityAt.timeIntervalSince1970, runEnded: ran, prs: prs)
+                if state == .needsYou, let request = requests[t.id] { (thread.ask, thread.askOptions) = ask(request) }
+                board.threads.append(thread)
                 if state == .needsYou { board.entries.append(entry(t, project: project, request: requests[t.id], since: since, asOf: unreachableSince)) }
                 if let said = t.lastUserText, let at = t.lastUserMessage, now.timeIntervalSince(at) <= 86_400 {
                     board.sent.append(SentLine(intent: t.id, words: said, state: "delivered"))
@@ -84,6 +91,18 @@ struct T3BriefSource: BriefSource {
             out[project] = board
         }
         return out
+    }
+
+    /// What a held request asks, in words, and the options it gives.
+    static func ask(_ r: ThreadRequest) -> (String, [String]) {
+        switch r.body {
+        case .plan(let markdown): return ("a plan to approve: " + markdown, ThreadRequest.planChoices)
+        case .approval(let kind, let prompt, let decisions):
+            return ("asks for a permission (\(kind)): " + prompt, decisions.map(ThreadRequest.label))
+        case .question(let questions):
+            let one = questions.count == 1 ? questions.first : nil
+            return ("asks: " + questions.map(\.question).joined(separator: "\n"), one?.multiSelect == false ? one?.options.map(\.label) ?? [] : [])
+        }
     }
 
     /// The entry of a thread that waits on you. A held request decides its kind; the shell alone (before the projection

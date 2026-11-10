@@ -83,8 +83,24 @@ struct BriefThread: Codable, Hashable, Sendable {
     /// How it ended, for a thread that stopped in the last day: the agent's last reply (its start and its end), so the brief
     /// sees a question or a request the reply leaves to you.
     var ends: String? = nil
+    /// When that reply was last written (the run's end, else the thread's last activity).
+    var endsAt: Double? = nil
+    /// When its last run ended.
+    var runEnded: Double? = nil
+    /// The pull requests it links, with where each stands.
+    var prs: [BriefPR] = []
+    /// What it waits on you for, as T3 holds it: the request's text and the options it gives.
+    var ask: String? = nil
+    var askOptions: [String] = []
 
-    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of", ends }
+    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of", ends, endsAt, runEnded, prs, ask, askOptions }
+}
+
+/// A pull request a thread links.
+struct BriefPR: Codable, Hashable, Sendable {
+    var url: String
+    var number: Int?
+    var state: PRState
 }
 
 struct BriefDecision: Codable, Hashable, Sendable {
