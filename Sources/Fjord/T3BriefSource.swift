@@ -83,10 +83,12 @@ struct T3BriefSource: BriefSource {
                 var thread = BriefThread(id: t.id, title: t.title, status: state, age: age, asOf: unreachableSince, ends: reply,
                                          endsAt: reply == nil ? nil : ran ?? t.activityAt.timeIntervalSince1970, runEnded: ran, prs: prs)
                 if state == .needsYou, let request = requests[t.id] { (thread.ask, thread.askOptions) = ask(request) }
-                thread.sentAt = t.lastUserMessage?.timeIntervalSince1970
+                // Only your own words: wakes, slash commands and agent-sent user messages don't move `lastAuthoredAt`.
+                thread.sentAt = t.lastAuthoredAt?.timeIntervalSince1970
                 board.threads.append(thread)
                 if state == .needsYou { board.entries.append(entry(t, project: project, request: requests[t.id], since: since, asOf: unreachableSince)) }
-                if let said = t.lastUserText, let at = t.lastUserMessage, now.timeIntervalSince(at) <= 86_400 {
+                if let said = t.lastUserText, let at = t.lastUserMessage, let mine = t.lastAuthoredAt, abs(mine.timeIntervalSince(at)) < 1,
+                   now.timeIntervalSince(at) <= 86_400 {
                     board.sent.append(SentLine(intent: t.id, words: said, state: "delivered"))
                 }
             }

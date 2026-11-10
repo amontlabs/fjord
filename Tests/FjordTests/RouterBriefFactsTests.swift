@@ -24,4 +24,15 @@ import Testing
         #expect(tb.ends == "CT5 is merged." && tb.endsAt == old && tb.runEnded == old)
         #expect(tb.prs.map(\.state) == [.unknown, .merged])
     }
+
+    @Test func onlyYourOwnWordsCountAsSent() {
+        let at = Date(timeIntervalSince1970: 999_000)
+        var mine = thread("m"), agent = thread("g")
+        mine.lastUserText = "ship it"; mine.lastUserMessage = at; mine.lastAuthoredAt = at
+        // A wake or an agent-sent user message: the latest user-role message, but not your words.
+        agent.lastUserText = "Background task completed"; agent.lastUserMessage = at; agent.lastAuthoredAt = at.addingTimeInterval(-3_600)
+        let board = T3BriefSource.boards(threads: [mine, agent], requests: [:], now: Date(timeIntervalSince1970: 1_000_000))["p"]!
+        #expect(board.sent.map(\.words) == ["ship it"])
+        #expect(board.threads.first { $0.id == "g" }?.sentAt == at.addingTimeInterval(-3_600).timeIntervalSince1970)
+    }
 }
