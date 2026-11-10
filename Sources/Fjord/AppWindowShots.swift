@@ -126,6 +126,7 @@ enum AppWindowShots {
         // local form), a stale project, all quiet, and the history open.
         briefShot("brief-home", .aqua), briefShot("brief-home-dark", .darkAqua),
         briefShot("brief-needs-you", .aqua, height: 1500, focus: true), briefShot("brief-needs-you-dark", .darkAqua, height: 1500, focus: true),
+        briefShot("brief-rewriting", .aqua, rewriting: true), briefShot("brief-rewriting-dark", .darkAqua, rewriting: true),
         briefShot("brief-stale", .aqua, variant: .stale), briefShot("brief-stale-dark", .darkAqua, variant: .stale),
         briefShot("brief-quiet", .aqua, height: 800, variant: .quiet), briefShot("brief-quiet-dark", .darkAqua, height: 800, variant: .quiet),
         // The history at the right on a wide window, across the bottom on a narrow one.
@@ -224,7 +225,7 @@ enum AppWindowShots {
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,
-                                  twoQuestions: Bool = false, permission: Bool = false, stranded: Bool = false, queued: Bool = false, expired: Bool = false, mentions: [BriefTarget] = []) -> Shot {
+                                  twoQuestions: Bool = false, permission: Bool = false, stranded: Bool = false, queued: Bool = false, expired: Bool = false, rewriting: Bool = false, mentions: [BriefTarget] = []) -> Shot {
         Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
              compose: { _, store in
                  let briefs = store.routerBriefs
@@ -263,6 +264,7 @@ enum AppWindowShots {
                  }
                  if queued { Self.queueWords(store) }
                  if drawer {
+                 if rewriting { briefs.demoRewriteProgress = (3, 8) }
                      briefs.drawerOpen = true
                      store.threadAct(.read, on: BriefTarget(project: "chan_demo_docs", thread: "th_guide"),
                                     title: briefs.title(BriefTarget(project: "chan_demo_docs", thread: "th_guide")))

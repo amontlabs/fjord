@@ -27,9 +27,6 @@ struct RouterBriefView: View {
         let now = briefs.clock().timeIntervalSince1970
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                if briefs.rewriting {
-                    Text("Rewriting…").cdsText(CDS.Density.compact.footnote, .medium, CDS.Text.muted)
-                }
                 BriefLead(store: store, page: page)
                 if page.sections.isEmpty {
                     Text(store.router.enabled || !briefs.docs.isEmpty
@@ -848,18 +845,18 @@ enum BriefAge {
     }
 }
 
-/// When the brief was last written, beside the Router's title as the other pages' subtitles: the newest of the general
-/// brief and the projects' documents, kept current on the minute.
+/// Beside the Router's title as the other pages' subtitles: "Rewriting… 3/8" while a rewrite runs, otherwise when the facts
+/// were last checked (a call skipped because nothing changed counts), kept current on the minute.
 struct BriefUpdated: View {
     let store: Store
 
     var body: some View {
         let briefs = store.routerBriefs
-        let at = ([briefs.general.at] + briefs.docs.values.map(\.at)).max() ?? 0
-        if at > 0 {
+        if let progress = briefs.rewriteProgress {
+            label("Rewriting… \(progress.done)/\(progress.total)")
+        } else if let at = briefs.lastChecked, at > 0 {
             TimelineView(.everyMinute) { context in
-                Text("Updated " + agoPhrase(Date(timeIntervalSince1970: at), now: context.date))
-                    .font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+                label("Checked " + agoPhrase(Date(timeIntervalSince1970: at), now: context.date))
             }
         }
     }
@@ -868,6 +865,10 @@ struct BriefUpdated: View {
 extension EnvironmentValues {
     /// Puts the keyboard in the composer to write to the mentioned thread (`RouterModel.reply`).
     @Entry var briefReply: () -> Void = {}
+
+    private func label(_ text: String) -> some View {
+        Text(text).font(CDS.sans(CDS.Density.compact.footnote.0)).foregroundStyle(CDS.Text.muted).lineLimit(1)
+    }
 }
 
 /// A highlight's panel, placed at its ideal size under the highlight (or above it), moved `dx` sideways; it takes the

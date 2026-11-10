@@ -320,9 +320,12 @@ enum BriefKeys {
         }
     }
     var rewriting: Bool { engine?.rewriting ?? false }
-    var rewriteProgress: (done: Int, total: Int)? { engine?.rewriteProgress }
-    /// When the facts were last checked (a call landed, or the trigger key showed nothing changed).
-    var lastChecked: Double? { engine?.lastChecked }
+    /// A rewrite shown without an engine (the offscreen shots).
+    @ObservationIgnored var demoRewriteProgress: (done: Int, total: Int)?
+    var rewriteProgress: (done: Int, total: Int)? { engine?.rewriteProgress ?? demoRewriteProgress }
+    /// When the facts were last checked (a call landed, or the trigger key showed nothing changed); with no engine, when the
+    /// newest brief was written.
+    var lastChecked: Double? { engine.map(\.lastChecked) ?? docs.values.map(\.at).max() }
 
     /// What briefs.db holds of projects and threads T3 doesn't list goes, once the listing is known and when it changes.
     @ObservationIgnored private var purged: (projects: Set<String>, threads: Set<String>)?
