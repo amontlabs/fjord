@@ -84,3 +84,46 @@ import Testing
         #expect(new.worthALookLines == ["B", "C"] && new.forYou == "A")
     }
 }
+
+/// The 2026-11-09 Silo case: PRs #95, #97 and #103 merged while the brief kept saying they waited for the user's merge.
+@MainActor @Suite struct BriefSiloRegression {
+    private func silo(_ state: PRState) -> [BriefThread] {
+        func pr(_ n: Int) -> [BriefPR] { [BriefPR(url: "https://github.com/amontlabs/silo/pull/\(n)", number: n, state: state)] }
+        var a = briefThread("th_ct5", .done, title: "CT5 sessions")
+        a.ends = "CT5 is merged into main. I merged as soon as the required tests passed."
+        a.endsAt = 1_000; a.runEnded = 1_000; a.prs = pr(95)
+        var b = briefThread("th_b", .done, title: "Silo API spec"); b.runEnded = 900; b.prs = pr(97)
+        var c = briefThread("th_c", .done, title: "Launch migration"); c.runEnded = 800; c.prs = pr(103)
+        return [a, b, c]
+    }
+
+    @Test func mergedPullRequestsAreMarkedMergedAndNoStaleWaitIsCarried() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        // A model that only follows the facts it is given: it says a PR waits for a merge only while the context says open.
+        model.answer = { c in
+            let line = c.contains("pull/95: open")
+                ? #"<t id=\"th_ct5\">PR 95</t> waits for your merge."# : #"<t id=\"th_ct5\">CT5</t> landed on main."#
+            return #"{"now":["\#(line)"],"needs_you":[],"purpose":""}"#
+        }
+        src.setThreads("silo", silo(.open))
+        let engine = makeEngine(src, model)
+        engine.boardChanged("silo"); await engine.idle()
+        #expect(engine.docs["silo"]?.now.first?.contains("waits for your merge") == true)
+
+        // They merge; GitHub's state arrives with the board: no earlier brief reaches the call.
+        src.setThreads("silo", silo(.merged))
+        engine.boardChanged("silo"); await engine.idle()
+        #expect(model.contexts.count == 2)
+        let context = model.contexts[1]
+        for n in [95, 97, 103] { #expect(context.contains("pull/\(n): merged") && !context.contains("pull/\(n): open")) }
+        #expect(context.contains("CT5 is merged into main") && context.contains("last run ended"))
+        #expect(!context.contains("waits for your merge") && !context.contains("Current brief") && !context.contains("now:"))
+        #expect(engine.docs["silo"]?.now.joined().contains("waits for your merge") == false)
+    }
+
+    @Test func oldStoredRowsWithDecisionsAndLooseEndsStillDecode() throws {
+        let old = #"{"purpose":"Silo","now":["a"],"needs_you":[],"decisions":[{"thread":"send","text":"ok"}],"loose_ends":["x"]}"#
+        let prose = try JSONDecoder().decode(BriefDoc.Prose.self, from: Data(old.utf8))
+        #expect(prose.now == ["a"] && prose.purpose == "Silo")
+    }
+}

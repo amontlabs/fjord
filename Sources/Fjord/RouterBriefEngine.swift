@@ -2,9 +2,10 @@ import Foundation
 import Observation
 import SQLite3
 
-// Keeps the per-project briefs and the general brief's lead (docs/design/router-watch-and-briefs.md, 3 and 4). It reads the log
-// through `BriefSource`, runs one Haiku call per project at a time over the items past that project's cursor, and rebuilds the
-// deterministic part (threads, sent, watch) on every change with no model. Events decide; there are no timers.
+// Keeps the per-project briefs and the general brief's lead (docs/design/router-watch-and-briefs.md, 3 and 4;
+// docs/design/brief-rebuild.md). It reads each project's board through `BriefSource`, runs one Haiku call per project at a time
+// when the board's trigger key moves, and rebuilds the deterministic part (threads, sent, watch) on every change with no model.
+// Events decide; there are no timers.
 
 // MARK: - The log, as the engine reads it
 
@@ -37,8 +38,6 @@ struct BriefBoard: Sendable, Equatable {
 /// What the engine reads (`T3BriefSource`): T3's threads now, and Fjord's own log of what happened.
 protocol BriefSource: Sendable {
     func projects() async -> [String]
-    /// Items stored once by id, past `cursor`, in log order (thread status changes included).
-    func items(project: String, after cursor: Int) async -> [BriefItem]
     func board(project: String) async -> BriefBoard
 }
 
@@ -113,8 +112,9 @@ final class MemoryBriefStore: BriefStore {
     }
 }
 
-/// `briefs` in briefs.db: project, version, at, fields, diff, items, cursor; the project's cursor on its own, since a landed
-/// answer that changed nothing advances it without making a version; and your marks (`brief_marks`: kind, key).
+/// `briefs` in briefs.db: project, version, at, fields, diff (and the old items and cursor columns, unused); the project's
+/// trigger key on its own (`brief_keys`), since a landed answer that changed nothing makes no version; and your marks
+/// (`brief_marks`: kind, key).
 final class SQLiteBriefStore: BriefStore {
     private var db: OpaquePointer?
 
@@ -163,11 +163,10 @@ final class SQLiteBriefStore: BriefStore {
     private static func text(_ s: OpaquePointer, _ i: Int32) -> String { sqlite3_column_text(s, i).map { String(cString: $0) } ?? "" }
 
     func versions(_ project: String) -> [BriefVersion] {
-        select("select version, at, fields, diff, items, cursor from briefs where project = ? order by version", [project]) { s in
+        select("select version, at, fields, diff from briefs where project = ? order by version", [project]) { s in
             let prose = (try? JSONDecoder().decode(BriefDoc.Prose.self, from: Data(Self.text(s, 2).utf8))) ?? BriefDoc.Prose()
-            let items = (try? JSONDecoder().decode([Int].self, from: Data(Self.text(s, 4).utf8))) ?? []
             return BriefVersion(project: project, version: Int(sqlite3_column_int64(s, 0)), at: sqlite3_column_double(s, 1), prose: prose,
-                                diff: Self.text(s, 3), items: items, cursor: Int(sqlite3_column_int64(s, 5)))
+                                diff: Self.text(s, 3))
         }
     }
 
@@ -175,9 +174,9 @@ final class SQLiteBriefStore: BriefStore {
 
     func append(_ v: BriefVersion) {
         let fields = (try? JSONEncoder().encode(v.prose)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-        let items = (try? JSONEncoder().encode(v.items)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
-        exec("insert or replace into briefs (project, version, at, fields, diff, items, cursor) values (?, \(v.version), \(v.at), ?, ?, ?, \(v.cursor))",
-             [v.project, fields, v.diff, items])
+        // `items` and `cursor` are columns of the old log-driven rows: written empty, never read.
+        exec("insert or replace into briefs (project, version, at, fields, diff, items, cursor) values (?, \(v.version), \(v.at), ?, ?, '[]', 0)",
+             [v.project, fields, v.diff])
     }
 
     func key(_ project: String) -> String? {

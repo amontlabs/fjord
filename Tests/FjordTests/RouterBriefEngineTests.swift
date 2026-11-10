@@ -22,7 +22,6 @@ final class FakeBriefSource: BriefSource, @unchecked Sendable {
     func count(_ project: String) -> Int { lock.withLock { log[project]?.count ?? 0 } }
 
     func projects() async -> [String] { lock.withLock { Array(Set(log.keys).union(boards.keys)).sorted() } }
-    func items(project: String, after cursor: Int) async -> [BriefItem] { lock.withLock { (log[project] ?? []).filter { $0.seq > cursor } } }
     func board(project: String) async -> BriefBoard { lock.withLock { boards[project] ?? BriefBoard() } }
 }
 

@@ -12,7 +12,7 @@ import Foundation
 
 extension RouterBriefEngine: BriefEvents {}
 
-/// The engine's source: the log's items and the boards `RouterBriefs` builds from the live threads.
+/// The engine's source: the boards `RouterBriefs` builds from the live threads.
 struct T3BriefSource: BriefSource {
     let log: BriefLog
     /// Every project's board now, read on the main actor.
@@ -22,8 +22,6 @@ struct T3BriefSource: BriefSource {
         let live = await boards().keys
         return Set(live).union(log.projects()).sorted()
     }
-
-    func items(project: String, after cursor: Int) async -> [BriefItem] { log.items(project: project, after: cursor) }
 
     func board(project: String) async -> BriefBoard { await boards()[project] ?? BriefBoard() }
 

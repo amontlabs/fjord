@@ -105,18 +105,9 @@ struct BriefPR: Codable, Hashable, Sendable {
     var state: PRState
 }
 
-struct BriefDecision: Codable, Hashable, Sendable {
-    /// A thread id, or `BriefDoc.yourSend` for one of your messages.
-    var thread: String
-    var text: String
-}
-
 struct BriefDoc: Codable, Equatable, Sendable {
-    static let yourSend = "send"
     static let maxNow = 3
     static let maxEntries = 20
-    static let maxDecisions = 10
-    static let maxLooseEnds = 2
 
     var project: String
     var version = 0
@@ -126,14 +117,12 @@ struct BriefDoc: Codable, Equatable, Sendable {
     var threads: [BriefThread] = []
     var now: [String] = []
     var needsYou: [BriefEntry] = []
-    var decisions: [BriefDecision] = []
-    var looseEnds: [String] = []
     var sent: [SentLine] = []
     /// The last call failed: the prose below is being rewritten.
     var proseStale = false
 
     private enum CodingKeys: String, CodingKey {
-        case project, version, at, purpose, watch, threads, now, needsYou = "needs_you", decisions, looseEnds = "loose_ends"
+        case project, version, at, purpose, watch, threads, now, needsYou = "needs_you"
         case sent, proseStale = "prose_stale"
     }
 
@@ -142,17 +131,15 @@ struct BriefDoc: Codable, Equatable, Sendable {
         var purpose: String?
         var now: [String] = []
         var needsYou: [BriefEntry] = []
-        var decisions: [BriefDecision] = []
-        var looseEnds: [String] = []
 
         private enum CodingKeys: String, CodingKey {
-            case purpose, now, needsYou = "needs_you", decisions, looseEnds = "loose_ends"
+            case purpose, now, needsYou = "needs_you"
         }
     }
 
     var prose: Prose {
-        get { Prose(purpose: purpose, now: now, needsYou: needsYou, decisions: decisions, looseEnds: looseEnds) }
-        set { purpose = newValue.purpose; now = newValue.now; needsYou = newValue.needsYou; decisions = newValue.decisions; looseEnds = newValue.looseEnds }
+        get { Prose(purpose: purpose, now: now, needsYou: needsYou) }
+        set { purpose = newValue.purpose; now = newValue.now; needsYou = newValue.needsYou }
     }
 
     func thread(_ id: String) -> BriefThread? { threads.first { $0.id == id } }
@@ -238,8 +225,6 @@ struct BriefDoc: Codable, Equatable, Sendable {
         func lines(_ p: Prose) -> [String] {
             p.now.map { "now: " + $0 }
                 + p.needsYou.map { "needs you: \($0.thread) \($0.kind.rawValue): \($0.question ?? "")" }
-                + p.decisions.map { "decided: \($0.thread): \($0.text)" }
-                + p.looseEnds.map { "loose: " + $0 }
                 + (p.purpose.map { ["purpose: " + $0] } ?? [])
         }
         let a = lines(old), b = lines(new)
@@ -254,7 +239,4 @@ struct BriefVersion: Equatable, Sendable {
     var at: Double
     var prose: BriefDoc.Prose
     var diff: String
-    /// The log positions of the items that made it.
-    var items: [Int] = []
-    var cursor: Int = 0
 }

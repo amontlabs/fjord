@@ -38,8 +38,6 @@ extension Demo {
                        question: "Which layout should the Settings window use?",
                        options: ["A sidebar with sections", "One scrolling page", "Tabs across the top"]),
         ]
-        fjord.decisions = [BriefDecision(thread: BriefDoc.yourSend, text: "Keep the composer at the bottom of every page.")]
-        fjord.looseEnds = ["The old Now page is still compiled; a later step deletes it."]
         fjord.sent = [SentLine(intent: "41", words: "keep the composer where it is, and match T3's spacing", state: "delivered")]
         fjord.watch = "live"
 
@@ -100,10 +98,10 @@ extension Demo {
                            at: t - 60)
         briefs.demoVersions = [
             fjord.project: [
-                BriefVersion(project: fjord.project, version: 1, at: t - 1_500, prose: BriefDoc.Prose(), diff: "+ now: <t id=\"th_migrate\">The briefs migration plan</t> is ready to approve.", items: [], cursor: 0),
-                BriefVersion(project: fjord.project, version: 2, at: t - 240, prose: BriefDoc.Prose(), diff: "+ now: The Settings redesign waits on your pick of a layout.", items: [], cursor: 0),
+                BriefVersion(project: fjord.project, version: 1, at: t - 1_500, prose: BriefDoc.Prose(), diff: "+ now: <t id=\"th_migrate\">The briefs migration plan</t> is ready to approve."),
+                BriefVersion(project: fjord.project, version: 2, at: t - 240, prose: BriefDoc.Prose(), diff: "+ now: The Settings redesign waits on your pick of a layout."),
             ],
-            docs.project: [BriefVersion(project: docs.project, version: 1, at: t - 600, prose: BriefDoc.Prose(), diff: "+ now: The install guide was rewritten for the new setup; the PR is open.", items: [], cursor: 0)],
+            docs.project: [BriefVersion(project: docs.project, version: 1, at: t - 600, prose: BriefDoc.Prose(), diff: "+ now: The install guide was rewritten for the new setup; the PR is open.")],
         ]
     }
 }
