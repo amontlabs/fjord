@@ -56,7 +56,7 @@ extension Demo {
         silo.watch = "live"
 
         var docs = BriefDoc(project: "chan_demo_docs")
-        docs.now = ["<t id=\"th_guide\">The install guide</t> was rewritten for the new setup; <a href=\"https://github.com/demo/docs-site/pull/12\">its PR</a> is open."]
+        docs.now = ["<t id=\"th_guide\">The install guide</t> was rewritten for the new setup; <a href=\"https://github.com/demo/docs-site/pull/12\">its PR</a> is in."]
         docs.threads = [BriefThread(id: "th_guide", title: "Rewrite the install guide", status: .done, age: t - 600,
                                     prs: [BriefPR(url: "https://github.com/demo/docs-site/pull/12", number: 12, state: .merged)])]
         docs.sent = [SentLine(intent: "39", words: "rewrite the install guide for the Chrome setup", state: "delivered")]
@@ -102,7 +102,7 @@ extension Demo {
                 BriefVersion(project: fjord.project, version: 1, at: t - 1_500, prose: BriefDoc.Prose(), diff: "+ now: <t id=\"th_migrate\">The briefs migration plan</t> is ready to approve."),
                 BriefVersion(project: fjord.project, version: 2, at: t - 240, prose: BriefDoc.Prose(), diff: "+ now: The Settings redesign waits on your pick of a layout."),
             ],
-            docs.project: [BriefVersion(project: docs.project, version: 1, at: t - 600, prose: BriefDoc.Prose(), diff: "+ now: The install guide was rewritten for the new setup; the PR is open.")],
+            docs.project: [BriefVersion(project: docs.project, version: 1, at: t - 600, prose: BriefDoc.Prose(), diff: "+ now: The install guide was rewritten for the new setup; the PR is in.")],
         ]
     }
 }
