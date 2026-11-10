@@ -9,10 +9,9 @@ import Testing
     /// A store whose engine already holds a brief for each of these projects, over a fresh briefs.db.
     private func briefs(_ projects: [String], store: Store, db: BriefStore = MemoryBriefStore()) async -> (RouterBriefs, RouterBriefEngine) {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"purpose":""}"# }
         for p in projects {
             src.setThreads(p, [briefThread("t1", .working)])
-            src.post(p, id: "m-\(p)", kind: .message, thread: "t1", text: "words")
         }
         let engine = makeEngine(src, model, store: db)
         engine.start(); await engine.idle()
@@ -56,19 +55,19 @@ import Testing
     @Test func thePurgeDropsBriefsCursorsMarksAndTheLeadOfOldProjects() async {
         let db = MemoryBriefStore()
         let src = FakeBriefSource(), model = FakeBriefModel()
-        for p in ["p1", "chan_old"] { src.setThreads(p, [briefThread("t1", .working)]); src.post(p, id: "m\(p)", kind: .message, thread: "t1", text: "x") }
-        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        for p in ["p1", "chan_old"] { src.setThreads(p, [briefThread("t1", .working)]) }
+        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"purpose":""}"# }
         let engine = makeEngine(src, model, store: db)
         engine.start(); await engine.idle()
         engine.setMark(.told, "th_1@5", on: true); engine.setMark(.told, "gone@5", on: true)
         engine.setMark(.notified, "done:th_1@9", on: true); engine.setMark(.notified, "done:gone@9", on: true)
         engine.setMark(.notified, "ask:req1", on: true)
-        #expect(db.latest("chan_old") != nil && db.cursor("chan_old") > 0)
+        #expect(db.latest("chan_old") != nil && db.key("chan_old") != nil)
         db.setLead(GeneralBrief(forYou: #"<t id="chan_old/t1">Old</t>"#, worthALook: "", at: 1))
 
         engine.purge(projects: ["p1"], threads: ["th_1"])
         await engine.idle()
-        #expect(db.latest("chan_old") == nil && db.cursor("chan_old") == 0 && db.latest("p1") != nil)
+        #expect(db.latest("chan_old") == nil && db.key("chan_old") == nil && db.latest("p1") != nil)
         #expect(engine.docs["chan_old"] == nil && engine.docs["p1"] != nil)
         #expect(db.marks().told == ["th_1@5"] && db.marks().notified == ["done:th_1@9", "ask:req1"])
         #expect(!engine.general.forYou.contains("chan_old") && !(db.lead()?.forYou.contains("chan_old") ?? false))
@@ -113,11 +112,13 @@ import Testing
     @Test func aForcedRewriteCallsEachListedProjectOnceWithNothingNewAndThenWritesTheLead() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         for p in ["p1", "p2", "chan_old"] { src.setThreads(p, [briefThread("t1", .working)]) }
-        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
-        let engine = makeEngine(src, model)
+        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"purpose":""}"# }
+        let store = MemoryBriefStore()
+        for p in ["p1", "p2", "chan_old"] { store.setKey(p, RouterBriefEngine.triggerKey(src.boards[p]!)) }
+        let engine = makeEngine(src, model, store: store)
         for p in ["p1", "p2", "chan_old"] { engine.boardChanged(p) }
         await engine.idle()
-        #expect(model.contexts.isEmpty && model.leadContexts.isEmpty)  // no items, no calls
+        #expect(model.contexts.isEmpty && model.leadContexts.isEmpty)  // the facts are the ones the prose was written from
 
         engine.rewrite(projects: ["p1", "p2"])
         #expect(engine.rewriting)

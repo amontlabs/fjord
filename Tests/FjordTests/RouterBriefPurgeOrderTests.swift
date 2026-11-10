@@ -10,8 +10,8 @@ import Testing
 
     private func oldRows(_ db: SQLiteBriefStore, _ projects: [String]) {
         for p in projects {
-            db.append(BriefVersion(project: p, version: 1, at: 1, prose: BriefDoc.Prose(now: ["Old."]), diff: "", items: [], cursor: 1))
-            db.setCursor(p, 1)
+            db.append(BriefVersion(project: p, version: 1, at: 1, prose: BriefDoc.Prose(now: ["Old."]), diff: ""))
+            db.setKey(p, "k")
         }
     }
 

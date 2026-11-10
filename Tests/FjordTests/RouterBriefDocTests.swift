@@ -3,88 +3,81 @@ import Testing
 @testable import Fjord
 
 @MainActor @Suite struct BriefDocChecks {
-    @Test func seeingTheSameItemAgainThroughTheSourceAddsNothing() {
-        let src = FakeBriefSource()
-        src.post("p", id: "m1", kind: .message, text: "hi")
-        src.post("p", id: "m1", kind: .message, text: "hi")  // a reload, a second frame
-        #expect(src.count("p") == 1)
-        src.post("p", id: "m1", kind: .message, text: "hi, edited")  // changed content of an id: stored once
-        src.post("p", id: "m1", kind: .message, text: "hi, edited")
-        #expect(src.count("p") == 2)
-    }
-
-    @Test func aRepeatOfAFinishAddsNoEntry() async {
+    @Test func aRepeatOfAFinishAddsNoEntryOrVersion() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         src.setThreads("p", [briefThread("t1", .done)])
-        // The brief already covers the finish: the canned answer leaves it as it was.
-        model.answer = { _ in #"{"now":["t1 finished."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        model.answer = { _ in #"{"now":["t1 finished."],"needs_you":[],"purpose":""}"# }
         let store = MemoryBriefStore()
         let engine = makeEngine(src, model, store: store)
-        src.post("p", id: "s1", kind: .status, thread: "t1", status: .done)
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
         let version = engine.docs["p"]?.version
-        src.post("p", id: "c1", kind: .message, text: "t1 is done!")
-        engine.itemsChanged("p"); await engine.idle()
+        // A new run end moves the key; the same words come back: a call, no new version.
+        src.setThreads("p", [ran(briefThread("t1", .done), at: 9)])
+        engine.boardChanged("p"); await engine.idle()
+        #expect(model.contexts.count == 2)
         #expect(engine.docs["p"]?.needsYou.isEmpty == true)
-        #expect(engine.docs["p"]?.version == version)  // no new version
-        #expect(store.versions("p").count == 1 && store.cursor("p") == 2)
-        // The call was given the brief that already covers it.
-        #expect(FakeBriefModelRead.last(model).contains("now: t1 finished."))
+        #expect(engine.docs["p"]?.version == version)
+        #expect(store.versions("p").count == 1)
     }
 
     @Test func theAnswerIsCheckedIdsOptionsAndCaps() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        src.setThreads("p", [briefThread("t1", .needsYou), briefThread("t2", .done)])
+        var t1 = briefThread("t1", .needsYou)
+        t1.askOptions = ["red", "blue"]
+        src.setThreads("p", [t1, briefThread("t2", .done)])
         model.answer = { _ in
-            #"{"now":["1","2","3","4"],"needs_you":[{"thread":"t1","kind":"question","question":"Which?","options":["wrong"]},{"thread":"ghost","kind":"plan","question":"?","options":[]},{"thread":"t2","kind":"question","question":"done already","options":[]}],"decisions":[{"thread":"send","text":"ok"},{"thread":"ghost","text":"no"}],"loose_ends":[]}"#
+            #"{"now":["1","2","3","4"],"needs_you":[{"thread":"t1","kind":"question","question":"Which?","options":["wrong"]},{"thread":"ghost","kind":"plan","question":"?","options":[]},{"thread":"t2","kind":"question","question":"done already","options":[]}],"purpose":"Docs"}"#
         }
         let engine = makeEngine(src, model)
-        src.post("p", id: "card", kind: .card, thread: "t1", text: "Which?", options: ["red", "blue"])
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
         let doc = engine.docs["p"]!
-        #expect(doc.now == ["1", "2", "3"])
-        // A done thread whose reply asks waits on you too; a thread the project doesn't have never does.
+        #expect(doc.now == ["1", "2", "3"] && doc.purpose == "Docs")
+        // A done thread whose reply asks waits on you too; a thread the board doesn't have never does.
         #expect(doc.needsYou.map(\.thread).sorted() == ["t1", "t2"])
-        #expect(doc.needsYou.first { $0.thread == "t1" }?.options == ["red", "blue"])  // the card item's, as data
-        #expect(doc.decisions.map(\.thread) == ["send"])
+        #expect(doc.needsYou.first { $0.thread == "t1" }?.options == ["red", "blue"])  // the request's, as data
+    }
+
+    @Test func theAnswerDecoderToleratesAnOldShapeAndAMissingPurpose() throws {
+        let old = try BriefDoc.parse(#"{"now":"a\nb","needs_you":[],"decisions":[{"thread":"send","text":"ok"}],"loose_ends":["x"]}"#)
+        #expect(old.now == ["a", "b"] && old.purpose == nil)
     }
 
     @Test func aFailureKeepsTheOldProseStaleAndTheDeterministicPartStillRebuilds() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        model.answer = { _ in #"{"now":["Old prose."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        model.answer = { _ in #"{"now":["Old prose."],"needs_you":[],"purpose":""}"# }
+        src.setThreads("p", [briefThread("t1", .working)])
         let engine = makeEngine(src, model)
-        src.post("p", id: "m1", kind: .message, text: "a")
-        engine.itemsChanged("p"); await engine.idle()
-        model.failing = true
-        src.post("p", id: "m2", kind: .message, text: "b")
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(engine.docs["p"]?.now == ["Old prose."] && engine.docs["p"]?.proseStale == true)
-        // A Board change: instantly, with no model call.
-        let calls = model.contexts.count
-        src.setThreads("p", [briefThread("t9", .working)])
         engine.boardChanged("p"); await engine.idle()
-        #expect(engine.docs["p"]?.threads.map(\.id) == ["t9"] && model.contexts.count == calls)
+        model.failing = true
+        src.setThreads("p", [ran(briefThread("t1", .working), at: 3)])
+        engine.boardChanged("p"); await engine.idle()
+        #expect(engine.docs["p"]?.now == ["Old prose."] && engine.docs["p"]?.proseStale == true)
+        // The deterministic part still rebuilds from the Board.
+        var t = briefThread("t1", .working); t.runEnded = 3; t.ends = "words only"
+        src.setThreads("p", [t])
+        engine.boardChanged("p"); await engine.idle()
+        #expect(engine.docs["p"]?.threads.first?.ends == "words only")
     }
 
-    @Test func versionsStoreTheirItemsAndAProseDiff() async {
+    @Test func versionsStoreAProseDiff() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        model.answer = { _ in #"{"now":["New line."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        model.answer = { _ in #"{"now":["New line."],"needs_you":[],"purpose":""}"# }
+        src.setThreads("p", [briefThread("t1", .done)])
         let store = MemoryBriefStore()
         let engine = makeEngine(src, model, store: store)
-        src.post("p", id: "m1", kind: .message, text: "a")
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
         let v = store.versions("p")
-        #expect(v.count == 1 && v[0].items == [1] && v[0].diff.contains("+ now: New line."))
+        #expect(v.count == 1 && v[0].diff.contains("+ now: New line."))
     }
 
-    @Test func theSQLiteStoreKeepsVersionsAndCursor() throws {
+    @Test func theSQLiteStoreKeepsVersionsAndKey() throws {
         let path = NSTemporaryDirectory() + "briefs-\(UUID().uuidString).db"
         defer { try? FileManager.default.removeItem(atPath: path) }
         let a = try SQLiteBriefStore(path: path)
-        a.append(BriefVersion(project: "p", version: 1, at: 5, prose: BriefDoc.Prose(now: ["x"]), diff: "+ x", items: [1, 2], cursor: 2))
-        a.setCursor("p", 2)
+        a.append(BriefVersion(project: "p", version: 1, at: 5, prose: BriefDoc.Prose(now: ["x"]), diff: "+ x"))
+        a.setKey("p", "k1")
         let b = try SQLiteBriefStore(path: path)
-        #expect(b.latest("p")?.prose.now == ["x"] && b.latest("p")?.items == [1, 2] && b.cursor("p") == 2 && b.cursor("q") == 0)
+        #expect(b.latest("p")?.prose.now == ["x"] && b.key("p") == "k1" && b.key("q") == nil)
     }
 }
 
@@ -97,17 +90,15 @@ enum FakeBriefModelRead {
         let src = FakeBriefSource(), model = FakeBriefModel()
         src.setThreads("a", [briefThread("t1", .needsYou)])
         src.setThreads("b", [briefThread("t2", .working)])
-        model.answer = { c in c.contains("thread t1") ? askAnswer : #"{"now":["Busy."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        model.answer = { c in c.contains("t1") ? askAnswer : #"{"now":["Busy."],"needs_you":[],"purpose":""}"# }
         let engine = makeEngine(src, model)
-        src.post("a", id: "c", kind: .card, thread: "t1", text: "Which one?", options: ["x"])
-        src.post("b", id: "m", kind: .message, thread: "t2", text: "go")
-        engine.itemsChanged("a"); engine.itemsChanged("b"); await engine.idle()
+        engine.boardChanged("a"); engine.boardChanged("b"); await engine.idle()
         #expect(model.leadContexts.count == 1)
         #expect(model.leadContexts[0].contains("Which one?") && model.leadContexts[0].contains("Busy."))
         #expect(engine.general.forYou == "Two things need you.")
         // A change that moves neither what needs you nor what finished: no lead.
-        src.post("b", id: "m2", kind: .message, thread: "t2", text: "more")
-        engine.itemsChanged("b"); await engine.idle()
+        src.setThreads("b", [ran(briefThread("t2", .working), at: 5)])
+        engine.boardChanged("b"); await engine.idle()
         #expect(model.leadContexts.count == 1)
         // The Board changing alone (mark read, a view) never runs it either.
         engine.boardChanged("a"); await engine.idle()

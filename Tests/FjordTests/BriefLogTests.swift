@@ -68,7 +68,7 @@ import Testing
         #expect(board.threads.first { $0.id == "o" }?.ends == "Old.")  // however old
         var doc = BriefDoc(project: "p1")
         doc.threads = board.threads
-        #expect(RouterBriefEngine.context(doc, []).contains("its last reply: <session-content untrusted=\"true\">\nWant me to post it?"))
+        #expect(RouterBriefEngine.context(doc).contains("its latest reply") && RouterBriefEngine.context(doc).contains("<session-content untrusted=\"true\">\nWant me to post it?"))
     }
 
     @Test func aNewRecentThreadIsNewsAndAnOldOneIsNot() {
@@ -131,13 +131,10 @@ import Testing
         #expect(T3BriefSource.entry(stopped, project: "p1", request: nil, since: 1, asOf: nil).kind == .request)
     }
 
-    @Test func theLooseEndsRuleIsTightAndTheCoordinatorIsGone() {
+    @Test func theRulesTellThreadsAreEverythingAndAMergedPullRequestWaitsOnNobody() {
         let rules = RouterBriefEngine.rules
-        #expect(rules.contains("never holds more than two lines") && rules.contains("When in doubt, leave it out"))
+        #expect(rules.contains("Threads is everything that exists") && rules.contains("merged or closed waits on nobody"))
         #expect(rules.contains("agent threads") && !rules.contains("coordinator") && !rules.contains("Claude"))
-        var doc = BriefDoc(project: "p")
-        let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[],"decisions":[],"loose_ends":["a","b","c","d"]}"#)
-        #expect(doc.checked(answer, known: [], cards: [:], at: 1).looseEnds == ["a", "b"])
-        doc.looseEnds = []
+        #expect(!rules.contains("Current brief") && !rules.contains("loose_ends"))
     }
 }

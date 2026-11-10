@@ -27,11 +27,10 @@ import Testing
         let src = FakeBriefSource(), model = FakeBriefModel()
         src.setThreads("p", [briefThread("t1", .needsYou)])
         model.answer = { _ in
-            #"{"now":["<t id=\"t1\">The pick</t> waits; <t id=\"ghost\">a ghost</t> too; its question."],"needs_you":[],"decisions":[],"loose_ends":[]}"#
+            #"{"now":["<t id=\"t1\">The pick</t> waits; <t id=\"ghost\">a ghost</t> too; its question."],"needs_you":[],"purpose":""}"#
         }
         let engine = makeEngine(src, model)
-        src.post("p", id: "c", kind: .card, thread: "t1", text: "Which?", options: ["a"])
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
         #expect(engine.docs["p"]?.now == [#"<t id="t1">The pick</t> waits; a ghost too; its question."#])
     }
 
@@ -91,35 +90,15 @@ import Testing
 
     @Test func theModelsLinksComeFromItsItems() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        src.setThreads("p", [briefThread("t1", .done)])
+        var t1 = briefThread("t1", .done)
+        t1.ends = "Published [v1](https://github.com/a/b/releases/tag/v1)."
+        src.setThreads("p", [t1])
         model.answer = { _ in
-            #"{"now":["<t id=\"t1\">The release</t> is out: <a href=\"https://github.com/a/b/releases/tag/v1\">v1</a>, <a href=\"https://github.com/a/b/releases/tag/v2\">v2</a>."],"needs_you":[],"decisions":[],"loose_ends":[]}"#
+            #"{"now":["<t id=\"t1\">The release</t> is out: <a href=\"https://github.com/a/b/releases/tag/v1\">v1</a>, <a href=\"https://github.com/a/b/releases/tag/v2\">v2</a>."],"needs_you":[],"purpose":""}"#
         }
         let engine = makeEngine(src, model)
-        src.post("p", id: "m", kind: .message, thread: "t1", text: "Published [v1](https://github.com/a/b/releases/tag/v1).")
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
         #expect(engine.docs["p"]?.now == [#"<t id="t1">The release</t> is out: <a href="https://github.com/a/b/releases/tag/v1">v1</a>, v2."#])
-    }
-
-    @Test func aBriefWrittenBeforeTagsIsWrittenAgainAtLaunch() async {
-        let src = FakeBriefSource(), model = FakeBriefModel()
-        src.setThreads("p", [briefThread("t1", .done)])
-        model.answer = { _ in #"{"now":["Busy."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
-        let store = MemoryBriefStore()
-        let engine = makeEngine(src, model, store: store)
-        src.post("p", id: "m", kind: .message, thread: "t1", text: "go")
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(RouterBriefEngine.untagged(engine.docs["p"]!))
-        let calls = model.contexts.count
-        model.answer = { _ in #"{"now":["<t id=\"t1\">It</t> is done."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
-        let again = makeEngine(src, model, store: store)
-        again.start(); await again.idle()
-        #expect(model.contexts.count == calls + 1)
-        #expect(again.docs["p"]?.now == [#"<t id="t1">It</t> is done."#])
-        // Tagged now: the next launch calls nothing.
-        let third = makeEngine(src, model, store: store)
-        third.start(); await third.idle()
-        #expect(model.contexts.count == calls + 1)
     }
 
     @Test func aHoveredPanelStaysWhileThePointerIsOnItOrYouType() async throws {
@@ -178,10 +157,10 @@ import Testing
     @Test func oneWrittenOptionIsNoChoice() {
         var doc = BriefDoc(project: "chan_p")
         doc.threads = [briefThread("t1", .needsYou)]
-        let one = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Repair it?","options":["repair keychain"]}],"decisions":[],"loose_ends":[]}"#)
-        #expect(doc.checked(one, known: [], cards: [:], at: 1).needsYou.first?.options == [])
-        let two = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Which?","options":["a","b"]}],"decisions":[],"loose_ends":[]}"#)
-        #expect(doc.checked(two, known: [], cards: [:], at: 1).needsYou.first?.options == ["a", "b"])
+        let one = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Repair it?","options":["repair keychain"]}],"purpose":""}"#)
+        #expect(doc.checked(one, at: 1).needsYou.first?.options == [])
+        let two = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"request","question":"Which?","options":["a","b"]}],"purpose":""}"#)
+        #expect(doc.checked(two, at: 1).needsYou.first?.options == ["a", "b"])
     }
 
     @Test func aCommandClickAddsAThreadYourWordsGoToAndAClickPicksOneAlone() {

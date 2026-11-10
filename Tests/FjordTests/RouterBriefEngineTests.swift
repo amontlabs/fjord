@@ -31,7 +31,7 @@ final class FakeBriefModel: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var contexts: [String] = []
     private(set) var leadContexts: [String] = []
-    var answer: @Sendable (String) -> String = { _ in #"{"now":[],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+    var answer: @Sendable (String) -> String = { _ in #"{"now":[],"needs_you":[],"purpose":""}"# }
     var failing = false
     var gate: (@Sendable () async -> Void)?
 
@@ -55,32 +55,51 @@ func briefThread(_ id: String, _ status: ThreadState, title: String = "T") -> Br
     RouterBriefEngine(source: src, store: store, model: model.runner, clock: { 100 })
 }
 
-let askAnswer = #"{"now":["Waiting on you."],"needs_you":[{"thread":"t1","kind":"question","question":"Which one?","options":["wrong","words"]}],"decisions":[],"loose_ends":[]}"#
+let askAnswer = #"{"now":["Waiting on you."],"needs_you":[{"thread":"t1","kind":"question","question":"Which one?","options":["wrong","words"]}],"purpose":""}"#
+
+/// A thread whose facts differ from `base` by its last run's end (a new trigger key, nothing else).
+func ran(_ t: BriefThread, at: Double) -> BriefThread { var t = t; t.runEnded = at; return t }
 
 @MainActor @Suite struct BriefTriggers {
-    @Test func theCallGetsTheNewItemsPastTheCursorAndTheCurrentBriefNothingOlder() async {
+    @Test func theCallGetsTheBoardAndNoEarlierBrief() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        src.setThreads("p", [briefThread("t1", .working)])
-        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        var t1 = briefThread("t1", .working)
+        t1.ends = "first words"
+        src.setThreads("p", [t1])
+        model.answer = { _ in #"{"now":["Building."],"needs_you":[],"purpose":""}"# }
         let engine = makeEngine(src, model)
-        src.post("p", id: "m1", kind: .message, thread: "t1", text: "first words")
-        engine.itemsChanged("p"); await engine.idle()
-        src.post("p", id: "m2", kind: .message, thread: "t1", text: "second words")
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
+        t1.ends = "second words"; t1.runEnded = 5
+        src.setThreads("p", [t1])
+        engine.boardChanged("p"); await engine.idle()
         #expect(model.contexts.count == 2)
-        #expect(model.contexts[1].contains("second words") && !model.contexts[1].contains("first words"))
-        #expect(model.contexts[1].contains("now: Building."))
+        #expect(model.contexts[0].contains("first words") && model.contexts[1].contains("second words") && !model.contexts[1].contains("first words"))
+        #expect(!model.contexts[1].contains("Current brief") && !model.contexts[1].contains("Building."))
     }
 
-    @Test func itemsAreRedactedBeforeAnyModel() async {
+    @Test func aChangeInReplyTextAloneMakesNoCallAndNeitherDoesAnUnchangedKey() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        src.post("p", id: "m1", kind: .message, text: "use sk-abcdefghijklmnopqrstuvwx please")
+        var t1 = briefThread("t1", .done)
+        src.setThreads("p", [t1])
         let engine = makeEngine(src, model)
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
+        t1.ends = "a new reply, same facts"
+        src.setThreads("p", [t1])
+        engine.boardChanged("p"); await engine.idle()
+        #expect(model.contexts.count == 1)
+    }
+
+    @Test func repliesAreRedactedBeforeAnyModel() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        var t = briefThread("t1", .done)
+        t.ends = "use sk-abcdefghijklmnopqrstuvwx please"
+        src.setThreads("p", [t])
+        let engine = makeEngine(src, model)
+        engine.boardChanged("p"); await engine.idle()
         #expect(!model.contexts[0].contains("sk-abcdef") && model.contexts[0].contains("[redacted]"))
     }
 
-    @Test func itemsDuringACallMarkItDirtyAndOneCallFollows() async {
+    @Test func changesDuringACallMarkItDirtyAndOneCallFollows() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         let started = AsyncStream<Void>.makeStream()
         let release = AsyncStream<Void>.makeStream()
@@ -91,67 +110,72 @@ let askAnswer = #"{"now":["Waiting on you."],"needs_you":[{"thread":"t1","kind":
             for await _ in release.stream { break }
         }
         let engine = makeEngine(src, model)
-        src.post("p", id: "m1", kind: .message, text: "one")
-        engine.itemsChanged("p")
+        src.setThreads("p", [briefThread("t1", .working)])
+        engine.boardChanged("p")
         for await _ in started.stream { break }
-        // Three items and three events while the call runs.
         for i in 2...4 {
-            src.post("p", id: "m\(i)", kind: .message, text: "w\(i)")
-            engine.itemsChanged("p")
+            src.setThreads("p", [ran(briefThread("t1", .working), at: Double(i))])
+            engine.boardChanged("p")
         }
         try? await Task.sleep(nanoseconds: 50_000_000)
         #expect(model.contexts.count == 0 || model.contexts.count == 1)
         release.continuation.yield()
         await engine.idle()
         #expect(model.contexts.count == 2)
-        #expect(model.contexts[1].contains("w2") && model.contexts[1].contains("w4") && !model.contexts[1].contains("one"))
+        #expect(model.contexts[1].contains("last run ended"))
     }
 
-    @Test func aQuitMidCallIsRerunAtLaunchFromTheStoredCursor() async {
+    @Test func aQuitMidCallIsRerunAtLaunchAndALaunchWithTheSameKeyMakesNoCall() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         let store = MemoryBriefStore()
-        src.post("p", id: "m1", kind: .message, text: "kept")
+        src.setThreads("p", [briefThread("t1", .done)])
         model.failing = true
         let e1 = makeEngine(src, model, store: store)
-        e1.itemsChanged("p"); await e1.idle()
-        #expect(store.cursor("p") == 0)  // advances only on a landed answer
+        e1.boardChanged("p"); await e1.idle()
+        #expect(store.key("p") == nil)  // kept only for a landed answer
         #expect(e1.docs["p"]?.proseStale == true)
         model.failing = false
         let e2 = makeEngine(src, model, store: store)  // a new launch
         e2.start(); await e2.idle()
-        #expect(model.contexts.count == 2 && model.contexts[1].contains("kept"))
-        #expect(store.cursor("p") == 1 && e2.docs["p"]?.proseStale == false)
-        // Nothing past the cursor: a third launch makes no call.
+        #expect(model.contexts.count == 2 && store.key("p") != nil && e2.docs["p"]?.proseStale == false)
         let e3 = makeEngine(src, model, store: store)
         e3.start(); await e3.idle()
         #expect(model.contexts.count == 2)
     }
 
-    @Test func threeFailuresThenARetryOnlyOnANewItem() async {
+    @Test func rewriteCallsEvenWhenTheKeyIsUnchanged() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        src.setThreads("p", [briefThread("t1", .done)])
+        let engine = makeEngine(src, model)
+        engine.boardChanged("p"); await engine.idle()
+        engine.rewrite(projects: ["p"]); await engine.idle()
+        #expect(model.contexts.count == 2)
+    }
+
+    @Test func threeFailuresThenARetryOnlyOnAChangedKey() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         model.failing = true
+        src.setThreads("p", [briefThread("t1", .done)])
         let engine = makeEngine(src, model)
-        for i in 1...3 {
-            src.post("p", id: "m\(i)", kind: .message, text: "x\(i)")
-            engine.itemsChanged("p"); await engine.idle()
-        }
+        for _ in 1...3 { engine.boardChanged("p"); await engine.idle() }
         #expect(model.contexts.count == 3)
-        engine.itemsChanged("p"); await engine.idle()  // same items: parked
+        engine.boardChanged("p"); await engine.idle()  // same facts: parked
         #expect(model.contexts.count == 3)
-        src.post("p", id: "m4", kind: .message, text: "x4")
-        engine.itemsChanged("p"); await engine.idle()
+        src.setThreads("p", [ran(briefThread("t1", .done), at: 4)])
+        engine.boardChanged("p"); await engine.idle()
         #expect(model.contexts.count == 4)
     }
 
-    @Test func aPlanCardThenTheRowsNeedsIsOneEntryAndOneCall() async {
+    @Test func aWaitingRequestIsOneEntryWithItsTextAndOptionsInTheContext() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
-        src.setThreads("p", [briefThread("t1", .needsYou)])
+        var t = briefThread("t1", .needsYou)
+        t.ask = "asks: Which one?"; t.askOptions = ["red", "blue"]
+        src.setThreads("p", [t])
+        src.boards["p", default: BriefBoard()].entries = [BriefEntry(project: "p", thread: "t1", kind: .question, state: .needsYou, since: 1, episode: "rq")]
         model.answer = { _ in askAnswer }
         let engine = makeEngine(src, model)
-        src.post("p", id: "card1", kind: .card, thread: "t1", text: "Which one?", options: ["a", "b"])
-        src.post("p", id: "t1:needs", kind: .status, thread: "t1", status: .needsYou)
-        engine.itemsChanged("p"); await engine.idle()
-        #expect(model.contexts.count == 1)
+        engine.boardChanged("p"); await engine.idle()
+        #expect(model.contexts.count == 1 && model.contexts[0].contains("Which one?") && model.contexts[0].contains("red / blue"))
         #expect(engine.docs["p"]?.needsYou.count == 1)
     }
 }

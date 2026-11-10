@@ -140,8 +140,8 @@ import Testing
         #expect(RouterBriefEngine.entries(model: ask, board: BriefBoard(threads: [])).isEmpty)
         var doc = BriefDoc(project: "p")
         doc.threads = [briefThread("t1", .done)]
-        let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"question","question":"Post the reply?","options":[]}],"decisions":[],"loose_ends":[]}"#)
-        #expect(doc.checked(answer, known: [], cards: [:], at: 1).needsYou.map(\.question) == ["Post the reply?"])
+        let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"question","question":"Post the reply?","options":[]}],"purpose":""}"#)
+        #expect(doc.checked(answer, at: 1).needsYou.map(\.question) == ["Post the reply?"])
     }
 
     // MARK: Stranded (P2-4)
@@ -152,8 +152,8 @@ import Testing
         #expect(RouterBriefEngine.entries(model: stranded, board: BriefBoard(threads: [briefThread("t1", .done)])).count == 1)
         var doc = BriefDoc(project: "p")
         doc.threads = [briefThread("t1", .working)]
-        let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"stranded","question":"","options":[]}],"decisions":[],"loose_ends":[]}"#)
-        #expect(doc.checked(answer, known: [], cards: [:], at: 1).needsYou.isEmpty)
+        let answer = try! BriefDoc.parse(#"{"now":[],"needs_you":[{"thread":"t1","kind":"stranded","question":"","options":[]}],"purpose":""}"#)
+        #expect(doc.checked(answer, at: 1).needsYou.isEmpty)
     }
 
     // MARK: The Router's switch (P2-6)
@@ -162,8 +162,8 @@ import Testing
         let src = FakeBriefSource(), model = FakeBriefModel()
         let engine = makeEngine(src, model)
         engine.stop()
-        src.post("p", id: "m1", kind: .message, text: "hello")
-        engine.itemsChanged("p"); await engine.idle()
+        src.setThreads("p", [briefThread("t1", .done)])
+        engine.boardChanged("p"); await engine.idle()
         #expect(model.contexts.isEmpty)
         engine.start(); await engine.idle()
         #expect(model.contexts.count == 1)

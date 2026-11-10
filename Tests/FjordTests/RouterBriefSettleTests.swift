@@ -3,24 +3,39 @@ import Testing
 @testable import Fjord
 
 @MainActor @Suite struct BriefSettle {
-    @Test func settlingAThreadDropsItsLineAtOnceAndAnUntaggedOneCostsNoCall() async {
+    @Test func settlingAThreadDropsItsLineAtOnceAndTheChangedFactsCostOneCall() async {
         let src = FakeBriefSource(), model = FakeBriefModel()
         src.setThreads("p", [briefThread("t1", .done), briefThread("t2", .done), briefThread("t3", .working)])
-        model.answer = { _ in #"{"now":["<t id=\"t1\">The first</t> is done.","<t id=\"t2\">The second</t> is done.","Things move."],"needs_you":[],"decisions":[],"loose_ends":[]}"# }
+        model.answer = { c in
+            var lines = ["Things move."]
+            for id in ["t1", "t2"] where c.contains("- \(id) ") { lines.append("<t id=\"\(id)\">Thread \(id)</t> is done.") }
+            return #"{"now":"# + String(decoding: try! JSONEncoder().encode(lines), as: UTF8.self) + #","needs_you":[],"purpose":""}"#
+        }
         let engine = makeEngine(src, model)
-        src.post("p", id: "m1", kind: .message, thread: "t1", text: "x")
-        engine.itemsChanged("p"); await engine.idle()
+        engine.boardChanged("p"); await engine.idle()
         #expect(engine.docs["p"]?.now.count == 3)
-        let calls = model.contexts.count
-        // t3 is untagged: settling it changes no line and calls nothing.
-        src.setThreads("p", [briefThread("t1", .done), briefThread("t2", .done)])
-        engine.boardChanged("p"); await engine.idle()
-        #expect(engine.docs["p"]?.now.count == 3 && model.contexts.count == calls)
-        // t1 is tagged: its whole line goes, with no call.
-        src.setThreads("p", [briefThread("t2", .done)])
-        engine.boardChanged("p"); await engine.idle()
+        // t1 is tagged: its whole line goes the moment the board changes, before any call; the changed facts then cost one.
+        src.setThreads("p", [briefThread("t2", .done), briefThread("t3", .working)])
+        engine.boardChanged("p")
+        await engine.idle()
+        #expect(model.contexts.count == 2 && !model.contexts[1].contains("- t1 "))
         #expect(engine.docs["p"]?.now.count == 2 && !(engine.docs["p"]?.now.joined().contains("t1") ?? true))
-        #expect(model.contexts.count == calls)
+    }
+
+    @Test func refreshAloneDropsATaggedLineWithNoCall() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        let store = MemoryBriefStore()
+        src.setThreads("p", [briefThread("t1", .done)])
+        store.append(BriefVersion(project: "p", version: 1, at: 1, prose: BriefDoc.Prose(now: [#"<t id="t1">It</t> is done."#, "Plain."]), diff: ""))
+        let engine = makeEngine(src, model, store: store)
+        engine.start(); await engine.idle()
+        let calls = model.contexts.count
+        src.setThreads("p", [briefThread("t1", .done)])
+        store.setKey("p", RouterBriefEngine.triggerKey(src.boards["p"]!))
+        src.setThreads("p", [])
+        src.boards["p"]?.threads = []
+        engine.boardChanged("p"); await engine.idle()
+        #expect(model.contexts.count == calls && engine.docs["p"]?.now.isEmpty == true)
     }
 
     @Test func aModelEntryForAThreadOffTheBoardIsDropped() {

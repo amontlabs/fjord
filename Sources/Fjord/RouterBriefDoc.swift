@@ -92,8 +92,10 @@ struct BriefThread: Codable, Hashable, Sendable {
     /// What it waits on you for, as T3 holds it: the request's text and the options it gives.
     var ask: String? = nil
     var askOptions: [String] = []
+    /// When you last wrote to it.
+    var sentAt: Double? = nil
 
-    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of", ends, endsAt, runEnded, prs, ask, askOptions }
+    private enum CodingKeys: String, CodingKey { case id, title, status, age, asOf = "as_of", ends, endsAt, runEnded, prs, ask, askOptions, sentAt }
 }
 
 /// A pull request a thread links.
@@ -165,15 +167,13 @@ struct BriefDoc: Codable, Equatable, Sendable {
         var options: [String]?
     }
 
-    /// The model's whole answer.
+    /// The model's whole answer. An old one's `decisions` and `loose_ends` are ignored.
     struct Answer: Codable {
         var now: [String]
         var needsYou: [RawEntry]
-        var decisions: [BriefDecision]
-        var looseEnds: [String]
         var purpose: String?
 
-        private enum CodingKeys: String, CodingKey { case now, needsYou = "needs_you", decisions, looseEnds = "loose_ends", purpose }
+        private enum CodingKeys: String, CodingKey { case now, needsYou = "needs_you", purpose }
 
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
@@ -181,8 +181,6 @@ struct BriefDoc: Codable, Equatable, Sendable {
                 now = ((try? c.decode(String.self, forKey: .now)) ?? "").split(separator: "\n").map(String.init)
             }
             needsYou = (try? c.decode([RawEntry].self, forKey: .needsYou)) ?? []
-            decisions = (try? c.decode([BriefDecision].self, forKey: .decisions)) ?? []
-            looseEnds = (try? c.decode([String].self, forKey: .looseEnds)) ?? []
             purpose = try? c.decodeIfPresent(String.self, forKey: .purpose)
         }
     }
@@ -191,7 +189,7 @@ struct BriefDoc: Codable, Equatable, Sendable {
         var description: String
     }
 
-    static let schema = #"{"type":"object","properties":{"now":{"type":"array","items":{"type":"string"}},"needs_you":{"type":"array","items":{"type":"object","properties":{"thread":{"type":"string"},"kind":{"type":"string","enum":["question","plan","request","permission","stranded"]},"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}},"required":["thread","kind","question","options"],"additionalProperties":false}},"decisions":{"type":"array","items":{"type":"object","properties":{"thread":{"type":"string"},"text":{"type":"string"}},"required":["thread","text"],"additionalProperties":false}},"loose_ends":{"type":"array","items":{"type":"string"}}},"required":["now","needs_you","decisions","loose_ends"],"additionalProperties":false}"#
+    static let schema = #"{"type":"object","properties":{"now":{"type":"array","items":{"type":"string"}},"needs_you":{"type":"array","items":{"type":"object","properties":{"thread":{"type":"string"},"kind":{"type":"string","enum":["question","plan","request","permission","stranded"]},"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}},"required":["thread","kind","question","options"],"additionalProperties":false}},"purpose":{"type":"string"}},"required":["now","needs_you","purpose"],"additionalProperties":false}"#
 
     static func parse(_ text: String) throws -> Answer {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,17 +197,18 @@ struct BriefDoc: Codable, Equatable, Sendable {
         do { return try JSONDecoder().decode(Answer.self, from: Data(s.utf8)) } catch { throw Rejected(description: "not the brief's JSON") }
     }
 
-    /// The checked prose: thread ids must exist (in the Board's list or in the new items), and so must a `now` line's tagged
-    /// ones (an unknown tag is dropped, its words kept), a card's options are the card
-    /// item's, `now` is cut at three lines, a decision names a thread or your send, an entry whose thread no longer waits on
-    /// you is dropped, and every list is capped. `cards` maps a thread to the options of its latest card item.
-    /// `sources`: the texts the model was given (the new items'), whose web addresses its links may use, besides the brief's own.
-    func checked(_ answer: Answer, known: Set<String>, cards: [String: [String]], at now: Double, sources: [String] = []) -> Prose {
-        let exists = known.union(threads.map(\.id))
+    /// The checked prose: thread ids must be on the Board (`threads`), and so must a `now` line's tagged ones (an unknown tag is
+    /// dropped, its words kept), a card's options are the thread's request's, `now` is cut at three lines, an entry whose
+    /// thread no longer waits on you is dropped, and every list is capped. A link may use only an address the Board holds.
+    func checked(_ answer: Answer, at now: Double) -> Prose {
+        let exists = Set(threads.map(\.id))
         var out = prose
-        // A thread's tag stays only on a thread of the project; its words stay either way.
+        var cards: [String: [String]] = [:]
+        for t in threads where !t.askOptions.isEmpty { cards[t.id] = t.askOptions }
+        // A thread's tag stays only on a thread of the Board; its words stay either way.
         let tagged: (String) -> Bool = { exists.contains($0) }
-        let links = (sources + self.now + self.looseEnds).reduce(into: Set<String>()) { $0.formUnion(BriefMarkup.addresses($1)) }
+        let sources = threads.flatMap { [$0.ends ?? "", $0.ask ?? ""] + $0.prs.map(\.url) }
+        let links = (sources + self.now).reduce(into: Set<String>()) { $0.formUnion(BriefMarkup.addresses($1)) }
         let lines = answer.now.map { BriefMarkup.checked($0, known: tagged, links: links) }.filter { !BriefMarkup.plain($0).isEmpty }
         out.now = Array(lines.prefix(Self.maxNow))
         var seen = Set<String>()
@@ -230,8 +229,6 @@ struct BriefDoc: Codable, Equatable, Sendable {
                               question: raw.question, options: options, request: old?.request, sent: old?.sent ?? [])
         }
         out.needsYou = Array(out.needsYou.prefix(Self.maxEntries))
-        out.decisions = Array(answer.decisions.filter { $0.thread == Self.yourSend || exists.contains($0.thread) }.prefix(Self.maxDecisions))
-        out.looseEnds = Array(answer.looseEnds.filter { !$0.isEmpty }.prefix(Self.maxLooseEnds))
         if let p = answer.purpose, !p.isEmpty { out.purpose = p }
         return out
     }
@@ -258,6 +255,6 @@ struct BriefVersion: Equatable, Sendable {
     var prose: BriefDoc.Prose
     var diff: String
     /// The log positions of the items that made it.
-    var items: [Int]
-    var cursor: Int
+    var items: [Int] = []
+    var cursor: Int = 0
 }
