@@ -43,13 +43,13 @@ import Testing
         #expect(checked == GeneralBrief(forYou: #"<t id="p/t1">The guide</t> and a ghost."#, worthALook: "Elsewhere", at: 3))
     }
 
-    @Test func theLeadIsWrittenFromTaggedThreadsByProject() {
+    @Test func theLeadIsWrittenFromThreadFactsByProject() {
         var doc = BriefDoc(project: "p")
         doc.now = [#"<t id="t1">The guide</t> is done."#]
         doc.threads = [briefThread("t1", .done, title: "Rewrite the guide")]
         let context = RouterBriefEngine.leadContext(["p": doc])
-        #expect(context.contains(#"now: <t id="p/t1">The guide</t> is done."#))
-        #expect(context.contains(#"finished: p/t1 "Rewrite the guide""#))
+        #expect(!context.contains("The guide</t>") && !context.contains("now:"))
+        #expect(context.contains(#"- p/t1 "Rewrite the guide" done"#))
     }
 
     @Test func aSectionNamesEveryThreadThatWaitsOnYou() {

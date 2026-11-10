@@ -94,7 +94,7 @@ enum FakeBriefModelRead {
         let engine = makeEngine(src, model)
         engine.boardChanged("a"); engine.boardChanged("b"); await engine.idle()
         #expect(model.leadContexts.count == 1)
-        #expect(model.leadContexts[0].contains("Which one?") && model.leadContexts[0].contains("Busy."))
+        #expect(model.leadContexts[0].contains("Which one?") && model.leadContexts[0].contains("p/t2") == false && model.leadContexts[0].contains("b/t2"))
         #expect(engine.general.forYou == "Two things need you.")
         // A change that moves neither what needs you nor what finished: no lead.
         src.setThreads("b", [ran(briefThread("t2", .working), at: 5)])

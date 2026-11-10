@@ -46,3 +46,41 @@ import Testing
         #expect(RouterBriefEngine.entries(model: [mine, gone], board: board).map(\.thread) == ["t1"])
     }
 }
+
+@MainActor @Suite struct BriefLeadFromFacts {
+    @Test func theLeadIsWrittenFromThreadFactsAndEntriesNeverFromNowProse() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        var t1 = briefThread("t1", .done)
+        t1.ends = "Merged it."; t1.prs = [BriefPR(url: "https://github.com/o/r/pull/3", number: 3, state: .merged)]
+        src.setThreads("a", [t1, briefThread("t2", .needsYou)])
+        model.answer = { _ in askAnswer.replacingOccurrences(of: "t1", with: "t2").replacingOccurrences(of: "Waiting on you.", with: "PROSE-NOT-FOR-THE-LEAD") }
+        let engine = makeEngine(src, model)
+        engine.boardChanged("a"); await engine.idle()
+        #expect(model.leadContexts.count == 1)
+        let lead = model.leadContexts[0]
+        #expect(lead.contains("a/t1") && lead.contains("Merged it.") && lead.contains("pull/3: merged") && lead.contains("needs you: a/t2"))
+        #expect(!lead.contains("PROSE-NOT-FOR-THE-LEAD") && !lead.contains("now:"))
+    }
+
+    @Test func aSettledThreadsLeadLineGoesAtOnceAndTheLeadIsWrittenAgain() async {
+        let src = FakeBriefSource(), model = FakeBriefModel()
+        let store = MemoryBriefStore()
+        src.setThreads("a", [briefThread("t1", .done), briefThread("t2", .done)])
+        store.setLead(GeneralBrief(forYouLines: [#"<t id="a/t1">One</t> waits."#], worthALookLines: [#"<t id="a/t2">Two</t> done."#, "Plain."], at: 1))
+        store.setKey("a", RouterBriefEngine.triggerKey(src.boards["a"]!))
+        let engine = makeEngine(src, model, store: store)
+        engine.start(); await engine.idle()
+        src.setThreads("a", [briefThread("t2", .done)])
+        store.setKey("a", RouterBriefEngine.triggerKey(src.boards["a"]!))
+        engine.boardChanged("a"); await engine.idle()
+        #expect(model.leadContexts.count >= 1)
+        #expect(!(store.lead()?.tagged.contains("a/t1") ?? false))
+    }
+
+    @Test func aStoredStringLeadStillDecodesAsLines() throws {
+        let old = try JSONDecoder().decode(GeneralBrief.self, from: Data(#"{"for_you":"One.\nTwo.","worth_a_look":""}"#.utf8))
+        #expect(old.forYouLines == ["One.", "Two."] && old.worthALookLines.isEmpty)
+        let new = try JSONDecoder().decode(GeneralBrief.self, from: Data(#"{"for_you":["A"],"worth_a_look":["B","C"]}"#.utf8))
+        #expect(new.worthALookLines == ["B", "C"] && new.forYou == "A")
+    }
+}

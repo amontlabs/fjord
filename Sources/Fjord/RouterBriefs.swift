@@ -284,8 +284,7 @@ enum BriefKeys {
         guard let engine else { return demoGeneral }
         guard let listing = t3Listing() else { return GeneralBrief() }
         let lead = engine.general
-        let tagged = BriefMarkup.ids(lead.forYou) + BriefMarkup.ids(lead.worthALook)
-        return tagged.allSatisfy({ id in BriefTarget(key: id).map { listing.projects.contains($0.project) } ?? false }) ? lead : GeneralBrief()
+        return lead.tagged.allSatisfy({ id in BriefTarget(key: id).map { listing.projects.contains($0.project) } ?? false }) ? lead : GeneralBrief()
     }
 
     /// T3's projects and threads now, once it has answered (its snapshot or its `synchronized`, whichever order they and the
