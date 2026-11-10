@@ -378,10 +378,58 @@ enum BriefKeys {
     // MARK: Feeding from T3
 
     /// The boards from the threads and requests now.
-    private func currentBoards() -> [String: BriefBoard] {
+    func currentBoards() -> [String: BriefBoard] {
         guard let store else { return [:] }
+        return boards(store: store, now: clock())
+    }
+
+    /// The boards with the pull requests' states: what GitHub last said of each pull request a thread links or a reply names.
+    private func boards(store: Store, now: Date) -> [String: BriefBoard] {
+        let ends = Self.ends(store)
+        let live = store.threads.values.filter { T3BriefSource.listed($0, now: now) }
+        var text: [String: [PullRequestRef]] = [:]
+        var all = Set<PullRequestRef>()
+        for t in live {
+            var refs = PullRequestRef.extract(from: t.latestMessage ?? ends[t.id] ?? "")
+            refs += t.pullRequests.flatMap { PullRequestRef.extract(from: $0.url) }
+            all.formUnion(refs)
+            let linked = Set(t.pullRequests.flatMap { PullRequestRef.extract(from: $0.url) })
+            let extra = refs.filter { !linked.contains($0) }
+            if !extra.isEmpty { text[t.id] = extra }
+        }
+        var states: [String: PRState] = [:]
+        for (ref, state) in prKnown where all.contains(ref) { states[ref.url.absoluteString] = state }
+        askPullRequests(Array(all), store: store)
         return T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince,
-                                    ends: Self.ends(store), now: clock())
+                                    ends: ends, prStates: states, textPRs: text, now: now)
+    }
+
+    /// The state GitHub gave for each pull request so far, here at once; `pullRequests` refreshes it in the background.
+    @ObservationIgnored private var prKnown: [PullRequestRef: PRState] = [:]
+    @ObservationIgnored private(set) var pullRequests: PullRequestStates?
+
+    /// Checks pull requests through `fetch` (tests give a fake one); a state that changes rebuilds the boards.
+    func usePullRequestStates(minInterval: TimeInterval = 30, fetch: @escaping PullRequestStates.Fetch) {
+        pullRequests = PullRequestStates(minInterval: minInterval, fetch: fetch) { [weak self] changed in
+            Task { @MainActor in self?.pullRequestsChanged(changed) }
+        }
+    }
+
+    private func askPullRequests(_ refs: [PullRequestRef], store: Store) {
+        if pullRequests == nil, !Store.isDemo, store.routerOn {
+            let gh = store.gh
+            pullRequests = PullRequestStates(client: gh) { [weak self] changed in
+                Task { @MainActor in self?.pullRequestsChanged(changed) }
+            }
+        }
+        guard let pullRequests, !refs.isEmpty else { return }
+        Task { _ = await pullRequests.states(for: refs) }
+    }
+
+    private func pullRequestsChanged(_ changed: [PullRequestRef: PRState]) {
+        var new = false
+        for (ref, state) in changed where prKnown[ref] != state { prKnown[ref] = state; new = true }
+        if new, let store { threadsChanged(store: store) }
     }
 
     /// The agent's last reply in each thread whose end is known now (T3's shell doesn't carry it).
@@ -403,8 +451,7 @@ enum BriefKeys {
         guard let engine, let log else { return }
         purgeUnlisted()
         let now = clock()
-        let boards = T3BriefSource.boards(threads: Array(store.threads.values), requests: store.requests, unreachableSince: downSince,
-                                          ends: Self.ends(store), now: now)
+        let boards = boards(store: store, now: now)
         var named = names
         for t in store.threads.values where boards[t.projectID] != nil { named[t.projectID] = Self.name(t.projectID, store: store, folder: t.folderKey) }
         // Projects with no thread on a board keep a brief too: T3's title, never their id.

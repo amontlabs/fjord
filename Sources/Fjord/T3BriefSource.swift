@@ -56,8 +56,10 @@ struct T3BriefSource: BriefSource {
     /// model writes the question of), and the words you sent. `unreachableSince`: T3 stopped answering (`watch: "stale:"`).
     /// `ends`: the agent's last reply in each thread, where known (T3's shell doesn't carry it); every thread on the board shows
     /// it, working ones included. `prStates`: a pull request's state by its URL, where known, over what T3's link says.
+    /// `textPRs`: pull requests found in a thread's replies (by thread id), listed with the ones T3 links.
     static func boards(threads: [AgentThread], requests: [String: ThreadRequest], unreachableSince: Double? = nil,
-                       ends: [String: String] = [:], prStates: [String: PRState] = [:], now: Date = Date()) -> [String: BriefBoard] {
+                       ends: [String: String] = [:], prStates: [String: PRState] = [:], textPRs: [String: [PullRequestRef]] = [:],
+                       now: Date = Date()) -> [String: BriefBoard] {
         var byProject: [String: [AgentThread]] = [:]
         for t in threads where listed(t, now: now) { byProject[t.projectID, default: []].append(t) }
         var out: [String: BriefBoard] = [:]
@@ -70,9 +72,13 @@ struct T3BriefSource: BriefSource {
                 let age = state == .done ? (t.lastRunEndedAt?.timeIntervalSince1970 ?? since) : since
                 let reply = (t.latestMessage ?? ends[t.id]).map(BriefLog.clip).flatMap { $0.isEmpty ? nil : $0 }
                 let ran = t.lastRunEndedAt?.timeIntervalSince1970
-                let prs = t.pullRequests.filter { !$0.url.isEmpty }.map { pr in
+                var prs = t.pullRequests.filter { !$0.url.isEmpty }.map { pr in
                     BriefPR(url: pr.url, number: pr.number,
                             state: prStates[pr.url] ?? pr.state.flatMap { PRState(rawValue: $0.lowercased()) } ?? .unknown)
+                }
+                let linked = Set(prs.compactMap { PullRequestRef.extract(from: $0.url).first })
+                for ref in textPRs[t.id] ?? [] where !linked.contains(ref) {
+                    prs.append(BriefPR(url: ref.url.absoluteString, number: ref.number, state: prStates[ref.url.absoluteString] ?? .unknown))
                 }
                 var thread = BriefThread(id: t.id, title: t.title, status: state, age: age, asOf: unreachableSince, ends: reply,
                                          endsAt: reply == nil ? nil : ran ?? t.activityAt.timeIntervalSince1970, runEnded: ran, prs: prs)
