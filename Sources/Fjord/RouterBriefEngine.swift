@@ -407,7 +407,7 @@ struct GeneralBrief: Codable, Equatable, Sendable {
     }
 
     /// The Board changed with no new item: the deterministic part only, no model.
-    func boardChanged(_ project: String) { spawn { [self] in await refresh(project) } }
+    func boardChanged(_ project: String) { spawn { [self] in await refresh(project); await batchEnd() } }
 
     /// The Router switched off: nothing runs until `start`; calls under way are cancelled and their answers dropped.
     func stop() {
@@ -453,9 +453,11 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         let board = await source.board(project: project)
         guard active else { return }
         load(project)
+        let before = leadSignature()
         var doc = docs[project] ?? BriefDoc(project: project)
         Self.apply(board, to: &doc)
         if docs[project] != doc { docs[project] = doc }
+        if leadSignature() != before { leadDirty = true }
     }
 
     // MARK: triggers
@@ -554,11 +556,14 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         doc.sent = board.sent
         doc.watch = board.watch
         doc.needsYou = entries(model: doc.needsYou, board: board)
+        // A line that tags a thread no longer on the board (settled, snoozed, gone) goes whole, instantly.
+        let on = Set(board.threads.map(\.id))
+        doc.now = doc.now.filter { BriefMarkup.ids($0).allSatisfy(on.contains) }
     }
 
     /// The entries that wait on you: the Board's, each with the model's plain-words question when the page gave none (a
-    /// card's options always the card's, in the page's order and words); then the model's own entries for threads the Board
-    /// still says need you or that it wrote as stranded. An entry leaves once its thread's status leaves `needs you`.
+    /// card's options always the card's, in the page's order and words); then the model's own entries for threads that are on
+    /// the Board and not working (a finished run that asks, a stranded session). An entry leaves once its thread leaves the Board.
     static func entries(model: [BriefEntry], board: BriefBoard) -> [BriefEntry] {
         var out: [BriefEntry] = []
         for b in board.entries {
@@ -572,12 +577,11 @@ struct GeneralBrief: Codable, Equatable, Sendable {
         }
         let listed = Set(out.map(\.thread))
         for m in model where !listed.contains(m.thread) {
-            let t = board.threads.first { $0.id == m.thread }
             // A stranded session stays until its thread works again; so does a thread whose reply leaves the next step to you
-            // (a finished run that asks), which T3 doesn't flag.
-            guard t?.status == .needsYou || (m.kind == .stranded || t != nil) && t?.status != .working else { continue }
+            // (a finished run that asks), which T3 doesn't flag. A thread off the Board has no entry.
+            guard let t = board.threads.first(where: { $0.id == m.thread }), t.status != .working else { continue }
             var e = m
-            if let t { e.state = t.status; e.asOf = t.asOf }
+            e.state = t.status; e.asOf = t.asOf
             out.append(e)
         }
         return out.sorted { ($0.since, $0.thread) < ($1.since, $1.thread) }
