@@ -35,6 +35,17 @@ extension Store {
         }.sorted { ($0.created, $0.key) < ($1.created, $1.key) }
     }
 
+    /// The threads the current brief tags (its `now` lines, its entries and the lead), as T3 thread ids.
+    func mentionedThreads() -> Set<String> {
+        var raw: [String] = []
+        for doc in routerBriefs.docs.values {
+            for line in doc.now { raw += BriefMarkup.ids(line) }
+            raw += doc.needsYou.map(\.thread)
+        }
+        raw += BriefMarkup.ids(routerBriefs.general.forYou) + BriefMarkup.ids(routerBriefs.general.worthALook)
+        return Set(raw.flatMap { id in BriefTarget(key: id).map { [id, $0.thread] } ?? [id] })
+    }
+
     /// The context for a decision on `message`: the day's archive frozen, everything else as it is now. No read.
     func deciderContext(_ message: String, board: DeciderBoard, tagged: String? = nil, unattended: Bool = false,
                         now: Date = Date(), zone: TimeZone = .current) -> DeciderContext.Built {
@@ -47,7 +58,8 @@ extension Store {
         }
         let search = routerPreview.searchHits(for: message)
         let x = DeciderContext.Inputs(projects: board.projects, purposes: board.purposes, threads: threads, cards: cards.cards,
-                                      turns: cards.turns, archive: archive, index: cards.index, search: search, now: now, zone: zone)
+                                      turns: cards.turns, archive: archive, index: cards.index, search: search, now: now, zone: zone,
+                                      mentioned: mentionedThreads())
         return DeciderContext.build(message, x, tagged: tagged, unattended: unattended)
     }
 

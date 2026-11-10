@@ -80,10 +80,34 @@ import Testing
         let fresh = DeciderContext.liveThreads([Self.thread("new", project: "fjord", created: -600, active: -86400 * 2),
                                                 Self.thread("newer", project: "fjord", created: -300, active: -60)], now: Self.now)
         #expect(fresh.map(\.key) == ["new", "newer"])
-        // Under the cap, each project's newest is live at any age; an older one isn't.
-        let quiet = DeciderContext.liveThreads([Self.thread("lone", project: "fjord", created: -86400 * 9, active: -86400 * 8),
+        // Under the cap, each project's newest is live within 7 days; an older one isn't, nor a newest past the backstop.
+        let quiet = DeciderContext.liveThreads([Self.thread("lone", project: "fjord", created: -86400 * 9, active: -86400 * 6),
                                                 Self.thread("stale", project: "fjord", created: -86400 * 20, active: -86400 * 19)], now: Self.now)
         #expect(quiet.map(\.key) == ["lone"])
+    }
+
+    @Test func settledThreadsAreLabelledAndABriefsTagsAreAlwaysLive() {
+        var settled = Self.thread("s", title: "Tide table import", created: -86400 * 5, active: -86400 * 2, onBoard: false)
+        settled.settledAt = Self.now.addingTimeInterval(-3600)
+        let live = Self.thread("l", title: "Tide table import")
+        let index = ThreadIndex()
+        let ts = [settled, live]
+        let byKey = Dictionary(uniqueKeysWithValues: ts.map { ($0.key, $0) })
+        let ids = ["s": "ts", "l": "tl"]
+        let e = DeciderContext.retrievalBlock(message: "tide table", index: index, keys: ["s", "l"], live: ["l"], archive: ["s"], threads: byKey,
+                                              ids: ids, search: [DeciderContext.SearchHit(thread: "s", snippet: "tide table")], now: Self.now,
+                                              zone: Self.zone, turns: [:])
+        #expect(e.contains("ts (settled,") && !e.contains("ts (archive"))
+        let f = DeciderContext.nowBlock([live], all: ts, ids: ids, now: Self.now, zone: Self.zone)
+        #expect(f.contains("Settled since the snapshot: ts."))
+        // A tagged settled thread is live even over the cap; an untagged one off the board is not.
+        var many: [ContextThread] = []
+        for i in 0..<20 { many.append(Self.thread("f\(i)", created: -Double(1000 + i * 10), active: -Double(60 * (i + 1)))) }
+        many.append(settled)
+        #expect(DeciderContext.liveThreads(many, now: Self.now, mentioned: ["s"]).contains { $0.key == "s" })
+        #expect(!DeciderContext.liveThreads(many, now: Self.now).contains { $0.key == "s" })
+        #expect(DeciderContext.stateLine(settled, zone: Self.zone, now: Self.now).hasPrefix("state: settled"))
+        #expect(DeciderContext.role.contains("names it, reopens it, or continues its exact deliverable"))
     }
 
     @Test func theArchiveHoldsThirtyDaysBeforeTheDaysStartInCreationOrder() {

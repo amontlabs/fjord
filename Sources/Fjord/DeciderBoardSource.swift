@@ -174,7 +174,7 @@ extension Store {
         var tasks: [Task<Void, Never>] = []
         let t3 = self.t3.store
         // Jev's candidates and the full context's live threads (N4b rules: 24 h, each project's newest, just created).
-        let live = Set(DeciderContext.liveThreads(contextThreads(board), now: Date()).map(\.key))
+        let live = Set(DeciderContext.liveThreads(contextThreads(board), now: Date(), mentioned: mentionedThreads()).map(\.key))
         var wanted = board.candidates
         for t in board.threads where live.contains(t.key) && !wanted.contains(where: { $0.key == t.key }) { wanted.append(t) }
         for t in wanted {
