@@ -42,12 +42,17 @@ struct T3BriefSource: BriefSource {
         return .paused
     }
 
-    /// Whether a thread is on the board: live or waiting, else recent and not snoozed or settled away.
+    /// How long a thread that never ran (paused) stays on the board.
+    static let pausedWindow = 86_400.0
+
+    /// Whether a thread is on the board: in play (`AgentThread.inPlay`), and a finished one only within the 7-day backstop, a
+    /// paused one (never ran) only within a day of being made or touched.
     static func listed(_ t: AgentThread, now: Date) -> Bool {
+        guard t.inPlay(now: now) else { return false }
         if t.running || t.waitsForYou { return true }
-        if let until = t.snoozedUntil, until > now { return false }
-        if t.settled && !t.needsYou { return false }
-        return now.timeIntervalSince(t.lastActivity) <= window
+        let touched = max(t.lastActivity, t.createdAt ?? .distantPast)
+        let limit = state(t) == .paused ? pausedWindow : window
+        return now.timeIntervalSince(touched) <= limit
     }
 
     /// Every project's board: its threads, the entries that wait on you (a request T3 holds as data, else a plain-words one the

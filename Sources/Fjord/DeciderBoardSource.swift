@@ -74,10 +74,7 @@ extension Store {
 
     /// The board now. `reads`: the end of a thread, by its id, for those known.
     func deciderBoard(now: Date = Date(), reads: [String: ThreadReads] = [:]) -> DeciderBoard {
-        let live = threads.values.filter { t in
-            if let until = t.snoozedUntil, until > now { return false }
-            return !(t.settled && !t.running && !t.waitsForYou)
-        }
+        let live = threads.values.filter { $0.inPlay(now: now) }
         // A project's name as the board shows it: T3's title, made unique when two share it.
         var names: [String: String] = [:]
         var ids: [String: String] = [:]

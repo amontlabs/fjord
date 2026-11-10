@@ -71,6 +71,12 @@ struct AgentThread: Identifiable, Hashable {
     var waitsForYou: Bool { pendingRequest?.blocking == true || hasPlan }
     /// Waits on you, or stopped short (failed, or on a usage limit it won't resume from) and not seen since.
     var needsYou: Bool { waitsForYou || (status == .failed || limitStopped) && unseen }
+    /// Still the owner's concern: not snoozed, and either not settled or live or waiting on them. A settled thread that failed
+    /// unseen is out (T3 unsettles on a real new failure).
+    func inPlay(now: Date) -> Bool {
+        if let until = snoozedUntil, until > now { return false }
+        return !settled || running || waitsForYou
+    }
     /// Its latest run is over, and nothing it started is still going.
     var finished: Bool { [.completed, .interrupted, .cancelled].contains(status) && !running }
     /// What it is on when the turn is over but its work isn't: "background: Review the changes" for one task, how many run

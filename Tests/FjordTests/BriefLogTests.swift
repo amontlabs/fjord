@@ -84,6 +84,24 @@ import Testing
         #expect(item.text.contains("Silent?"))
     }
 
+    @Test func inPlayTiersTheBoard() {
+        var failed = thread("f", ended: 999_900)
+        failed.status = .failed; failed.unseen = true; failed.settled = true
+        #expect(!T3BriefSource.listed(failed, now: now))
+        #expect(!T3BriefSource.listed(thread("old", ended: 1_000_000 - 8 * 86_400, active: 1_000_000 - 8 * 86_400), now: now))
+        #expect(T3BriefSource.listed(thread("ok", ended: 1_000_000 - 3 * 86_400, active: 1_000_000 - 3 * 86_400), now: now))
+        var waiting = thread("w", ended: 999_000)
+        waiting.settled = true; waiting.hasPlan = true
+        #expect(T3BriefSource.listed(waiting, now: now))
+        var snoozed = thread("s", running: true)
+        snoozed.snoozedUntil = now.addingTimeInterval(3600)
+        #expect(!T3BriefSource.listed(snoozed, now: now))
+        var fresh = thread("p", active: 1_000_000 - 3600), stale = thread("p2", active: 1_000_000 - 2 * 86_400)
+        fresh.status = .idle; stale.status = .idle
+        #expect(T3BriefSource.listed(fresh, now: now))
+        #expect(!T3BriefSource.listed(stale, now: now))
+    }
+
     @Test func boardsGroupByProjectAndSayWhatWaitsOnYou() {
         var waiting = thread("w", running: true)
         waiting.pendingRequest = T3PendingRequest(json: ["id": "rq", "kind": "user_input", "blocking": true])
