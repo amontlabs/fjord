@@ -7,3 +7,8 @@
 - Open: a refused settle/snooze can't toast its reason (no toast case in `RouterV2Change`; `.refused` ignored for lines with no `sent`) and the page's undo entry stays (⌘Z would unsettle a never-settled thread). Needs a port addition + model seam.
 - Open: `RouterV2Thread` has no request id (picks read against the request held at Return); `start` has no mentions; a failed Stop is silent.
 - `start(project:)` matches T3 projects by id, then title.
+
+## Track 2 w1 (detail, PRs) — 03e74f19 af1fcebe
+- `RouterDetail.make(projection, now:)`: working (todo step → first sentence of latest words → tool → "starting"), steps, reply/writing, request, queued, diff (summed per turn; may double-count a file touched in two checkpoints), lastStep, steers.
+- `RouterPullRequests(link:github:)`: `states(for:reply:)` (cheap, T3 state wins, named PRs linked once), `onChange(threadId)`, `refresh()` (window open + Triage sync), `forget(_:)`. 9a/track 3 wire `link` to `dispatch(.pullRequestLink)` and pass the last reply text.
+- A PR with unknown state is hidden (no `.unknown` state).
