@@ -159,15 +159,17 @@ enum RouterV2Demo {
         let upstream = T(id: ID.upstream, name: "Upstream issue", title: "Answer upstream issue #2031", project: "silo", state: .working,
                          sentence: .init(text: "I'll reproduce it on the 0.4 branch first."), since: ago(18))
 
-        model.threads = [settings, valCenis, briefs, updater, disk, guide, bar, tab, snapshot, checkpoint, upstream]
         func days(_ d: Double) -> Date { start.addingTimeInterval(-d * 86_400 - 3_600) }
-        model.older = [
+        let older: [RouterV2Older] = [
             .init(id: "canvas", name: "Drop the canvas layout", project: "fjord", since: days(3)),
             .init(id: "glass-fallback", name: "Glass capture fallback", project: "fjord", since: days(2)),
             .init(id: "decider-score", name: "Score the decider on last week's moments", project: "fjord", since: days(2)),
             .init(id: "approval-copy", name: "Approval panel copy", project: "lcu", since: days(4)),
             .init(id: "sitemap", name: "Sitemap and redirects", project: "docs-site", since: days(2)),
         ]
+        // The page's first load: one update.
+        let threads = [settings, valCenis, briefs, updater, disk, guide, bar, tab, snapshot, checkpoint, upstream]
+        model.apply(.batch(threads.map { .upsert($0) } + [.older(older)]))
         // On page open: the first Needs-you line, its card open.
         model.selection = .line(ID.settings)
         return model
@@ -334,7 +336,7 @@ final class RouterV2DemoSource: RouterV2Source {
 
     func read(_ draft: String, selected: String?) {
         let read = reads[draft] ?? fallback(draft, selected: selected)
-        after(time(of: read)) { [model] in model.readLanded(read) }
+        after(time(of: read)) { [model] in model.apply(.read(read)) }
     }
 
     private func time(of read: RouterV2Read) -> Double {
@@ -379,6 +381,9 @@ final class RouterV2DemoSource: RouterV2Source {
     }
 
     func queue(_ words: String, on thread: String) {}
+
+    /// T3 sends a thread's queued words as its turn ends: taken, then a run, as a send.
+    func queuedWent(_ thread: String) { send("", to: thread, steering: false, continuing: false) }
 
     func start(_ thread: String, words: String, project: String, launch: RouterV2Launch) {
         let print = bump(thread)
@@ -471,5 +476,198 @@ final class RouterV2DemoSource: RouterV2Source {
                 try? await Task.sleep(for: .seconds(every / speed))
             }
         }
+    }
+}
+
+// MARK: - The demo's T3 events
+
+/// What T3 and the Router's models do in the demo (DESIGN.md 3): each event builds the thread's next record from the one
+/// the page holds and hands it to `apply`, as the real store does (IMPLEMENTATION.md 1.2). The script, the demo's
+/// source and the shots call these; nothing else does.
+extension RouterV2Model {
+    /// A turn ends with no request: Working → Done at once, "finished", the sentence sheening until the verdict.
+    func turnEnded(_ id: String, lastLines: String? = nil, prs: [RouterV2Thread.PR] = [], diff: RouterV2Thread.Diff? = nil) {
+        guard var t = thread(id) else { return }
+        // Queued words go as the turn ends: the row rises into the line, which becomes Sent.
+        if let words = t.queued {
+            t.queued = nil
+            t.state = .sent
+            t.sent = .init(words: words, status: .sending)
+            t.since = now
+            apply(.upsert(t))
+            (source as? RouterV2DemoSource)?.queuedWent(id)
+            return
+        }
+        t.state = .done
+        t.worth = .quiet
+        t.sentence = .init(text: RouterV2.Copy.finished, phase: .reassessing, stream: t.sentence.stream)
+        t.since = now
+        t.isNew = true
+        t.sent = nil
+        t.writing = false
+        t.steps = []
+        t.launch = nil
+        t.result = nil
+        if let lastLines { t.lastLines = lastLines }
+        if !prs.isEmpty { t.prs = prs }
+        if let diff { t.diff = diff }
+        apply(.upsert(t))
+    }
+
+    /// The verdict's state, which comes first: Done worth a look or quiet, or it left you a step (the line moves to Needs
+    /// you at once, still sheening).
+    func verdict(_ id: String, worth: RouterV2Thread.Worth = .quiet, step ask: String? = nil, options: [String] = [],
+                 result: String? = nil) {
+        guard var t = thread(id), t.state == .done else { return }
+        if let ask {
+            t.state = .needsYou(.step)
+            t.question = ask
+            t.options = options
+            t.result = result
+            t.since = now
+        } else {
+            t.worth = worth
+        }
+        apply(.upsert(t))
+    }
+
+    /// The model's line lands: its words stream in over the sentence's place.
+    func line(_ id: String, _ text: String, stateWord: Bool = true) {
+        guard var t = thread(id) else { return }
+        if t.sentence.text == text, t.sentence.stateWord == stateWord, !t.sentence.mono {
+            // The same words (a PR merged, the result didn't change): nothing streams, the sheen just goes.
+            t.sentence.phase = .settled
+            apply(.upsert(t))
+            return
+        }
+        let words = RouterV2Change.words(id, stream: t.sentence.stream + 1, text: text, done: true)
+        if t.sentence.stateWord != stateWord {
+            t.sentence.stateWord = stateWord
+            apply(.batch([.upsert(t), words]))
+        } else {
+            apply(words)
+        }
+    }
+
+    /// The model names a thread: once.
+    func named(_ id: String, _ name: String) { apply(.named(id, name)) }
+
+    /// A new request (question, form, plan, permission): Needs you at once with the kind's mark and T3's words verbatim;
+    /// the card is complete at once.
+    func asked(_ id: String, _ ask: RouterV2Thread.Ask, line: String, mono: Bool = false, card: (inout RouterV2Thread) -> Void) {
+        guard var t = thread(id) else { return }
+        t.state = .needsYou(ask)
+        t.sentence = .init(text: line, mono: mono, phase: .reassessing, stream: t.sentence.stream)
+        t.since = now
+        t.isNew = true
+        t.sent = nil
+        t.writing = false
+        card(&t)
+        apply(.upsert(t))
+    }
+
+    /// T3 has your words: the status goes (there is no "delivered").
+    func taken(_ id: String) {
+        guard var t = thread(id), t.state == .sent else { return }
+        t.sent?.status = .taken
+        apply(.upsert(t))
+    }
+
+    /// A run starts (your send, a rerun, T3 on its own): Working, under the Sent lines.
+    func runStarted(_ id: String, step: String = RouterV2.Copy.starting, mono: Bool = false, steps: [RouterV2Thread.Step] = []) {
+        guard var t = thread(id) else { return }
+        t.state = .working
+        t.sentence = .init(text: step, mono: mono, stream: t.sentence.stream)
+        t.since = now
+        t.sent = nil
+        t.paused = false
+        t.stop = nil
+        t.steps = steps
+        // A new turn: the agent has said nothing in it yet.
+        t.lastLines = ""
+        t.diff = nil
+        // What it asked is answered.
+        t.question = nil; t.options = []; t.form = []; t.plan = []; t.permission = nil
+        t.result = nil
+        t.isNew = false
+        apply(.upsert(t))
+    }
+
+    /// The running step changes: the sentence cross-fades.
+    func step(_ id: String, _ text: String, mono: Bool = false, steps: [RouterV2Thread.Step]? = nil) {
+        guard var t = thread(id) else { return }
+        t.sentence = .init(text: text, mono: mono, stream: t.sentence.stream)
+        if let steps { t.steps = steps }
+        apply(.upsert(t))
+    }
+
+    /// A run you stopped yourself (T3's `latestRunStopRequested`): Done, not Needs you. Code only: nothing sheens.
+    func interrupted(_ id: String) {
+        guard var t = thread(id), t.isRunning else { return }
+        t.state = .done
+        t.worth = .quiet
+        t.sentence = .init(text: RouterV2.Copy.stoppedByYou, stream: t.sentence.stream)
+        t.since = now
+        t.sent = nil
+        t.writing = false
+        t.queued = nil
+        t.steps = []
+        t.launch = nil
+        apply(.upsert(t))
+    }
+
+    /// A run T3 failed (a provider or transport error, a usage limit with no resume): Stopped, at the end of Needs you.
+    /// Code only: nothing sheens.
+    func failed(_ id: String, error: String, lastStep: String, line: String? = nil) {
+        guard var t = thread(id) else { return }
+        let first = error.split(separator: "\n").first.map(String.init) ?? error
+        t.state = .stopped
+        t.sentence = .init(text: line ?? "failed: " + first, stream: t.sentence.stream)
+        t.stop = .init(error: error, lastStep: lastStep)
+        t.since = now
+        t.sent = nil
+        t.writing = false
+        t.queued = nil
+        apply(.upsert(t))
+    }
+
+    /// Paused at the usage limit, resuming on its own: stays Working, the dots stop.
+    func paused(_ id: String, line: String) {
+        guard var t = thread(id) else { return }
+        t.paused = true
+        t.sentence = .init(text: line, stream: t.sentence.stream)
+        apply(.upsert(t))
+    }
+
+    /// A pull request opens, merges or closes: the state word flips (the view pops it) and the sentence sheens, since the
+    /// PR's state is in the fingerprint.
+    func pr(_ id: String, _ number: Int, _ state: RouterV2Thread.PR.State) {
+        guard var t = thread(id) else { return }
+        if let i = t.prs.firstIndex(where: { $0.number == number }) { t.prs[i].state = state } else {
+            t.prs.append(.init(number: number, state: state))
+        }
+        if t.state == .done || t.state == .needsYou(.step) { t.sentence.phase = .reassessing }
+        apply(.upsert(t))
+    }
+
+    /// Settled, snoozed or archived in T3: the line leaves. No toast: it wasn't done here.
+    func left(_ id: String) { apply(.remove(id)) }
+
+    /// A new thread (or one unsettled, reopened, its snooze over): its line grows in, in its state's section.
+    func appeared(_ t: RouterV2Thread) { apply(.upsert(t)) }
+
+    /// Your send is refused, or T3 drops: the line returns to the state and place it had, a failure line enters.
+    func refused(_ id: String, reason: String, offline: Bool = false) { apply(.refused(id, reason: reason, offline: offline)) }
+
+    func connection(lost: Bool) { apply(.connection(lost: lost)) }
+
+    /// The agent's reply as it is written.
+    func reply(_ id: String, _ text: String, writing: Bool) { apply(.reply(id, text: text, writing: writing)) }
+
+    /// The thread's messages loaded.
+    func loaded(_ id: String) {
+        guard var t = thread(id) else { return }
+        t.loading = false
+        apply(.upsert(t))
     }
 }

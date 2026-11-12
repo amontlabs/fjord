@@ -35,9 +35,9 @@ enum RouterV2Shots {
     private static func newThread(_ model: RouterV2Model, aside: String = "", launch: RouterV2LaunchAsk = RouterV2LaunchAsk()) {
         model.select(nil)
         model.setDraft("silo: write the changelog for 0.4" + aside)
-        model.readLanded(RouterV2Read(draft: model.draft, places: [.newThread(project: "silo")], sure: true,
-                                      name: "write the changelog for 0.4", launch: launch,
-                                      taken: aside.isEmpty ? nil : aside.trimmingCharacters(in: .whitespaces)))
+        model.apply(.read(RouterV2Read(draft: model.draft, places: [.newThread(project: "silo")], sure: true,
+                                       name: "write the changelog for 0.4", launch: launch,
+                                       taken: aside.isEmpty ? nil : aside.trimmingCharacters(in: .whitespaces))))
     }
 
     private static let states: [State] = [
@@ -61,7 +61,10 @@ enum RouterV2Shots {
         State(name: "v2-card-step") { $0.select(.line(ID.valCenis)) },
         State(name: "v2-card-done") { $0.select(.line(ID.guide)) },
         State(name: "v2-card-loading") { model in
-            model.threads = model.threads.map { var t = $0; if t.id == ID.guide { t.loading = true }; return t }
+            if var guide = model.thread(ID.guide) {
+                guide.loading = true
+                model.apply(.upsert(guide))
+            }
             model.select(.line(ID.guide))
         },
         State(name: "v2-card-stopped") { $0.select(.line(ID.disk)) },
@@ -69,7 +72,7 @@ enum RouterV2Shots {
             model.select(.line(ID.tab))
             model.reply(ID.tab, "The draft now survives the handover. I am wiring the composer so the caret lands where it was, then I will check the spacing against T3", writing: true)
             model.setDraft("keep the placeholder as it is")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.tab)], sure: true))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.tab)], sure: true)))
         },
         State(name: "v2-peek", make: { $0.select(nil) }, pointer: { model in
             model.hoverRow = ID.guide
@@ -96,13 +99,13 @@ enum RouterV2Shots {
         State(name: "v2-destination-unsure") { model in
             model.select(nil)
             model.setDraft("the spacing is off again")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.settings), .thread(ID.tab), .newThread(project: "fjord")],
-                                          sure: false))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.settings), .thread(ID.tab), .newThread(project: "fjord")],
+                                          sure: false)))
         },
         State(name: "v2-destination-sure") { model in
             model.select(nil)
             model.setDraft("bar count: push it and open the PR")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.bar)], sure: true))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.bar)], sure: true)))
         },
         State(name: "v2-reading") { model in
             // The first read of a draft with nothing selected: Fjord's mark in the arrow's slot.
@@ -127,8 +130,8 @@ enum RouterV2Shots {
         State(name: "v2-new-thread-unsure") { model in
             model.select(nil)
             model.setDraft("the spacing is off again")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.settings), .thread(ID.tab), .newThread(project: "fjord")],
-                                          sure: false))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.settings), .thread(ID.tab), .newThread(project: "fjord")],
+                                          sure: false)))
             model.light(2)
         },
         State(name: "v2-new-thread-sent") { model in
@@ -153,18 +156,18 @@ enum RouterV2Shots {
         State(name: "v2-pick-a-place", make: { model in
             model.select(nil)
             model.setDraft("that one test again")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [], sure: false))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [], sure: false)))
         }, pointer: { $0.openPlaces() }),
         State(name: "v2-unreachable") { model in
             model.select(.line(ID.bar))
             model.setDraft("also bump the version")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.bar)], sure: true))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.bar)], sure: true)))
             model.connection(lost: true)
         },
         State(name: "v2-queued") { model in
             model.select(.line(ID.checkpoint))
             model.setDraft("then delete the old checkpoint image too")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.checkpoint)], sure: true))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.checkpoint)], sure: true)))
             model.send(queue: true)
         },
         State(name: "v2-sent") { model in
@@ -174,7 +177,7 @@ enum RouterV2Shots {
         State(name: "v2-failure") { model in
             model.select(.line(ID.bar))
             model.setDraft("also bump the version")
-            model.readLanded(RouterV2Read(draft: model.draft, places: [.thread(ID.bar)], sure: true))
+            model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.bar)], sure: true)))
             model.send()
             model.connection(lost: true)
             model.refused(ID.bar, reason: RouterV2.Copy.unreachable, offline: true)
@@ -186,12 +189,11 @@ enum RouterV2Shots {
         State(name: "v2-snooze", make: { $0.select(.line(ID.valCenis)) }, pointer: { $0.openSnooze() }),
         State(name: "v2-empty") { model in
             model.select(nil)
-            model.threads = []
-            model.older = []
+            model.apply(.batch(model.threads.map { .remove($0.id) } + [.older([])]))
         },
         State(name: "v2-nothing-needs-you") { model in
             model.select(nil)
-            model.threads.removeAll { $0.section == .needsYou }
+            model.apply(.batch(model.threads.filter { $0.section == .needsYou }.map { .remove($0.id) }))
         },
     ]
 }

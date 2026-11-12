@@ -4,7 +4,7 @@ import SwiftUI
 // Router v2's page model (docs/design/router-v2/DESIGN.md 2 to 5): the records, what the owner has selected, picked,
 // filtered and typed, and the page as a pure function of them (`rows()`, the counts, the destination row). The owner's
 // acts are its methods (the keys, the pointer and the demo's script all call the same ones); what T3 and the model do
-// arrives through the methods under "T3 events". A source (the demo's today) takes the acts that leave the page.
+// arrives as whole records through `apply` (RouterV2Port.swift). A source takes the acts that leave the page.
 
 /// What takes the page's acts and feeds its events: the demo's fake T3 today, the real engine later.
 @MainActor protocol RouterV2Source: AnyObject {
@@ -198,6 +198,10 @@ final class RouterV2Model {
     /// The fake clock: `clockStart` at the moment the page was made.
     @ObservationIgnored let made = Date()
     @ObservationIgnored var clockStart: Date = RouterV2Model.today(14, 2)
+    /// Tests: each change's curve, and whether it animated.
+    @ObservationIgnored var trace: ((RouterV2Curve, Bool) -> Void)?
+    /// Inside a `.batch`: nothing animates.
+    @ObservationIgnored private var unanimated = 0
 
     @ObservationIgnored var undos: [(toast: Int, undo: () -> Void)] = []
     @ObservationIgnored private var nextID = 0
@@ -217,14 +221,19 @@ final class RouterV2Model {
 
     func fresh() -> Int { nextID += 1; return nextID }
 
+    /// Nothing animates: a still, the window arriving, or a `.batch` being applied.
+    private var motionOff: Bool { WindowArrival.appWindow.active || still || unanimated > 0 }
+
     func animate(_ curve: RouterV2Curve, _ body: () -> Void) {
-        let animation = WindowArrival.appWindow.active || still ? nil : curve.resolved(reduce: reduce)
-        withAnimation(animation) { body() }
+        let off = motionOff
+        trace?(curve, !off)
+        withAnimation(off ? nil : curve.resolved(reduce: reduce)) { body() }
     }
 
     /// A change that takes `id` to another section: it is on top of its neighbours for the length of the move.
     func move(_ id: String, _ body: () -> Void) {
-        let off = WindowArrival.appWindow.active || still
+        let off = motionOff
+        trace?(.lineMove, !off)
         if scripted { RouterV2Frames.note("move \(id)") }
         // In flight from the same frame as the change that moves it: one update, nothing drawn in between.
         withAnimation(off ? nil : RouterV2Curve.lineMove.resolved(reduce: reduce), completionCriteria: .logicallyComplete) {
@@ -597,235 +606,136 @@ final class RouterV2Model {
         if open { show(t.id) }
     }
 
-    // MARK: T3 events (section 3). Code sets state, section, mark, counts and a plain line in the same frame.
+    // MARK: Records from the store (docs/design/router-v2/IMPLEMENTATION.md 1.2)
 
-    /// A turn ends with no request: Working → Done at once, "finished", the sentence sheening until the verdict.
-    func turnEnded(_ id: String, lastLines: String? = nil, prs: [RouterV2Thread.PR] = [], diff: RouterV2Thread.Diff? = nil) {
-        guard let t = thread(id) else { return }
-        // Queued words go as the turn ends: the row rises into the line, which becomes Sent.
-        if let words = t.queued {
+    /// What T3 and the Router's models change reaches the page here, and only here, as whole records: the store (the
+    /// real one or the demo's) says what a thread is, the model works out the motion. A record equal to the one held
+    /// changes nothing. The owner's own acts change the model's copy at once (`dispatch`, `remove`, `notForMe`): the
+    /// store mirrors them as pending acts, so the record it sends next agrees and changes nothing either.
+    func apply(_ change: RouterV2Change) {
+        switch change {
+        case .upsert(let t): upsert(t)
+        case .remove(let id): removeLine(id)
+        case .older(let list):
+            guard list != older else { return }
             animate(.spatial) {
-                update(id) {
-                    $0.queued = nil
-                    $0.state = .sent
-                    $0.sent = .init(words: words, status: .sending)
-                    $0.since = now
-                    $0.order = fresh()
+                older = list
+                if selection == .housekeeping, shownOlder.isEmpty { selection = nil }
+                settleFilters()
+            }
+        case .reply(let id, let text, let writing):
+            // The hot path: one field of one line, nothing animated here (the card's text draws its own growth).
+            guard let t = thread(id), t.lastLines != text || t.writing != writing else { return }
+            update(id) { $0.lastLines = text; $0.writing = writing }
+        case .words(let id, let stream, let text, _):
+            words(id, stream: stream, text: text)
+        case .named(let id, let name):
+            guard let t = thread(id), t.name != name || t.naming else { return }
+            animate(.fade) { update(id) { $0.name = name; $0.naming = false } }
+        case .read(let read):
+            readLanded(read)
+        case .refused(let id, let reason, let offline):
+            sendRefused(id, reason: reason, offline: offline)
+        case .connection(let lost):
+            guard lost != connectionLost else { return }
+            animate(.spatial) { connectionLost = lost }
+        case .launch(let defaults, let models):
+            guard defaults != launchDefault || models != launchModels else { return }
+            animate(.fade) {
+                rolling {
+                    launchDefault = defaults
+                    launchModels = models
                 }
             }
-            source?.send(words, to: id, steering: false, continuing: false)
+        case .batch(let changes):
+            // One update, nothing animated: the first load, or what a held window morph kept.
+            unanimated += 1
+            defer { unanimated -= 1 }
+            for change in changes { apply(change) }
+        }
+    }
+
+    /// A thread's record. New: its line grows in. Its section or its place in the section's order changed: it moves,
+    /// and if it was selected and left its section, the selection goes to its neighbour (T3 never moves the selection
+    /// otherwise, and never opens a card). Otherwise its fields change in place.
+    private func upsert(_ new: RouterV2Thread) {
+        let id = new.id
+        guard let old = thread(id) else {
+            var t = new
+            t.order = fresh()
+            animate(.spatial) { threads.append(t) }
             return
         }
-        let next = selection == .line(id) ? neighbour(of: id) : selection
-        move(id) {
-            update(id) {
-                $0.state = .done
-                $0.worth = .quiet
-                $0.sentence = .init(text: RouterV2.Copy.finished, phase: .reassessing, stream: $0.sentence.stream)
-                $0.since = now
-                $0.order = fresh()
-                $0.isNew = true
-                $0.sent = nil
-                $0.writing = false
-                $0.steps = []
-                $0.launch = nil
-                $0.result = nil
-                if let lastLines { $0.lastLines = lastLines }
-                if !prs.isEmpty { $0.prs = prs }
-                if let diff { $0.diff = diff }
-            }
-            // T3 never moves the selection: it only follows a line that left its section.
-            if selection == .line(id) { selection = next }
+        // What is the model's own: the order among lines that entered their state at once (a fresh one only when the
+        // state changes), and the count of the model's lines (it never goes back). A line whose words are still
+        // streaming in keeps streaming when the record says they are all there.
+        var t = new
+        t.order = old.order
+        t.sentence.stream = max(old.sentence.stream, new.sentence.stream)
+        if old.sentence.phase == .streaming, new.sentence.phase == .settled, new.sentence.text == old.sentence.text {
+            t.sentence.phase = .streaming
         }
-    }
-
-    /// The verdict's state, which comes first: Done worth a look or quiet, or it left you a step (the line moves to Needs
-    /// you at once, still sheening).
-    func verdict(_ id: String, worth: RouterV2Thread.Worth = .quiet, step ask: String? = nil, options: [String] = [],
-                 result: String? = nil) {
-        guard let t = thread(id), t.state == .done else { return }
-        if let ask {
-            let next = selection == .line(id) ? neighbour(of: id) : selection
+        if t.state != old.state { t.order = fresh() }
+        guard t != old else { return }
+        // A send T3 took, or that ended: nothing is left to put back if it is refused.
+        if t.state != .sent || t.sent?.status == .taken { backups[id] = nil }
+        let leaves = t.section != old.section
+        if leaves || t.orderClass != old.orderClass {
+            let next: RouterV2Selection?? = leaves && selection == .line(id) ? .some(neighbour(of: id)) : nil
             move(id) {
-                update(id) {
-                    $0.state = .needsYou(.step)
-                    $0.question = ask
-                    $0.options = options
-                    $0.result = result
-                    $0.since = now
-                    $0.order = fresh()
-                }
-                if selection == .line(id) { selection = next }
+                update(id) { $0 = t }
+                if let next { selection = next }
             }
-        } else if t.worth != worth {
-            // Quiet under the lines worth a look, or up among them: on the fade, with the ground.
-            move(id) { update(id) { $0.worth = worth } }
+        } else if let curve = Self.curve(from: old, to: t) {
+            animate(curve) { update(id) { $0 = t } }
+        } else {
+            update(id) { $0 = t }
         }
     }
 
-    /// The model's line lands: its words stream in over the sentence's place.
-    func line(_ id: String, _ text: String, stateWord: Bool = true) {
-        guard let t = thread(id) else { return }
-        if t.sentence.text == text, t.sentence.stateWord == stateWord, !t.sentence.mono {
-            // The same words (a PR merged, the result didn't change): nothing streams, the sheen just goes.
-            animate(.fade) { update(id) { $0.sentence.phase = .settled } }
-            return
-        }
-        update(id) { $0.sentence = .init(text: text, phase: .streaming, stream: $0.sentence.stream + 1, stateWord: stateWord) }
+    /// How a line that keeps its place changes: on the fade, unless the change draws its own motion.
+    private static func curve(from old: RouterV2Thread, to new: RouterV2Thread) -> RouterV2Curve? {
+        // A PR's state word swaps in one frame and pops on its own; the model's words stream in on their own.
+        if old.prs != new.prs { return nil }
+        if new.sentence.stream != old.sentence.stream, new.sentence.phase == .streaming { return nil }
+        // The queued row rises into the line, or comes under it: the line's height changes.
+        if (old.queued == nil) != (new.queued == nil) { return .spatial }
+        return .fade
     }
 
-    /// The sentence's words are all in.
-    func streamed(_ id: String, stream: Int) {
-        update(id) { if $0.sentence.stream == stream, $0.sentence.phase == .streaming { $0.sentence.phase = .settled } }
-    }
-
-    /// The model names a thread: once.
-    func named(_ id: String, _ name: String) {
-        animate(.fade) { update(id) { $0.name = name; $0.naming = false } }
-    }
-
-    /// A new request (question, form, plan, permission): Needs you at once with the kind's mark and T3's words verbatim;
-    /// the card is complete at once.
-    func asked(_ id: String, _ ask: RouterV2Thread.Ask, line: String, mono: Bool = false, card: (inout RouterV2Thread) -> Void) {
-        let next = selection == .line(id) ? neighbour(of: id) : selection
-        move(id) {
-            update(id) {
-                $0.state = .needsYou(ask)
-                $0.sentence = .init(text: line, mono: mono, phase: .reassessing, stream: $0.sentence.stream)
-                $0.since = now
-                $0.order = fresh()
-                $0.isNew = true
-                $0.sent = nil
-                $0.writing = false
-                card(&$0)
-            }
-            if selection == .line(id) { selection = next }
-        }
-    }
-
-    /// T3 has your words: the status goes (there is no "delivered").
-    func taken(_ id: String) {
-        animate(.fade) { update(id) { if $0.state == .sent { $0.sent?.status = .taken } } }
-        backups[id] = nil
-    }
-
-    /// A run starts (your send, a rerun, T3 on its own): Working, under the Sent lines.
-    func runStarted(_ id: String, step: String = RouterV2.Copy.starting, mono: Bool = false, steps: [RouterV2Thread.Step] = []) {
-        guard let t = thread(id) else { return }
-        let change = {
-            self.update(id) {
-                $0.state = .working
-                $0.sentence = .init(text: step, mono: mono, stream: $0.sentence.stream)
-                $0.since = self.now
-                $0.order = self.fresh()
-                $0.sent = nil
-                $0.paused = false
-                $0.stop = nil
-                $0.steps = steps
-                // A new turn: the agent has said nothing in it yet.
-                $0.lastLines = ""
-                $0.diff = nil
-                // What it asked is answered.
-                $0.question = nil; $0.options = []; $0.form = []; $0.plan = []; $0.permission = nil
-                $0.result = nil
-                $0.isNew = false
-            }
-        }
-        if t.section == .working { animate(.fade) { change() } } else {
-            let next = selection == .line(id) ? neighbour(of: id) : selection
-            move(id) {
-                change()
-                if selection == .line(id) { selection = next }
-            }
-        }
-    }
-
-    /// The running step changes: the sentence cross-fades.
-    func step(_ id: String, _ text: String, mono: Bool = false, steps: [RouterV2Thread.Step]? = nil) {
-        animate(.fade) {
-            update(id) {
-                $0.sentence = .init(text: text, mono: mono, stream: $0.sentence.stream)
-                if let steps { $0.steps = steps }
-            }
-        }
-    }
-
-    /// A run you stopped yourself (T3's `latestRunStopRequested`): Done, not Needs you. Code only: nothing sheens.
-    func interrupted(_ id: String) {
-        guard thread(id)?.isRunning == true else { return }
-        let next = selection == .line(id) ? neighbour(of: id) : selection
-        move(id) {
-            update(id) {
-                $0.state = .done
-                $0.worth = .quiet
-                $0.sentence = .init(text: RouterV2.Copy.stoppedByYou, stream: $0.sentence.stream)
-                $0.since = now
-                $0.order = fresh()
-                $0.sent = nil
-                $0.writing = false
-                $0.queued = nil
-                $0.steps = []
-                $0.launch = nil
-            }
-            if selection == .line(id) { selection = next }
-        }
-    }
-
-    /// A run T3 failed (a provider or transport error, a usage limit with no resume): Stopped, at the end of Needs you.
-    /// Code only: nothing sheens.
-    func failed(_ id: String, error: String, lastStep: String, line: String? = nil) {
-        let next = selection == .line(id) ? neighbour(of: id) : selection
-        let first = error.split(separator: "\n").first.map(String.init) ?? error
-        move(id) {
-            update(id) {
-                $0.state = .stopped
-                $0.sentence = .init(text: line ?? "failed: " + first, stream: $0.sentence.stream)
-                $0.stop = .init(error: error, lastStep: lastStep)
-                $0.since = now
-                $0.order = fresh()
-                $0.sent = nil
-                $0.writing = false
-                $0.queued = nil
-            }
-            if selection == .line(id) { selection = next }
-        }
-    }
-
-    /// Paused at the usage limit, resuming on its own: stays Working, the dots stop.
-    func paused(_ id: String, line: String) {
-        animate(.fade) { update(id) { $0.paused = true; $0.sentence = .init(text: line, stream: $0.sentence.stream) } }
-    }
-
-    /// A pull request opens, merges or closes: the state word flips (the view pops it) and the sentence sheens, since the
-    /// PR's state is in the fingerprint.
-    func pr(_ id: String, _ number: Int, _ state: RouterV2Thread.PR.State) {
-        update(id) {
-            if let i = $0.prs.firstIndex(where: { $0.number == number }) { $0.prs[i].state = state } else {
-                $0.prs.append(.init(number: number, state: state))
-            }
-            if $0.state == .done || $0.state == .needsYou(.step) { $0.sentence.phase = .reassessing }
-        }
-    }
-
-    /// Settled, snoozed or archived in T3: the line leaves. No toast: it wasn't done here.
-    func left(_ id: String) {
+    /// Settled, snoozed or archived in T3, aged out: the line leaves. No toast: it wasn't done here.
+    private func removeLine(_ id: String) {
+        guard thread(id) != nil else { return }
         let next = selection == .line(id) ? neighbour(of: id) : selection
         animate(.spatial) {
             threads.removeAll { $0.id == id }
             if selection == .line(id) { selection = next }
             settleFilters()
         }
+        backups[id] = nil
     }
 
-    /// A new thread (or one unsettled, reopened, its snooze over): its line grows in, in its state's section.
-    func appeared(_ t: RouterV2Thread) {
-        var t = t
-        t.order = fresh()
-        animate(.spatial) { threads.append(t) }
+    /// A verdict's line as it lands: a new `stream` starts it (its words stream in over the sentence's place), the same
+    /// one grows it, an older one is late and dropped.
+    private func words(_ id: String, stream: Int, text: String) {
+        guard let t = thread(id), stream >= t.sentence.stream else { return }
+        if stream > t.sentence.stream {
+            update(id) { $0.sentence = .init(text: text, phase: .streaming, stream: stream, stateWord: $0.sentence.stateWord) }
+        } else if t.sentence.text != text {
+            update(id) {
+                $0.sentence.text = text
+                $0.sentence.phase = .streaming
+            }
+        }
+    }
+
+    /// The sentence's words are all drawn (the line's view says so).
+    func streamed(_ id: String, stream: Int) {
+        update(id) { if $0.sentence.stream == stream, $0.sentence.phase == .streaming { $0.sentence.phase = .settled } }
     }
 
     /// Your send is refused, or T3 drops: the line returns to the state and place it had, a failure line enters.
-    func refused(_ id: String, reason: String, offline: Bool = false) {
+    private func sendRefused(_ id: String, reason: String, offline: Bool) {
         guard let t = thread(id), let sent = t.sent else { return }
         let failure = RouterV2Failure(id: fresh(), thread: id, words: sent.words, reason: reason,
                                       continuing: backups[id]?.thread.state == .stopped, offline: offline)
@@ -844,18 +754,19 @@ final class RouterV2Model {
             failures.append(failure)
         }
     }
+}
 
-    func connection(lost: Bool) {
-        animate(.spatial) { connectionLost = lost }
-    }
+extension RouterV2Thread {
+    /// The groups a section orders its lines in (`RouterV2Model.ordered`): a line that goes from one to another moves.
+    /// Sent and running are one: a Sent line becomes Working where it is, on the fade.
+    enum OrderClass { case ask, stopped, working, look, quiet }
 
-    /// The agent's reply as it is written.
-    func reply(_ id: String, _ text: String, writing: Bool) {
-        update(id) { $0.lastLines = text; $0.writing = writing }
-    }
-
-    /// The thread's messages loaded.
-    func loaded(_ id: String) {
-        animate(.fade) { update(id) { $0.loading = false } }
+    var orderClass: OrderClass {
+        switch state {
+        case .needsYou: .ask
+        case .stopped: .stopped
+        case .sent, .working: .working
+        case .done: worth == .look ? .look : .quiet
+        }
     }
 }
