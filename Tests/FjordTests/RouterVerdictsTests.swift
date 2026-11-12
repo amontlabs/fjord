@@ -97,7 +97,7 @@ final class FakeClaude: @unchecked Sendable {
         e.ask(request("Snapshot"))
         await until(fake.calls.count == 1)
         #expect(fake.calls[0].arguments.contains("stream-json"))
-        #expect(fake.calls[0].arguments.contains("claude-haiku-5-5"))
+        #expect(fake.calls[0].arguments.contains("claude-sonnet-5-5"))
         fake.send(0, FakeClaude.answer(FakeClaude.step, size: 5))
         fake.close(0)
         await until(told.of("Snapshot").last.map { if case .done = $0 { true } else { false } } ?? false)
@@ -237,6 +237,25 @@ final class FakeClaude: @unchecked Sendable {
         #expect(fake.calls.count == 4)
     }
 
+    @Test func onlyAFinishedTurnRunsOnSonnet() async {
+        #expect(RouterVerdictPrompt.arguments(.finished).contains("claude-sonnet-5-5"))
+        #expect(RouterVerdictPrompt.arguments(.ask).contains("claude-haiku-5-5"))
+        #expect(RouterVerdictPrompt.arguments(.name).contains("claude-haiku-5-5"))
+        let fake = FakeClaude()
+        let (e, _) = engine(fake)
+        e.ask(request("n", .name))
+        await until(fake.calls.count == 1)
+        #expect(fake.calls[0].arguments.contains("claude-haiku-5-5"))
+    }
+
+    @Test func theFinishedRulesAreTheEvalsV2Prompt() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let v2 = try String(contentsOf: root.appendingPathComponent("evals/router/verdict/prompts/system-finished-v2.txt"), encoding: .utf8)
+        func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
+        #expect(words(RouterVerdictPrompt.finished).starts(with: words(v2).prefix(40)))
+        #expect(words(RouterVerdictPrompt.finished) == words(v2))
+    }
+
     @Test func usageIsLoggedAsVerdicts() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("verdicts-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -252,7 +271,7 @@ final class FakeClaude: @unchecked Sendable {
         let entries = log.entries()
         #expect(entries.count == 1)
         #expect(entries.first?.role == .verdict)
-        #expect(entries.first?.model == "claude-haiku-5-5")
+        #expect(entries.first?.model == "claude-sonnet-5-5")
         #expect(entries.first?.usage.inputTokens == 1700)
         #expect(entries.first?.usage.costUSD == 0.0004)
     }

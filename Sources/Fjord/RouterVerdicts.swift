@@ -401,7 +401,10 @@ struct RouterVerdictReading {
     private func ended(_ key: String, _ token: Int, end: ClaudeStream.End?, reading: RouterVerdictReading?,
                        limit: (hit: Bool, after: TimeInterval?)) {
         guard let job = running[key], job.token == token else { return }
-        if let end { log?.record(role: reading == nil ? .purpose : .verdict, model: RouterVerdictPrompt.model, end.usage) }
+        if let end {
+            let model = reading.map { RouterVerdictPrompt.model($0.kind) } ?? RouterVerdictPrompt.model
+            log?.record(role: reading == nil ? .purpose : .verdict, model: model, end.usage)
+        }
         if limit.hit { hold(limit.after) }
         switch job.work {
         case .verdict:
