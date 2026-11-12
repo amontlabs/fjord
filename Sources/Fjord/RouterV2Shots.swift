@@ -54,6 +54,11 @@ enum RouterV2Shots {
                             v2Pointer: state.pointer)
     }
 
+    private static func activity(_ model: RouterV2Model) {
+        model.select(nil)
+        for (id, a) in RouterV2Demo.activity(at: model.now) { model.activity(id, a) }
+    }
+
     /// A draft for a new thread in silo, read: the row shows what it starts with. `pills`: settings picked from the @ list,
     /// after the words. `typing`: an @ word being typed, its list open.
     private static func newThread(_ model: RouterV2Model, pills: [RouterSetting] = [], typing: String? = nil) {
@@ -116,6 +121,16 @@ enum RouterV2Shots {
             model.hoverName = ID.guide
         }),
         State(name: "v2-peek-older", make: { $0.select(nil) }, pointer: { $0.hoverControl = .housekeepingWords }),
+        // Subagents, background commands and waits: the glyphs on the lines, their peek, and the open card's list.
+        State(name: "v2-activity") { activity($0) },
+        State(name: "v2-activity-peek", make: { activity($0) }, pointer: { model in
+            model.hoverRow = ID.tab
+            model.hoverControl = .activity(ID.tab)
+        }),
+        State(name: "v2-activity-card") { model in
+            activity(model)
+            model.select(.line(ID.tab))
+        },
         State(name: "v2-reassessing") { model in
             model.select(nil)
             RouterV2Demo.askPermission(model)

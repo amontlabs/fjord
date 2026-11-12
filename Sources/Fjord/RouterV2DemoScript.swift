@@ -129,10 +129,10 @@ final class RouterV2DemoScript {
     private static let lengths: [Double] = [
         5.0, 4.5, 3.2, 6.4,                                 // 1–4   read
         4.4, 4.6, 7.6, 7.4, 9.6, 5.6, 3.0,                  // 5–11  answer from the keyboard
-        6.6, 6.2, 7.6, 6.0, 4.6, 6.6, 3.6,                  // 12–18 T3 moves, live
-        4.6, 5.0, 5.6, 3.0,                                 // 19–22 filters
-        8.0, 12.6, 14.0, 9.6, 6.4, 5.6, 8.2, 5.4, 9.4, 13.0, // 23–32 send
-        12.0, 5.6, 3.2, 3.2, 5.6, 5.4, 6.8, 6.4, 20.4, 6.0, // 33–42 clear
+        6.6, 6.2, 7.6, 6.0, 4.6, 6.6, 3.6, 7.0,             // 12–19 T3 moves, live
+        4.6, 5.0, 5.6, 3.0,                                 // 20–23 filters
+        8.0, 12.6, 14.0, 9.6, 6.4, 5.6, 8.2, 5.4, 9.4, 13.0, // 24–33 send
+        12.0, 5.6, 3.2, 3.2, 5.6, 5.4, 6.8, 6.4, 20.4, 6.0, // 34–43 clear
     ]
     /// When each beat starts, and when the last one ends.
     private static let times: [Double] = lengths.reduce(into: [0]) { $0.append($0[$0.count - 1] + $1) }
@@ -335,10 +335,10 @@ final class RouterV2DemoScript {
         if from == nil { RouterV2Demo.frames?.start() }
         let beats: [(Int, () async -> Void)] = [
             (1, beat1), (2, beat2), (3, beat3), (4, beat4), (5, beat5), (6, beat6), (7, beat7), (8, beat8), (9, beat9), (10, beat10),
-            (11, beat11), (12, beat12), (13, beat13), (14, beat14), (15, beat15), (16, beat16), (17, beat17), (18, beat18),
-            (19, beat19), (20, beat20), (21, beat21), (22, beat22), (23, beat23), (24, beat24), (25, beat25), (26, beat26),
-            (27, beat27), (28, beat28), (29, beat29), (30, beat30), (31, beat31), (32, beat32), (33, beat33), (34, beat34),
-            (35, beat35), (36, beat36), (37, beat37), (38, beat38), (39, beat39), (40, beat40), (41, beat41), (42, beat42),
+            (11, beat11), (12, beat12), (13, beat13), (14, beat14), (15, beat15), (16, beat16), (17, beat17), (18, beat18), (19, beat19),
+            (20, beat20), (21, beat21), (22, beat22), (23, beat23), (24, beat24), (25, beat25), (26, beat26), (27, beat27),
+            (28, beat28), (29, beat29), (30, beat30), (31, beat31), (32, beat32), (33, beat33), (34, beat34), (35, beat35),
+            (36, beat36), (37, beat37), (38, beat38), (39, beat39), (40, beat40), (41, beat41), (42, beat42), (43, beat43),
         ]
         for (number, play) in beats where (only?.contains(number) ?? true) && number <= (until ?? .max) {
             // With `--from`, the frames start with the first beat played at its own speed.
@@ -525,17 +525,34 @@ final class RouterV2DemoScript {
         model.left(ID.guide)
     }
 
+    private func beat19() async {
+        await beat(19, "Subagents, background work and waits, at a glance")
+        for (id, a) in RouterV2Demo.activity(at: model.now) { model.activity(id, a) }
+        await pause(0.6)
+        stage.pointerShown = true
+        await move(to: .activity(ID.tab))
+        await pause(2.2)
+        await move(to: .activity(ID.checkpoint))
+        await pause(1.4)
+        // One of Tab handover's subagents is done: its count goes, the glyph stays.
+        if var a = model.thread(ID.tab)?.activity {
+            a.agents.removeFirst()
+            model.activity(ID.tab, a)
+        }
+        await park()
+    }
+
     // Act 4: filters
 
-    private func beat19() async {
-        await beat(19, "Click a project pill: the page filters")
+    private func beat20() async {
+        await beat(20, "Click a project pill: the page filters")
         await click(.pill(ID.disk))
         await pause(0.6)
         await park()
     }
 
-    private func beat20() async {
-        await beat(20, "Add a state")
+    private func beat21() async {
+        await beat(21, "Add a state")
         await click(.state(.working))
         await pause(1.5)
         await click(.state(.working))
@@ -543,8 +560,8 @@ final class RouterV2DemoScript {
         await park()
     }
 
-    private func beat21() async {
-        await beat(21, "⌘F: filter from the keyboard")
+    private func beat22() async {
+        await beat(22, "⌘F: filter from the keyboard")
         key(["cmd", "F"], code: kVK_ANSI_F, flags: .command, characters: "f")
         await pause(1.3)
         // Type-ahead, shown as typed text: no letter is a shortcut.
@@ -554,15 +571,15 @@ final class RouterV2DemoScript {
         enter()
     }
 
-    private func beat22() async {
-        await beat(22, "Esc clears")
+    private func beat23() async {
+        await beat(23, "Esc clears")
         escape()
     }
 
     // Act 5: send
 
-    private func beat23() async {
-        await beat(23, "Type with nothing selected: Fjord finds the place")
+    private func beat24() async {
+        await beat(24, "Type with nothing selected: Fjord finds the place")
         let words = "bar count: push it and open the PR"
         source.reads[words] = RouterV2Read(draft: words, places: [.thread(ID.bar)], sure: true)
         await type(words)
@@ -570,8 +587,8 @@ final class RouterV2DemoScript {
         enter()
     }
 
-    private func beat24() async {
-        await beat(24, "Not sure: its guess first, ⌘1–3 pick")
+    private func beat25() async {
+        await beat(25, "Not sure: its guess first, ⌘1–3 pick")
         let words = "the spacing is off again"
         source.reads[words] = RouterV2Read(draft: words, places: [.thread(ID.settings), .thread(ID.tab), .newThread(project: "fjord")], sure: false)
         await type(words)
@@ -582,8 +599,8 @@ final class RouterV2DemoScript {
         enter()
     }
 
-    private func beat25() async {
-        await beat(25, "A working thread: Return steers, ⌥ queues")
+    private func beat26() async {
+        await beat(26, "A working thread: Return steers, ⌥ queues")
         model.step(ID.checkpoint, "Checking the boot log",
                    steps: RouterV2Demo.steps(["Building the boot image", "Removing the old worktree", "Booting the VM from the checkpoint",
                                               "Checking the boot log", "Updating the README"], running: 3))
@@ -609,8 +626,8 @@ final class RouterV2DemoScript {
     /// The new thread's words.
     private static let newThread = "silo: write the changelog for 0.4"
 
-    private func beat26() async {
-        await beat(26, "A new thread: the row shows how it starts")
+    private func beat27() async {
+        await beat(27, "A new thread: the row shows how it starts")
         let words = Self.newThread
         source.reads[words] = RouterV2Read(draft: words, places: [.newThread(project: "silo")], sure: true, name: "write the changelog for 0.4")
         source.names[words] = "Changelog 0.4"
@@ -620,8 +637,8 @@ final class RouterV2DemoScript {
         await type(words)
     }
 
-    private func beat27() async {
-        await beat(27, "Tab into the row: arrows change a setting")
+    private func beat28() async {
+        await beat(28, "Tab into the row: arrows change a setting")
         key(["tab"], code: kVK_Tab)
         await pause(1.0)
         key(["right"], code: kVK_RightArrow)
@@ -630,8 +647,8 @@ final class RouterV2DemoScript {
         key(["down"], code: kVK_DownArrow)
     }
 
-    private func beat28() async {
-        await beat(28, "Or click a chip: its menu")
+    private func beat29() async {
+        await beat(29, "Or click a chip: its menu")
         guard let sonnet = model.launchModels.firstIndex(where: { $0.id == "claude-sonnet-5-5" }) else { return }
         await click(.launch(.model))
         await pause(0.9)
@@ -640,8 +657,8 @@ final class RouterV2DemoScript {
         await park()
     }
 
-    private func beat29() async {
-        await beat(29, "Or type @: the list offers the settings")
+    private func beat30() async {
+        await beat(30, "Or type @: the list offers the settings")
         // @op: Opus 5.5 is the list's first row; Return makes it a pill and the chip rolls to it. @med: Medium, the same.
         await type(" @op")
         await pause(1.0)
@@ -652,13 +669,13 @@ final class RouterV2DemoScript {
         model.pickScripted()
     }
 
-    private func beat30() async {
-        await beat(30, "Return starts it; the pills stay behind")
+    private func beat31() async {
+        await beat(31, "Return starts it; the pills stay behind")
         enter()
     }
 
-    private func beat31() async {
-        await beat(31, "Return early: it goes when Fjord knows where")
+    private func beat32() async {
+        await beat(32, "Return early: it goes when Fjord knows where")
         let words = "lcu: add a --dry-run flag to lcu apps"
         source.reads[words] = RouterV2Read(draft: words, places: [.newThread(project: "lcu")], sure: true, name: "add a --dry-run flag")
         source.names[words] = "Dry-run flag"
@@ -669,8 +686,8 @@ final class RouterV2DemoScript {
         enter()
     }
 
-    private func beat32() async {
-        await beat(32, "A send fails: it stays by the composer")
+    private func beat33() async {
+        await beat(33, "A send fails: it stays by the composer")
         let words = "snapshot api: RestoreToken moved to SiloCore"
         source.reads[words] = RouterV2Read(draft: words, places: [.thread(ID.snapshot)], sure: true)
         await type(words)
@@ -687,8 +704,8 @@ final class RouterV2DemoScript {
 
     // Act 6: clear
 
-    private func beat33() async {
-        await beat(33, "Turns end; each line is read alone")
+    private func beat34() async {
+        await beat(34, "Turns end; each line is read alone")
         source.endTurn(ID.settings, worth: .look, line: "now one scrolling page; PR #58",
                        lastLines: "Settings is one scrolling page now, with the sections in the order of the old tabs. The sidebar code is gone.",
                        prs: [.init(number: 58, state: .open)], diff: .init(files: 5, added: 184, removed: 97))
@@ -710,33 +727,33 @@ final class RouterV2DemoScript {
         model.turnEnded(ID.checkpoint)
     }
 
-    private func beat34() async {
-        await beat(34, "Done: the result, the PR, what changed")
+    private func beat35() async {
+        await beat(35, "Done: the result, the PR, what changed")
         down(option: true)
         await pause(0.9)
         down(option: true)
     }
 
-    private func beat35() async {
-        await beat(35, "Settle: gone at once")
+    private func beat36() async {
+        await beat(36, "Settle: gone at once")
         settle()
     }
 
-    private func beat36() async {
-        await beat(36, "⌘Z brings it back")
+    private func beat37() async {
+        await beat(37, "⌘Z brings it back")
         key(["cmd", "Z"], code: kVK_ANSI_Z, flags: .command, characters: "z")
     }
 
-    private func beat37() async {
-        await beat(37, "⌘⌫ twice: two lines, one toast")
+    private func beat38() async {
+        await beat(38, "⌘⌫ twice: two lines, one toast")
         settle()
         // The next card is read before it is settled too.
         await pause(1.8)
         settle()
     }
 
-    private func beat38() async {
-        await beat(38, "Snooze")
+    private func beat39() async {
+        await beat(39, "Snooze")
         key(["alt", "cmd", "backspace"], code: kVK_Delete, flags: [.command, .option])
         await pause(1.0)
         down()
@@ -746,16 +763,16 @@ final class RouterV2DemoScript {
         enter()
     }
 
-    private func beat39() async {
-        await beat(39, "Doesn't need me: it goes to Done")
+    private func beat40() async {
+        await beat(40, "Doesn't need me: it goes to Done")
         down()
         await pause(2.2)
         await click(.footer(ID.upstream, .notForMe))
         await park()
     }
 
-    private func beat40() async {
-        await beat(40, "Finished earlier: one line, one act")
+    private func beat41() async {
+        await beat(41, "Finished earlier: one line, one act")
         await move(to: .housekeepingWords)
         await pause(2.2)
         await click(.settleAll)
@@ -763,8 +780,8 @@ final class RouterV2DemoScript {
         await park()
     }
 
-    private func beat41() async {
-        await beat(41, "Clearing the rest")
+    private func beat42() async {
+        await beat(42, "Clearing the rest")
         // What was flagged is dealt with before it is settled: PR #2049 merges, and its line goes quiet.
         model.pr(ID.upstream, 2049, .merged)
         source.verdict(ID.upstream, line: "replied on the issue; PR #2049") { $0.verdict(ID.upstream, worth: .quiet) }
@@ -805,8 +822,8 @@ final class RouterV2DemoScript {
         }
     }
 
-    private func beat42() async {
-        await beat(42, "Nothing left")
+    private func beat43() async {
+        await beat(43, "Nothing left")
         // The last toast doesn't sit on the empty page for its eight seconds.
         await pause(2.2)
         model.dismissToast()
