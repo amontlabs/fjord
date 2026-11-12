@@ -246,7 +246,8 @@ private struct RouterV2Pills: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onAppear { pull() }
+            // Words already in the field (a prefill made before the page showed) are the page's; else the page's are the field's.
+            .onAppear { if host?.text.draft.isEmpty == false { push() } else { pull() } }
             .onChange(of: model.draft) { pull() }
             .onChange(of: host?.text.draft) { push() }
             .onChange(of: host?.text.pointers) { push() }

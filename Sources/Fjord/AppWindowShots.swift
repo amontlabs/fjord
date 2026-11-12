@@ -246,7 +246,7 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ] + RouterV2Shots.catalog
+    ] + RouterV2Shots.catalog + RouterV2MentionShot.catalog
 
     private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
                                   focus: Bool = false, drawer: Bool = false, hover: String? = nil,
