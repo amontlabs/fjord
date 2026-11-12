@@ -19,3 +19,7 @@
 - Decider: `DeciderContext.Inputs.open/launch`, `Built.schema/launch`; answer decodes `launch`, `launch_words`; DeciderLog records them.
 - 9b wiring: feed on connect/reconnect; reader `decide` passes `open: selected`, `launch: feed.offer`; jev→readDraft, search→searchDraft, boardKey→deciderBoardKey, eligible→routerDispatcher.eligible, tagged→RouterPointers.context; searchHits in place of routerPreview.searchHits; `onRead` decision → `RouterContext.decided` (and RouterActs.decision).
 - Eval (wave 2): 300 dev moments vs N4 (top-1, wrong-thread sends, new-work starts); 40 drafts with settings asides (launch/launch_words, nothing meant for the agent taken); share of Sonnet calls cancelled by keystrokes.
+
+## Track 8 (composer, dock, keys) — c6bf9a8a fdbbc311 479577b2 db35e0ab
+- 9a: set `routerV2Composer` env (store + RouterModel) so the composer is `MentionField`; pass `composer:` into `RouterV2Keys.key(event, model:, composer:)` from the window's key monitor; set `routerV2Waiting` env, fill `RouterV2Waiting.items` (unattended actions with no place), wire its `pick`.
+- Live-only checks for wave 3: caret-anchored @ list position, IME in the new field, ⇧Return, new-thread pill vs real project names.
