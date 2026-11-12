@@ -97,6 +97,11 @@ struct RouterV2Card: View {
             if let launch = thread.launch { started(launch) }
             // T3's to-do steps, when the thread has a list (Claude sends one only with T3's to-do setting on).
             if !thread.steps.isEmpty { steps.prose() }
+            // Its subagents, background commands and waits, each with how long it has run.
+            if !thread.activity.isEmpty {
+                RouterV2ActivityRows(model: model, activity: thread.activity, compact: true).prose()
+                    .transition(.opacity)
+            }
         case .sent:
             if let sent = thread.sent {
                 Text(sent.words).cdsText(d.body, .regular, CDS.Text.primary).fixedSize(horizontal: false, vertical: true).prose()
