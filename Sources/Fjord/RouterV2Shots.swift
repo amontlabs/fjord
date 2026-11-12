@@ -143,6 +143,11 @@ enum RouterV2Shots {
             model.toggle(section: .working)
             model.enterFilterMode()
         },
+        // A state token pressed alone: only Done's lines, every project; the pills count under it.
+        State(name: "v2-filter-state") { model in
+            model.select(nil)
+            model.toggle(section: .done)
+        },
         State(name: "v2-filter-empty") { model in
             model.select(nil)
             model.toggle(project: "docs-site")

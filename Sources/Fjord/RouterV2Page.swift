@@ -332,8 +332,9 @@ struct RouterV2FilterBar: View {
             .fixedSize()
             .geometryGroup()
             .modifier(Shell(model: model, item: .state(section), active: active, hot: hot, pressed: pressed, grounds: grounds, group: "state"))
+            // The word, on the label: a tooltip around the button itself stood between it and an accessibility press.
+            .help("\(section.title), \(count)")
         }
-        .help("\(section.title), \(count)")
         .accessibilityLabel("\(section.title), \(count)")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
