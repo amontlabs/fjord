@@ -533,6 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if CommandLine.arguments.contains("--window") {
             appWindow = AppWindowDev.open(store)
+            WindowRecorder.runIfRequested { [weak self] in self?.appWindow?.window }
             return
         }
         if CommandLine.arguments.contains("--playground") {
