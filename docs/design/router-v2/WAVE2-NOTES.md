@@ -37,3 +37,15 @@
 - 9a: `records.shell(item)` first in `onShell`; `detail(id, RouterDetail.make(…))` in `onThread`; `delivered(_:)` from whoever watches `Store.delivery`; `projectName` = `Store.folderName`; `notifier.post` = `Store.notifyRouter`; `pullRequests` → track 2's `RouterPullRequests.states`; `RouterVerdictFile.live(supportDir)`, `flush()` on quit.
 - Open: `RouterActs.Send.Kind.start` needs `name: String?` so a new thread's line keeps the read's name; permission `warning/warned` empty (ThreadRequest has none); Stopped lines kept 7 days.
 - Perf: 500-row shell reduces in 2.85 ms (debug).
+
+## Track 7 (rendering) — ad0b9369 22b44659 ce129ef8 3a4992d6 6aa49c4d
+- Streamed `.words`/`.reply` must go through `RouterV2Model.post(_:)` (the per-frame coalescer), not `apply` (9a wires tracks 3/4 to it).
+- `RouterV2Thread.live` (default true): track 3 should set it from `ThreadRequest.live` (not-live card shows Open in T3).
+- Load scenario: `--router-v2-load`; `scripts/morph-timings.sh --args`.
+- GATES MISSED (release, load): event→commit p50 41 / p95 99 / max 225 ms (budget p95 ≤ 8); Select p95 68–83 ms (≤ 8). Per-record work is ≤ 1–2 ms; the cost is SwiftUI laying out and drawing the whole 60-row page each frame. Needs a list layout change (stored row heights, lazy stack, or per-row drawing isolation). Idle 0.10 % (met). Bodies per change met.
+
+## Wave 2 small fixes (owned by 9a unless noted)
+- `RouterActs.Send.Kind.start` gains `name: String?` (track 3 open item).
+- Refused settle/snooze: a port case for a toast with the reason, and drop the page's undo entry (track 6 open item).
+- Reader pauses to 300/600 ms, moved into `enum RouterV2`.
+- `RouterTools.redacted` nonisolated (RouterMCP.swift, 9b's file) so verdict input builds off main.
