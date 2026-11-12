@@ -2,8 +2,9 @@ import Foundation
 
 // One structured model call through Claude Code on your subscription (`claude -p`): a system prompt, the user text on stdin
 // and a JSON schema, answered as the typed JSON. No tools, no settings, no MCP, no session kept, thinking off. The router's
-// decider (Sonnet) and its thread cards (Haiku) use it; the brief's Haiku runs through `RouterBriefer` the same way. Every call's
-// usage (`--output-format json`: its tokens and `total_cost_usd`) goes to the model-usage log (`ModelUsageLog`).
+// decider (Sonnet) and its thread cards (Haiku) use it; the brief's Haiku runs through `RouterBriefer` the same way, and
+// Router v2's verdicts stream with the same flags (`ClaudeStream`). Every call's usage (`--output-format json`: its tokens
+// and `total_cost_usd`) goes to the model-usage log (`ModelUsageLog`).
 
 /// What a call cost, in tokens, and Claude Code's own cost for it (at API prices).
 struct ModelUsage: Equatable, Sendable, Codable {
@@ -34,10 +35,12 @@ enum ClaudePrint {
     /// Thinking off for a single answer: the setting Claude Code reads (no other settings load).
     static let noThinking = #"{"alwaysThinkingEnabled":false}"#
 
-    /// The arguments of one call, in a fixed order.
-    static func arguments(model: String, system: String, schema: String, effort: String?) -> [String] {
-        var out = ["-p", "--model", model, "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence",
-                   "--output-format", "json", "--settings", noThinking]
+    /// The arguments of one call, in a fixed order. `streaming`: the answer as it is written (`ClaudeStream`), one JSON
+    /// line per event, the typed answer's pieces included.
+    static func arguments(model: String, system: String, schema: String, effort: String?, streaming: Bool = false) -> [String] {
+        var out = ["-p", "--model", model, "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence"]
+        out += streaming ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"] : ["--output-format", "json"]
+        out += ["--settings", noThinking]
         if let effort { out += ["--effort", effort] }
         out += ["--json-schema", schema, "--system-prompt", system]
         return out
@@ -49,11 +52,7 @@ enum ClaudePrint {
             let why = String(decoding: output.stderr.prefix(200), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             throw Failure(message: why.isEmpty ? "Claude Code's answer wasn't JSON (exit \(output.status))" : "Claude Code: \(why)")
         }
-        let u = obj["usage"] as? [String: Any] ?? [:]
-        func n(_ k: String) -> Int { (u[k] as? NSNumber)?.intValue ?? 0 }
-        let usage = ModelUsage(inputTokens: n("input_tokens"), outputTokens: n("output_tokens"),
-                               cacheReadTokens: n("cache_read_input_tokens"), cacheCreationTokens: n("cache_creation_input_tokens"),
-                               costUSD: (obj["total_cost_usd"] as? NSNumber)?.doubleValue)
+        let usage = usage(obj)
         if obj["is_error"] as? Bool == true {
             throw Failure(message: "Claude Code: " + String((obj["result"] as? String ?? "the call failed").prefix(200)))
         }
@@ -61,6 +60,15 @@ enum ClaudePrint {
             throw Failure(message: "Claude Code's answer had no structured output")
         }
         return (data, usage)
+    }
+
+    /// A result object's tokens and cost.
+    static func usage(_ obj: [String: Any]) -> ModelUsage {
+        let u = obj["usage"] as? [String: Any] ?? [:]
+        func n(_ k: String) -> Int { (u[k] as? NSNumber)?.intValue ?? 0 }
+        return ModelUsage(inputTokens: n("input_tokens"), outputTokens: n("output_tokens"),
+                          cacheReadTokens: n("cache_read_input_tokens"), cacheCreationTokens: n("cache_creation_input_tokens"),
+                          costUSD: (obj["total_cost_usd"] as? NSNumber)?.doubleValue)
     }
 
     static let liveRunner: Runner = { binary, arguments, input, timeout in
@@ -85,13 +93,15 @@ enum ClaudePrint {
 /// which role and model, its tokens and its cost at API prices. Settings › T3 Code sums it for today, 7 days and all time.
 final class ModelUsageLog: @unchecked Sendable {
     enum Role: String, Codable, CaseIterable, Sendable {
-        case decider, cards, brief, jev
+        case decider, cards, brief, jev, verdict, purpose
         var title: String {
             switch self {
             case .decider: "Sonnet decider"
             case .cards: "Haiku thread cards"
             case .brief: "Haiku briefs"
             case .jev: "Jev"
+            case .verdict: "Haiku verdicts"
+            case .purpose: "Haiku project purposes"
             }
         }
     }
