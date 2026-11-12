@@ -8,14 +8,17 @@ import SwiftUI
 
 struct RouterV2Card: View {
     let model: RouterV2Model
-    let thread: RouterV2Thread
+    /// Its line's box: the card redraws when the record does, not as the reply grows (`RouterV2LastLines` does).
+    let box: RouterV2LineBox
     @Namespace private var rail
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias M = RouterV2.Card
     private var d: CDS.Density { .compact }
+    private var thread: RouterV2Thread { box.head }
 
     var body: some View {
+        let _ = RouterV2Bodies.count("card", box.id)
         VStack(alignment: .leading, spacing: M.gap) {
             Text(thread.title).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(1).prose()
             if thread.loading {
@@ -27,8 +30,8 @@ struct RouterV2Card: View {
                 .padding(.vertical, 4)
                 .prose()
                 .transition(.opacity)
-            } else if !thread.lastLines.isEmpty || thread.writing {
-                RouterV2LastLines(model: model, thread: thread).prose().transition(.opacity)
+            } else if box.talking {
+                RouterV2LastLines(model: model, box: box).prose().transition(.opacity)
             }
             kind
             footer
@@ -257,18 +260,20 @@ enum RouterV2Inline {
 /// While the agent writes, the text grows live with a caret after its last word.
 struct RouterV2LastLines: View {
     let model: RouterV2Model
-    let thread: RouterV2Thread
+    let box: RouterV2LineBox
     /// The whole text's height, and the height of its first lines (where it is cut while closed).
     @State private var full: CGFloat = 0
     @State private var cut: CGFloat = 0
 
     var body: some View {
+        let _ = RouterV2Bodies.count("lastLines", box.id)
         let d = CDS.Density.compact
+        let thread = box.head
         let open = model.expanded.contains(thread.id) && thread.plan.isEmpty
         let limit = thread.state == .done ? RouterV2.Card.lastLinesDone : RouterV2.Card.lastLines
         // The agent's words are Markdown: its inline code reads as code.
-        let words = Text(RouterV2Inline.text(thread.lastLines, size: d.body.0))
-        let text = (thread.writing ? words + RouterV2TextCaret.text : words).cdsText(d.body, .regular, CDS.Text.secondary)
+        let words = Text(RouterV2Inline.text(box.lastLines, size: d.body.0))
+        let text = (box.writing ? words + RouterV2TextCaret.text : words).cdsText(d.body, .regular, CDS.Text.secondary)
         let clipped = !open && cut > 0 && full > cut + 1
         Group {
             if open, full > RouterV2.Card.openHeight {
@@ -366,7 +371,7 @@ struct RouterV2Options: View {
     var body: some View {
         let picked = Set((model.picks[thread.id] ?? [:]).values)
         // With a draft, digits are words and Return sends the words: the rows show they are not what goes.
-        let quiet = !model.draft.isEmpty
+        let quiet = !model.draftEmpty
         VStack(spacing: 1) {
             ForEach(Array(labels.enumerated()), id: \.offset) { n, label in
                 let number = from + n + 1

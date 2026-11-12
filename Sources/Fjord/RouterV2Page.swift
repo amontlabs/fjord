@@ -46,8 +46,13 @@ struct RouterV2Screen: View {
             model.reduce = reduce
             model.undoManager = undoManager
             flags.start(model)
+            // The ages tick on one clock while the page shows (a still's stands).
+            if !model.still { model.clock.start() }
         }
-        .onDisappear { flags.stop() }
+        .onDisappear {
+            flags.stop()
+            model.clock.stop()
+        }
         .onChange(of: reduce) { _, now in model.reduce = now }
     }
 
@@ -100,7 +105,9 @@ struct RouterV2List: View {
     @Environment(\.windowArrival) private var arrival
 
     var body: some View {
-        let rows = model.rows()
+        // The stored layout: this body runs when the order or a count changes, not when a line's fields do.
+        let rows = model.layout
+        let _ = RouterV2Bodies.count("list")
         // Each row's place on the page. The rows themselves are declared by id, an order no change of section moves:
         // a reordered `ForEach` takes the row out and puts it back in, and then nothing glides.
         let places = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -115,7 +122,6 @@ struct RouterV2List: View {
                             .layoutValue(key: RouterV2Stack.Order.self, value: places[row.id] ?? 0)
                             // Read top to bottom, whatever the order they are declared in.
                             .accessibilitySortPriority(Double(rows.count - (places[row.id] ?? 0)))
-                            .zIndex(z(row))
                             .transition(.routerV2Fold(reduce: reduce))
                     }
                 }
@@ -127,7 +133,7 @@ struct RouterV2List: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 // With no thread the bar goes, and its place stays: the sentence under it doesn't jump.
                 ZStack {
-                    if !model.threads.isEmpty {
+                    if model.hasThreads {
                         RouterV2FilterBar(model: model)
                             .padding(.leading, edges.leading - CDS.Tabs.pad).padding(.trailing, edges.trailing - CDS.Tabs.pad)
                             .transition(.opacity)
@@ -153,22 +159,11 @@ struct RouterV2List: View {
                         .allowsHitTesting(false)
                     }
             }
-            .onChange(of: model.revealTick) {
-                guard let line = model.reveal, let row = rows.first(where: { $0.id == line || $0.id.hasPrefix(line + "@") }) else { return }
-                // After the card has its place in the layout.
-                let follow = arrival?.active == true ? nil : Motion.follow.resolved(reduce: reduce)
-                DispatchQueue.main.async { withAnimation(follow) { proxy.scrollTo(row.id) } }
-            }
+            .background { RouterV2Reveal(model: model, proxy: proxy) }
         }
     }
 
-    /// A line in flight passes over the rows between: it is drawn last.
-    private func z(_ row: RouterV2Row) -> Double {
-        if case .line(let t) = row.kind, model.moving.contains(t.id) { return 1 }
-        return 0
-    }
-
-    @ViewBuilder private func view(_ row: RouterV2Row, first: Bool) -> some View {
+    @ViewBuilder private func view(_ row: RouterV2Slot, first: Bool) -> some View {
         switch row.kind {
         // The first row's content (the Needs-you header, or the sentence in its place) swaps in place. The swap's
         // fades carry their own curve: a curve set here on all the rows would take the lines' glide from them.
@@ -178,11 +173,30 @@ struct RouterV2List: View {
         case .sentence(let words, let clear):
             RouterV2SentenceRow(model: model, words: words, clear: clear)
                 .transition(.routerV2Swap)
-        case .line(let thread):
-            RouterV2LineView(model: model, thread: thread)
+        case .line(let id):
+            RouterV2LineView(model: model, box: model.box(id))
         case .housekeeping(let count):
             RouterV2HousekeepingRow(model: model, count: count)
         }
+    }
+}
+
+/// Brings the selection's line into view as it moves: its own view, so a reveal doesn't run the list's body.
+private struct RouterV2Reveal: View {
+    let model: RouterV2Model
+    let proxy: ScrollViewProxy
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.windowArrival) private var arrival
+
+    var body: some View {
+        Color.clear
+            .onChange(of: model.revealTick) {
+                guard let line = model.reveal,
+                      let row = model.layout.first(where: { $0.id == line || $0.id.hasPrefix(line + "@") }) else { return }
+                // After the card has its place in the layout.
+                let follow = arrival?.active == true ? nil : Motion.follow.resolved(reduce: reduce)
+                DispatchQueue.main.async { withAnimation(follow) { proxy.scrollTo(row.id) } }
+            }
     }
 }
 
@@ -255,7 +269,7 @@ struct RouterV2HousekeepingRow: View {
     let count: Int
 
     var body: some View {
-        let selected = model.selection == .housekeeping
+        let selected = model.flags(.housekeeping).selected
         HStack(spacing: 8) {
             Text(RouterV2.Copy.older(count)).font(CDS.sans(13)).foregroundStyle(CDS.Text.muted).lineLimit(1)
                 .frame(height: 24)
@@ -346,11 +360,9 @@ struct RouterV2FilterBar: View {
                 // After the pills, so the tokens never move. Its Esc keycap shows only when Esc would clear (it steps
                 // out of a card or a draft first).
                 if model.filtered {
-                    RouterV2TextButton(model: model, hit: .clear, title: RouterV2.Copy.clear, keys: model.escClears ? ["esc"] : []) {
-                        model.clearFilters()
-                    }
-                    .padding(.leading, 12 - M.pillGap)
-                    .transition(.opacity)
+                    RouterV2ClearFilters(model: model)
+                        .padding(.leading, 12 - M.pillGap)
+                        .transition(.opacity)
                 }
             }
             Spacer(minLength: 12)
@@ -373,7 +385,6 @@ struct RouterV2FilterBar: View {
         }
         .motion(.glass, value: model.project)
         .motion(.glass, value: model.section)
-        .motion(.fade, value: model.escClears)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Filters")
     }
@@ -443,6 +454,19 @@ struct RouterV2FilterBar: View {
     }
 }
 
+/// The filter bar's Clear: its Esc keycap shows only when Esc would clear (it steps out of a card or a draft first). Its
+/// own view: what Esc does reads the draft, and the bar doesn't redraw on each key.
+private struct RouterV2ClearFilters: View {
+    let model: RouterV2Model
+
+    var body: some View {
+        RouterV2TextButton(model: model, hit: .clear, title: RouterV2.Copy.clear, keys: model.escClears ? ["esc"] : []) {
+            model.clearFilters()
+        }
+        .motion(.fade, value: model.escClears)
+    }
+}
+
 // MARK: - What floats
 
 /// The hover peek, the housekeeping line's peek and the menus, placed by the frame of what they hang from: under it in
@@ -459,7 +483,7 @@ struct RouterV2Floating: View {
                     .id("peek-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
-            if model.hoverControl == .housekeepingWords, let frame = frames[.housekeepingWords], !model.shownOlder.isEmpty {
+            if model.flags(.housekeepingWords).hot, let frame = frames[.housekeepingWords], !model.shownOlder.isEmpty {
                 hung(from: frame, width: RouterV2.Peek.olderWidth) { RouterV2OlderPeek(model: model, older: model.shownOlder) }
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
@@ -481,7 +505,7 @@ struct RouterV2Floating: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .motion(.fade, value: model.peeked)
-        .motion(.fade, value: model.hoverControl == .housekeepingWords)
+        .motion(.fade, value: model.flags(.housekeepingWords).hot)
         .motion(.fade, value: model.snoozeMenu != nil)
         .motion(.fade, value: model.placesMenu)
         .motion(.fade, value: model.launchMenu)

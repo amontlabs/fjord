@@ -91,24 +91,28 @@ enum RouterV2Curve {
 final class RouterV2Model {
     // MARK: Records
 
-    var threads: [RouterV2Thread] = []
-    var older: [RouterV2Older] = []
+    /// Views don't read the records: each line reads its box (`box(_:)`), the list its layout, the bar its tally. Every
+    /// change is mirrored there in the same turn (`threadsChanged`).
+    var threads: [RouterV2Thread] = [] { didSet { threadsChanged() } }
+    var older: [RouterV2Older] = [] { didSet { if older != oldValue { relayout() } } }
     var failures: [RouterV2Failure] = []
     var connectionLost = false
 
     // MARK: The owner's state
 
-    var selection: RouterV2Selection?
+    var selection: RouterV2Selection? { didSet { if selection != oldValue { selectionChanged(from: oldValue) } } }
     /// The filters: one project or all, one state or all.
-    var project: String?
-    var section: RouterV2Section?
+    var project: String? { didSet { if project != oldValue { relayout() } } }
+    var section: RouterV2Section? { didSet { if section != oldValue { relayout() } } }
     /// ⌘F: the keyboard is on the filter bar, the ring on `ring`.
     var filterMode = false
     var ring: RouterV2FilterItem = .project(nil)
     @ObservationIgnored var typeAhead = ""
 
     /// Written through `setDraft`.
-    var draft = ""
+    var draft = "" { didSet { if draft.isEmpty != draftEmpty { draftEmpty = draft.isEmpty } } }
+    /// No draft: what reads only that doesn't redraw on each key.
+    private(set) var draftEmpty = true
     /// The picked options: per thread, per question (0 for a single question), the option's number through the card.
     var picks: [String: [Int: Int]] = [:]
     /// A form's typed answers, per question.
@@ -156,13 +160,13 @@ final class RouterV2Model {
     var snoozeMenu: RouterV2SnoozeMenu?
 
     // The pointer (the real one, or the demo's drawn one).
-    var hoverRow: String?
-    var hoverName: String?
-    var hoverControl: RouterV2Hit?
-    var pressed: RouterV2Hit?
+    var hoverRow: String? { didSet { if hoverRow != oldValue { hotChanged(oldValue.map(RouterV2Hit.row), hoverRow.map(RouterV2Hit.row)) } } }
+    var hoverName: String? { didSet { if hoverName != oldValue { hotChanged(oldValue.map(RouterV2Hit.name), hoverName.map(RouterV2Hit.name)) } } }
+    var hoverControl: RouterV2Hit? { didSet { if hoverControl != oldValue { hotChanged(oldValue, hoverControl) } } }
+    var pressed: RouterV2Hit? { didSet { if pressed != oldValue { pressedChanged(from: oldValue) } } }
 
     /// The lines changing section now: drawn over their neighbours.
-    var moving: Set<String> = []
+    var moving: Set<String> = [] { didSet { if moving != oldValue { movingChanged(from: oldValue) } } }
     /// The card your own act advanced to: its "new" dot goes (and T3 is told) at your next key or pointer move, not as
     /// it opens, so nothing is marked seen that you didn't look at.
     @ObservationIgnored var pendingSeen: String?
@@ -181,7 +185,7 @@ final class RouterV2Model {
     @ObservationIgnored var scripted = false
     /// A still (a shot): the sheen and the dots hold one pose, the clock stands.
     @ObservationIgnored var still = false
-    var reduce = false
+    var reduce = false { didSet { if reduce != oldValue { relayout() } } }
     /// The fake clock: `clockStart` at the moment the page was made.
     @ObservationIgnored let made = Date()
     @ObservationIgnored var clockStart: Date = RouterV2Model.today(14, 2)
@@ -200,6 +204,32 @@ final class RouterV2Model {
     @ObservationIgnored private var armGeneration = 0
     @ObservationIgnored private var armed: [RouterV2Hit: Int] = [:]
     @ObservationIgnored private var lastPointer: [RouterV2Hit: CGPoint] = [:]
+
+    // MARK: What the views read (RouterV2Render.swift)
+
+    /// The list's rows, rewritten only when the order or a header's count changes.
+    private(set) var layout: [RouterV2Slot] = [RouterV2Slot(id: RouterV2Model.firstRow, kind: .sentence(RouterV2.Copy.nothingAtAll, clear: false))]
+    /// The counts and the projects, stored with the layout.
+    private(set) var tally = RouterV2Tally()
+    /// There is a thread: the filter bar shows.
+    private(set) var hasThreads = false
+    /// The ages' one clock.
+    @ObservationIgnored private(set) lazy var clock = RouterV2Clock(from: made)
+    @ObservationIgnored private var boxes: [String: RouterV2LineBox] = [:]
+    @ObservationIgnored private var hits: [RouterV2Hit: RouterV2HitBox] = [:]
+    /// What is hot and pressed, for a hit's box made after the fact.
+    @ObservationIgnored private var hot: Set<RouterV2Hit> = []
+    /// The line marked as the draft's destination, as last set on the boxes.
+    @ObservationIgnored private var markedShown: String?
+    /// Streamed changes kept for the turn's end, by thread, in arrival order (`post`).
+    @ObservationIgnored private var kept: [(id: String, change: RouterV2Change)] = []
+    /// Threads whose words of the current stream are still coming (`.words(done: false)`).
+    @ObservationIgnored private var growing: Set<String> = []
+    @ObservationIgnored private lazy var turn = RouterV2Turn { [weak self] in self?.endTurn() }
+
+    init() {
+        trackMarked()
+    }
 
     static func today(_ hour: Int, _ minute: Int) -> Date {
         Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
@@ -235,7 +265,10 @@ final class RouterV2Model {
 
     // MARK: Reading the records
 
-    func thread(_ id: String) -> RouterV2Thread? { threads.first { $0.id == id } }
+    func thread(_ id: String) -> RouterV2Thread? {
+        access(keyPath: \.threads)
+        return boxes[id]?.record
+    }
 
     func update(_ id: String, _ change: (inout RouterV2Thread) -> Void) {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
@@ -272,7 +305,7 @@ final class RouterV2Model {
 
     /// The lines shown, top to bottom.
     var shownLines: [RouterV2Thread] {
-        RouterV2Section.allCases.flatMap { s in ordered(s).filter { matches($0, project: project, section: section) } }
+        layout.compactMap { if case .line(let id) = $0.kind { boxes[id]?.record } else { nil } }
     }
 
     var shownOlder: [RouterV2Older] {
@@ -285,43 +318,56 @@ final class RouterV2Model {
 
     /// The page: headers, lines, the sentences that take a header's place, the housekeeping line.
     func rows() -> [RouterV2Row] {
-        if threads.isEmpty {
-            return [RouterV2Row(id: Self.firstRow, kind: .sentence(RouterV2.Copy.nothingAtAll, clear: false))]
+        layout.compactMap { slot in
+            switch slot.kind {
+            case .header(let s, let n): RouterV2Row(id: slot.id, kind: .header(s, n))
+            case .sentence(let words, let clear): RouterV2Row(id: slot.id, kind: .sentence(words, clear: clear))
+            case .line(let id): boxes[id].map { RouterV2Row(id: slot.id, kind: .line($0.record)) }
+            case .housekeeping(let n): RouterV2Row(id: slot.id, kind: .housekeeping(n))
+            }
         }
-        var out: [RouterV2Row] = []
-        let shown = shownLines
+    }
+
+    /// The page's rows from the records: sorted here, once per change of order, never in a body.
+    private func slots() -> [RouterV2Slot] {
+        if threads.isEmpty {
+            return [RouterV2Slot(id: Self.firstRow, kind: .sentence(RouterV2.Copy.nothingAtAll, clear: false))]
+        }
+        var out: [RouterV2Slot] = []
         let older = shownOlder
-        if shown.isEmpty, older.isEmpty, let project {
-            return [RouterV2Row(id: Self.firstRow, kind: .sentence(RouterV2.Copy.noThreads(in: project), clear: true))]
+        var shown: [RouterV2Section: [RouterV2Thread]] = [:]
+        for s in RouterV2Section.allCases { shown[s] = ordered(s).filter { matches($0, project: project, section: section) } }
+        if shown.values.allSatisfy(\.isEmpty), older.isEmpty, let project {
+            return [RouterV2Slot(id: Self.firstRow, kind: .sentence(RouterV2.Copy.noThreads(in: project), clear: true))]
         }
         for s in RouterV2Section.allCases {
-            let lines = shown.filter { $0.section == s }
+            let lines = shown[s] ?? []
             if lines.isEmpty {
                 if s == .needsYou, section == nil || section == .needsYou {
                     let words = project.map(RouterV2.Copy.nothingNeedsYou(in:)) ?? RouterV2.Copy.nothingNeedsYou
-                    out.append(RouterV2Row(id: Self.firstRow, kind: .sentence(words, clear: false)))
+                    out.append(RouterV2Slot(id: Self.firstRow, kind: .sentence(words, clear: false)))
                 }
                 continue
             }
-            out.append(RouterV2Row(id: "header-\(s.rawValue)", kind: .header(s, lines.count)))
+            out.append(RouterV2Slot(id: "header-\(s.rawValue)", kind: .header(s, lines.count)))
             // Under Reduce Motion a line that changes section fades out where it was and in where it goes: its row is
             // another one there.
-            out += lines.map { RouterV2Row(id: reduce ? "\($0.id)@\(s.rawValue)" : $0.id, kind: .line($0)) }
+            out += lines.map { RouterV2Slot(id: reduce ? "\($0.id)@\(s.rawValue)" : $0.id, kind: .line($0.id)) }
         }
-        if !older.isEmpty { out.append(RouterV2Row(id: "housekeeping", kind: .housekeeping(older.count))) }
+        if !older.isEmpty { out.append(RouterV2Slot(id: "housekeeping", kind: .housekeeping(older.count))) }
         return out
     }
 
     /// The projects with at least one line (or a finished thread under the housekeeping line), alphabetical: the bar's
     /// pills.
-    var projects: [String] { Set(threads.compactMap(\.project) + older.compactMap(\.project)).sorted() }
+    var projects: [String] { tally.projects }
 
     /// A pill's count: its lines under the current state choice.
-    func count(project p: String?) -> Int { threads.filter { matches($0, project: p, section: section) }.count }
+    func count(project p: String?) -> Int { tally.count(project: p, section: section) }
     /// A token's count: its lines under the current project choice.
-    func count(section s: RouterV2Section) -> Int { threads.filter { matches($0, project: project, section: s) }.count }
+    func count(section s: RouterV2Section) -> Int { tally.count(project: project, section: s) }
     /// The sidebar's badge: every Needs-you line, whatever the filters.
-    var needsYou: Int { threads.filter { $0.section == .needsYou }.count }
+    var needsYou: Int { tally.all[.needsYou] ?? 0 }
 
     var filtered: Bool { project != nil || section != nil }
 
@@ -412,6 +458,8 @@ final class RouterV2Model {
 
     func select(_ new: RouterV2Selection?) {
         guard new != selection else { return }
+        let interval = RouterSignposts.begin("Select")
+        defer { RouterSignposts.end(interval, afterCommit: true) }
         pendingSeen = nil
         animate(.spatial) {
             selection = new
@@ -615,8 +663,8 @@ final class RouterV2Model {
             // The hot path: one field of one line, nothing animated here (the card's text draws its own growth).
             guard let t = thread(id), t.lastLines != text || t.writing != writing else { return }
             update(id) { $0.lastLines = text; $0.writing = writing }
-        case .words(let id, let stream, let text, _):
-            words(id, stream: stream, text: text)
+        case .words(let id, let stream, let text, let done):
+            words(id, stream: stream, text: text, done: done)
         case .named(let id, let name):
             guard let t = thread(id), t.name != name || t.naming else { return }
             animate(.fade) { update(id) { $0.name = name; $0.naming = false } }
@@ -704,21 +752,32 @@ final class RouterV2Model {
     }
 
     /// A verdict's line as it lands: a new `stream` starts it (its words stream in over the sentence's place), the same
-    /// one grows it, an older one is late and dropped.
-    private func words(_ id: String, stream: Int, text: String) {
+    /// one grows it (the words that arrived since fade in where they are), an older one is late and dropped. `done`: the
+    /// stream's words are all there, and the line settles once they are drawn; until then it keeps streaming, however
+    /// long the words take to come.
+    private func words(_ id: String, stream: Int, text: String, done: Bool) {
         guard let t = thread(id), stream >= t.sentence.stream else { return }
+        let wasGrowing = growing.contains(id)
+        if done { growing.remove(id) } else { growing.insert(id) }
         if stream > t.sentence.stream {
+            if !done { growing.insert(id) }
+            boxes[id]?.complete = done
             update(id) { $0.sentence = .init(text: text, phase: .streaming, stream: stream, stateWord: $0.sentence.stateWord) }
         } else if t.sentence.text != text {
+            boxes[id]?.complete = done
             update(id) {
                 $0.sentence.text = text
                 $0.sentence.phase = .streaming
             }
+        } else if wasGrowing, done {
+            // The same words, now all there: drawn, the line settles.
+            boxes[id]?.complete = true
         }
     }
 
-    /// The sentence's words are all drawn (the line's view says so).
+    /// The sentence's words are all drawn (the line's view says so), and none are still coming.
     func streamed(_ id: String, stream: Int) {
+        guard !growing.contains(id) else { return }
         update(id) { if $0.sentence.stream == stream, $0.sentence.phase == .streaming { $0.sentence.phase = .settled } }
     }
 
@@ -741,6 +800,180 @@ final class RouterV2Model {
             if draft.isEmpty, selection == nil || selection == .line(id) { selection = .failure(failure.id) }
             failures.append(failure)
         }
+    }
+
+    // MARK: Streaming: one flush a turn
+
+    /// The hot path's entry (IMPLEMENTATION.md 2.2, streaming): a verdict's words and a reply, which come faster than
+    /// frames, are kept by thread (the last one of each wins: they are whole) and applied once, at the end of the main
+    /// loop's turn; anything else is applied at once, after what was kept, so the order of changes holds.
+    func post(_ change: RouterV2Change) {
+        switch change {
+        case .words(let id, _, _, _):
+            keep(id, change) { if case .words = $0 { true } else { false } }
+        case .reply(let id, _, _):
+            keep(id, change) { if case .reply = $0 { true } else { false } }
+        default:
+            flush()
+            apply(change)
+        }
+    }
+
+    private func keep(_ id: String, _ change: RouterV2Change, replacing same: (RouterV2Change) -> Bool) {
+        if let i = kept.firstIndex(where: { $0.id == id && same($0.change) }) {
+            // Newer words of an older stream never replace a newer stream's: the late ones are dropped by `apply`.
+            if case .words(_, let stream, _, _) = change, case .words(_, let held, _, _) = kept[i].change, stream < held { return }
+            kept[i].change = change
+        } else {
+            kept.append((id, change))
+        }
+        turn.schedule()
+    }
+
+    /// Applies what was kept for the turn's end.
+    func flush() {
+        guard !kept.isEmpty else { return }
+        let changes = kept
+        kept = []
+        RouterV2Bodies.count("flush")
+        let interval = RouterSignposts.begin("Flush")
+        for (_, change) in changes { apply(change) }
+        RouterSignposts.end(interval, afterCommit: true)
+    }
+
+    /// The turn's end: what was streamed is applied, and the line the draft goes to is marked.
+    func endTurn() {
+        flush()
+        syncMarked()
+    }
+
+    /// Runs the turn's end now (tests; a still).
+    func finishTurn() { turn.runNow() }
+
+    // MARK: Keeping the boxes in step
+
+    /// What places a line on the page: a change of any of these may move it, or change a count.
+    struct OrderKey: Equatable {
+        var section: RouterV2Section
+        var orderClass: RouterV2Thread.OrderClass
+        var since: Date
+        var order: Int
+        var reassessing: Bool
+        var project: String?
+
+        init(_ t: RouterV2Thread) {
+            section = t.section
+            orderClass = t.orderClass
+            since = t.since
+            order = t.order
+            reassessing = t.sentence.phase == .reassessing
+            project = t.project
+        }
+    }
+
+    /// A line's box. Its view is only made for a line the model holds.
+    func box(_ id: String) -> RouterV2LineBox {
+        if let box = boxes[id] { return box }
+        // A row whose thread just left, drawn once more on its way out: a box of its own, not kept.
+        return RouterV2LineBox(RouterV2Thread(id: id, name: "", title: "", state: .done, sentence: .init(text: ""), since: made))
+    }
+
+    /// The flags of a thing that can be pointed at.
+    func flags(_ hit: RouterV2Hit) -> RouterV2HitBox {
+        if let box = hits[hit] { return box }
+        let box = RouterV2HitBox(hot: hot.contains(hit), pressed: pressed == hit, selected: hit == .housekeeping && selection == .housekeeping)
+        hits[hit] = box
+        return box
+    }
+
+    private func threadsChanged() {
+        var moved = boxes.count != threads.count
+        for t in threads {
+            if let box = boxes[t.id] {
+                if box.take(t) { moved = true }
+            } else {
+                let box = RouterV2LineBox(t)
+                box.selected = selection == .line(t.id)
+                box.built = box.selected
+                box.moving = moving.contains(t.id)
+                box.marked = markedShown == t.id
+                boxes[t.id] = box
+                moved = true
+            }
+        }
+        if boxes.count != threads.count {
+            let ids = Set(threads.map(\.id))
+            boxes = boxes.filter { ids.contains($0.key) }
+            growing = growing.filter { ids.contains($0) }
+        }
+        if moved { relayout() }
+        if hasThreads == threads.isEmpty { hasThreads = !threads.isEmpty }
+    }
+
+    /// The layout and the counts from the records, written only when they changed.
+    private func relayout() {
+        let slots = slots()
+        if slots != layout { layout = slots }
+        var tally = RouterV2Tally()
+        var projects = Set<String>()
+        for t in threads {
+            tally.all[t.section, default: 0] += 1
+            if let p = t.project {
+                tally.byProject[p, default: [:]][t.section, default: 0] += 1
+                projects.insert(p)
+            }
+        }
+        for o in older { if let p = o.project { projects.insert(p) } }
+        tally.projects = projects.sorted()
+        if tally != self.tally { self.tally = tally }
+    }
+
+    private func selectionChanged(from old: RouterV2Selection?) {
+        if case .line(let id)? = old { boxes[id]?.selected = false }
+        if case .line(let id)? = selection, let box = boxes[id] {
+            box.selected = true
+            box.built = true
+        }
+        if old == .housekeeping || selection == .housekeeping { hits[.housekeeping]?.selected = selection == .housekeeping }
+    }
+
+    private func hotChanged(_ old: RouterV2Hit?, _ new: RouterV2Hit?) {
+        if let old {
+            hot.remove(old)
+            hits[old]?.hot = false
+        }
+        if let new {
+            hot.insert(new)
+            hits[new]?.hot = true
+        }
+    }
+
+    private func pressedChanged(from old: RouterV2Hit?) {
+        if let old { hits[old]?.pressed = false }
+        if let pressed { hits[pressed]?.pressed = true }
+    }
+
+    private func movingChanged(from old: Set<String>) {
+        for id in old.subtracting(moving) { boxes[id]?.moving = false }
+        for id in moving.subtracting(old) { boxes[id]?.moving = true }
+    }
+
+    /// `marked` reads the draft, the read, the places and the selection: it is followed, and set on the two lines it
+    /// leaves and enters at the turn's end.
+    private func trackMarked() {
+        _ = withObservationTracking { marked } onChange: { [weak self] in
+            MainActor.assumeIsolated { self?.turn.schedule() }
+        }
+    }
+
+    private func syncMarked() {
+        let now = withObservationTracking { marked } onChange: { [weak self] in
+            MainActor.assumeIsolated { self?.turn.schedule() }
+        }
+        guard now != markedShown else { return }
+        if let old = markedShown { boxes[old]?.marked = false }
+        if let now { boxes[now]?.marked = true }
+        markedShown = now
     }
 }
 

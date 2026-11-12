@@ -514,10 +514,16 @@ struct RouterV2StreamedText: View {
 
     var body: some View {
         if #available(macOS 15, *), !reduce {
-            RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn)
-                .textRenderer(RouterV2WordRenderer(shown: still ? Self.all : shown, pop: pop))
-                // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
-                .contentTransition(.identity)
+            // Laid out from the words alone; the words as drawn (their renderer animating every frame while they stream)
+            // sit over that place, so a frame of the stream measures this text only, not the page around it.
+            RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: false)
+                .hidden()
+                .overlay(alignment: .leading) {
+                    RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn)
+                        .textRenderer(RouterV2WordRenderer(shown: still ? Self.all : shown, pop: pop))
+                        // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
+                        .contentTransition(.identity)
+                }
                 .onAppear { stream() }
                 .onChange(of: words.count) { old, new in if new > old { grow(from: old) } }
                 .onChange(of: complete) { _, complete in if complete { finish() } }

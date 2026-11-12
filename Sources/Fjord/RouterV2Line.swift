@@ -95,7 +95,9 @@ struct RouterV2Button<Label: View>: View {
         let label: (Bool, Bool) -> Label
 
         var body: some View {
-            label(model.isHot(hit), model.pressed == hit)
+            // Its own flags: the pointer moving between two things redraws those two.
+            let flags = model.flags(hit)
+            label(flags.hot, flags.pressed)
                 .contentShape(Rectangle())
                 .onChange(of: down) { _, down in
                     if down { model.pressed = hit } else if model.pressed == hit { model.pressed = nil }
@@ -108,7 +110,8 @@ struct RouterV2Button<Label: View>: View {
 
 struct RouterV2LineView: View {
     let model: RouterV2Model
-    let thread: RouterV2Thread
+    /// Its own box: the line redraws when its record or its flags change, and for nothing else.
+    let box: RouterV2LineBox
     /// The card's own height, as laid out: its place opens to it and follows it (a reply growing, a plan opening).
     @State private var cardHeight: CGFloat = 0
     /// How much of the card and its ground shows. A card that opens as a line takes off (you answered: that line goes
@@ -120,18 +123,21 @@ struct RouterV2LineView: View {
     private typealias M = RouterV2.Line
 
     var body: some View {
-        let id = thread.id
-        let selected = model.selection == .line(id)
-        let hot = model.hoverRow == id
-        let pressed = model.pressed == .row(id)
-        let moving = model.moving.contains(id)
+        let _ = RouterV2Bodies.count("line", box.id)
+        let thread = box.head
+        let id = box.id
+        let selected = box.selected
+        let flags = model.flags(.row(id))
+        let hot = flags.hot
+        let pressed = flags.pressed
+        let moving = box.moving
         // A line in flight is its row alone: in the frame it takes off its card's content and the selected surface are
         // gone (nothing half-faded is dragged across the page), while the card's place folds on the move's own curve, so
         // the rows under it close up as the next card opens. It opens again once the line has landed.
         let open = selected && !moving
         VStack(alignment: .leading, spacing: 0) {
             RouterV2Button(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                row(hot: hot)
+                row(thread, hot: hot)
             }
             .background {
                 // The row's own ground under the pointer: on and off at once, so no trail follows the pointer down the list.
@@ -151,9 +157,15 @@ struct RouterV2LineView: View {
                 RouterV2QueuedRow(model: model, thread: id, words: queued)
                     .transition(.routerV2Fold(reduce: reduce))
             }
-            // The card is always in its line, closed to no height: it rolls open and shut in place, at full opacity,
-            // clipped to the line's surface, on the curve the rows around it move on.
-            RouterV2Card(model: model, thread: thread)
+            // The card is in its line, closed to no height: it rolls open and shut in place, at full opacity, clipped to
+            // the line's surface, on the curve the rows around it move on. Only an open card (or one rolling shut) has a
+            // body: a closed one costs nothing.
+            ZStack(alignment: .top) {
+                if box.built || open {
+                    RouterV2Card(model: model, box: box)
+                        .transition(.identity)
+                }
+            }
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
                 .opacity(moving ? 0 : shown)
@@ -165,6 +177,13 @@ struct RouterV2LineView: View {
                 .allowsHitTesting(open)
                 .accessibilityHidden(!open)
                 .environment(\.routerV2Live, open)
+                // Shut: once its roll has ended, the card's body goes (unless it opened again meanwhile).
+                .transaction(value: open) { t in
+                    guard !open else { return }
+                    t.addAnimationCompletion(criteria: .removed) { [box] in
+                        if !box.selected { box.built = false }
+                    }
+                }
         }
         .background {
             // Selected, the row and its card share one ground (a fill, no outline), which comes and goes with the
@@ -186,13 +205,15 @@ struct RouterV2LineView: View {
         }
         // The line moves as one: what changes in it on the way (its mark, its sentence) arrives with it, not ahead of it.
         .geometryGroup()
+        // A line in flight passes over the rows between: it is drawn last.
+        .zIndex(moving ? 1 : 0)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(thread.name), \(thread.look.label)")
     }
 
-    private func row(hot: Bool) -> some View {
+    private func row(_ thread: RouterV2Thread, hot: Bool) -> some View {
         // The line the draft goes to, when it isn't the selected one: the destination row's arrow, in the dot's slot.
-        let marked = model.marked == thread.id
+        let marked = box.marked
         return HStack(spacing: 0) {
             ZStack {
                 Circle().fill(CDS.Fill.accent).opacity(thread.isNew && !marked ? 1 : 0)
@@ -208,7 +229,7 @@ struct RouterV2LineView: View {
             .accessibilityLabel(marked ? "Your words go here" : thread.isNew ? "New" : "")
             RouterV2Name(model: model, thread: thread, rowHot: hot)
                 .layoutPriority(2)
-            RouterV2SentenceView(model: model, thread: thread)
+            RouterV2SentenceView(model: model, box: box)
                 .padding(.leading, M.sentenceGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let project = thread.project {
@@ -301,10 +322,14 @@ struct RouterV2Mark: View {
 /// while the thread is read again, the model's words streaming in when they land.
 struct RouterV2SentenceView: View {
     let model: RouterV2Model
-    let thread: RouterV2Thread
+    /// Its line's box: streamed words redraw this view only.
+    let box: RouterV2LineBox
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
+        let _ = RouterV2Bodies.count("sentence", box.id)
+        let thread = box.head
+        let sentence = box.sentence
         ZStack(alignment: .leading) {
             if let sent = thread.sent, thread.state == .sent {
                 HStack(spacing: 6) {
@@ -324,7 +349,7 @@ struct RouterV2SentenceView: View {
                 }
                 .transition(.routerV2Swap)
             } else {
-                let s = thread.sentence
+                let s = sentence
                 let reassessing = s.phase == .reassessing
                 let words = RouterV2Words(s.text, prs: thread.prs, stateWord: s.stateWord)
                 let tint = reassessing ? CDS.Text.muted : thread.sentenceTint
@@ -332,6 +357,7 @@ struct RouterV2SentenceView: View {
                 let id = thread.id
                 HStack(spacing: RouterV2.Thinking.gap) {
                     RouterV2StreamedText(words: words, tint: tint, mono: s.mono, arriving: s.phase == .streaming,
+                                         complete: box.complete,
                                          prState: words.parts.contains { $0.kind == .link } ? thread.prs.first?.state : nil) {
                         model.streamed(id, stream: stream)
                     }
@@ -349,13 +375,14 @@ struct RouterV2SentenceView: View {
                     if reassessing { RouterV2Thinking().transition(.opacity) }
                 }
                 // One view per line of words: the old line goes, then the new one is there (the model's words fade
-                // in themselves as they stream, from the frame the old line starts to go).
-                .id("\(s.stream)|\(s.text)")
+                // in themselves as they stream, from the frame the old line starts to go). Words that grow are the
+                // same line: only the ones that arrived fade in.
+                .id(box.sentenceID)
                 .transition(s.phase == .streaming ? .routerV2SwapOut : .routerV2Swap)
             }
         }
-        .motion(.fade, value: thread.sentence.phase)
-        .motion(.fade, value: thread.sentence.text)
+        .motion(.fade, value: sentence.phase)
+        .motion(.fade, value: sentence.text)
     }
 }
 
@@ -390,23 +417,22 @@ struct RouterV2ProjectBadge: View {
     }
 }
 
-/// "now", "4m", "2h", "3d": how long it has waited, run, or been finished. It ticks on the page's minute.
+/// "now", "4m", "2h", "3d": how long it has waited, run, or been finished. It ticks on the page's one minute clock.
 struct RouterV2Age: View {
     let model: RouterV2Model
     let since: Date
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        TimelineView(.periodic(from: model.made, by: 60)) { _ in
-            let age = BriefAge.short(model.now.timeIntervalSince(since))
-            Text(age)
-                .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
-                .lineLimit(1).fixedSize()
-                // It ticks as the counts do: never two ages on top of each other.
-                .contentTransition(reduce ? .opacity : .numericText())
-                .motion(reduce ? .easeOut(duration: 0.12) : RouterV2.counts, value: age)
-                .frame(minWidth: RouterV2.Line.ageWidth, alignment: .trailing)
-        }
+        let _ = model.clock.minute
+        let age = BriefAge.short(model.now.timeIntervalSince(since))
+        Text(age)
+            .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
+            .lineLimit(1).fixedSize()
+            // It ticks as the counts do: never two ages on top of each other.
+            .contentTransition(reduce ? .opacity : .numericText())
+            .motion(reduce ? .easeOut(duration: 0.12) : RouterV2.counts, value: age)
+            .frame(minWidth: RouterV2.Line.ageWidth, alignment: .trailing)
     }
 }
 

@@ -159,7 +159,10 @@ struct RouterV2Stack: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var y = bounds.minY
-        for row in subviews.sorted(by: { $0[Order.self] < $1[Order.self] }) {
+        // Each row's order read once (a layout value's lookup is not free), then its rows sorted by it.
+        let orders = subviews.map { $0[Order.self] }
+        for i in subviews.indices.sorted(by: { orders[$0] < orders[$1] }) {
+            let row = subviews[i]
             let height = row.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
             row.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: height))
             y += height
