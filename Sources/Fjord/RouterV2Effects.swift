@@ -394,6 +394,8 @@ enum RouterV2PRTint {
 @available(macOS 15, *)
 struct RouterV2WordTurn: TextAttribute {
     let index: Double
+    /// The word's own index in the line.
+    var word = 0
 }
 
 /// The run that pops (a PR's state word as it flips).
@@ -406,6 +408,8 @@ struct RouterV2PopRun: TextAttribute {}
 struct RouterV2WordRenderer: TextRenderer {
     var shown: Double
     var pop: CGFloat
+    /// Told where each word is drawn (inside `RouterV2FadingWords`).
+    var places: RouterV2WordPlaces?
     /// How many words' time one word's fade lasts.
     static let fade = RouterV2.wordFade / RouterV2.wordEvery
 
@@ -415,6 +419,17 @@ struct RouterV2WordRenderer: TextRenderer {
     }
 
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        if let places {
+            var rects: [Int: CGRect] = [:]
+            for line in layout {
+                for run in line {
+                    guard let word = run[RouterV2WordTurn.self]?.word else { continue }
+                    let rect = run.typographicBounds.rect
+                    rects[word] = rects[word].map { $0.union(rect) } ?? rect
+                }
+            }
+            places.drew(rects)
+        }
         for line in layout {
             for run in line {
                 var copy = context
@@ -455,7 +470,7 @@ enum RouterV2SentenceText {
                 piece = Text(part.text).font(CDS.sans(12)).foregroundColor(RouterV2PRTint.text(state))
             }
             if attributed, #available(macOS 15, *) {
-                piece = piece.customAttribute(RouterV2WordTurn(index: turn(part.index)))
+                piece = piece.customAttribute(RouterV2WordTurn(index: turn(part.index), word: part.index))
                 if case .state = part.kind { piece = piece.customAttribute(RouterV2PopRun()) }
             }
             out = out + piece
@@ -469,6 +484,9 @@ enum RouterV2SentenceText {
 /// ones that arrived fade in from where the stream is, in turn if it is ahead of them, together (0.12 s) if they came
 /// after their time. The PR's state word pops when it flips. Under Reduce Motion (and before macOS 15) the whole line
 /// is there at once; the row fades it.
+///
+/// While they stream, the words are drawn whole in a hosting view of their own and Core Animation fades each one in
+/// (`RouterV2FadingWords`): nothing in SwiftUI runs per frame, only once per word that arrives.
 struct RouterV2StreamedText: View {
     let words: RouterV2Words
     let tint: Color
@@ -481,7 +499,8 @@ struct RouterV2StreamedText: View {
     var prState: RouterV2Thread.PR.State?
     var done: () -> Void = {}
 
-    /// The stream's clock, in words' time: word `i` starts to fade in at `max(i, the clock when it arrived)`.
+    /// The stream's clock, in words' time: word `i` starts to fade in at `max(i, the clock when it arrived)`. `shown` is
+    /// where the current stretch ends (`all`: every word drawn whole).
     @State private var shown: Double
     /// The clock's current stretch: from `start`, at `began`, to `shown`, one word every `RouterV2.wordEvery`.
     @State private var start: Double = 0
@@ -492,6 +511,7 @@ struct RouterV2StreamedText: View {
     @State private var pop: CGFloat = 1
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.routerV2Still) private var still
+    @Environment(\.colorScheme) private var scheme
 
     private struct Batch: Equatable {
         var from: Int
@@ -514,15 +534,17 @@ struct RouterV2StreamedText: View {
 
     var body: some View {
         if #available(macOS 15, *), !reduce {
-            // Laid out from the words alone; the words as drawn (their renderer animating every frame while they stream)
-            // sit over that place, so a frame of the stream measures this text only, not the page around it.
+            // Laid out from the words alone; the words as drawn sit over that place, so a word that fades in measures
+            // nothing.
             RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: false)
                 .hidden()
                 .overlay(alignment: .leading) {
-                    RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn)
-                        .textRenderer(RouterV2WordRenderer(shown: still ? Self.all : shown, pop: pop))
-                        // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
-                        .contentTransition(.identity)
+                    if !still, shown < Self.all {
+                        RouterV2FadingWords(text: RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn),
+                                            pop: pop, scheme: scheme, plan: plan) { ended($0) }
+                    } else {
+                        drawn()
+                    }
                 }
                 .onAppear { stream() }
                 .onChange(of: words.count) { old, new in if new > old { grow(from: old) } }
@@ -538,6 +560,22 @@ struct RouterV2StreamedText: View {
                 .onAppear { if arriving, complete { done() } }
                 .onChange(of: complete) { _, complete in if complete, arriving { done() } }
         }
+    }
+
+    /// The words that have arrived, drawn whole.
+    @available(macOS 15, *)
+    private func drawn() -> some View {
+        RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn)
+            .textRenderer(RouterV2WordRenderer(shown: Self.all, pop: pop))
+            // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
+            .contentTransition(.identity)
+    }
+
+    /// The fades as they stand: when each word's turn comes on the wall clock, and when the stretch ends.
+    private var plan: RouterV2FadePlan {
+        let turns = (0..<words.count).map(turn)
+        return .init(turns: turns, start: start, began: began, end: began.addingTimeInterval(max(0, shown - start) * RouterV2.wordEvery),
+                     stretch: stretch)
     }
 
     /// Word `i`'s turn: its index, or the clock when it came if that was later.
@@ -587,23 +625,212 @@ struct RouterV2StreamedText: View {
         }
     }
 
-    /// Runs the clock from `from` to `to`, one word every `wordEvery`; at its end, if no later stretch began and no more
-    /// words are coming, every word is drawn whole and the line is done.
+    /// Runs the clock from `from` to `to`, one word every `wordEvery`; at its end (`ended`), if no later stretch began
+    /// and no more words are coming, every word is drawn whole and the line is done.
     private func run(to: Double, from: Double? = nil, lead: Double) {
         let from = from ?? shown
         stretch += 1
-        let mine = stretch
         start = from
         began = Date().addingTimeInterval(lead)
-        let duration = max(0, to - from) * RouterV2.wordEvery
-        withAnimation(Animation.linear(duration: duration).delay(lead).resolved(reduce: reduce), completionCriteria: .logicallyComplete) {
-            // A stretch that ends where the last one did still runs to its end, so its completion waits for the words.
-            shown = to == shown ? to.nextUp : to
-        } completion: {
-            guard stretch == mine, complete else { return }
-            shown = Self.all
-            done()
+        shown = to
+    }
+
+    /// A stretch's end, from its fades.
+    private func ended(_ which: Int) {
+        guard which == stretch, complete, shown < Self.all else { return }
+        shown = Self.all
+        done()
+    }
+}
+
+/// A streaming line's words, drawn whole in a hosting view of their own and faded in one by one by Core Animation: a mask
+/// over that view's layer has a tile per word (from its start to the next word's), each tile's opacity rising from 0 at
+/// the word's turn over `RouterV2.wordFade` on the renderer's curve (1 - (1 - t)^2). The words' places come from the
+/// renderer as it draws them (`RouterV2WordPlaces`), in the same frame, so a word never shows before its tile is there.
+/// The stretch's end is a Core Animation clock too (`ended`), so nothing waits on a timer.
+@available(macOS 15, *)
+struct RouterV2FadingWords: NSViewRepresentable {
+    typealias Plan = RouterV2FadePlan
+
+    let text: Text
+    let pop: CGFloat
+    let scheme: ColorScheme
+    let plan: Plan
+    let ended: (Int) -> Void
+
+    func makeCoordinator() -> RouterV2WordFades { RouterV2WordFades() }
+
+    func makeNSView(context: Context) -> NSHostingView<AnyView> {
+        let view = NSHostingView(rootView: root(context.coordinator))
+        view.sizingOptions = []
+        view.safeAreaRegions = []
+        view.wantsLayer = true
+        context.coordinator.view = view
+        context.coordinator.ended = ended
+        context.coordinator.take(plan)
+        return view
+    }
+
+    func updateNSView(_ view: NSHostingView<AnyView>, context: Context) {
+        context.coordinator.ended = ended
+        view.rootView = root(context.coordinator)
+        context.coordinator.take(plan)
+    }
+
+    static func dismantleNSView(_ view: NSHostingView<AnyView>, coordinator: RouterV2WordFades) {
+        coordinator.stop()
+    }
+
+    private func root(_ fades: RouterV2WordFades) -> AnyView {
+        AnyView(text
+            .textRenderer(RouterV2WordRenderer(shown: RouterV2StreamedText.all, pop: pop, places: fades.places))
+            .contentTransition(.identity)
+            .lineLimit(1).truncationMode(.tail)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .environment(\.colorScheme, scheme))
+    }
+}
+
+/// A streaming line's fades as they stand.
+struct RouterV2FadePlan: Equatable {
+    /// Each word's turn, in words' time.
+    var turns: [Double]
+    /// The current stretch: the clock is at `start` at `began` and moves a word every `RouterV2.wordEvery`; it ends at
+    /// `end`.
+    var start: Double
+    var began: Date
+    var end: Date
+    var stretch: Int
+}
+
+/// Where each word was drawn (its runs' union, by word index), told by the renderer as it draws.
+final class RouterV2WordPlaces {
+    var changed: (([Int: CGRect]) -> Void)?
+    private var last: [Int: CGRect] = [:]
+
+    func drew(_ rects: [Int: CGRect]) {
+        guard rects != last else { return }
+        last = rects
+        changed?(rects)
+    }
+}
+
+/// The fades' layers: the mask and its tiles, the start of each word's fade, the stretch's clock.
+@MainActor
+final class RouterV2WordFades: NSObject, CAAnimationDelegate {
+    weak var view: NSView?
+    var ended: (Int) -> Void = { _ in }
+    let places = RouterV2WordPlaces()
+
+    private let mask = CALayer()
+    private var tiles: [Int: CALayer] = [:]
+    /// Each word's fade's start, in media time, once known: a word's start never moves.
+    private var starts: [Int: CFTimeInterval] = [:]
+    private var rects: [Int: CGRect] = [:]
+    private var plan: RouterV2FadePlan?
+    private static let clockKey = "fjord.clock"
+
+    override init() {
+        super.init()
+        places.changed = { [weak self] rects in
+            MainActor.assumeIsolated { self?.laid(rects) }
         }
+    }
+
+    /// The renderer's own curve, 1 - (1 - t)^2, as a cubic Bézier (exact: x(t) = t).
+    private static let curve = CAMediaTimingFunction(controlPoints: 1.0 / 3, 2.0 / 3, 2.0 / 3, 1)
+
+    func take(_ plan: RouterV2FadePlan) {
+        guard plan != self.plan else { return }
+        let stretchChanged = plan.stretch != self.plan?.stretch || plan.end != self.plan?.end
+        self.plan = plan
+        let now = CACurrentMediaTime(), date = Date()
+        // Before the first stretch begins (the line just appeared) no word has a turn on the clock yet: hidden.
+        for (i, turn) in plan.turns.enumerated() where starts[i] == nil && plan.stretch > 0 {
+            let at = plan.began.addingTimeInterval((turn - plan.start) * RouterV2.wordEvery)
+            starts[i] = now + at.timeIntervalSince(date)
+        }
+        layTiles()
+        if stretchChanged { clock(until: now + plan.end.timeIntervalSince(date), stretch: plan.stretch) }
+    }
+
+    func stop() {
+        mask.removeAllAnimations()
+        view?.layer?.mask = nil
+    }
+
+    private func laid(_ rects: [Int: CGRect]) {
+        self.rects = rects
+        layTiles()
+    }
+
+    /// One tile per word, from its start to the next word's, the layer's whole height; the first from the layer's start.
+    /// Past the last word's end nothing shows: a word drawn before its place is known stays hidden.
+    private func layTiles() {
+        guard let layer = view?.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        if layer.mask !== mask {
+            mask.frame = layer.bounds
+            layer.mask = mask
+        }
+        mask.frame = layer.bounds
+        let order = rects.keys.sorted { rects[$0]!.minX < rects[$1]!.minX }
+        let now = CACurrentMediaTime()
+        let height = layer.bounds.height
+        for (n, i) in order.enumerated() {
+            let rect = rects[i]!
+            let minX = n == 0 ? -1000 : rect.minX
+            let maxX = n + 1 < order.count ? rects[order[n + 1]]!.minX : rect.maxX + 4
+            let tile: CALayer
+            if let old = tiles[i] {
+                tile = old
+            } else {
+                tile = CALayer()
+                tile.backgroundColor = NSColor.black.cgColor
+                tile.opacity = 0
+                mask.addSublayer(tile)
+                tiles[i] = tile
+            }
+            // Its turn known: it fades in from it (once).
+            if tile.opacity == 0, let start = starts[i] {
+                tile.opacity = 1
+                if start + RouterV2.wordFade > now {
+                    let fade = CABasicAnimation(keyPath: "opacity")
+                    fade.fromValue = 0
+                    fade.toValue = 1
+                    fade.beginTime = start
+                    fade.duration = RouterV2.wordFade
+                    fade.timingFunction = Self.curve
+                    fade.fillMode = .backwards
+                    tile.add(fade, forKey: "fade")
+                }
+            }
+            tile.frame = CGRect(x: minX, y: -height, width: maxX - minX, height: 3 * height)
+        }
+        for (i, tile) in tiles where rects[i] == nil {
+            tile.removeFromSuperlayer()
+            tiles[i] = nil
+        }
+    }
+
+    /// The stretch's end as an animation of the mask's own: its stop says the words are drawn.
+    private func clock(until end: CFTimeInterval, stretch: Int) {
+        mask.removeAnimation(forKey: Self.clockKey)
+        let clock = CABasicAnimation(keyPath: "fjordClock")
+        clock.fromValue = 0
+        clock.toValue = 1
+        clock.beginTime = CACurrentMediaTime()
+        clock.duration = max(0.001, end - CACurrentMediaTime())
+        clock.delegate = self
+        clock.setValue(stretch, forKey: "stretch")
+        mask.add(clock, forKey: Self.clockKey)
+    }
+
+    nonisolated func animationDidStop(_ animation: CAAnimation, finished: Bool) {
+        guard finished, let stretch = animation.value(forKey: "stretch") as? Int else { return }
+        MainActor.assumeIsolated { ended(stretch) }
     }
 }
 

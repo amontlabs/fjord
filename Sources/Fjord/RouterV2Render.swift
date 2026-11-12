@@ -40,8 +40,9 @@ final class RouterV2LineBox {
     var rowHeight: CGFloat = 0
     var queuedHeight: CGFloat = 0
 
-    /// The whole record as last taken.
+    /// The whole record as last taken; `revision` changes with it, for what reads the whole record (`model.thread(id)`).
     @ObservationIgnored private(set) var record: RouterV2Thread
+    private(set) var revision = 0
 
     init(_ thread: RouterV2Thread) {
         id = thread.id
@@ -64,12 +65,16 @@ final class RouterV2LineBox {
         return head
     }
 
+    /// Its thread left the page.
+    func left() { revision &+= 1 }
+
     /// Takes a record: only the fields that changed are written, so only their readers redraw. True when its place on the
     /// page may have changed (its section, its order, its project).
     @discardableResult func take(_ t: RouterV2Thread) -> Bool {
         let old = record
         guard t != old else { return false }
         record = t
+        revision &+= 1
         let head = Self.head(t)
         if head != self.head { self.head = head }
         if t.sentence != sentence {

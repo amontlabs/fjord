@@ -288,8 +288,14 @@ final class RouterV2Model {
     // MARK: Reading the records
 
     func thread(_ id: String) -> RouterV2Thread? {
-        access(keyPath: \.threads)
-        return boxes[id]?.record
+        // What reads one thread follows that thread only: its box's revision, or the records while it has none (it may
+        // come). Following all the records redrew the dock and the peek on every streamed word of every line.
+        guard let box = boxes[id] else {
+            access(keyPath: \.threads)
+            return nil
+        }
+        _ = box.revision
+        return box.record
     }
 
     func update(_ id: String, _ change: (inout RouterV2Thread) -> Void) {
@@ -927,6 +933,8 @@ final class RouterV2Model {
         }
         if boxes.count != threads.count {
             let ids = Set(threads.map(\.id))
+            // What read a thread that left hears it once more (`thread(id)` follows its box).
+            for (id, box) in boxes where !ids.contains(id) { box.left() }
             boxes = boxes.filter { ids.contains($0.key) }
             growing = growing.filter { ids.contains($0) }
         }

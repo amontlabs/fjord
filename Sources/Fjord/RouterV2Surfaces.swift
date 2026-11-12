@@ -151,21 +151,47 @@ struct RouterV2Stack: Layout {
         static let defaultValue = 0
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let height = subviews.reduce(CGFloat(0)) { $0 + $1.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
-        return CGSize(width: width, height: height)
+    /// The rows' heights at a width and their order, measured once per pass: `placeSubviews` takes them from
+    /// `sizeThatFits` instead of measuring every row again. Cleared whenever the rows or their inputs change.
+    struct Cache {
+        var width: CGFloat?
+        var heights: [CGFloat] = []
+        var order: [Int] = []
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
+
+    private func measure(_ width: CGFloat, _ subviews: Subviews, _ cache: inout Cache) {
+        guard cache.width != width || cache.heights.count != subviews.count else { return }
+        cache.width = width
+        cache.heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
         // Each row's order read once (a layout value's lookup is not free), then its rows sorted by it.
         let orders = subviews.map { $0[Order.self] }
-        for i in subviews.indices.sorted(by: { orders[$0] < orders[$1] }) {
-            let row = subviews[i]
-            let height = row.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
-            row.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: height))
+        cache.order = subviews.indices.sorted { orders[$0] < orders[$1] }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        measure(width, subviews, &cache)
+        return CGSize(width: width, height: cache.heights.reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        measure(bounds.width, subviews, &cache)
+        var y = bounds.minY
+        for i in cache.order {
+            let height = cache.heights[i]
+            subviews[i].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: height))
             y += height
         }
     }
+
+    /// No alignment guides of its own: without these, every pass asked every row for its guides.
+    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                           cache: inout Cache) -> CGFloat? { nil }
+
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                           cache: inout Cache) -> CGFloat? { nil }
 }
