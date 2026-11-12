@@ -44,10 +44,13 @@ enum FjordMark {
 struct FjordLoader: View {
     var color: Color = .primary
     var label: String = "Loading"
+    /// Starts its cycle at the whole mark when it appears, not on the wall clock's phase: for a small loader that comes
+    /// and goes (the Router's), which would otherwise often come in as a trace.
+    var fromStart = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        FjordLoaderRepresentable(color: NSColor(color), still: reduceMotion)
+        FjordLoaderRepresentable(color: NSColor(color), still: reduceMotion, fromStart: fromStart)
             .aspectRatio(1, contentMode: .fit)
             .accessibilityElement()
             .accessibilityLabel(label)
@@ -57,8 +60,14 @@ struct FjordLoader: View {
 private struct FjordLoaderRepresentable: NSViewRepresentable {
     let color: NSColor
     let still: Bool
+    var fromStart = false
 
-    func makeNSView(context: Context) -> FjordLoaderView { FjordLoaderView() }
+    func makeNSView(context: Context) -> FjordLoaderView {
+        let view = FjordLoaderView()
+        view.fromStart = fromStart
+        return view
+    }
+
     func updateNSView(_ view: FjordLoaderView, context: Context) {
         view.color = color
         view.still = still
@@ -73,6 +82,8 @@ final class FjordLoaderView: NSView {
 
     var color: NSColor = .labelColor { didSet { if color != oldValue { paint() } } }
     var still = false { didSet { if still != oldValue { animate() } } }
+    /// The cycle starts at the whole mark each time it comes into view, not on the wall clock's phase.
+    var fromStart = false
     private let layers = (0..<3).map { _ in CAShapeLayer() }
 
     override init(frame: NSRect) {
@@ -116,7 +127,7 @@ final class FjordLoaderView: NSView {
         guard !still, window != nil, !isHiddenOrHasHiddenAncestor else { return }
         // Smoothstep (3x² − 2x³) is exactly this cubic Bézier: control points evenly spaced in time, flat at both ends.
         let smooth = CAMediaTimingFunction(controlPoints: 1 / 3, 0, 2 / 3, 1), linear = CAMediaTimingFunction(name: .linear)
-        let phase = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period)
+        let phase = fromStart ? 0 : Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period)
         for (i, l) in layers.enumerated() {
             let a = Self.out + Double(i) * Self.step, b = Self.back + Double(i) * Self.step
             let anim = CAKeyframeAnimation(keyPath: "opacity")

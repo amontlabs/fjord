@@ -77,6 +77,8 @@ For release window timings, run `scripts/morph-timings.sh --scenario router --st
 
 `FJORD_THEME=dark|light|claude` pins the look: Fjord light, Fjord dark, or Claude's own. The default is Fjord, following the Mac's appearance live.
 
+**Router v2 demo** (docs/design/router-v2/DESIGN.md). `--window --router-v2-demo` shows the Router v2 page (`RouterV2*.swift`) on fake records in the Router's place and plays the storyboard on it: a drawn pointer, keys through the page's own key map, fake T3 events. `--beats 5,6,14` plays only those beats, `--from <beat>` runs the earlier ones at 30 times the speed, `--until <beat>` ends after that beat, `--speed <x>` scales every wait, `--reduce-motion` turns Reduce Motion on for the page, `--quit-after` quits at the end, `--frames <dir>` writes the window's own picture ten times a second while the script plays (`--frames-rate <n>` for more, up to 60; each file is named by its time in hundredths of a second; frames to check a beat's motion where nothing can be filmed; it needs no Screen Recording permission). When the script is over (and nothing records) the page is yours to try. Its stills are the `v2-` window shots, light and dark (`v2-home`, `v2-card-plan-dark`, `v2-new-thread-written`, …). To film it: `FJORD_THEME=light FJORD_GLASS=0 scripts/record-window.sh router-v2 -- --window --router-v2-demo`.
+
 ```sh
 FJORD_THEME=dark .build/debug/Fjord --window
 ```

@@ -281,7 +281,8 @@ private struct RouterSidebarRow: View {
     typealias M = CDS.Sidebar
 
     var body: some View {
-        let needsYou = store.routerBriefs.untoldNeedsYou
+        // The v2 demo's page counts its own lines (the unfiltered Needs-you count).
+        let needsYou = RouterV2Demo.model?.needsYou ?? store.routerBriefs.untoldNeedsYou
         AppSidebarRow(title: "Router", on: navigator.selection == .router,
                       badge: needsYou > 0 ? RailBadge(count: needsYou, fill: CDS.solid(0xFAB219), ink: CDS.solid(0x0B0B0B)) : nil,
                       tip: AppSidebar.routerTip(needsYou),

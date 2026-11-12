@@ -1035,6 +1035,11 @@ final class AppWindowController: NSObject, NSWindowDelegate {
                     return true
                 }
                 if self.palette.isOpen { return self.palette.takes(event) }
+                // The Router v2 demo's page has its own key map; while its script plays, the keyboard is the script's.
+                if let v2 = RouterV2Demo.model, self.navigator.selection == .router {
+                    if v2.scripted { return !event.modifierFlags.contains(.command) }
+                    return RouterV2Keys.key(event, model: v2)
+                }
                 return self.navigator.selection == .router ? self.keys.key(event) : self.inboxKeys.key(event)
             }
             return consumed ? nil : event

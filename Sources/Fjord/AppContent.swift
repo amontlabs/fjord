@@ -273,8 +273,14 @@ struct AppContent: View {
             case .category(let id): InboxListView(store: store, tab: .category(id), hub: hub, search: search, leadingInset: leadingInset).id(id)
             case .done: InboxListView(store: store, tab: .done, hub: hub, search: search, leadingInset: leadingInset).id("done")
             case .router:
-                RouterCodeView(store: store, model: routerModel, checksClaudeCode: checksClaudeCode, embedded: true,
-                               leadingInset: leadingInset)
+                if let v2 = RouterV2Demo.model {
+                    // The Router v2 page on its demo records (`--router-v2-demo`, the `v2-` shots).
+                    RouterV2Screen(model: v2, stage: RouterV2Demo.stage, leadingInset: leadingInset)
+                        .transformEnvironment(\._accessibilityReduceMotion) { if RouterV2Demo.reduceMotion { $0 = true } }
+                } else {
+                    RouterCodeView(store: store, model: routerModel, checksClaudeCode: checksClaudeCode, embedded: true,
+                                   leadingInset: leadingInset)
+                }
             case .settings:
                 AppPage(title: "Settings", leadingInset: leadingInset, trailing: { EmptyView() }) {
                     column { SettingsView(store: store, hub: hub) }
