@@ -148,6 +148,20 @@ final class DeciderLog: @unchecked Sendable {
         append(record)
     }
 
+    /// One step of a draft's read while typing (`RouterV2Reader`): a pause that ended, a model call started or skipped, a read
+    /// cancelled by the next key. `sinceKeyMs` counts from the key that began the read; the constants in `RouterV2` are tuned
+    /// from these lines, not from a simulation.
+    func typing(event: String, phase: String, characters: Int, sinceKeyMs: Int, extra: [String: Any] = [:], now: Date = Date()) {
+        var record = extra
+        record["type"] = "typing"
+        record["at"] = ISO8601DateFormatter.string(from: now, timeZone: .gmt, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
+        record["event"] = event
+        record["phase"] = phase
+        record["characters"] = characters
+        record["sinceKeyMs"] = sinceKeyMs
+        append(record)
+    }
+
     private func append(_ record: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(record),
               var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys, .withoutEscapingSlashes]) else { return }

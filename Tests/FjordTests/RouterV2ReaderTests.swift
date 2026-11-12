@@ -211,4 +211,60 @@ import Testing
         func wait() async { if opened { return }; await withCheckedContinuation { waiting.append($0) } }
         func open() { opened = true; waiting.forEach { $0.resume() }; waiting = [] }
     }
+
+    // MARK: Sonnet's guards and the typing trace
+
+    @Test func sonnetStartsOnlyAfterTenNewCharactersSinceHisLastStartAndAReturnSkipsTheGuard() async {
+        let calls = Calls()
+        let r = reader(calls, p: 0.5)
+        r.read("the readme needs a section", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 1 }
+        #expect(calls.decided.count == 1)
+        // Two more characters: Jev reads again, Sonnet is not started, and the page gets the prior alone.
+        r.read("the readme needs a section.", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 2 }
+        #expect(calls.jev.count == 2 && calls.decided.count == 1 && r.decisions == 1)
+        #expect(calls.reads[1].places.isEmpty && !calls.reads[1].sure)
+        // Ten more than at his last start: he starts.
+        r.read("the readme needs a section for the install steps", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 3 }
+        #expect(calls.decided.count == 2)
+        // A Return reads at once, whatever the length since.
+        r.now("the readme needs a section for the install steps!")
+        await waitUntil { calls.reads.count == 4 }
+        #expect(calls.decided.count == 3)
+    }
+
+    @Test func aDraftShorterThanTwelveCharactersStartsNoModelAndJevSureNeverStartsSonnet() async {
+        let calls = Calls()
+        let r = reader(calls, p: 0.5)
+        r.read("fix the bug", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 1 }
+        #expect(calls.jev.isEmpty && calls.decided.isEmpty)
+        let sure = reader(calls)
+        sure.read("fix the login redirect", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 2 }
+        #expect(calls.decided.isEmpty && sure.decisions == 0)
+    }
+
+    @Test func eachPauseStartSkipAndCancelIsLoggedWithTimestamps() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("typing-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = DeciderLog(url: url)
+        let calls = Calls()
+        let r = reader(calls, p: 0.5)
+        r.log = log
+        r.read("the readme needs a section", selected: nil, mentions: [])
+        r.read("the readme needs a section.", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 1 }
+        r.read("the readme needs a section..", selected: nil, mentions: [])
+        await waitUntil { calls.reads.count == 2 }
+        log.flush()
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        let events = lines.compactMap { $0["event"] as? String }
+        #expect(lines.allSatisfy { $0["type"] as? String == "typing" && $0["at"] is String && $0["sinceKeyMs"] is Int })
+        #expect(events.contains("cancel") && events.contains("pause") && events.contains("skip"))
+        #expect(events.filter { $0 == "start" }.count >= 2)
+    }
 }

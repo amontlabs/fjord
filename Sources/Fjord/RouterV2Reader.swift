@@ -19,6 +19,12 @@ final class RouterV2Reader {
     var jevPause: Duration = RouterV2.jevPause
     var sonnetPause: Duration = RouterV2.sonnetPause
     static let minLength = 12
+    /// Sonnet starts only when the draft differs by at least this many characters from the draft of his last start (a Return
+    /// skips the guard): a typist's every thinking pause is not worth a full-context call.
+    static let newCharacters = 10
+    /// Each pause, start, cancel and skipped start, with timestamps, for tuning `RouterV2`'s pauses from real typing
+    /// (`Store.makeRouterReader` sets it).
+    var log: DeciderLog?
 
     /// Jev's fused path on the draft (`Store.readDraft`); nil without Jev.
     var jev: (@MainActor (_ text: String, _ tagged: String?) async -> JevPath.Result?)?
@@ -56,6 +62,10 @@ final class RouterV2Reader {
     /// The pause being waited out, so a Return can cut it short.
     private var sleeper: Task<Void, Never>?
     private var hurry = false
+    /// The draft Sonnet last started on, and what the read under way is doing, for the guard and the log.
+    private var sonnetStart: String?
+    private var phase = "idle"
+    private var begunAt: ContinuousClock.Instant?
     private var jevLast: (text: String, board: String, result: JevPath.Result)?
     private var decided: (key: String, decision: RouterProjectDecision)?
     private var searched: (text: String, hits: [DeciderContext.SearchHit])?
@@ -73,8 +83,22 @@ final class RouterV2Reader {
         start(ask, pauses: true)
     }
 
+    /// One line of the typing trace: what happened to the read, in which phase, how long after the read began.
+    private func trace(_ event: String, _ draft: String, extra: [String: Any] = [:]) {
+        guard let log else { return }
+        let elapsed = begunAt.map { $0.duration(to: .now) } ?? .zero
+        let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        log.typing(event: event, phase: phase, characters: draft.count, sinceKeyMs: ms, extra: extra)
+    }
+
     /// Nothing is read for this draft any more (it was cleared, or sent).
     func cancel() {
+        stop()
+        sonnetStart = nil
+    }
+
+    private func stop() {
+        if task != nil, let current { trace("cancel", current.draft) }
         generation += 1
         task?.cancel()
         sleeper?.cancel()
@@ -99,8 +123,10 @@ final class RouterV2Reader {
     // MARK: The read
 
     private func start(_ ask: Ask, pauses: Bool) {
-        cancel()
+        stop()
         current = ask
+        begunAt = .now
+        phase = "start"
         asking = ask.draft
         hurry = !pauses
         generation += 1
@@ -127,12 +153,16 @@ final class RouterV2Reader {
             return
         }
         let begun = ContinuousClock.now
+        phase = "jev-pause"
         await wait(jevPause)
         guard live() else { return }
+        trace("pause", text, extra: ["for": "jev"])
         // Jev first: shown at once when he is sure.
         var jevResult = jevLast.flatMap { $0.text == text && $0.board == board ? $0.result : nil }
         if jevResult == nil, let jev {
             reads += 1
+            phase = "jev"
+            trace("start", text, extra: ["model": "jev"])
             jevResult = await jev(text, tagged)
             guard live() else { return }
             if let jevResult { jevLast = (text, board, jevResult) }
@@ -150,14 +180,28 @@ final class RouterV2Reader {
             }
         }
         let left = sonnetPause - (ContinuousClock.now - begun)
+        phase = "sonnet-pause"
         if left > .zero { await wait(left) }
         guard live(), let decide else {
             if live() { land(ask, nil, gen: gen) }
             return
         }
+        trace("pause", text, extra: ["for": "sonnet"])
+        // Not for every thinking pause: the draft must have grown (or shrunk) by enough since Sonnet's last start. A Return
+        // (hurry) always reads.
+        // The same words asked again (another open card, another board) are not typing: no guard.
+        if !hurry, let last = sonnetStart, last != text, abs(text.count - last.count) < Self.newCharacters {
+            trace("skip", text, extra: ["since": abs(text.count - last.count)])
+            land(ask, nil, gen: gen)
+            return
+        }
+        sonnetStart = text
         decisions += 1
+        phase = "sonnet"
+        trace("start", text, extra: ["model": "sonnet", "hurry": hurry])
         let decision = await decide(text, tagged, ask.selected, jevResult)
         guard live() else { return }
+        trace("done", text, extra: ["model": "sonnet"])
         if let decision { decided = (key, decision) }
         land(ask, decision, gen: gen)
     }
