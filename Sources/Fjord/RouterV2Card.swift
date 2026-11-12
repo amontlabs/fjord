@@ -44,6 +44,26 @@ struct RouterV2Card: View {
     // MARK: Kind blocks. Prose keeps to 560 pt; option rows run the card's width, their keycaps under the footer's.
 
     @ViewBuilder private var kind: some View {
+        if case .needsYou(let request) = thread.state, request != .step, !thread.live {
+            if let question = thread.question { ask(question) }
+            if request == .permission, let p = thread.permission { permission(p).prose() }
+            notLive
+        } else {
+            live
+        }
+    }
+
+    /// A request T3 can no longer answer (IMPLEMENTATION.md 1.3): no options, Open in T3 in their place.
+    private var notLive: some View {
+        HStack(spacing: 10) {
+            Text(RouterV2.Copy.notLive).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(2)
+            RouterV2PushButton(model: model, hit: .footer(thread.id, .open), title: "Open in T3", keys: ["cmd", "O"]) {
+                model.open(thread.id)
+            }
+        }
+    }
+
+    @ViewBuilder private var live: some View {
         switch thread.state {
         case .needsYou(.question):
             if let question = thread.question { ask(question) }
@@ -227,7 +247,8 @@ struct RouterV2Card: View {
                                    removes: true) { model.openSnooze() }
                 RouterV2TextButton(model: model, hit: .footer(id, .settle), title: "Settle", keys: ["cmd", "backspace"],
                                    removes: true) { model.settle(id) }
-                openButton
+                // A request that is no longer live has it in its options' place.
+                if thread.live || thread.state == .needsYou(.step) { openButton }
             }
         }
         .padding(.top, 2)

@@ -58,6 +58,14 @@ enum RouterV2Shots {
             model.select(.line(ID.checkpoint))
             model.pick(1)
         },
+        State(name: "v2-card-not-live") { model in
+            // After a T3 restart: the question can't be answered from here.
+            if var settings = model.thread(ID.settings) {
+                settings.live = false
+                settings.options = []
+                model.apply(.upsert(settings))
+            }
+        },
         State(name: "v2-card-step") { $0.select(.line(ID.valCenis)) },
         State(name: "v2-card-done") { $0.select(.line(ID.guide)) },
         State(name: "v2-card-loading") { model in

@@ -187,6 +187,8 @@ enum RouterV2 {
         static let unreachableRow = "T3 Code isn't reachable"
         static let reconnecting = "T3 Code isn't reachable. Reconnecting…"
         static let clickToOpen = "Click for its card"
+        /// A request T3 can no longer answer (after a T3 restart): its options give way to Open in T3.
+        static let notLive = "T3 can no longer take an answer to this from here."
         static let snooze = "Snooze"
         static let snoozeChoices = ["For 1 hour", "For 3 hours", "Until tomorrow, 9:00"]
         static let snoozedUntil = ["for 1 hour", "for 3 hours", "until tomorrow, 9:00"]
@@ -338,6 +340,9 @@ struct RouterV2Thread: Identifiable, Equatable {
     var lastLines = ""
     /// The thread's messages are loading: skeleton bars.
     var loading = false
+    /// T3 can still take an answer to its request (`ThreadRequest.live`): false after a T3 restart, and the card offers
+    /// Open in T3 in its options' place.
+    var live = true
     /// The agent is writing: the last lines grow, a caret after them.
     var writing = false
     /// The question, when it isn't already the line; a step's ask.
