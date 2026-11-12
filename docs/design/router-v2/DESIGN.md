@@ -441,7 +441,7 @@ quietly. After the last chip the key `⇥` says Tab goes in; it is hidden while 
      model takes (`@med`, `@low`, `@supervised`, `@auto-accept`, `@full`), and `@plan` / `@build`. Typing after the `@`
      filters it as it does threads (a setting is found by a prefix, a word or a substring, never by loose letters).
      Return or Tab on a row makes a **settings pill** in the draft and sets that chip at once, with the roll below.
-     The pill is quieter than a thread's: no "@", an outline and no fill, the kind's glyph (cpu, gauge, lock, clipboard).
+     The pill is quieter than a thread's: no "@", the `quiet` fill at a token's radius and no outline (R4), the kind's glyph (cpu, gauge, lock, clipboard).
      It is **never sent**: it is taken out of the message with the space after it. ⌫ takes it out like any pill and the
      chip goes back to your pick, else T3's default. A pill beats a chip you set by hand before it; a chip you change by
      hand afterwards beats the pill. Two pills of one kind: the last wins. With the row on an existing thread the pill is

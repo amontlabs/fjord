@@ -85,7 +85,7 @@ struct MentionLook: Equatable {
     var label: String
     var symbol: String?
     var tint: Color?
-    /// A setting's pill (Router v2): drawn quieter than a thread's, with no "@", on an outline.
+    /// A setting's pill (Router v2): drawn quieter than a thread's, with no "@", on the quiet fill.
     var setting = false
 }
 
@@ -627,15 +627,14 @@ enum MentionPill {
                               ink: NSAttributedString) {
         let height = Self.height
         do {
-            let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
             if look.setting {
-                // On the page's quiet ground with an outline: a setting reads apart from a thread's filled pill.
-                NSColor(CDS.Text.muted).withAlphaComponent(0.55).setStroke()
-                shape.lineWidth = 1
-                shape.stroke()
+                // The Surfaces system's quiet ground at a token's radius, no outline (Router v2 DESIGN 1.0): a setting
+                // reads apart from a thread's pill by its lighter ground and its glyph.
+                NSColor(RouterV2.Surface.quiet).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: RouterV2.Surface.token, yRadius: RouterV2.Surface.token).fill()
             } else {
                 NSColor(CDS.Fill.secondary).setFill()
-                shape.fill()
+                NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6).fill()
             }
             var x: CGFloat = 6
             if let glyph {
