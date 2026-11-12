@@ -35,15 +35,10 @@ extension Store {
         }.sorted { ($0.created, $0.key) < ($1.created, $1.key) }
     }
 
-    /// The threads the current brief tags (its `now` lines, its entries and the lead), as T3 thread ids.
+    /// The threads the Router page shows a line for (what needs you, what is done and what works), as T3 thread ids.
     func mentionedThreads() -> Set<String> {
-        var raw: [String] = []
-        for doc in routerBriefs.docs.values {
-            for line in doc.now { raw += BriefMarkup.ids(line) }
-            raw += doc.needsYou.map(\.thread)
-        }
-        raw += BriefMarkup.ids(routerBriefs.general.forYou) + BriefMarkup.ids(routerBriefs.general.worthALook)
-        return Set(raw.flatMap { id in BriefTarget(key: id).map { [id, $0.thread] } ?? [id] })
+        Set(routerRecords.lines(in: .needsYou).map(\.id) + routerRecords.lines(in: .done).map(\.id)
+            + routerRecords.lines(in: .working).map(\.id))
     }
 
     /// The context for a decision on `message`: the day's archive frozen, everything else as it is now. No read.

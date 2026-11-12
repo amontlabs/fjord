@@ -105,7 +105,7 @@ extension Store {
         board.projectIDs = ids
         board.projectRepos = repos
         for p in projects {
-            if let purpose = routerBriefs.docs[p.id]?.purpose, !purpose.isEmpty {
+            if let purpose = routerPurposes?.purpose(p.id), !purpose.isEmpty {
                 board.purposes[names[p.id] ?? ""] = purpose.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             }
         }
@@ -129,6 +129,18 @@ extension Store {
                 youLatest: t.id == latestTold)
         }
         return board
+    }
+
+    /// Asks for a project's purpose (block B) when the first asks of its threads changed: the verdict engine's small call per
+    /// project, once every thread in play there has its first ask read (a half-read set would ask again at each read).
+    func updateProjectPurposes(_ board: DeciderBoard) {
+        guard let purposes = routerPurposes else { return }
+        var byProject: [String: [DeciderBoard.Thread]] = [:]
+        for t in board.threads { byProject[t.project, default: []].append(t) }
+        for (name, threads) in byProject {
+            guard let id = board.projectIDs[name], !threads.contains(where: { $0.first.isEmpty }) else { continue }
+            purposes.update(project: id, name: name, firstAsks: threads.map(\.first))
+        }
     }
 
     /// `#12 open`, from a pull request's shell snapshot; nil without a number.
@@ -171,6 +183,7 @@ extension Store {
         guard t3.store.hasClient else { return [] }
         let board = deciderBoard()
         deciderReads.prune(keeping: Set(threads.keys))
+        updateProjectPurposes(board)
         var tasks: [Task<Void, Never>] = []
         let t3 = self.t3.store
         // Jev's candidates and the full context's live threads (N4b rules: 24 h, each project's newest, just created).
