@@ -16,11 +16,21 @@ enum RouterV2Demo {
     private static var source: RouterV2DemoSource?
     private static var script: RouterV2DemoScript?
 
-    static var isRequested: Bool { CommandLine.arguments.contains("--router-v2-demo") }
+    static var isRequested: Bool { CommandLine.arguments.contains("--router-v2-demo") || RouterV2Load.isRequested }
 
     /// `--window --router-v2-demo [--from <beat>] [--until <beat>] [--beats 5,6,14] [--speed <x>] [--reduce-motion]
     /// [--frames <dir> [--frames-rate <n>]]`.
     static func install() {
+        if RouterV2Load.isRequested {
+            // The load scenario (RouterV2Load.swift): the same store, sixty lines, no script.
+            let model = RouterV2Load.records()
+            let source = RouterV2DemoSource(model: model)
+            model.source = source
+            self.model = model
+            self.source = source
+            RouterV2Load.play(model)
+            return
+        }
         let model = records()
         let source = RouterV2DemoSource(model: model)
         let stage = RouterV2Stage()

@@ -8,6 +8,11 @@
 #   scripts/morph-timings.sh                                       release build, "open,close x10" on busy
 #   scripts/morph-timings.sh --bin /tmp/fjord-before/.build/release/Fjord --steps "open,close x6"
 #   scripts/morph-timings.sh --json out.json                       also write the summary as JSON
+#   scripts/morph-timings.sh --args "--window --router-v2-load --quit-after"
+#                                                                  runs the build with those flags instead of the motion
+#                                                                  script (they must make it quit by itself), and reads the
+#                                                                  same signposts: the Router's ("router: T3 event", "Key",
+#                                                                  "Flush"…) among them
 set -u
 cd "$(dirname "$0")/.." || exit 2
 
@@ -15,6 +20,7 @@ bin=.build/release/Fjord
 scenario=busy
 steps="open,close x10"
 json=
+args=
 while [ $# -gt 0 ]; do
     [ $# -ge 2 ] || { echo "morph-timings: $1 needs a value"; exit 2; }
     case "$1" in
@@ -22,7 +28,8 @@ while [ $# -gt 0 ]; do
         --scenario) scenario=$2 ;;
         --steps) steps=$2 ;;
         --json) json=$2 ;;
-        *) echo "morph-timings: unknown argument '$1' (--bin, --scenario, --steps, --json)"; exit 2 ;;
+        --args) args=$2 ;;
+        *) echo "morph-timings: unknown argument '$1' (--bin, --scenario, --steps, --json, --args)"; exit 2 ;;
     esac
     shift 2
 done
@@ -30,7 +37,12 @@ done
 
 start=$(date '+%Y-%m-%d %H:%M:%S')
 sleep 1
-"$bin" --demo "$scenario" --motion-script "$steps" --quit-after > /dev/null 2>&1 &
+if [ -n "$args" ]; then
+    # shellcheck disable=SC2086 # the flags are words
+    "$bin" $args > /dev/null 2>&1 &
+else
+    "$bin" --demo "$scenario" --motion-script "$steps" --quit-after > /dev/null 2>&1 &
+fi
 pid=$!
 wait "$pid"
 sleep 1
@@ -40,15 +52,18 @@ log show --start "$start" --signpost --style compact \
     python3 -I -c "$(cat <<'PY'
 import re, sys, json
 from datetime import datetime
-line = re.compile(r"^(\S+ \S+) .*\[com\.amontlabs\.fjord:(\w+)\] \[spid \S+, \w+,\s+(begin|end)\] (.+?)\s*$")
+line = re.compile(r"^(\S+ \S+) .*\[com\.amontlabs\.fjord:(\w+)\] \[spid (\S+), \w+,\s+(begin|end)\] (.+?)\s*$")
 open_, spans = {}, {}
 for raw in sys.stdin:
     m = line.match(raw)
     if not m: continue
     when = datetime.strptime(m[1], "%Y-%m-%d %H:%M:%S.%f").timestamp() * 1000
-    key = m[2] + ": " + m[4].split(" (")[0]
-    if m[3] == "begin": open_.setdefault(key, []).append(when)
-    elif open_.get(key): spans.setdefault(key, []).append(when - open_[key].pop())
+    key = m[2] + ": " + m[5].split(" (")[0]
+    # Paired by name and signpost id: intervals of one name that overlap (a key's "Key" and the next key's) each end
+    # their own.
+    pair = (key, m[3])
+    if m[4] == "begin": open_.setdefault(pair, []).append(when)
+    elif open_.get(pair): spans.setdefault(key, []).append(when - open_[pair].pop())
 def pct(v, p):
     v = sorted(v)
     return v[min(len(v) - 1, int(round(p * (len(v) - 1))))]
