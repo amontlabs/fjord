@@ -376,4 +376,17 @@ import Testing
         #expect(press(model, kVK_Return, inField: true, composer: host))
         #expect(source.sends.count == 1)
     }
+
+    // MARK: The settings' lists
+
+    @Test func theEffortAndAccessMenusAreTheChosenModelsOwnLists() {
+        let (model, _) = page(select: nil)
+        let slim = RouterV2LaunchModel(id: "slim", name: "Slim", provider: "T3", instance: "slim",
+                                       efforts: [.low, .high], defaultEffort: .low, access: [.supervised, .full])
+        model.apply(.launch(defaults: RouterV2Launch(model: "slim", effort: .low, access: .supervised, plan: false), models: [slim]))
+        draft(model, "silo: write the changelog", to: .newThread(project: "silo"))
+        #expect(model.launchChoices(.effort).map(\.label) == ["Low", "High"])
+        #expect(model.launchChoices(.access).count == 2)
+        #expect(model.launchChoices(.model).map(\.label) == ["Slim"])
+    }
 }

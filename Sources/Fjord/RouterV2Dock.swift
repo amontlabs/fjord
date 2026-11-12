@@ -8,6 +8,7 @@ import SwiftUI
 struct RouterV2Dock: View {
     let model: RouterV2Model
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.routerV2Waiting) private var waiting
 
     var body: some View {
         VStack(alignment: .leading, spacing: CDS.Composer.dockGap) {
@@ -26,6 +27,12 @@ struct RouterV2Dock: View {
                 .frame(height: 20)
                 .transition(.opacity)
             }
+            if let waiting {
+                ForEach(waiting.items) { item in
+                    RouterV2WaitingLine(model: model, waiting: waiting, item: item)
+                        .transition(.scaleFade(0.96, reduce: reduce))
+                }
+            }
             ForEach(model.failures) { failure in
                 RouterV2FailureLine(model: model, failure: failure)
                     // In once the stack has made room for it.
@@ -41,6 +48,7 @@ struct RouterV2Dock: View {
         }
         .motion(.spatial, value: model.toast != nil)
         .motion(.spatial, value: model.failures.count)
+        .motion(.spatial, value: waiting?.items.map(\.id) ?? [])
         .motion(.spatial, value: model.connectionLost)
         .motion(.spatial, value: model.destination != nil)
     }
@@ -58,6 +66,88 @@ extension EnvironmentValues {
     var routerV2Composer: RouterV2ComposerHost? {
         get { self[RouterV2ComposerKey.self] }
         set { self[RouterV2ComposerKey.self] = newValue }
+    }
+}
+
+// MARK: - An action waiting for a place
+
+/// Words an unattended Triage action wrote that its policy couldn't place (no project known to start a thread in): they wait
+/// as one line in the dock's status stack, with the places to pick from, and in History (risk 5). The store (9a) fills
+/// `items` and takes the pick; the page only shows them.
+@MainActor @Observable final class RouterV2Waiting {
+    struct Item: Identifiable, Equatable {
+        let id: String
+        /// Where they come from, as the line says it: "Triage's action on PR #12".
+        var origin: String
+        var words: String
+        /// The places it offers first: its guesses; the places menu adds a new thread in each project.
+        var places: [RouterV2Place]
+    }
+
+    var items: [Item] = []
+    /// A place was picked for an item: the store sends the words there and takes the item away.
+    @ObservationIgnored var pick: (String, RouterV2Place) -> Void = { _, _ in }
+}
+
+private struct RouterV2WaitingKey: EnvironmentKey {
+    static let defaultValue: RouterV2Waiting? = nil
+}
+
+extension EnvironmentValues {
+    /// The actions waiting for a place (`RouterV2Waiting`); none when unset.
+    var routerV2Waiting: RouterV2Waiting? {
+        get { self[RouterV2WaitingKey.self] }
+        set { self[RouterV2WaitingKey.self] = newValue }
+    }
+}
+
+/// An action's words and where they can go: a line like a failure's, on the quiet ground, its places as buttons and the
+/// places menu after them.
+struct RouterV2WaitingLine: View {
+    let model: RouterV2Model
+    let waiting: RouterV2Waiting
+    let item: RouterV2Waiting.Item
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: RouterV2.Surface.row, style: .continuous)
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.branch").font(.system(size: 11, weight: .medium)).foregroundStyle(CDS.Text.accent)
+            (Text("“\(item.words)”").foregroundColor(CDS.Text.primary)
+                + Text(" needs a place").foregroundColor(CDS.Text.secondary))
+                .font(CDS.sans(13)).lineLimit(1).truncationMode(.tail)
+                .help(item.origin)
+            Spacer(minLength: 8)
+            ForEach(Array(item.places.prefix(2).enumerated()), id: \.offset) { _, place in
+                Button { waiting.pick(item.id, place) } label: {
+                    RouterV2PlaceView(model: model, place: place, project: false)
+                        .padding(.horizontal, RouterV2.Dock.placePadX)
+                        .frame(height: RouterV2.Dock.place)
+                }
+                .buttonStyle(HoverFillButtonStyle(shape: RoundedRectangle(cornerRadius: RouterV2.Surface.control, style: .continuous),
+                                                  rest: .clear, hover: RouterV2.Surface.hover, active: RouterV2.Surface.pressed,
+                                                  pressed: RouterV2.Surface.pressed))
+            }
+            Menu {
+                ForEach(Array(places.enumerated()), id: \.offset) { _, place in
+                    Button(model.name(place)) { waiting.pick(item.id, place) }
+                }
+            } label: {
+                Text("Other places").cdsText(CDS.Density.compact.footnote, .regular, CDS.Text.secondary)
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.visible).fixedSize()
+        }
+        .padding(.leading, 10).padding(.trailing, 5)
+        .frame(height: RouterV2.Dock.failureHeight)
+        .background(shape.fill(RouterV2.Surface.chosen))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("“\(item.words)” from \(item.origin) has no place yet")
+    }
+
+    /// Its guesses, then a new thread in each project.
+    private var places: [RouterV2Place] {
+        var out = item.places
+        for p in model.projects where !out.contains(.newThread(project: p)) { out.append(.newThread(project: p)) }
+        return out
     }
 }
 
