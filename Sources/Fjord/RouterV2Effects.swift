@@ -390,10 +390,10 @@ enum RouterV2PRTint {
     }
 }
 
-/// A word's turn, carried by its run of text to the renderer.
+/// A word's turn, carried by its run of text to the renderer: when it starts to fade in, in words' time.
 @available(macOS 15, *)
 struct RouterV2WordTurn: TextAttribute {
-    let index: Int
+    let index: Double
 }
 
 /// The run that pops (a PR's state word as it flips).
@@ -419,7 +419,7 @@ struct RouterV2WordRenderer: TextRenderer {
             for run in line {
                 var copy = context
                 if let turn = run[RouterV2WordTurn.self] {
-                    let t = min(1, max(0, (shown - Double(turn.index)) / Self.fade))
+                    let t = min(1, max(0, (shown - turn.index) / Self.fade))
                     // Ease-out.
                     copy.opacity = 1 - (1 - t) * (1 - t)
                 }
@@ -436,9 +436,10 @@ struct RouterV2WordRenderer: TextRenderer {
 }
 
 /// A line's sentence as text: its words in `tint`, a PR's link in the accent, its state word in footnote in the state's
-/// colour. `attributed`: each run carries its turn for the renderer.
+/// colour. `attributed`: each run carries its turn for the renderer (`turn`: a word's own, its index unless it arrived
+/// later than its index's time).
 enum RouterV2SentenceText {
-    static func text(_ words: RouterV2Words, tint: Color, mono: Bool, attributed: Bool) -> Text {
+    static func text(_ words: RouterV2Words, tint: Color, mono: Bool, attributed: Bool, turn: (Int) -> Double = { Double($0) }) -> Text {
         var out = Text("")
         for part in words.parts {
             var piece: Text
@@ -454,7 +455,7 @@ enum RouterV2SentenceText {
                 piece = Text(part.text).font(CDS.sans(12)).foregroundColor(RouterV2PRTint.text(state))
             }
             if attributed, #available(macOS 15, *) {
-                piece = piece.customAttribute(RouterV2WordTurn(index: part.index))
+                piece = piece.customAttribute(RouterV2WordTurn(index: turn(part.index)))
                 if case .state = part.kind { piece = piece.customAttribute(RouterV2PopRun()) }
             }
             out = out + piece
@@ -464,31 +465,48 @@ enum RouterV2SentenceText {
 }
 
 /// The model's words arriving: on appearing as a line that just landed, they fade in one by one, one every 50 ms; a line
-/// already there is drawn whole. The PR's state word pops when it flips. Under Reduce Motion (and before macOS 15) the
-/// whole line is there at once; the row fades it.
+/// already there is drawn whole. Words that keep coming (`.words` of the same stream, growing) are the same view: the
+/// ones that arrived fade in from where the stream is, in turn if it is ahead of them, together (0.12 s) if they came
+/// after their time. The PR's state word pops when it flips. Under Reduce Motion (and before macOS 15) the whole line
+/// is there at once; the row fades it.
 struct RouterV2StreamedText: View {
     let words: RouterV2Words
     let tint: Color
     var mono = false
     /// The words just landed: they stream.
     let arriving: Bool
+    /// No more words are coming for this line: `done` once they are all drawn.
+    var complete = true
     /// The PR's state, to pop its word when it changes.
     var prState: RouterV2Thread.PR.State?
     var done: () -> Void = {}
 
+    /// The stream's clock, in words' time: word `i` starts to fade in at `max(i, the clock when it arrived)`.
     @State private var shown: Double
+    /// The clock's current stretch: from `start`, at `began`, to `shown`, one word every `RouterV2.wordEvery`.
+    @State private var start: Double = 0
+    @State private var began = Date.distantPast
+    /// Each later batch of words: its first word's index and the clock when it came.
+    @State private var batches: [Batch] = []
+    @State private var stretch = 0
     @State private var pop: CGFloat = 1
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.routerV2Still) private var still
 
+    private struct Batch: Equatable {
+        var from: Int
+        var at: Double
+    }
+
     static let all: Double = 100_000
 
-    init(words: RouterV2Words, tint: Color, mono: Bool = false, arriving: Bool, prState: RouterV2Thread.PR.State? = nil,
-         done: @escaping () -> Void = {}) {
+    init(words: RouterV2Words, tint: Color, mono: Bool = false, arriving: Bool, complete: Bool = true,
+         prState: RouterV2Thread.PR.State? = nil, done: @escaping () -> Void = {}) {
         self.words = words
         self.tint = tint
         self.mono = mono
         self.arriving = arriving
+        self.complete = complete
         self.prState = prState
         self.done = done
         _shown = State(initialValue: arriving ? 0 : Self.all)
@@ -496,11 +514,13 @@ struct RouterV2StreamedText: View {
 
     var body: some View {
         if #available(macOS 15, *), !reduce {
-            RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true)
+            RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn)
                 .textRenderer(RouterV2WordRenderer(shown: still ? Self.all : shown, pop: pop))
                 // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
                 .contentTransition(.identity)
                 .onAppear { stream() }
+                .onChange(of: words.count) { old, new in if new > old { grow(from: old) } }
+                .onChange(of: complete) { _, complete in if complete { finish() } }
                 .onChange(of: prState) { _, new in
                     guard new != nil, !still else { return }
                     pop = RouterV2.prPopScale
@@ -509,19 +529,72 @@ struct RouterV2StreamedText: View {
                 }
         } else {
             RouterV2SentenceText.text(words, tint: tint, mono: mono, attributed: false)
-                .onAppear { if arriving { done() } }
+                .onAppear { if arriving, complete { done() } }
+                .onChange(of: complete) { _, complete in if complete, arriving { done() } }
         }
+    }
+
+    /// Word `i`'s turn: its index, or the clock when it came if that was later.
+    private func turn(_ i: Int) -> Double {
+        guard let batch = batches.last(where: { $0.from <= i }) else { return Double(i) }
+        return max(Double(i), batch.at)
+    }
+
+    /// Where the clock is drawn now.
+    private var presented: Double {
+        guard shown < Self.all else { return Self.all }
+        let ran = Date().timeIntervalSince(began) / RouterV2.wordEvery
+        return min(shown, start + max(0, ran))
+    }
+
+    /// The clock's end: a word's time after the last word's turn, and its fade.
+    private var target: Double {
+        guard words.count > 0 else { return RouterV2.wordFade / RouterV2.wordEvery }
+        return turn(words.count - 1) + 1 + RouterV2.wordFade / RouterV2.wordEvery
     }
 
     private func stream() {
         guard arriving, shown < Self.all else { return }
-        guard !still else { done(); return }
-        let target = Double(words.count) + RouterV2.wordFade / RouterV2.wordEvery
+        guard !still else { if complete { done() }; return }
         // As the code line goes, at the rate the words arrive.
-        withAnimation(Animation.linear(duration: target * RouterV2.wordEvery).delay(RouterV2.streamLead).resolved(reduce: reduce),
-                      completionCriteria: .logicallyComplete) {
-            shown = target
+        run(to: target, lead: RouterV2.streamLead)
+    }
+
+    /// More words of the same stream: they start where the clock is.
+    private func grow(from count: Int) {
+        guard arriving, !still, shown < Self.all else { return }
+        let now = presented
+        batches.append(Batch(from: count, at: now))
+        run(to: target, from: now, lead: 0)
+    }
+
+    /// The last words are in: once drawn, it is done.
+    private func finish() {
+        guard arriving, !still else { done(); return }
+        guard shown < Self.all else { return }
+        let now = presented
+        if now >= shown {
+            shown = Self.all
+            done()
+        } else {
+            run(to: shown, from: now, lead: 0)
+        }
+    }
+
+    /// Runs the clock from `from` to `to`, one word every `wordEvery`; at its end, if no later stretch began and no more
+    /// words are coming, every word is drawn whole and the line is done.
+    private func run(to: Double, from: Double? = nil, lead: Double) {
+        let from = from ?? shown
+        stretch += 1
+        let mine = stretch
+        start = from
+        began = Date().addingTimeInterval(lead)
+        let duration = max(0, to - from) * RouterV2.wordEvery
+        withAnimation(Animation.linear(duration: duration).delay(lead).resolved(reduce: reduce), completionCriteria: .logicallyComplete) {
+            // A stretch that ends where the last one did still runs to its end, so its completion waits for the words.
+            shown = to == shown ? to.nextUp : to
         } completion: {
+            guard stretch == mine, complete else { return }
             shown = Self.all
             done()
         }
