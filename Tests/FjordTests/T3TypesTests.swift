@@ -254,6 +254,22 @@ struct T3TypesTests {
         #expect(plain.interactionMode == .default && plain.options.isEmpty)
     }
 
+    @Test func aMessageCanContinueAnInterruptedRun() {
+        let c = payload(.messageDispatch(threadId: "t1", messageId: "m1", text: "Continue where you left off.", dispatch: .startImmediately(intent: .auto), continuationOf: "r7"))
+        #expect(c["manualContinuationOfRunId"] == "r7" && c["type"] == "message.dispatch" && c["dispatchMode"] == ["type": "start_immediately"])
+        #expect(payload(.messageDispatch(threadId: "t1", messageId: "m1", text: "x", dispatch: .startImmediately(intent: .auto)))["manualContinuationOfRunId"] == nil)
+    }
+
+    @Test func aNamedPullRequestIsLinkedByItsKey() {
+        #expect(payload(.pullRequestLink(threadId: "t1", url: "https://github.com/amontlabs/Fjord/pull/42")) == [
+            "commandId": "c1", "type": "thread.pull-request.link", "threadId": "t1", "url": "https://github.com/amontlabs/Fjord/pull/42",
+            "source": "agent", "host": "github.com", "repository": "amontlabs/Fjord", "number": 42])
+        #expect(T3PullRequestRef(url: "https://github.com/a/b/issues/3") == nil)
+        #expect(T3PullRequestRef(url: "not a url") == nil)
+        #expect(T3PullRequestRef(url: "https://github.com/a/b/pull/0") == nil)
+        #expect(T3PullRequestRef(url: "https://GitHub.com/a/b/pull/7/files") == T3PullRequestRef(url: "https://github.com/a/b/pull/7"))
+    }
+
     // MARK: Commands (exact shapes from S1)
 
     private func payload(_ c: T3Command) -> T3JSON { c.payload(commandId: "c1") }

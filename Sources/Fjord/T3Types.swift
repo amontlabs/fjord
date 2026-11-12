@@ -805,7 +805,9 @@ struct T3LaunchRequest: Equatable, Sendable {
 enum T3Command: Equatable, Sendable {
     case messageDispatch(threadId: String, messageId: String, text: String, dispatch: T3Dispatch,
                          attachments: [T3Attachment] = [], sourcePlan: (threadId: String, planId: String)? = nil,
-                         context: [T3JSON] = [])
+                         context: [T3JSON] = [], continuationOf: String? = nil)
+    /// Links a pull request to a thread so T3 polls and pushes its state (`thread.pull-request.link`, source `agent`).
+    case pullRequestLink(threadId: String, url: String)
     case respondDecision(threadId: String, requestId: String, decision: T3Decision, feedback: String? = nil)
     case respondAnswers(threadId: String, requestId: String, answers: [String: T3Answer])
     case runInterrupt(threadId: String, runId: String, reason: String? = nil, holdQueue: Bool = false)
@@ -838,7 +840,7 @@ enum T3Command: Equatable, Sendable {
             .object(extra.merging(["commandId": .string(commandId), "type": .string(type), "threadId": .string(thread)]) { a, _ in a })
         }
         switch self {
-        case .messageDispatch(let thread, let messageId, let text, let dispatch, let attachments, let plan, let records):
+        case .messageDispatch(let thread, let messageId, let text, let dispatch, let attachments, let plan, let records, let continuation):
             var e: [String: T3JSON] = [
                 "createdBy": "user", "creationSource": "mcp", "messageId": .string(messageId), "text": .string(text),
                 "attachments": .array(attachments.map(\.json)),
@@ -852,7 +854,15 @@ enum T3Command: Equatable, Sendable {
             if let plan { e["sourcePlanRef"] = ["threadId": .string(plan.threadId), "planId": .string(plan.planId)] }
             // Typed context the text points at with `t3-context://` links (`ThreadMessage`).
             if !records.isEmpty { e["context"] = ["version": 1, "records": .array(records)] }
+            // Continues an interrupted run, or one a usage limit stopped (`manualContinuationOfRunId`).
+            if let continuation { e["manualContinuationOfRunId"] = .string(continuation) }
             return cmd("message.dispatch", thread, e)
+        case .pullRequestLink(let thread, let url):
+            var e: [String: T3JSON] = ["url": .string(url), "source": "agent"]
+            if let ref = T3PullRequestRef(url: url) {
+                e["host"] = .string(ref.host); e["repository"] = .string(ref.repository); e["number"] = .number(Double(ref.number))
+            }
+            return cmd("thread.pull-request.link", thread, e)
         case .respondDecision(let thread, let request, let decision, let feedback):
             var e: [String: T3JSON] = ["requestId": .string(request), "decision": .string(decision.rawValue)]
             if let feedback { e["feedback"] = .string(feedback) }
@@ -915,4 +925,20 @@ struct T3Error: Error, Equatable, Sendable, CustomStringConvertible {
     var commandType: String? = nil
     var tag: String? = nil
     var description: String { "T3 \(kind)\(tag.map { " (\($0))" } ?? ""): \(message)" }
+}
+
+
+/// A pull request's key as T3 wants it for a link: the host, `owner/name` and the number, read from its URL.
+struct T3PullRequestRef: Equatable, Sendable {
+    var host: String
+    var repository: String
+    var number: Int
+
+    /// `https://github.com/owner/name/pull/12`; nil for any other shape.
+    init?(url: String) {
+        guard let u = URL(string: url), let host = u.host?.lowercased() else { return nil }
+        let parts = u.path.split(separator: "/").map(String.init)
+        guard parts.count >= 4, parts[2] == "pull", let n = Int(parts[3]), n > 0 else { return nil }
+        self.host = host; repository = "\(parts[0])/\(parts[1])"; number = n
+    }
 }
