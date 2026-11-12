@@ -152,7 +152,11 @@ final class RouterRecords {
     /// What the thread's projection says (its working line, its reply, its request…), while one is held; nil once closed.
     func detail(_ id: String, _ d: RouterDetail?) {
         operation {
-            guard let e = entries[id], e.detail != d else { return }
+            guard let e = entries[id] else { return }
+            // Work T3 gives no start keeps the time Fjord first saw it.
+            var d = d
+            if let a = d?.activity { d?.activity = a.stamped(after: e.detail?.activity, now: now()) }
+            guard e.detail != d else { return }
             e.detail = d
             refresh(id)
         }
@@ -518,6 +522,7 @@ final class RouterRecords {
         r.lastLines = d?.reply ?? t.latestMessage ?? ""
         r.writing = d?.writing ?? false
         r.steps = d?.steps ?? []
+        r.activity = d?.activity ?? .init()
         r.diff = d?.diff
         r.queued = e.queued ?? d?.queued.first { !e.cancelled.contains($0.id) }?.words
         r.prs = pullRequests(t, d?.reply ?? t.latestMessage)

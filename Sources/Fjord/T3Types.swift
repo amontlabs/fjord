@@ -372,11 +372,17 @@ struct T3PendingTask: T3Decodable, Hashable, Sendable {
     var id: String
     var kind: String?
     var description: String?
+    /// The agent said it resumes when this work ends (`awaited`): a wait, not work it left running.
+    var awaited = false
+    /// A subagent's own thread (`childThreadId`).
+    var childThreadId: String?
 
     init(json j: T3JSON) {
         id = j.str("taskId") ?? ""
         kind = j.str("kind")
         description = j.str("description")
+        awaited = j.flag("awaited")
+        childThreadId = j.str("childThreadId")
     }
 
     /// What it is, in a few words: what T3 named it, else its kind.
