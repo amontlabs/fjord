@@ -114,6 +114,30 @@ import Testing
         #expect(RouterLaunchCatalog.taken("", in: draft, said: said) == nil)
     }
 
+    @Test func theCutWidensOverBracketsAndDanglingSeparators() {
+        let said = RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium)
+        func left(_ words: String, _ draft: String) -> String? {
+            RouterLaunchCatalog.taken(words, in: draft, said: said).map { cut in
+                draft.replacingOccurrences(of: cut, with: "").trimmingCharacters(in: .whitespaces)
+            }
+        }
+        // The model quoted the words without their brackets.
+        #expect(left("use opus medium", "fix x (use opus medium)") == "fix x")
+        #expect(left("use opus medium", "fix x [ use opus medium ]") == "fix x")
+        #expect(left("use opus medium", "(use opus medium) fix x") == "fix x")
+        // A dash or comma the words leave at the end (or the start) goes too.
+        #expect(left("use sonnet high", "fix x — use sonnet high") == "fix x")
+        #expect(left("use sonnet high", "fix x - use sonnet high") == "fix x")
+        #expect(left("use opus, dont edit anything", "fix the readme, use opus, dont edit anything") == "fix the readme")
+        #expect(left("use opus", "use opus, fix the readme") == "fix the readme")
+        // Near-misses stay: a comma in the middle of the message, brackets that don't match or aren't right around the words.
+        #expect(RouterLaunchCatalog.taken("use opus medium", in: "fix x, then y use opus medium", said: said) == "use opus medium")
+        #expect(RouterLaunchCatalog.taken("use opus medium", in: "fix x (use opus medium]", said: said) == "use opus medium")
+        #expect(RouterLaunchCatalog.taken("use opus medium", in: "fix (see use opus medium here)", said: said) == "use opus medium")
+        // Nothing left to send once the brackets go: nothing is taken.
+        #expect(RouterLaunchCatalog.taken("use opus medium", in: "(use opus medium)", said: said) == nil)
+    }
+
     // MARK: The feed
 
     @Test func theFeedReadsTheConfigWhenConnectedAndTellsThePageOnlyWhatChanged() async {

@@ -203,7 +203,7 @@ enum DeciderContext {
             A new thread can be started with settings. A message that starts new work may say how: its model, its reasoning effort, its runtime mode (how much it may do unasked) or its interaction mode (plan: it writes a plan and waits for the owner's go; default: it builds). Fill launch with only what the message itself names, never a default, and only when the message starts a new thread; otherwise launch is empty and launch_words is "". The models T3 has (model is one of these ids, runtime_mode and effort are T3's own words):
             \(models.joined(separator: "\n"))
             Runtime modes: \(offer.accesses.joined(separator: ", ")).
-            In launch_words put the message's words that only say those settings, copied exactly from the message, nothing added or changed; empty when the message names none. Words that are part of the work itself ("make the summary use opus-style headings") are the work: they are not settings and stay out of launch_words. Never rewrite, shorten or correct the message.
+            In launch_words put the message's words that only say those settings, copied exactly from the message, nothing added or changed; empty when the message names none. Words that are part of the work itself ("make the summary use opus-style headings") are the work: they are not settings and stay out of launch_words. Never rewrite, shorten or correct the message. When the settings are written inside brackets or parentheses, launch_words includes the brackets, so cutting it leaves no empty or half brackets. "don't edit anything" and "ask me before editing" say the approval-required runtime mode.
             """
     }
 

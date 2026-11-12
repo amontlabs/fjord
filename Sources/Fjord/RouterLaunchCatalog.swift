@@ -135,9 +135,34 @@ enum RouterLaunchCatalog {
     /// otherwise, so nothing is ever cut from a message on a guess.
     static func taken(_ words: String, in draft: String, said: RouterV2LaunchAsk) -> String? {
         guard !words.isEmpty, said != RouterV2LaunchAsk(), let range = draft.range(of: words, options: .backwards) else { return nil }
-        let rest = (draft[..<range.lowerBound] + draft[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return rest.isEmpty ? nil : words
+        var lo = range.lowerBound
+        var hi = range.upperBound
+        // Brackets right around the words (a model that quoted "use opus medium" out of "(use opus medium)") go with them,
+        // else the sent message keeps "()".
+        var before = lo
+        while before > draft.startIndex, draft[draft.index(before: before)].isWhitespace { before = draft.index(before: before) }
+        var after = hi
+        while after < draft.endIndex, draft[after].isWhitespace { after = draft.index(after: after) }
+        if before > draft.startIndex, after < draft.endIndex, closer[draft[draft.index(before: before)]] == draft[after] {
+            lo = draft.index(before: before)
+            hi = draft.index(after: after)
+        }
+        // A comma or dash the words leave dangling at an end of the message goes too.
+        let tail = draft[hi...].trimmingCharacters(in: .whitespacesAndNewlines)
+        let head = draft[..<lo].trimmingCharacters(in: .whitespacesAndNewlines)
+        if tail.isEmpty, let last = head.last, separators.contains(last) {
+            lo = draft[..<lo].lastIndex { !$0.isWhitespace && !separators.contains($0) }.map { draft.index(after: $0) } ?? draft.startIndex
+        } else if head.isEmpty, let first = tail.first, separators.contains(first) {
+            var i = hi
+            while i < draft.endIndex, draft[i].isWhitespace || separators.contains(draft[i]) { i = draft.index(after: i) }
+            hi = i
+        }
+        let rest = (draft[..<lo] + draft[hi...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return rest.isEmpty ? nil : String(draft[lo..<hi])
     }
+
+    private static let closer: [Character: Character] = ["(": ")", "[": "]", "{": "}"]
+    private static let separators: Set<Character> = [",", ";", "-", "—", "–"]
 }
 
 // MARK: - Read from T3

@@ -336,6 +336,8 @@ extension DeciderContextTests {
         #expect(b.system.hasPrefix(DeciderContext.role) && b.launch == offer && b.schema == DeciderContext.schema(launch: offer))
         #expect(b.system.contains("- claude-opus-5-5: Opus 5.5 (Claude), also called opus; efforts low, medium, high, xhigh, max"))
         #expect(b.system.contains("- claude-haiku-5-5: Haiku 5.5 (Claude), also called haiku") && b.system.contains("Never rewrite, shorten or correct the message"))
+        #expect(b.system.contains("launch_words includes the brackets") && b.system.contains("approval-required runtime mode"))
+        #expect(!b.system.contains("just read"))
         // The offer is part of the request, and absent it the prompt and schema are what they were.
         let plain = Self.buildWith("split the tests (use opus medium)", threads: ts)
         #expect(plain.system == DeciderContext.role && plain.schema == DeciderContext.schema && plain.launch == nil && plain.key != b.key)
