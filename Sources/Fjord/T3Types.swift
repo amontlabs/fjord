@@ -756,6 +756,24 @@ struct T3Attachment: Equatable, Sendable {
     var json: T3JSON { ["type": .string(type), "id": .string(id), "name": .string(name), "mimeType": .string(mimeType), "sizeBytes": .number(Double(sizeBytes))] }
 }
 
+/// One of a model selection's options (`ProviderOptionSelection`): `{id, value}`, the value a string or a flag.
+struct T3ModelOption: Equatable, Sendable {
+    var id: String
+    var value: Value
+    enum Value: Equatable, Sendable { case text(String), flag(Bool) }
+    init(id: String, value: Value) { self.id = id; self.value = value }
+    init(id: String, text: String) { self.init(id: id, value: .text(text)) }
+    /// The effort of a model (`modelSelection.options: [{id: "effort", value}]`).
+    static func effort(_ value: String) -> T3ModelOption { .init(id: "effort", text: value) }
+
+    var json: T3JSON {
+        switch value {
+        case .text(let s): ["id": .string(id), "value": .string(s)]
+        case .flag(let b): ["id": .string(id), "value": .bool(b)]
+        }
+    }
+}
+
 struct T3LaunchRequest: Equatable, Sendable {
     var threadId: String
     var projectId: String
@@ -765,6 +783,8 @@ struct T3LaunchRequest: Equatable, Sendable {
     var model: String
     var runtimeMode: T3RuntimeMode = .fullAccess
     var interactionMode: T3InteractionMode = .default
+    /// The model's options, `[{id, value}]` in `modelSelection.options`: the effort is `id: "effort"`. Empty sends none.
+    var options: [T3ModelOption] = []
     /// `root`, or `worktree` with a base ref and branch (see OV2:654-671).
     var workspaceStrategy: T3JSON = ["type": "root"]
     var messageId: String
@@ -866,10 +886,12 @@ enum T3Command: Equatable, Sendable {
         case .threadRename(let thread, let title): return cmd("thread.metadata.update", thread, ["title": .string(title)])
         case .queueResume(let thread): return cmd("queue.resume", thread)
         case .launchThread(let r):
+            var selection: [String: T3JSON] = ["instanceId": .string(r.instanceId), "model": .string(r.model)]
+            if !r.options.isEmpty { selection["options"] = .array(r.options.map(\.json)) }
             return [
                 "commandId": .string(commandId), "creationSource": "mcp", "threadId": .string(r.threadId),
                 "projectId": .string(r.projectId), "title": .string(r.title), "generateTitle": .bool(r.generateTitle),
-                "modelSelection": ["instanceId": .string(r.instanceId), "model": .string(r.model)],
+                "modelSelection": .object(selection),
                 "runtimeMode": .string(r.runtimeMode.rawValue), "interactionMode": .string(r.interactionMode.rawValue),
                 "workspaceStrategy": r.workspaceStrategy,
                 "initialMessage": r.initialMessage,

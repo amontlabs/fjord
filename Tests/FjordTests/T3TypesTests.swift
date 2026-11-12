@@ -234,6 +234,26 @@ struct T3TypesTests {
         #expect(idle.latestRunID == nil && !idle.stopRequested && idle.runStartedAt == nil)
     }
 
+    @Test func aLaunchCarriesTheEffortAndTheInteractionMode() {
+        var r = T3LaunchRequest(threadId: "t9", projectId: "p1", title: "x", instanceId: "claudeAgent", model: "claude-opus-5-5", messageId: "m9", text: "go")
+        r.options = [.effort("high")]
+        r.interactionMode = .plan
+        let body = payload(.launchThread(r))
+        #expect(body["modelSelection"] == ["instanceId": "claudeAgent", "model": "claude-opus-5-5", "options": [["id": "effort", "value": "high"]]])
+        #expect(body["interactionMode"] == "plan")
+        var flag = r; flag.options = [.init(id: "fastMode", value: .flag(true))]
+        #expect(payload(.launchThread(flag))["modelSelection"]?["options"] == [["id": "fastMode", "value": true]])
+    }
+
+    @Test func theLauncherPassesTheInteractionModeAndOptionsThrough() {
+        let m = ThreadMessage(text: "Plan the beds")
+        let r = ThreadLauncher.request(thread: "t", project: "p", message: m, model: .init(instanceId: "i", model: "m"), runtimeMode: .fullAccess,
+                                       interactionMode: .plan, options: [.effort("low")], workspace: .root)
+        #expect(r.interactionMode == .plan && r.options == [.effort("low")])
+        let plain = ThreadLauncher.request(thread: "t", project: "p", message: m, model: .init(instanceId: "i", model: "m"), runtimeMode: .fullAccess, workspace: .root)
+        #expect(plain.interactionMode == .default && plain.options.isEmpty)
+    }
+
     // MARK: Commands (exact shapes from S1)
 
     private func payload(_ c: T3Command) -> T3JSON { c.payload(commandId: "c1") }

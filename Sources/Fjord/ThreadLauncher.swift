@@ -72,10 +72,11 @@ enum ThreadLauncher {
 
     /// The command for a launch. A worktree only when nobody is there to see it (`unattended`).
     static func request(thread: String, project: String, message: ThreadMessage, model: ThreadLaunchModel, runtimeMode: T3RuntimeMode,
+                        interactionMode: T3InteractionMode = .default, options: [T3ModelOption] = [],
                         workspace: ThreadLaunchWorkspace) -> T3LaunchRequest {
         T3LaunchRequest(threadId: thread, projectId: project, title: provisionalTitle(message.text), generateTitle: true,
-                        instanceId: model.instanceId, model: model.model, runtimeMode: runtimeMode, interactionMode: .default,
-                        workspaceStrategy: workspace.json, messageId: message.messageID, text: message.text, context: message.records)
+                        instanceId: model.instanceId, model: model.model, runtimeMode: runtimeMode, interactionMode: interactionMode,
+                        options: options, workspaceStrategy: workspace.json, messageId: message.messageID, text: message.text, context: message.records)
     }
 
     /// The workspace for a launch: unattended work never touches your checkout.
