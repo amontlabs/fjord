@@ -96,13 +96,17 @@ enum RouterV2Destination: Equatable {
 enum RouterV2Curve {
     case spatial, lineMove, fade, glass, follow
 
-    func resolved(reduce: Bool) -> Animation? {
+    func resolved(reduce: Bool) -> Animation? { curve(reduce: reduce).animation }
+
+    /// The curve as plain values: SwiftUI runs it (`resolved`), and so does Core Animation for the lines' glides
+    /// (`RouterV2Glides`).
+    func curve(reduce: Bool) -> Motion.Curve {
         switch self {
-        case .spatial: Motion.spatial.resolved(reduce: reduce)
-        case .lineMove: reduce ? Motion.spatial.resolved(reduce: true) : RouterV2.lineMove
-        case .fade: Motion.fade.resolved(reduce: reduce)
-        case .glass: Motion.glass.resolved(reduce: reduce)
-        case .follow: Motion.follow.resolved(reduce: reduce)
+        case .spatial: Motion.spatial.curve(reduce: reduce)
+        case .lineMove: reduce ? Motion.spatial.curve(reduce: true) : RouterV2.lineMoveCurve
+        case .fade: Motion.fade.curve(reduce: reduce)
+        case .glass: Motion.glass.curve(reduce: reduce)
+        case .follow: Motion.follow.curve(reduce: reduce)
         }
     }
 }
@@ -203,6 +207,8 @@ final class RouterV2Model {
 
     @ObservationIgnored weak var source: RouterV2Source?
     @ObservationIgnored let targets = RouterV2Targets()
+    /// The curve the list's rows glide on, for the change being made now (`RouterV2Glides`).
+    @ObservationIgnored let glides = RouterV2Glides()
     @ObservationIgnored weak var undoManager: UndoManager?
     /// The demo's script holds the pointer and the keys: the real pointer's hover is not read.
     @ObservationIgnored var scripted = false
@@ -269,6 +275,7 @@ final class RouterV2Model {
     func animate(_ curve: RouterV2Curve, _ body: () -> Void) {
         let off = motionOff
         trace?(curve, !off)
+        if !off { glides.began(curve.curve(reduce: reduce)) }
         withAnimation(off ? nil : curve.resolved(reduce: reduce)) { body() }
     }
 
@@ -277,13 +284,23 @@ final class RouterV2Model {
         let off = motionOff
         trace?(.lineMove, !off)
         if scripted { RouterV2Frames.note("move \(id)") }
-        // In flight from the same frame as the change that moves it: one update, nothing drawn in between.
-        withAnimation(off ? nil : RouterV2Curve.lineMove.resolved(reduce: reduce), completionCriteria: .logicallyComplete) {
+        // Landed: its ground fades, and its card opens if it landed selected.
+        let land: () -> Void = { [weak self] in self?.animate(.spatial) { _ = self?.moving.remove(id) } }
+        guard !off else {
+            withAnimation(nil, completionCriteria: .logicallyComplete) {
+                moving.insert(id)
+                body()
+            } completion: { land() }
+            return
+        }
+        // In flight from the same frame as the change that moves it: one update, nothing drawn in between. Its row
+        // glides on Core Animation (`RouterV2Glides`), which says when it has landed.
+        let curve = RouterV2Curve.lineMove.curve(reduce: reduce)
+        glides.began(curve)
+        glides.landing(id, land)
+        withAnimation(curve.animation) {
             moving.insert(id)
             body()
-        } completion: { [weak self] in
-            // Landed: its ground fades, and its card opens if it landed selected.
-            self?.animate(.spatial) { self?.moving.remove(id) }
         }
     }
 

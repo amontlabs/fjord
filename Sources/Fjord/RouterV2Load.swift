@@ -7,7 +7,8 @@ import SwiftUI
 // records arrive, one every 30 ms, each timed as "T3 event" from the record taken to its change committed. Most keep
 // their line's place (a step, a new dot), one in eight moves it to another state; "T3 event work" is the record's own
 // main-thread work, to the end of `apply`. Read with
-// `scripts/morph-timings.sh --args "--window --router-v2-load --quit-after"`.
+// `scripts/morph-timings.sh --args "--window --router-v2-load --quit-after"`. `FJORD_LOAD_OFF=streams,reply,records,moves`
+// leaves those parts out, to see what each costs.
 
 @MainActor
 enum RouterV2Load {
@@ -53,11 +54,12 @@ enum RouterV2Load {
             let streams = Array(model.threads.filter { $0.state != .working }.map(\.id).prefix(streaming))
             let end = Date().addingTimeInterval(seconds)
             await withTaskGroup(of: Void.self) { group in
-                for (n, id) in streams.enumerated() {
+                let off = ProcessInfo.processInfo.environment["FJORD_LOAD_OFF"] ?? ""
+                for (n, id) in streams.enumerated() where !off.contains("streams") {
                     group.addTask { @MainActor in await stream(model, id, offset: n, until: end) }
                 }
-                group.addTask { @MainActor in await records(model, until: end) }
-                if let first = working.first {
+                if !off.contains("records") { group.addTask { @MainActor in await records(model, until: end) } }
+                if let first = working.first, !off.contains("reply") {
                     group.addTask { @MainActor in await reply(model, first, until: end) }
                 }
             }
@@ -91,7 +93,7 @@ enum RouterV2Load {
             guard !ids.isEmpty else { return }
             let id = ids[(n * 7919) % ids.count]
             if var t = model.thread(id) {
-                if n % 8 == 0 {
+                if n % 8 == 0, ProcessInfo.processInfo.environment["FJORD_LOAD_OFF"]?.contains("moves") != true {
                     // Another state: the line moves.
                     t.state = t.state == .working ? .done : .working
                     t.sentence = .init(text: t.state == .working ? "Starting" : "finished", stream: t.sentence.stream)

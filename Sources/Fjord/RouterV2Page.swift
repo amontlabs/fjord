@@ -36,6 +36,7 @@ struct RouterV2List: View {
                             .transition(.routerV2Fold(reduce: reduce))
                     }
                 }
+                .coordinateSpace(.named(RouterV2.listSpace))
                 .padding(.leading, leading).padding(.trailing, trailing)
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -46,7 +47,7 @@ struct RouterV2List: View {
                 // With no thread the bar goes, and its place stays: the sentence under it doesn't jump.
                 ZStack {
                     if model.hasThreads {
-                        RouterV2FilterBar(model: model)
+                        RouterV2HostedBar(model: model)
                             .padding(.leading, edges.leading - CDS.Tabs.pad).padding(.trailing, edges.trailing - CDS.Tabs.pad)
                             .transition(.opacity)
                     }
@@ -76,22 +77,11 @@ struct RouterV2List: View {
     }
 
     @ViewBuilder private func view(_ row: RouterV2Slot, first: Bool) -> some View {
-        switch row.kind {
-        // The first row's content (the Needs-you header, or the sentence in its place) swaps in place. The swap's
-        // fades carry their own curve: a curve set here on all the rows would take the lines' glide from them.
-        case .header(let section, let count):
-            RouterV2HeaderRow(model: model, section: section, count: count, first: first)
-                .transition(.routerV2Swap)
-        case .sentence(let words, let clear):
-            RouterV2SentenceRow(model: model, words: words, clear: clear)
-                .transition(.routerV2Swap)
-        case .reading(let count):
-            RouterV2ReadingRow(count: count, first: first)
-                .transition(.routerV2Swap)
-        case .line(let id):
-            RouterV2HostedLine(model: model, box: model.box(id))
-        case .housekeeping(let count):
-            RouterV2HousekeepingRow(model: model, count: count)
+        // Every row in a hosting view of its own, gliding on Core Animation (`RouterV2Glides`).
+        if case .line(let id) = row.kind {
+            RouterV2HostedLine(model: model, box: model.box(id), slot: row.id)
+        } else {
+            RouterV2HostedRow(model: model, slot: row, first: first)
         }
     }
 }
@@ -285,6 +275,8 @@ struct RouterV2FilterBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias M = RouterV2.Bar
+    /// How far the bar's ground reaches past its sides.
+    static let groundReach: CGFloat = 400
 
     var body: some View {
         HStack(spacing: 0) {
@@ -315,7 +307,7 @@ struct RouterV2FilterBar: View {
                 LinearGradient(colors: [CDS.Surface.s1, CDS.Surface.s1.opacity(0)], startPoint: .top, endPoint: .bottom)
                     .frame(height: M.fade)
             }
-            .padding(.horizontal, -400)
+            .padding(.horizontal, -Self.groundReach)
             .padding(.bottom, -M.fade)
             .allowsHitTesting(false)
         }

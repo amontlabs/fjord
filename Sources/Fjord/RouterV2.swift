@@ -132,6 +132,7 @@ enum RouterV2 {
     // MARK: Curves (section 3). Each resolves for Reduce Motion where it is used.
 
     /// A line changing section: a little longer than `spatial`, so the eye can follow it.
+    static let lineMoveCurve = Motion.Curve.spring(duration: 0.45, bounce: 0.14)
     static let lineMove = Animation.spring(duration: 0.45, bounce: 0.14)
     /// A card that opens as a line takes off shows what is in it once the line has passed its place.
     static let cardAfterFlight: (delay: Double, fade: Double) = (0.14, 0.16)

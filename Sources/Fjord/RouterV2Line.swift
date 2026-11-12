@@ -182,6 +182,11 @@ struct RouterV2LineView: View {
             }
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    // Grown or shrunk while open (a reply, a plan): the rows under it glide as it does, on the spatial
+                    // curve, unless the change that did it has a curve of its own.
+                    if open, cardHeight > 0, $0 != cardHeight, model.glides.current == nil {
+                        model.glides.began(Motion.spatial.curve(reduce: reduce))
+                    }
                     cardHeight = $0
                     box.cardHeight = $0
                 }
