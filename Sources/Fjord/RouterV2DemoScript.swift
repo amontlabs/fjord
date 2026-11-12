@@ -133,6 +133,7 @@ final class RouterV2DemoScript {
         4.6, 5.0, 5.6, 3.0,                                 // 20–23 filters
         8.0, 12.6, 14.0, 9.6, 6.4, 5.6, 8.2, 5.4, 9.4, 13.0, // 24–33 send
         12.0, 5.6, 3.2, 3.2, 5.6, 5.4, 6.8, 6.4, 20.4, 6.0, // 34–43 clear
+        7.0,                                                // 44    a cold launch
     ]
     /// When each beat starts, and when the last one ends.
     private static let times: [Double] = lengths.reduce(into: [0]) { $0.append($0[$0.count - 1] + $1) }
@@ -339,6 +340,7 @@ final class RouterV2DemoScript {
             (20, beat20), (21, beat21), (22, beat22), (23, beat23), (24, beat24), (25, beat25), (26, beat26), (27, beat27),
             (28, beat28), (29, beat29), (30, beat30), (31, beat31), (32, beat32), (33, beat33), (34, beat34), (35, beat35),
             (36, beat36), (37, beat37), (38, beat38), (39, beat39), (40, beat40), (41, beat41), (42, beat42), (43, beat43),
+            (44, beat44),
         ]
         for (number, play) in beats where (only?.contains(number) ?? true) && number <= (until ?? .max) {
             // With `--from`, the frames start with the first beat played at its own speed.
@@ -827,5 +829,34 @@ final class RouterV2DemoScript {
         // The last toast doesn't sit on the empty page for its eight seconds.
         await pause(2.2)
         model.dismissToast()
+    }
+
+    // Act 6: a cold launch
+
+    private func beat44() async {
+        await beat(44, "A cold launch: Fjord reads what finished first")
+        // The demo's threads as a relaunch finds them: the finished ones' verdicts pending, nothing known to need you.
+        RouterV2Demo.coldReading(model, threads: RouterV2Demo.records().threads)
+        await pause(2.0)
+        // The guide's verdict: it left you a step. Its state first (it moves up under Needs you), then its words.
+        if var guide = model.thread(ID.guide) {
+            guide.judging = false
+            guide.state = .needsYou(.step)
+            guide.question = "Merge #41 once the Chrome steps are checked?"
+            model.apply(.upsert(guide))
+            await pause(0.5)
+            guide.name = "Install guide"
+            guide.naming = false
+            guide.sentence = .init(text: "rewritten for Chrome; check the steps, then merge #41")
+            model.apply(.upsert(guide))
+        }
+        await pause(1.4)
+        // The bar's: done, quiet. The reading row goes with it.
+        if var bar = model.thread(ID.bar) {
+            bar.judging = false
+            bar.sentence = .init(text: "counts only unread; tests pass, not pushed")
+            model.apply(.upsert(bar))
+        }
+        await pause(1.0)
     }
 }

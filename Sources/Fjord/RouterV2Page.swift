@@ -85,6 +85,9 @@ struct RouterV2List: View {
         case .sentence(let words, let clear):
             RouterV2SentenceRow(model: model, words: words, clear: clear)
                 .transition(.routerV2Swap)
+        case .reading(let count):
+            RouterV2ReadingRow(count: count, first: first)
+                .transition(.routerV2Swap)
         case .line(let id):
             RouterV2HostedLine(model: model, box: model.box(id))
         case .housekeeping(let count):
@@ -172,6 +175,27 @@ struct RouterV2SentenceRow: View {
         .padding(.leading, RouterV2.Line.nameLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .motion(.fade, value: words)
+    }
+}
+
+/// "Reading 2 threads…" with Fjord's mark: finished threads whose verdicts are pending, listed under it. In the first
+/// row's place when nothing is known to need you yet, so the page never says "Nothing needs you" before it knows.
+struct RouterV2ReadingRow: View {
+    let count: Int
+    let first: Bool
+
+    var body: some View {
+        HStack(spacing: RouterV2.Thinking.gap) {
+            Text(RouterV2.Copy.reading(count)).cdsText(CDS.Density.compact.prose, .regular, CDS.Text.secondary)
+                .contentTransition(.numericText(value: Double(count)))
+            RouterV2Thinking(label: "Fjord is reading them")
+        }
+        .frame(height: RouterV2.Header.height)
+        .padding(.top, first ? RouterV2.Header.firstTop : RouterV2.Header.top)
+        .padding(.leading, RouterV2.Line.nameLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .motion(RouterV2.counts, value: count)
+        .accessibilityElement(children: .combine)
     }
 }
 

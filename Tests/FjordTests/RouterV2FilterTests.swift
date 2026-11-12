@@ -47,3 +47,47 @@ import Testing
         #expect(model.project == "fjord")
     }
 }
+
+/// A cold launch (docs/design/router-v2/LIVE-CHECK.md, problem 1): finished threads whose verdicts are pending are being
+/// read, in a group of their own, and the page never says "Nothing needs you" while one is.
+@MainActor
+@Suite struct RouterV2ReadingTests {
+    private typealias ID = RouterV2Demo.ID
+
+    @Test func finishedThreadsBeingReadWaitUnderReadingAndNotInDone() throws {
+        let model = RouterV2Demo.records()
+        model.select(nil)
+        RouterV2Demo.coldReading(model)
+        let first = try #require(model.layout.first)
+        #expect(first.id == RouterV2Model.firstRow)
+        #expect(first.kind == .reading(2))
+        #expect(!model.layout.contains { if case .sentence(let w, _) = $0.kind { w.hasPrefix("Nothing needs you") } else { false } })
+        #expect(!model.layout.contains { $0.kind == .header(.done, 2) || $0.id == "header-\(RouterV2Section.done.rawValue)" })
+        // Not counted as Done, nor as needing you; still on the pills.
+        #expect(model.count(section: .done) == 0)
+        #expect(model.count(section: .needsYou) == 0)
+        #expect(model.needsYou == 0)
+        #expect(model.count(project: "docs-site") == 1)
+        // A Working filter hides them; a Done filter keeps them.
+        model.toggle(section: .working)
+        #expect(!model.layout.contains { $0.kind == .reading(2) })
+        model.toggle(section: .done)
+        #expect(model.layout.first?.kind == .reading(2))
+        model.clearFilters()
+
+        // The guide's verdict: it needs you. It leaves the group, under its own header; the other is still read.
+        var guide = try #require(model.thread(ID.guide))
+        guide.judging = false
+        guide.state = .needsYou(.step)
+        model.apply(.upsert(guide))
+        #expect(model.layout.first?.kind == .header(.needsYou, 1))
+        #expect(model.layout.contains { $0.id == RouterV2Model.readingRow && $0.kind == .reading(1) })
+
+        // The bar's verdict: quiet. Done, and nothing is read any more.
+        var bar = try #require(model.thread(ID.bar))
+        bar.judging = false
+        model.apply(.upsert(bar))
+        #expect(!model.layout.contains { if case .reading = $0.kind { true } else { false } })
+        #expect(model.count(section: .done) == 1)
+    }
+}

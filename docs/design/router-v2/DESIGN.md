@@ -187,7 +187,9 @@ What floats keeps CDS Menu's 10, the composer CDS's 14.
   (below, **R4**).
 - **Name.** The existing highlight (`BriefSpan`): mark at 9.5 pt semibold, 4 pt, name in sans 14 medium; with a ground:
   name in the tint, padding 5 × 1, radius 6 (**R4**), ground tint 12 %. Plain states: name `CDS.Text.primary`, regular weight, no
-  ground, no underline. One line, never truncated under 28 characters. **R3.** The name always takes the width of its
+  ground, no underline. One line, never truncated under 28 characters. **R5.** Until the model names it, the name is T3's
+  whole title, truncated at the row's own width (at most 45 % of the row, `RouterV2.Line.nameShare`); a name being given
+  sheens with no mark of its own (the line's one Fjord mark is after its sentence). **R3.** The name always takes the width of its
   medium weight (a hidden copy), so the sentence doesn't shift when the ground comes or goes.
 - **Sentence.** Sans 14 regular. `CDS.Text.secondary` for Needs you, Stopped, Done; `CDS.Text.muted` for Working; one
   line, tail truncation. Links inside it (a PR) keep the `BriefLink` look; the PR's state word after the link is drawn by
@@ -541,6 +543,7 @@ filter) are footnote 12.
 | Case | What shows |
 |---|---|
 | No Needs-you line, other lines exist | in the header's place (the same row, 1.3): `Nothing needs you.` prose 14 `CDS.Text.secondary` |
+| **R5.** Finished threads whose verdicts are pending (a cold launch) | never `Nothing needs you.`: `Reading 2 threads…` + Fjord's mark, same style, in the header's place (under the Needs-you lines when there are some); the threads being read are listed under it (newest first) with a dashed circle (`circle.dashed`, muted) for a mark, no check, the sentence sheening with the mark after it. They count on no token (not Done, not Needs you), only on the pills; a Working filter hides them. Each leaves the group as its verdict's state lands (2.3). Shot `v2-cold-reading`, storyboard beat 44 |
 | No line at all | `Nothing needs you. Nothing is running.` same style; no filter bar, no housekeeping line; placeholder "Message your threads" |
 | Filter on, nothing needs you there | `Nothing needs you in fjord.` |
 | Filter on, no line at all | `No threads in docs-site right now.` + ghost `Clear filter` |
@@ -964,6 +967,7 @@ shows a thread's subagents, background work and waits.
 | 41 | 261.7 | Pointer rests on "5 finished earlier, not settled", then clicks Settle all | Finished earlier: one line, one act | The peek lists the five; the row folds away; "Settled 5 older threads · Revert ⌘Z" |
 | 42 | 268.1 | PR #2049 merges (Upstream issue goes quiet). 0.6 s on, nine turns end, 0.4 s apart. After 5.4 s: ⌥↓, then ⌘⌫ every 0.6 s while a line is selected | Clearing the rest | Lines go Done as they end; four verdicts run at once, so the fifth line on sheens until a call is free; each ⌘⌫ takes exactly one line down the Done list; pills leave the bar one by one |
 | 43 | 288.5 | Hold. After 2.2 s the last toast is dismissed | Nothing left | "Nothing needs you. Nothing is running." No bar (its 48 pt stay), no badge; the composer says "Message your threads" |
+| 44 | 294.5 | The demo's threads come back as a relaunch finds them: the finished ones' verdicts pending. 2.0 s later the guide's verdict (a step: Needs you, its state first, then its name and words); 1.4 s later the bar's (Done, quiet) | A cold launch: Fjord reads what finished first | "Reading 2 threads…" + the mark in the first row, the two lines under it (dashed circle, sheen); never "Nothing needs you"; the guide glides up under "Needs you 1", the row reads "Reading 1 thread…" under it; then the bar glides into Done and the row goes (**R5**) |
 
 Lines the script needs for beat 42 (all `quiet`, in the order the turns end): Updater "asks before installing, never
 mid-call; stable channel" · Disk test "the flake was a 120 s timeout under load; raised and fixed" · Tab handover "the

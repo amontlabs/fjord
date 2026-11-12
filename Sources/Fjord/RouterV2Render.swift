@@ -116,6 +116,7 @@ struct RouterV2Slot: Identifiable, Equatable {
     enum Kind: Equatable {
         case header(RouterV2Section, Int)
         case sentence(String, clear: Bool)
+        case reading(Int)
         case line(String)
         case housekeeping(Int)
     }
@@ -129,8 +130,14 @@ struct RouterV2Tally: Equatable {
     var all: [RouterV2Section: Int] = [:]
     /// Each project's lines, by section.
     var byProject: [String: [RouterV2Section: Int]] = [:]
+    /// The project's lines being read (no state yet; "" for no project).
+    var reading: [String: Int] = [:]
     /// The projects with a line or an older thread, alphabetical.
     var projects: [String] = []
+
+    func reading(project: String?) -> Int {
+        project.map { reading[$0] ?? 0 } ?? reading.values.reduce(0, +)
+    }
 
     func count(project: String?, section: RouterV2Section?) -> Int {
         let counts = project.map { byProject[$0] ?? [:] } ?? all

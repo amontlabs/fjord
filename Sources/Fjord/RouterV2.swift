@@ -57,6 +57,12 @@ enum RouterV2 {
         static let queuedHeight: CGFloat = 22
         /// A name is never cut under this many characters; a new thread's first words stop there.
         static let nameCharacters = 28
+        /// The most of the row a name takes before it truncates (T3's whole title, until the model's name comes); the
+        /// sentence gives way first below that.
+        static let nameShare: CGFloat = 0.45
+        /// T3's title as a name until the model's comes: whole on one line, the row truncating it at its own width; cut
+        /// here only past this many characters.
+        static let titleCharacters = 120
     }
 
     enum Card {
@@ -170,6 +176,8 @@ enum RouterV2 {
         static let clear = "Clear"
         static let clearFilter = "Clear filter"
         static let nothingNeedsYou = "Nothing needs you."
+        /// Finished threads whose verdicts are pending: never "Nothing needs you" while one may.
+        static func reading(_ n: Int) -> String { n == 1 ? "Reading 1 thread…" : "Reading \(n) threads…" }
         static let nothingAtAll = "Nothing needs you. Nothing is running."
         static func nothingNeedsYou(in project: String) -> String { "Nothing needs you in \(project)." }
         static func noThreads(in project: String) -> String { "No threads in \(project) right now." }
@@ -203,15 +211,15 @@ enum RouterV2 {
     }
 
     /// A thread's first words as its name, until the model names it: 28 characters at most, cut at a word.
-    static func firstWords(_ text: String) -> String {
+    static func firstWords(_ text: String, limit: Int = Line.nameCharacters) -> String {
         let flat = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard flat.count > Line.nameCharacters else { return flat }
+        guard flat.count > limit else { return flat }
         var out = ""
         for word in flat.split(separator: " ") {
-            if out.count + word.count + (out.isEmpty ? 0 : 1) > Line.nameCharacters - 1 { break }
+            if out.count + word.count + (out.isEmpty ? 0 : 1) > limit - 1 { break }
             out += (out.isEmpty ? "" : " ") + word
         }
-        return (out.isEmpty ? String(flat.prefix(Line.nameCharacters - 1)) : out) + "…"
+        return (out.isEmpty ? String(flat.prefix(limit - 1)) : out) + "…"
     }
 }
 
@@ -321,6 +329,9 @@ struct RouterV2Thread: Identifiable, Equatable {
     var title: String
     var project: String?
     var state: State
+    /// A finished turn whose verdict hasn't said yet whether it needs you: Fjord is reading it. It is shown as being read
+    /// (its own group, under the Needs-you place), never as a settled Done line.
+    var judging = false
     var worth: Worth = .quiet
     var sentence: Sentence
     /// What the age counts from: how long it has waited, run, or been finished.
@@ -373,6 +384,9 @@ struct RouterV2Thread: Identifiable, Equatable {
 
     var isRunning: Bool { state == .working || state == .sent }
 
+    /// Being read on the page: finished, its verdict pending.
+    var reading: Bool { judging && state == .done }
+
     /// Every option of the card, numbered through: a form's questions one after the other.
     var numbered: [(question: Int, label: String)] {
         if !form.isEmpty { return form.enumerated().flatMap { q, question in question.options.map { (q, $0) } } }
@@ -400,6 +414,8 @@ extension RouterV2Thread {
         case .stopped: Look(symbol: "exclamationmark.triangle.fill", tint: CDS.Text.danger, ground: true, label: "Stopped")
         case .sent: Look(symbol: "arrow.up.circle.fill", tint: CDS.Text.accent, ground: false, label: "Sent")
         case .working: Look(symbol: nil, tint: CDS.Text.muted, ground: false, label: "Working")
+        // Being read: no check yet, it isn't known to be done with you.
+        case .done where judging: Look(symbol: "circle.dashed", tint: CDS.Text.muted, ground: false, label: "Being read")
         case .done: Look(symbol: "checkmark.circle.fill", tint: CDS.Text.accent, ground: worth == .look, label: "Done")
         }
     }

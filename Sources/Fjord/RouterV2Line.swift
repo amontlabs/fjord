@@ -126,6 +126,8 @@ struct RouterV2LineView: View {
     /// to Working and the next card opens) lets the line pass first: its place opens at once, on the move's curve, and
     /// what is in it comes a moment later, so the line in flight never crosses it.
     @State private var shown: Double = 1
+    /// The row's width: a name takes up to its share of it (`M.nameShare`).
+    @State private var rowWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias M = RouterV2.Line
@@ -243,6 +245,7 @@ struct RouterV2LineView: View {
             .motion(.fade, value: marked)
             .accessibilityLabel(marked ? "Your words go here" : thread.isNew ? "New" : "")
             RouterV2Name(model: model, thread: thread, rowHot: hot)
+                .modifier(RouterV2WidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
                 .layoutPriority(2)
             RouterV2SentenceView(model: model, box: box)
                 // Its subagents, background commands and waits, right after the words (RouterV2ActivityViews.swift).
@@ -261,8 +264,31 @@ struct RouterV2LineView: View {
                 .layoutPriority(1)
         }
         .frame(minHeight: M.minHeight)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         // A name being given: the sentence slides to its new start.
         .motion(.spatial, value: thread.name)
+    }
+}
+
+/// Its content at its own width, never wider than `cap` (a flexible frame would take the whole cap).
+struct RouterV2WidthCap: ViewModifier {
+    let cap: CGFloat
+
+    func body(content: Content) -> some View { Cap(cap: cap) { content } }
+
+    private struct Cap: Layout {
+        let cap: CGFloat
+
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            guard let child = subviews.first else { return .zero }
+            let ideal = child.sizeThatFits(.unspecified)
+            let width = min(ideal.width, cap, proposal.width ?? .infinity)
+            return child.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
+        }
+
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+        }
     }
 }
 
@@ -292,19 +318,19 @@ struct RouterV2Name: View {
         ZStack(alignment: .leading) {
             // The name's width at the medium weight, always: the sentence's start doesn't shift when a state gives the
             // name its ground (medium) or takes it back (regular).
-            Text(thread.name).font(CDS.sans(14, .medium)).lineLimit(1).fixedSize().hidden().accessibilityHidden(true)
+            // It takes the width it needs, up to the row's share for a name (`RouterV2Line.nameShare`), then truncates:
+            // T3's whole title stands in until the model's name comes.
+            Text(thread.name).font(CDS.sans(14, .medium)).lineLimit(1).hidden().accessibilityHidden(true)
             if thread.naming {
-                // Being named: the first words sheen, Fjord's mark after them, until the model's name takes their place.
+                // Being named: the words sheen until the model's name takes their place. The line's one Fjord mark is
+                // after its sentence, so none here.
                 let text = Text(thread.name).font(CDS.sans(14, look.ground ? .medium : .regular))
-                HStack(spacing: 5) {
-                    text.foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
-                        .routerV2Sheen { text.lineLimit(1).fixedSize() }
-                    RouterV2Thinking(label: "Fjord is naming it")
-                }
-                .transition(.routerV2Swap)
+                text.foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
+                    .routerV2Sheen { text.lineLimit(1).truncationMode(.tail) }
+                    .transition(.routerV2Swap)
             } else {
                 Text(thread.name).font(CDS.sans(14, look.ground ? .medium : .regular))
-                    .foregroundStyle(look.ground ? look.tint : CDS.Text.primary).lineLimit(1).fixedSize()
+                    .foregroundStyle(look.ground ? look.tint : CDS.Text.primary).lineLimit(1).truncationMode(.tail)
                     .id(thread.name)
                     .transition(.routerV2Swap)
             }

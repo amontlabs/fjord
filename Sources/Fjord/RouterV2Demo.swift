@@ -104,6 +104,24 @@ enum RouterV2Demo {
     ]
 
     /// The page at t = 0: eleven threads, five older ones, Settings layout selected with its card open.
+    /// The page as a cold launch shows it: nothing known to need you yet, the finished threads being read.
+    static func coldReading(_ model: RouterV2Model, threads: [RouterV2Thread]? = nil) {
+        let all = threads ?? model.threads
+        var changes: [RouterV2Change] = model.threads.filter { $0.section == .needsYou }.map { .remove($0.id) }
+        changes += all.filter { $0.section == .working && model.thread($0.id) == nil }.map { .upsert($0) }
+        for var t in all where t.section == .done {
+            t.judging = true
+            t.worth = .quiet
+            t.sentence = .init(text: "finished", phase: .reassessing)
+            if t.id == ID.guide {
+                t.name = "Rewrite the install guide for the Chrome extension setup"
+                t.naming = true
+            }
+            changes.append(.upsert(t))
+        }
+        model.apply(.batch(changes))
+    }
+
     static func records(still: Bool = false) -> RouterV2Model {
         let model = RouterV2Model()
         model.still = still

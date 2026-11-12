@@ -20,6 +20,8 @@ struct RouterV2Row: Identifiable, Equatable {
         case header(RouterV2Section, Int)
         /// "Nothing needs you." and its kin; `clear` adds the ghost Clear filter.
         case sentence(String, clear: Bool)
+        /// "Reading 2 threads…": finished threads whose verdicts are pending, listed under it.
+        case reading(Int)
         case line(RouterV2Thread)
         case housekeeping(Int)
     }
@@ -343,6 +345,8 @@ final class RouterV2Model {
 
     /// The Needs-you header and the sentence that takes its place are one row: its content cross-fades, nothing folds.
     static let firstRow = "header-0"
+    /// The "Reading 2 threads…" row under Needs-you lines (with none, it takes the first row's place).
+    static let readingRow = "reading"
 
     /// The page: headers, lines, the sentences that take a header's place, the housekeeping line.
     func rows() -> [RouterV2Row] {
@@ -350,6 +354,7 @@ final class RouterV2Model {
             switch slot.kind {
             case .header(let s, let n): RouterV2Row(id: slot.id, kind: .header(s, n))
             case .sentence(let words, let clear): RouterV2Row(id: slot.id, kind: .sentence(words, clear: clear))
+            case .reading(let n): RouterV2Row(id: slot.id, kind: .reading(n))
             case .line(let id): boxes[id].map { RouterV2Row(id: slot.id, kind: .line($0.record)) }
             case .housekeeping(let n): RouterV2Row(id: slot.id, kind: .housekeeping(n))
             }
@@ -364,23 +369,38 @@ final class RouterV2Model {
         var out: [RouterV2Slot] = []
         let older = shownOlder
         var shown: [RouterV2Section: [RouterV2Thread]] = [:]
-        for s in RouterV2Section.allCases { shown[s] = ordered(s).filter { matches($0, project: project, section: section) } }
-        if shown.values.allSatisfy(\.isEmpty), older.isEmpty, let project {
+        for s in RouterV2Section.allCases { shown[s] = ordered(s).filter { matches($0, project: project, section: section) && !$0.reading } }
+        // Finished threads Fjord is still reading: they may need you or not, so they wait in a group of their own under
+        // the Needs-you place (under a Needs-you or a Done filter alike), newest first.
+        let reading = section == .working ? [] : threads.filter { $0.reading && (project == nil || $0.project == project) }
+            .sorted { $0.since != $1.since ? $0.since > $1.since : $0.order > $1.order }
+        if shown.values.allSatisfy(\.isEmpty), reading.isEmpty, older.isEmpty, let project {
             return [RouterV2Slot(id: Self.firstRow, kind: .sentence(RouterV2.Copy.noThreads(in: project), clear: true))]
         }
+        func lines(_ list: [RouterV2Thread], _ place: String) -> [RouterV2Slot] {
+            // Under Reduce Motion a line that changes section fades out where it was and in where it goes: its row is
+            // another one there.
+            list.map { RouterV2Slot(id: reduce ? "\($0.id)@\(place)" : $0.id, kind: .line($0.id)) }
+        }
         for s in RouterV2Section.allCases {
-            let lines = shown[s] ?? []
-            if lines.isEmpty {
-                if s == .needsYou, section == nil || section == .needsYou {
+            let list = shown[s] ?? []
+            if list.isEmpty {
+                if s == .needsYou, !reading.isEmpty {
+                    // Never "Nothing needs you" while a verdict that may say otherwise is pending.
+                    out.append(RouterV2Slot(id: Self.firstRow, kind: .reading(reading.count)))
+                    out += lines(reading, "reading")
+                } else if s == .needsYou, section == nil || section == .needsYou {
                     let words = project.map(RouterV2.Copy.nothingNeedsYou(in:)) ?? RouterV2.Copy.nothingNeedsYou
                     out.append(RouterV2Slot(id: Self.firstRow, kind: .sentence(words, clear: false)))
                 }
                 continue
             }
-            out.append(RouterV2Slot(id: "header-\(s.rawValue)", kind: .header(s, lines.count)))
-            // Under Reduce Motion a line that changes section fades out where it was and in where it goes: its row is
-            // another one there.
-            out += lines.map { RouterV2Slot(id: reduce ? "\($0.id)@\(s.rawValue)" : $0.id, kind: .line($0.id)) }
+            out.append(RouterV2Slot(id: "header-\(s.rawValue)", kind: .header(s, list.count)))
+            out += lines(list, "\(s.rawValue)")
+            if s == .needsYou, !reading.isEmpty {
+                out.append(RouterV2Slot(id: Self.readingRow, kind: .reading(reading.count)))
+                out += lines(reading, "reading")
+            }
         }
         if !older.isEmpty { out.append(RouterV2Slot(id: "housekeeping", kind: .housekeeping(older.count))) }
         return out
@@ -391,7 +411,10 @@ final class RouterV2Model {
     var projects: [String] { tally.projects }
 
     /// A pill's count: its lines under the current state choice.
-    func count(project p: String?) -> Int { tally.count(project: p, section: section) }
+    func count(project p: String?) -> Int {
+        // The lines being read show under every state choice but Working.
+        tally.count(project: p, section: section) + (section == .working ? 0 : tally.reading(project: p))
+    }
     /// A token's count: its lines under the current project choice.
     func count(section s: RouterV2Section) -> Int { tally.count(project: project, section: s) }
     /// The sidebar's badge: every Needs-you line, whatever the filters.
@@ -889,9 +912,11 @@ final class RouterV2Model {
         var since: Date
         var order: Int
         var reassessing: Bool
+        var reading: Bool
         var project: String?
 
         init(_ t: RouterV2Thread) {
+            reading = t.reading
             section = t.section
             orderClass = t.orderClass
             since = t.since
@@ -949,11 +974,14 @@ final class RouterV2Model {
         var tally = RouterV2Tally()
         var projects = Set<String>()
         for t in threads {
-            tally.all[t.section, default: 0] += 1
-            if let p = t.project {
-                tally.byProject[p, default: [:]][t.section, default: 0] += 1
-                projects.insert(p)
+            if let p = t.project { projects.insert(p) }
+            // A line being read is in no state yet: its own count, on the pills, not on a token.
+            if t.reading {
+                tally.reading[t.project ?? "", default: 0] += 1
+                continue
             }
+            tally.all[t.section, default: 0] += 1
+            if let p = t.project { tally.byProject[p, default: [:]][t.section, default: 0] += 1 }
         }
         for o in older { if let p = o.project { projects.insert(p) } }
         tally.projects = projects.sorted()

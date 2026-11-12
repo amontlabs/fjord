@@ -257,6 +257,13 @@ enum RouterV2Shots {
             model.select(nil)
             model.apply(.batch(model.threads.map { .remove($0.id) } + [.older([])]))
         },
+        // A cold launch: the finished threads' verdicts are pending, so they wait as being read (no check, the sentence
+        // sheening, Fjord's mark after it) under "Reading 2 threads…", never as settled Done lines; a long T3 title takes
+        // the row's room while the model names it.
+        State(name: "v2-cold-reading") { model in
+            model.select(nil)
+            RouterV2Demo.coldReading(model)
+        },
         State(name: "v2-nothing-needs-you") { model in
             model.select(nil)
             model.apply(.batch(model.threads.filter { $0.section == .needsYou }.map { .remove($0.id) }))

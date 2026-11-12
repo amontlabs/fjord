@@ -70,6 +70,12 @@
 - Not done: the live check on the owner's T3 (needs the owner's go).
 
 ## Live check follow-ups (LIVE-CHECK.md) — to do after the layout-perf agent lands (page files)
+Done 2026-11-12: 1 (`RouterV2Thread.judging`: a finished turn whose verdict's state hasn't landed is read under "Reading N
+threads…", counted on no token; names are T3's whole title truncated at the row's width, no mark after a name), 4 (the
+verdict file is read before the records are made, `makeRouterRecords`; a relaunch keeps a known verdict and doesn't
+re-ask, `RouterRecordsTests.notForMeSurvivesARestart…`), 5 (tokens' tooltip moved onto the label; the press path tested
+in `RouterV2FilterTests`; the live AX press failure itself was not reproduced offscreen), and the activity seam below.
+Open: with the Router off, a finished thread's verdict is never asked, so it stays "being read" (as its sheen did before).
 1. While verdicts are pending on a cold launch, the page says "Nothing needs you." and a needs-you thread sits in Done, then jumps. Fix: a finished thread whose verdict is pending shows as being read (logo + sheen) and doesn't count as settled-in-Done; the empty state never says "Nothing needs you" while any verdict is pending ("Reading 2 threads…"). Names cut at ~22 chars with a shimmer disc although the row has room: use the row's width.
 2. Working lines show raw shell commands. Prefer the tool call's own description (Claude's Bash `description`) or the agent's latest sentence; a command only as last resort.
 3. Pill said `lookout` (folder) vs T3 `fjord`: fixed in 10ab9eda.
@@ -85,7 +91,7 @@ Owner: free text never sets a new thread's settings. `@` lists models (T3 names,
 ## Activity on the line (subagents, background work, waits) — 03cbdbc7 328b03fa 4fe12355
 - `RouterV2Activity.make(projection)` (RouterActivity.swift) → `RouterDetail.activity` → `RouterV2Thread.activity`; the records stamp a start T3 doesn't give (roster tasks) with the time Fjord first saw it. Subagent models come from the projection's `subagents[].model` (886 of 889 real records carry it; an agent type's name such as `judge` when started as a named agent).
 - Views: `RouterV2ActivityViews.swift` (glyphs, peek, rows); the working card lists them. Shots `v2-activity`, `v2-activity-peek`, `v2-activity-card` (+ `-dark`); storyboard beat 19.
-- **SEAM, not applied** (the layout-performance track owned RouterV2Line/Page while this landed). Until it is, the glyphs and their peek don't draw on the page (the card's list does). Two edits:
+- **SEAM, applied 2026-11-12** on the hosted lines (was: not applied while the layout-performance track owned RouterV2Line/Page). Until it is, the glyphs and their peek don't draw on the page (the card's list does). Two edits:
   - `RouterV2Line.swift`, `RouterV2LineView.row`: after `RouterV2SentenceView(model: model, box: box)` add `.routerV2Activity(model, thread)` (before `.padding(.leading, M.sentenceGap)`).
   - `RouterV2Page.swift`, `RouterV2Floating.body`: before the housekeeping peek add
     `if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] { hung(from: frame, width: RouterV2.Peek.width) { RouterV2ActivityPeek(model: model, thread: thread) }.id("activity-" + id).transition(.scaleFade(0.98, reduce: reduce)) }`

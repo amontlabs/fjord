@@ -540,6 +540,9 @@ final class RouterRecords {
             } else if e.asked {
                 if let l = e.landed, code.wants == .finished {
                     judged(&r, needsYou: l.needsYou, worth: l.worth, notForMe: notForMe, v: nil)
+                } else if code.wants == .finished {
+                    // Its verdict's state isn't in: being read, not Done yet.
+                    r.judging = true
                 }
                 if let words = e.words {
                     r.sentence = .init(text: words, phase: .streaming, stream: e.stream)
@@ -552,6 +555,7 @@ final class RouterRecords {
         // Your send, until T3 shows it: Sent, at the top of Working.
         if let s = e.send {
             r.state = .sent
+            r.judging = false
             r.sent = .init(words: s.words, status: s.status)
             r.since = s.at
             r.isNew = false
@@ -661,14 +665,14 @@ final class RouterRecords {
         return name
     }
 
-    /// `RouterV2.firstWords`, read in one pass over the bytes for a title in ASCII (most are): the words on one line,
-    /// 28 characters at most, cut at a word.
+    /// `RouterV2.firstWords` at `Line.titleCharacters`, read in one pass over the bytes for a title in ASCII (most are):
+    /// the words on one line, cut at a word only past that (the row truncates the rest at its own width).
     static func cut(_ title: String) -> String {
-        let limit = RouterV2.Line.nameCharacters
+        let limit = RouterV2.Line.titleCharacters
         var words: [Range<Int>] = []
         var start = -1, flat = 0, i = 0
         for b in title.utf8 {
-            if b >= 0x80 { return RouterV2.firstWords(title) }
+            if b >= 0x80 { return RouterV2.firstWords(title, limit: limit) }
             let space = b == 0x20 || (b >= 0x09 && b <= 0x0D)
             if space {
                 if start >= 0 { words.append(start..<i); flat += i - start + (words.count > 1 ? 1 : 0); start = -1 }

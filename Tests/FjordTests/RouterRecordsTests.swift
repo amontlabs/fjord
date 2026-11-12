@@ -101,13 +101,18 @@ import Testing
         let ask = h.verdictAsk()
         #expect(ask?.kind == .finished)
         #expect(h.records.record("t1")?.sentence.phase == .reassessing)
+        // Until the verdict's state is in, it is being read: not a Done line yet.
+        #expect(h.records.record("t1")?.judging == true)
+        #expect(h.records.record("t1")?.reading == true)
         _ = h.take()
         h.records.put(F.thread())
         #expect(h.asks.filter { $0.kind == .finished }.count == 1)
 
         let fp = ask!.fingerprint
         h.records.verdict("t1", fingerprint: fp, .state(needsYou: true, worth: .quiet))
-        #expect(upserts(h.take()).first?.state == .needsYou(.step))
+        let landed = upserts(h.take()).first
+        #expect(landed?.state == .needsYou(.step))
+        #expect(landed?.judging == false)
         h.records.verdict("t1", fingerprint: fp, .words("reserve for", done: false))
         h.records.verdict("t1", fingerprint: fp, .words("reserve for five?", done: true))
         #expect(h.take() == [.words("t1", stream: 1, text: "reserve for", done: false),
@@ -185,6 +190,8 @@ import Testing
         again.records.put(F.thread())
         #expect(again.asks.filter { $0.kind == .finished }.isEmpty)
         #expect(again.records.record("t1")?.state == .done)
+        // Known at once: not read again.
+        #expect(again.records.record("t1")?.judging == false)
         #expect(again.records.record("t1")?.sentence.text == "opened #41")
 
         // The next turn: the mark is for the old fingerprint.
@@ -570,11 +577,17 @@ import Testing
 
     // MARK: Speed
 
+    @Test func aLongT3TitleIsTheNameWholeUntilTheModelNamesIt() {
+        let title = "Did we lose various colour highlights in the brief after the rewrite?"
+        #expect(RouterRecords.cut(title) == title)
+        #expect(RouterRecords.cut(title + " " + String(repeating: "word ", count: 40)).count <= RouterV2.Line.titleCharacters)
+    }
+
     @Test func theFastNameCutIsFirstWords() {
         for title in ["Tidy the garden notes", "Thread number 123 with a longer title", "  spaced\tout   words\nhere ",
                       "Averyveryveryverylongsinglewordthatgoesonandon", "exactly twenty-eight chars!!", "", "café au lait with a croissant please",
                       "one two three four five six seven", "a b"] {
-            #expect(RouterRecords.cut(title) == RouterV2.firstWords(title), "\(title)")
+            #expect(RouterRecords.cut(title) == RouterV2.firstWords(title, limit: RouterV2.Line.titleCharacters), "\(title)")
         }
     }
 
