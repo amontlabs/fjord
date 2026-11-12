@@ -412,16 +412,11 @@ import Testing
         store.categories[0].name = "Renamed"
         let renamed = model.sourceStamp
         #expect(renamed != withSnippet)
-        // A brief entry, the same entry of another kind, a session, the action runs, the Router's switch.
-        var doc = BriefDoc(project: "p")
-        var entry = BriefEntry(project: "p", thread: "t", kind: .question, state: .needsYou, since: 1, question: "?")
-        doc.needsYou = [entry]
-        store.routerBriefs.demoDocs = ["p": doc]
+        // A Router line, another line, a session, the action runs, the Router's switch.
+        store.routerRecords.put(AgentThread(id: "t", title: "Pick a db", folder: "/code/web", lastActivity: Date(), running: true))
         let carded = model.sourceStamp
         #expect(carded != renamed)
-        entry.kind = .plan
-        doc.needsYou = [entry]
-        store.routerBriefs.demoDocs = ["p": doc]
+        store.routerRecords.put(AgentThread(id: "u", title: "Tidy the docs", folder: "/code/web", lastActivity: Date(), running: true))
         #expect(model.sourceStamp != carded)
         let sessioned = model.sourceStamp
         store.threads["x"] = AgentThread(id: "x", title: "T", folder: "/code/web", lastActivity: Date())

@@ -1069,7 +1069,7 @@ import Testing
         }
     }
 
-    @Test func theBoardGivesEachEntryFencedAndTheBriefsLead() async throws {
+    @Test(.disabled("The board reads the Router v2 records (RouterMCPTests covers it); track 10 deletes this test")) func theBoardGivesEachEntryFencedAndTheBriefsLead() async throws {
         let s = store()
         var doc = BriefDoc(project: "chan_a")
         doc.threads = [BriefThread(id: "t1", title: "Pick a db", status: .needsYou, age: 0)]
