@@ -81,3 +81,13 @@
 ## Settings pills (2026-11-12)
 
 Owner: free text never sets a new thread's settings. `@` lists models (T3 names, slugs, aliases), the model's efforts and access, `@plan`/`@build` in a Settings section; a pick is `RouterPointer.setting(RouterSetting)` (a pill, not sent: `RouterV2Mentions.plain` drops it); `RouterV2Model.launchPills` feeds `launch` (hand picks give way when a pill names the same field). The demo types it (`updateScriptedMention`, `pickScripted`, `RouterV2Dock.drawn`). Shots `v2-new-thread-pills`, `-mention`, `-mention-bare`, `-plan`. Known: in the script a mid-roll pill crossfade overlaps briefly.
+
+## Activity on the line (subagents, background work, waits) — 03cbdbc7 328b03fa 4fe12355
+- `RouterV2Activity.make(projection)` (RouterActivity.swift) → `RouterDetail.activity` → `RouterV2Thread.activity`; the records stamp a start T3 doesn't give (roster tasks) with the time Fjord first saw it. Subagent models come from the projection's `subagents[].model` (886 of 889 real records carry it; an agent type's name such as `judge` when started as a named agent).
+- Views: `RouterV2ActivityViews.swift` (glyphs, peek, rows); the working card lists them. Shots `v2-activity`, `v2-activity-peek`, `v2-activity-card` (+ `-dark`); storyboard beat 19.
+- **SEAM, not applied** (the layout-performance track owned RouterV2Line/Page while this landed). Until it is, the glyphs and their peek don't draw on the page (the card's list does). Two edits:
+  - `RouterV2Line.swift`, `RouterV2LineView.row`: after `RouterV2SentenceView(model: model, box: box)` add `.routerV2Activity(model, thread)` (before `.padding(.leading, M.sentenceGap)`).
+  - `RouterV2Page.swift`, `RouterV2Floating.body`: before the housekeeping peek add
+    `if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] { hung(from: frame, width: RouterV2.Peek.width) { RouterV2ActivityPeek(model: model, thread: thread) }.id("activity-" + id).transition(.scaleFade(0.98, reduce: reduce)) }`
+    and after `.motion(.fade, value: model.peeked)` add `.motion(.fade, value: model.activityPeeked)`.
+  - Checked with both applied: the three shots and beat 19's frames (`--from 19 --until 19 --frames`).

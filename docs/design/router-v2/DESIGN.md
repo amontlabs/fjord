@@ -5,7 +5,7 @@ behind a flag (`Sources/Fjord/RouterV2*.swift`), on fake data, recorded for the 
 by the real engine.
 
 Round 2 (2026-11-12, CONTEXT.md "Round 2") added two things, marked **R2** where they land: Fjord's mark wherever the
-Router's model is at work (1.9, 2.2, 2.3), and a new thread's settings in the destination row (1.9.1, 5.1, beats 26–30).
+Router's model is at work (1.9, 2.2, 2.3), and a new thread's settings in the destination row (1.9.1, 5.1, beats 27–31).
 
 Round 3 (2026-11-12) fixed the two polish reviews (POLISH-visual.md, POLISH-interaction.md) and moved the demo to the
 latencies and behaviours FEASIBILITY.md measured. Its rules are marked **R3**.
@@ -193,6 +193,16 @@ What floats keeps CDS Menu's 10, the composer CDS's 14.
   line, tail truncation. Links inside it (a PR) keep the `BriefLink` look; the PR's state word after the link is drawn by
   code from the board, in footnote: open `BadgeTint.successText`, merged `BadgeTint.violetText`, closed `Text.danger`.
   **R3.** The word has a 14 pt space after the link. It swaps in one frame and pops from 1.25 (3).
+- **Activity.** **R5** (2026-11-12, owner: "show in a super compact way when there are subagents running, background
+  processes, something it's waiting on"). Right after the sentence's words, 8 pt on: one glyph per kind the thread has,
+  in page order subagents `person.2`, background commands `terminal`, waits `hourglass` (another thread, a monitor, a
+  command the agent said it resumes after); 10 pt medium, 7 apart, `CDS.Text.muted`, no ground. A kind's count follows
+  its glyph 2 pt on (sans 11, `monospacedDigit`, `numericText`) only when it is more than one: `person.2 2  terminal`.
+  The words give way first; the glyphs never truncate. The pointer on them brightens them to `CDS.Text.secondary` and
+  shows their peek (1.6). A glyph group comes and goes with `Motion.fade`; Reduce Motion: counts cross-fade. Read from
+  T3's projection (`RouterActivity.swift`): `subagents[]` (title, model, start), the provider thread's
+  `pendingBackgroundTasks` roster, the command item that started a background task, live `t3_thread_wait` / `Monitor`
+  items. T3's own watch of a PR is not listed (it isn't the agent's work).
 - **Project pill.** CDS Badge neutral xs (`CDS.Badge`): height 16, padding 4, radius 4, fill `alpha(0.05)`, 10 pt medium
   `CDS.Text.secondary`. Hover: fill `CDS.Fill.secondary`, ink `CDS.Text.primary`, pointing hand. Click filters (section
   4). A thread with no project has no pill. While a project filter is on, pills on lines fade out (the bar says it).
@@ -258,6 +268,7 @@ Kind blocks:
 | **Done** | PR badges; "4 files" + `+96` in `Git.added`, `−212` in `Git.removed` (footnote, mono digits) | none | same three |
 | **Stopped** | reason banner: fill `Text.danger` 12 % (`RouterV2.dangerFill`), no ring (**R4**), radius 8, padding 10; the error in `CDS.mono(12)` `Text.primary`, max 6 lines; under it "Last step: " + step, footnote muted | none | **R3.** left: `Continue` + the key `⏎` (the page's button, **R4**: 24 tall, radius 6, the chosen fill); then the same three. T3 has no rerun: Continue sends T3's own words, "Continue where you left off.", and the destination row shows them (1.9). The Sent line reads those words |
 | **Working** | **R3.** T3's to-do steps only when the thread has a list (Claude sends one only with T3's to-do setting), footnote: done `checkmark` muted, running in `Text.primary` with the working dots, pending muted; at most 5, then "+3 more". A thread started here shows what it runs on as the card's first footnote through its first run | none | Stop · Open in T3 ⌘O. **R3.** Stop is the page's one act with no way back: a button, no key |
+| **Working: activity** | **R5.** Under the steps, the activity peek's rows (1.6) at footnote size in `Text.muted`, the glyph column 14 wide like the steps' | none | as Working |
 | **Sent** | your words, body `Text.primary`; a thread started here: under them what it starts with, footnote `Text.muted` ("Opus 5.5 · High · Auto"), until its run starts | none | Open in T3 ⌘O |
 
 - **Option row.** Radio 16 (multi-select: checkbox, radius `Approval.checkboxRadius`), label prose 14/20, its key
@@ -283,6 +294,12 @@ Kind blocks:
 - Content: T3 title (footnote medium muted); last lines (4, body secondary); then by kind, as plain text: the options
   numbered "1 A sidebar with sections"; a plan's first 4 lines; a permission's command; a stop's error line; PR badges
   for Done. Last row, caption `Text.muted`: "Click for its card" (**R3**).
+- **R5.** The activity glyphs' peek (pointer on the glyphs, not on a selected line, whose card lists the same): the
+  same shell, 360 wide, hung from the glyphs. One row per item, 6 apart: its glyph (10 pt muted, a 14 pt column), the
+  words (body `Text.primary`, one line, tail truncation), then trailing, caption 12 muted mono digits: a subagent's name
+  · its model as a person says it ("Opus 5.5"; T3's string when it isn't a Claude id) · its age; a background command
+  in `CDS.mono(12)` · its age; a wait: what (a thread wait by the waited thread's page name, a command in mono) · its
+  age. Ages are from T3's start, else from when Fjord first saw it. Subagents first, then commands, then waits.
 - The housekeeping line's peek lists its threads: name, project pill, age. **R3.** It is 400 wide, its names being T3
   titles, whole.
 
@@ -595,7 +612,7 @@ shown (table in 1.4), the line moves if its section changed, counts tick. Then, 
 - **R3.** The verdict's state comes first (the demo: at 1.9 s). If it changes the section (Done → Needs you), the
   line moves at once (2.4), still sheening. A finished thread has already moved to Done in code, so it can move twice;
   that is the owner's decision, and it is shown as it is (beats 14, 17), and so is a turn that starts again inside the
-  sheen (beat 33).
+  sheen (beat 34).
 - Then the words (the demo: from 2.0 s, done by about 2.5 s): the model's words appear one by one in the same place,
   each fading 0 → 1 over 0.12 s (ease-out), no movement, at the rate they arrive (the demo: one word every 50 ms).
   Implement with a `TextRenderer` whose animatable progress is the number of words shown. **R3.** One text taking
@@ -804,7 +821,7 @@ It never closes the window and never clears a draft.
   composer at 22 characters a second.
 - **Caption:** beside the window's title, where the "Checked…" subtitle used to be: beat number and text, footnote 12
   `CDS.Text.muted`, swapping (`routerV2Swap`). After it, the keys just pressed as glyphs (`RouterV2KeyHint`), shown 0.8 s.
-  **R3.** A caption leads its act by 0.2 s a word (0.8 s at least) and can change mid-beat (beats 12, 14, 33).
+  **R3.** A caption leads its act by 0.2 s a word (0.8 s at least) and can change mid-beat (beats 12, 14, 34).
   Type-ahead is shown as text ("typing “f”"), not as a key: no letter is a shortcut.
 - Record the window only (ScreenCaptureKit, `SCContentFilter(desktopIndependentWindow:)`), 2x, 60 fps; trim the first
   second; mp4 plus a half-speed copy, in `docs/design/router-v2/`. Second clip, 25 s: beats 5, 6 and 14 with Reduce
@@ -871,8 +888,9 @@ Card contents:
 
 t in seconds from the trimmed start: the sum of the beats' lengths before it (`lengths` in `RouterV2DemoScript.swift`; a
 beat is as long as its acts plus the time to read what they did). "Notice" is what the viewer should see. Counts are
-Needs you / Done / Working, given where they can be derived with certainty. **R3.** The script has 42 beats in six acts
-(the old act 5 grew by two, act 6 by one); beats 26 to 30 are Round 2's (a new thread's settings).
+Needs you / Done / Working, given where they can be derived with certainty. **R3.** The script has 43 beats in six acts
+(the old act 5 grew by two, act 6 by one, act 3 by one); beats 27 to 31 are Round 2's (a new thread's settings), beat 19
+shows a thread's subagents, background work and waits.
 
 **Act 1: read (0:00–0:19)**
 
@@ -895,7 +913,7 @@ Needs you / Done / Working, given where they can be derived with certainty. **R3
 | 10 | 52.7 | Disk test's card. Return | Stopped: the reason, and Continue | The red banner with the error and the last step; the destination row shows → Disk test “Continue where you left off.”; Return sends it; the line goes Sent with those words, then Working `swift test --filter SnapshotRestore` in mono; 0 / 2 / 9 |
 | 11 | 58.3 | Hold | Nothing needs you | "Nothing needs you." takes the header's place; the sidebar badge is gone; no card is open |
 
-**Act 3: T3 moves, live (1:01–1:43)**
+**Act 3: T3 moves, live (1:01–1:50)**
 
 | # | t | What happens | Caption | Notice |
 |---|---|---|---|---|
@@ -906,47 +924,48 @@ Needs you / Done / Working, given where they can be derived with certainty. **R3
 | 16 | 87.7 | T3: a thread starts there: "Fix the sidebar glass on resize" (fjord) | A new thread appears | A line grows into Working with T3's title cut at 28 characters and a new dot; the name and the sentence sheen; the step "Reading SidebarGlass.swift" comes at 0.9 s, the name "Sidebar glass" at 2.2 s; fjord 4 → 5, All 11 → 12; 1 / 2 / 9 |
 | 17 | 92.3 | T3: Snapshot API's turn ends (a failed build is a finished turn). The verdict flags it | A turn ends on an error: Fjord flags it | Done at once, then amber with the checklist mark in Needs you under the ask: "the build fails: cannot find 'RestoreToken'; it stopped there"; 1 / 3 / 8, then 2 / 2 / 8 |
 | 18 | 98.9 | T3: Install guide is settled there | Settled in T3: it just leaves | The line folds away; 2 / 1 / 8; the docs-site pill leaves the bar; no toast |
+| 19 | 102.5 | Subagents, background commands and waits appear on Tab handover (two subagents, a dev server), Checkpoint boot (waits on a CI run and on the boot log) and Sidebar glass (one subagent). The pointer rests on Tab handover's glyphs, then on Checkpoint boot's; then one of Tab handover's subagents ends | Subagents, background work and waits, at a glance | Muted glyphs right after each sentence, a count only past one (`person.2 2  terminal`, `hourglass 2`); the peek lists each subagent with its model and age, the command in mono, each wait; Checkpoint's peek swaps in; the `2` beside Tab handover's subagents goes, its glyph stays |
 
-**Act 4: filters (1:43–2:01)**
-
-| # | t | What happens | Caption | Notice |
-|---|---|---|---|---|
-| 19 | 102.5 | Click the `silo` pill on Disk test's line | Click a project pill: the page filters | The bar's ground slides from All to silo; other lines fold away; 2 / 0 / 2; Done's header leaves; the pills on lines fade (the bar says silo) |
-| 20 | 107.1 | Click the Working token. Then click it again | Add a state | silo × Working: two lines; the project counts change with the state (All 8, fjord 4, silo 2, lcu 1); the second click brings the silo asks back |
-| 21 | 112.1 | ⌘F. Type `f` (shown as the text "typing “f”"). Return | ⌘F: filter from the keyboard | The ring appears on silo, jumps to fjord; Return applies and returns to the list; "Nothing needs you in fjord." over Done 1 and Working 4 |
-| 22 | 117.7 | Esc | Esc clears | Every line grows back in its place; `Clear` leaves the bar |
-
-**Act 5: send (2:01–3:33)**
+**Act 4: filters (1:50–2:08)**
 
 | # | t | What happens | Caption | Notice |
 |---|---|---|---|---|
-| 23 | 120.7 | Nothing selected. Type "bar count: push it and open the PR". The read lands in 0.5 s. Return | Type with nothing selected: Fjord finds the place | Fjord's mark in the arrow's slot and a skeleton place while the draft is read, then → ✓ Bar count fjord · starts a new turn, and a dashed outline on that line's name; Return: Bar count goes Sent, then Working `git push -u origin bar-count`; Done's header leaves (2 / 0 / 9) |
-| 24 | 128.7 | Type "the spacing is off again". The unsure read takes 3.2 s. Key ⌘2. Return | Not sure: its guess first, ⌘1–3 pick | Fjord's mark in the row while it reads; then three places, each with mark, name and project; the guess lit, with what Return does there (steer now · ⌥ queue) inside its chip; ⌘2 moves the light to Tab handover; Return: the line reads ↑ “the spacing is off again” steering… for about 3 s, then Working "I'll re-measure the composer's spacing against T3." |
-| 25 | 141.3 | Click Checkpoint boot's row. Type "then delete the old checkpoint image too". The read of a running thread takes 3.2 s. Hold ⌥ (0.9 s), release, hold again, ⌥Return | A working thread: Return steers, ⌥ queues | The Working card: five steps with the running one lit, the agent's reply growing live with a caret, Stop; the row flips to "queue after this turn" while ⌥ is down; the words land as a small queued row under the line, with Cancel |
-| 26 | 155.3 | Esc. Type "silo: write the changelog for 0.4". The read takes 3.2 s | A new thread: the row shows how it starts | While it is read, Fjord's mark is in the arrow's slot; then → new thread in silo and four chips: Opus 5.5 · High · Auto · Build, quiet (they are T3's defaults), and the key ⇥ |
-| 27 | 164.9 | Tab. →. ↓ | Tab into the row: arrows change a setting | The ring lands on the model's chip and slides to the effort with →; ↓ opens its menu and moves High to Extra high, the value rolling as it moves and its ink now primary; nothing is sent |
-| 28 | 171.3 | Click the model's chip. Click "Sonnet 5.5". Pointer parks | Or click a chip: its menu | The ring goes (the pointer has the row); the menu hangs over the chip: the models with their providers, a check on Opus 5.5; the click rolls the chip to Sonnet 5.5 and closes the menu |
-| 29 | 176.9 | Type " @op", Return, then "@med", Return | Or type @: the list offers the settings | The list over the @ word: Fable 5.2 · Opus 5.5 · Sonnet 5.5 · Haiku 5.5 at a bare @, only Opus 5.5 at "@op"; Return makes a quiet pill (glyph, outline, no "@") and the model chip rolls from Sonnet 5.5 to Opus 5.5 with the accent glow; the same for "@med": the list holds Medium, the pill lands and the effort chip rolls from Extra high to Medium a moment after |
-| 30 | 185.1 | Return | Return starts it; the pills stay behind | A line is born Sent as ↑ “silo: write the changelog for 0.4”, without the pills, with Opus 5.5 · Medium after the status; its name is "write the changelog for 0.4", sheens with the mark after it, becomes "Changelog 0.4" at 2.2 s; the run starts at 0.9 s with `git log v0.3..HEAD --oneline`; silo 4 → 5 |
-| 31 | 190.5 | Type "lcu: add a --dry-run flag to lcu apps". Return 0.15 s after the last key, before the read lands | Return early: it goes when Fjord knows where | The held look: the words stay in the composer, muted, the caret hidden, the send button pressed, the mark in the arrow's slot; when the read lands sure (3.2 s) the words go to a new thread in lcu; a line is born Sent, named "add a --dry-run flag", then "Dry-run flag"; Working "Reading Apps.swift" |
-| 32 | 199.9 | Type "snapshot api: RestoreToken moved to SiloCore". Return. 0.3 s later T3 drops. 2.2 s on, T3 is back. 1.4 s later, Return | A send fails: it stays by the composer | The connection line and the red failure line at once (the Sent line returns to its flagged state), the failure line shaking once and taking the keyboard; once T3 is back the connection line leaves and the failure reads "… didn't go to Snapshot API."; Return = Send again: the failure line goes, the thread goes Sent, then Working "Editing Snapshots.swift" |
+| 20 | 109.5 | Click the `silo` pill on Disk test's line | Click a project pill: the page filters | The bar's ground slides from All to silo; other lines fold away; 2 / 0 / 2; Done's header leaves; the pills on lines fade (the bar says silo) |
+| 21 | 114.1 | Click the Working token. Then click it again | Add a state | silo × Working: two lines; the project counts change with the state (All 8, fjord 4, silo 2, lcu 1); the second click brings the silo asks back |
+| 22 | 119.1 | ⌘F. Type `f` (shown as the text "typing “f”"). Return | ⌘F: filter from the keyboard | The ring appears on silo, jumps to fjord; Return applies and returns to the list; "Nothing needs you in fjord." over Done 1 and Working 4 |
+| 23 | 124.7 | Esc | Esc clears | Every line grows back in its place; `Clear` leaves the bar |
 
-**Act 6: clear (3:33–4:47)**
+**Act 5: send (2:08–3:40)**
 
 | # | t | What happens | Caption | Notice |
 |---|---|---|---|---|
-| 33 | 212.9 | T3: Settings layout, Briefs migration and Val Cenis booking end their turns, 1.2 s apart. Then Tab handover ends, and 1.1 s later it starts again. Last, Checkpoint boot's turn ends and its queued words go | Turns end; each line is read alone / It started again: no line was written | Three lines go Done one after another, each sheens and streams by itself: "now one scrolling page; PR #58", "briefs moved into BriefLog; tests pass; PR #59" (both worth a look, blue), "reserved for five; late checkout asked; the confirmation is in your inbox" (quiet, plain). Tab handover goes Done, sheens, then back to Working with no line written (the second caption). The queued row rises into Checkpoint boot's line: Sent, then Working |
-| 34 | 224.9 | ⌥↓, then ⌥↓ again, 0.9 s apart | Done: the result, the PR, what changed | The selection reaches Done's first line, Briefs migration: last lines, `#59 open`, 6 files +212 −148; the footer's three acts with their keys |
-| 35 | 230.5 | ⌘⌫ | Settle: gone at once | The line folds away; toast "Settled Briefs migration · Revert ⌘Z"; the next Done card opens |
-| 36 | 233.7 | ⌘Z | ⌘Z brings it back | The line grows back where it was, selected; the toast leaves |
-| 37 | 236.9 | ⌘⌫. 1.8 s later, ⌘⌫ | ⌘⌫ twice: two lines, one toast | Two settles, two presses; the toast is replaced, not stacked; Val Cenis is selected |
-| 38 | 242.5 | ⌥⌘⌫. ↓ ↓ Return | Snooze | The snooze menu at the card (For 1 hour · For 3 hours · Until tomorrow, 9:00); the second ↓ lights the last; "Snoozed Val Cenis booking until tomorrow, 9:00 · Revert ⌘Z"; Done's header leaves; no selection |
-| 39 | 247.9 | ↓ (Upstream issue, the first line). Click Doesn't need me | Doesn't need me: it goes to Done | The step card: the ask, `#2049 open`; the line turns blue, shows its result line, and moves to Done; toast "Moved Upstream issue to Done · Revert ⌘Z" |
-| 40 | 254.7 | Pointer rests on "5 finished earlier, not settled", then clicks Settle all | Finished earlier: one line, one act | The peek lists the five; the row folds away; "Settled 5 older threads · Revert ⌘Z" |
-| 41 | 261.1 | PR #2049 merges (Upstream issue goes quiet). 0.6 s on, nine turns end, 0.4 s apart. After 5.4 s: ⌥↓, then ⌘⌫ every 0.6 s while a line is selected | Clearing the rest | Lines go Done as they end; four verdicts run at once, so the fifth line on sheens until a call is free; each ⌘⌫ takes exactly one line down the Done list; pills leave the bar one by one |
-| 42 | 281.5 | Hold. After 2.2 s the last toast is dismissed | Nothing left | "Nothing needs you. Nothing is running." No bar (its 48 pt stay), no badge; the composer says "Message your threads" |
+| 24 | 127.7 | Nothing selected. Type "bar count: push it and open the PR". The read lands in 0.5 s. Return | Type with nothing selected: Fjord finds the place | Fjord's mark in the arrow's slot and a skeleton place while the draft is read, then → ✓ Bar count fjord · starts a new turn, and a dashed outline on that line's name; Return: Bar count goes Sent, then Working `git push -u origin bar-count`; Done's header leaves (2 / 0 / 9) |
+| 25 | 135.7 | Type "the spacing is off again". The unsure read takes 3.2 s. Key ⌘2. Return | Not sure: its guess first, ⌘1–3 pick | Fjord's mark in the row while it reads; then three places, each with mark, name and project; the guess lit, with what Return does there (steer now · ⌥ queue) inside its chip; ⌘2 moves the light to Tab handover; Return: the line reads ↑ “the spacing is off again” steering… for about 3 s, then Working "I'll re-measure the composer's spacing against T3." |
+| 26 | 148.3 | Click Checkpoint boot's row. Type "then delete the old checkpoint image too". The read of a running thread takes 3.2 s. Hold ⌥ (0.9 s), release, hold again, ⌥Return | A working thread: Return steers, ⌥ queues | The Working card: five steps with the running one lit, the agent's reply growing live with a caret, Stop; the row flips to "queue after this turn" while ⌥ is down; the words land as a small queued row under the line, with Cancel |
+| 27 | 162.3 | Esc. Type "silo: write the changelog for 0.4". The read takes 3.2 s | A new thread: the row shows how it starts | While it is read, Fjord's mark is in the arrow's slot; then → new thread in silo and four chips: Opus 5.5 · High · Auto · Build, quiet (they are T3's defaults), and the key ⇥ |
+| 28 | 171.9 | Tab. →. ↓ | Tab into the row: arrows change a setting | The ring lands on the model's chip and slides to the effort with →; ↓ opens its menu and moves High to Extra high, the value rolling as it moves and its ink now primary; nothing is sent |
+| 29 | 178.3 | Click the model's chip. Click "Sonnet 5.5". Pointer parks | Or click a chip: its menu | The ring goes (the pointer has the row); the menu hangs over the chip: the models with their providers, a check on Opus 5.5; the click rolls the chip to Sonnet 5.5 and closes the menu |
+| 30 | 183.9 | Type " @op", Return, then "@med", Return | Or type @: the list offers the settings | The list over the @ word: Fable 5.2 · Opus 5.5 · Sonnet 5.5 · Haiku 5.5 at a bare @, only Opus 5.5 at "@op"; Return makes a quiet pill (glyph, outline, no "@") and the model chip rolls from Sonnet 5.5 to Opus 5.5 with the accent glow; the same for "@med": the list holds Medium, the pill lands and the effort chip rolls from Extra high to Medium a moment after |
+| 31 | 192.1 | Return | Return starts it; the pills stay behind | A line is born Sent as ↑ “silo: write the changelog for 0.4”, without the pills, with Opus 5.5 · Medium after the status; its name is "write the changelog for 0.4", sheens with the mark after it, becomes "Changelog 0.4" at 2.2 s; the run starts at 0.9 s with `git log v0.3..HEAD --oneline`; silo 4 → 5 |
+| 32 | 197.5 | Type "lcu: add a --dry-run flag to lcu apps". Return 0.15 s after the last key, before the read lands | Return early: it goes when Fjord knows where | The held look: the words stay in the composer, muted, the caret hidden, the send button pressed, the mark in the arrow's slot; when the read lands sure (3.2 s) the words go to a new thread in lcu; a line is born Sent, named "add a --dry-run flag", then "Dry-run flag"; Working "Reading Apps.swift" |
+| 33 | 206.9 | Type "snapshot api: RestoreToken moved to SiloCore". Return. 0.3 s later T3 drops. 2.2 s on, T3 is back. 1.4 s later, Return | A send fails: it stays by the composer | The connection line and the red failure line at once (the Sent line returns to its flagged state), the failure line shaking once and taking the keyboard; once T3 is back the connection line leaves and the failure reads "… didn't go to Snapshot API."; Return = Send again: the failure line goes, the thread goes Sent, then Working "Editing Snapshots.swift" |
 
-Lines the script needs for beat 41 (all `quiet`, in the order the turns end): Updater "asks before installing, never
+**Act 6: clear (3:40–4:54)**
+
+| # | t | What happens | Caption | Notice |
+|---|---|---|---|---|
+| 34 | 219.9 | T3: Settings layout, Briefs migration and Val Cenis booking end their turns, 1.2 s apart. Then Tab handover ends, and 1.1 s later it starts again. Last, Checkpoint boot's turn ends and its queued words go | Turns end; each line is read alone / It started again: no line was written | Three lines go Done one after another, each sheens and streams by itself: "now one scrolling page; PR #58", "briefs moved into BriefLog; tests pass; PR #59" (both worth a look, blue), "reserved for five; late checkout asked; the confirmation is in your inbox" (quiet, plain). Tab handover goes Done, sheens, then back to Working with no line written (the second caption). The queued row rises into Checkpoint boot's line: Sent, then Working |
+| 35 | 231.9 | ⌥↓, then ⌥↓ again, 0.9 s apart | Done: the result, the PR, what changed | The selection reaches Done's first line, Briefs migration: last lines, `#59 open`, 6 files +212 −148; the footer's three acts with their keys |
+| 36 | 237.5 | ⌘⌫ | Settle: gone at once | The line folds away; toast "Settled Briefs migration · Revert ⌘Z"; the next Done card opens |
+| 37 | 240.7 | ⌘Z | ⌘Z brings it back | The line grows back where it was, selected; the toast leaves |
+| 38 | 243.9 | ⌘⌫. 1.8 s later, ⌘⌫ | ⌘⌫ twice: two lines, one toast | Two settles, two presses; the toast is replaced, not stacked; Val Cenis is selected |
+| 39 | 249.5 | ⌥⌘⌫. ↓ ↓ Return | Snooze | The snooze menu at the card (For 1 hour · For 3 hours · Until tomorrow, 9:00); the second ↓ lights the last; "Snoozed Val Cenis booking until tomorrow, 9:00 · Revert ⌘Z"; Done's header leaves; no selection |
+| 40 | 254.9 | ↓ (Upstream issue, the first line). Click Doesn't need me | Doesn't need me: it goes to Done | The step card: the ask, `#2049 open`; the line turns blue, shows its result line, and moves to Done; toast "Moved Upstream issue to Done · Revert ⌘Z" |
+| 41 | 261.7 | Pointer rests on "5 finished earlier, not settled", then clicks Settle all | Finished earlier: one line, one act | The peek lists the five; the row folds away; "Settled 5 older threads · Revert ⌘Z" |
+| 42 | 268.1 | PR #2049 merges (Upstream issue goes quiet). 0.6 s on, nine turns end, 0.4 s apart. After 5.4 s: ⌥↓, then ⌘⌫ every 0.6 s while a line is selected | Clearing the rest | Lines go Done as they end; four verdicts run at once, so the fifth line on sheens until a call is free; each ⌘⌫ takes exactly one line down the Done list; pills leave the bar one by one |
+| 43 | 288.5 | Hold. After 2.2 s the last toast is dismissed | Nothing left | "Nothing needs you. Nothing is running." No bar (its 48 pt stay), no badge; the composer says "Message your threads" |
+
+Lines the script needs for beat 42 (all `quiet`, in the order the turns end): Updater "asks before installing, never
 mid-call; stable channel" · Disk test "the flake was a 120 s timeout under load; raised and fixed" · Tab handover "the
 tab hands over with no gap; spacing matches T3" · Checkpoint boot "boots from a checkpoint; old worktree and image
 removed" · Sidebar glass "the glass no longer flickers on resize" · Bar count "pushed; PR #60" · Changelog 0.4
@@ -1025,7 +1044,7 @@ Where this goes past the reviews, or picks between them:
 14. **(R3) Return early goes when Fjord is sure.** A Return before the read lands holds the words and sends them when
     the read lands sure; unsure or disagreeing, the row shows the places and Return is asked again.
 15. **(R3) A finished line may move twice.** A finished thread goes to Done at once (code); the verdict may then promote
-    it to Needs you. This is the owner's decision, shown as it is (beats 14, 17, 33).
+    it to Needs you. This is the owner's decision, shown as it is (beats 14, 17, 34).
 16. **(R3) Fjord's mark starts whole** each time it appears, rather than in phase with the others.
 17. **(R3) Digits pick by key position, kept on AZERTY.** A first character from the digit row (é on 2) picks when the
     open card has that many options. (Superseded: options pick with ⇧, section 5.)
