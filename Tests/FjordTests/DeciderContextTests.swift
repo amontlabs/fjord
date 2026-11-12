@@ -284,15 +284,14 @@ final class CardCounter: @unchecked Sendable {
     }
 }
 
-// MARK: - The open card and a new thread's settings
+// MARK: - The open card
 
 extension DeciderContextTests {
-    static func buildWith(_ message: String, threads: [ContextThread], open: String? = nil, launch: RouterLaunchOffer? = nil) -> DeciderContext.Built {
+    static func buildWith(_ message: String, threads: [ContextThread], open: String? = nil) -> DeciderContext.Built {
         let index = ThreadIndex()
         for t in threads { index.put(t.key, title: t.title, text: t.said, stamp: "1") }
         var x = DeciderContext.Inputs(projects: ["harbor", "fjord"], purposes: [:], threads: threads, index: index, now: now, zone: zone)
         x.open = open
-        x.launch = launch
         return DeciderContext.build(message, x)
     }
 
@@ -308,39 +307,5 @@ extension DeciderContextTests {
         // A thread the context doesn't know is no prior.
         let unknown = Self.buildWith("fix the trailing comma", threads: ts, open: "zzz")
         #expect(unknown.user == plain.user && unknown.key == plain.key)
-    }
-
-    @Test func theSchemaGainsLaunchAndItsWordsAfterThePlaceWithT3sOwnEnums() throws {
-        let offer = RouterLaunchCatalog.offer(config: RouterLaunchCatalogTests.config())
-        let schema = DeciderContext.schema(launch: offer)
-        let json = try #require(try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any])
-        let keys = ["message_deliverable", "fits", "owned_by", "referent_unique", "action", "project", "session", "reason", "alternatives",
-                    "confidence", "project_confidence", "p_new", "launch", "launch_words"]
-        #expect(json["required"] as? [String] == keys && json["additionalProperties"] as? Bool == false)
-        let at = keys.map { (schema.range(of: "\"\($0)\": {")?.lowerBound).map { schema.distance(from: schema.startIndex, to: $0) } ?? -1 }
-        #expect(at == at.sorted() && !at.contains(-1))
-        let props = try #require(json["properties"] as? [String: Any])
-        let launch = try #require((props["launch"] as? [String: Any])?["properties"] as? [String: Any])
-        func enumOf(_ k: String) -> [String]? { (launch[k] as? [String: Any])?["enum"] as? [String] }
-        #expect(enumOf("model") == ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])
-        #expect(enumOf("effort") == ["low", "medium", "high", "xhigh", "max"] && enumOf("interaction_mode") == ["default", "plan"])
-        #expect(enumOf("runtime_mode") == ["approval-required", "auto-accept-edits", "auto", "full-access"])
-        // Without an offer it is N4b's alone.
-        #expect(DeciderContext.schema(launch: nil) == DeciderContext.schema && DeciderContext.schema(launch: .empty) == DeciderContext.schema)
-    }
-
-    @Test func theSystemPromptNamesT3sModelsAndNeverLetsTheDeciderRewriteTheMessage() {
-        let offer = RouterLaunchCatalog.offer(config: RouterLaunchCatalogTests.config())
-        let ts = [Self.thread("a")]
-        let b = Self.buildWith("split the tests (use opus medium)", threads: ts, launch: offer)
-        #expect(b.system.hasPrefix(DeciderContext.role) && b.launch == offer && b.schema == DeciderContext.schema(launch: offer))
-        #expect(b.system.contains("- claude-opus-5-5: Opus 5.5 (Claude), also called opus; efforts low, medium, high, xhigh, max"))
-        #expect(b.system.contains("- claude-haiku-5-5: Haiku 5.5 (Claude), also called haiku") && b.system.contains("Never rewrite, shorten or correct the message"))
-        #expect(b.system.contains("launch_words includes the brackets") && b.system.contains("approval-required runtime mode"))
-        #expect(!b.system.contains("just read"))
-        // The offer is part of the request, and absent it the prompt and schema are what they were.
-        let plain = Self.buildWith("split the tests (use opus medium)", threads: ts)
-        #expect(plain.system == DeciderContext.role && plain.schema == DeciderContext.schema && plain.launch == nil && plain.key != b.key)
-        #expect(plain.blocks == b.blocks)
     }
 }

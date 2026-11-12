@@ -350,7 +350,7 @@ final class RouterV2DemoSource: RouterV2Source {
     }
 
     private func time(of read: RouterV2Read) -> Double {
-        guard read.sure, read.launch == RouterV2LaunchAsk(), case .thread(let id)? = read.places.first,
+        guard read.sure, case .thread(let id)? = read.places.first,
               let t = model.thread(id), !t.isRunning else { return Self.slowRead }
         return Self.quickRead
     }

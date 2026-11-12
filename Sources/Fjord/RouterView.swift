@@ -429,9 +429,16 @@ final class RouterModel {
         guard let query = mention else { return [] }
         // A bare @ shows the first few of each section, in order: only those are made.
         let first = query.isEmpty ? RouterMentions.perSection.bare : nil
-        return RouterMentions.suggest(RouterMentions.candidates(store, except: Set(pointers), query: query, first: first),
-                                      query: query)
+        var rows = RouterMentions.candidates(store, except: Set(pointers), query: query, first: first)
+        // The Router v2 page's settings (a new thread's model, effort, access, mode), not those the draft names already.
+        if let settingRows { rows += settingRows(query).filter { row in
+            if case .pointer(let p) = row.pick { !pointers.contains(p) } else { true }
+        } }
+        return RouterMentions.suggest(rows, query: query)
     }
+
+    /// Rows the page adds to the @ list for a typed word (Router v2's settings); nil: none.
+    @ObservationIgnored var settingRows: (@MainActor (String) -> [MentionSuggestion])?
 
     /// The composer's text view (`MentionField`): text a pick inserts goes in through it while it shows the draft, so ⌘Z
     /// takes it back as it does what you type.

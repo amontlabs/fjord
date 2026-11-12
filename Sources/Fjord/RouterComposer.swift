@@ -374,12 +374,7 @@ struct MentionList: View {
                             Image(systemName: row.look.symbol ?? "folder").font(.system(size: 12))
                                 .foregroundStyle(row.look.tint ?? CDS.Text.secondary)
                                 .frame(width: d.icon, height: d.icon)
-                            HStack(alignment: .firstTextBaseline, spacing: d.gap.xs) {
-                                Text(row.insertsText ? row.name : "@" + row.name).font(CDS.sans(d.body.0)).foregroundStyle(CDS.Text.primary)
-                                    .lineLimit(1).layoutPriority(1)
-                                Text(row.detail).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted)
-                                    .lineLimit(1).truncationMode(row.folder == nil ? .tail : .head)
-                            }
+                            rowText(row, density: d)
                             Spacer(minLength: 0)
                         }
                         .padding(.leading, d.pad.md)
@@ -404,6 +399,15 @@ struct MentionList: View {
         .shadow(color: CDS.PanelShadow.far.color, radius: CDS.PanelShadow.far.radius, y: CDS.PanelShadow.far.y)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Suggestions")
+    }
+
+    /// A row's name and, muted after it, its detail.
+    private func rowText(_ row: MentionSuggestion, density d: CDS.Density) -> some View {
+        let truncation: Text.TruncationMode = row.folder == nil ? .tail : .head
+        return HStack(alignment: .firstTextBaseline, spacing: d.gap.xs) {
+            Text(row.rowName).font(CDS.sans(d.body.0)).foregroundStyle(CDS.Text.primary).lineLimit(1).layoutPriority(1)
+            Text(row.detail).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(truncation)
+        }
     }
 
     /// `~/code/lookout` rather than the whole path.

@@ -74,71 +74,11 @@ import Testing
         #expect(none.models.isEmpty && none.defaults == .t3Default)
     }
 
-    @Test func aModelsNamesResolveByAliasAndOnlyToWhatT3Has() {
+    @Test func aModelCarriesT3sOtherNamesForTheAtList() {
         let offer = RouterLaunchCatalog.offer(config: Self.config())
-        #expect(offer.slug("opus") == "claude-opus-5-5" && offer.slug(" Sonnet ") == "claude-sonnet-5-5")
-        #expect(offer.slug("claude-haiku-5-5") == "claude-haiku-5-5" && offer.slug("Fable 5.2") == "claude-fable-5-2")
-        #expect(offer.slug("gpt-9") == nil && offer.slug("") == nil && offer.slug("opus-4") == nil)
-        #expect(offer.efforts == ["low", "medium", "high", "xhigh", "max"] && offer.accesses == ["approval-required", "auto-accept-edits", "auto", "full-access"])
+        #expect(offer.model("claude-opus-5-5")?.aliases == ["opus"] && offer.model("claude-haiku-5-5")?.aliases == ["haiku"])
+        #expect(offer.model("gpt-9") == nil)
     }
-
-    // MARK: What the decider said
-
-    @Test func theDeciderSaidIsCheckedAgainstTheModelItNamed() {
-        let offer = RouterLaunchCatalog.offer(config: Self.config())
-        let ok = RouterLaunchCatalog.checked(model: "opus", effort: "Medium", runtimeMode: "approval-required", interactionMode: "plan", offer: offer)
-        #expect(ok == RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium, access: .supervised, plan: true))
-        // A model T3 doesn't have is dropped; Sonnet has no xhigh; Haiku takes no effort; an unknown mode and mode are dropped.
-        #expect(RouterLaunchCatalog.checked(model: "gpt-9", effort: nil, runtimeMode: nil, interactionMode: nil, offer: offer) == RouterV2LaunchAsk())
-        #expect(RouterLaunchCatalog.checked(model: "sonnet", effort: "xhigh", runtimeMode: nil, interactionMode: nil, offer: offer)
-            == RouterV2LaunchAsk(model: "claude-sonnet-5-5"))
-        #expect(RouterLaunchCatalog.checked(model: "haiku", effort: "low", runtimeMode: nil, interactionMode: nil, offer: offer)
-            == RouterV2LaunchAsk(model: "claude-haiku-5-5"))
-        #expect(RouterLaunchCatalog.checked(model: nil, effort: "ultra", runtimeMode: "yolo", interactionMode: "agent", offer: offer) == RouterV2LaunchAsk())
-        // An effort alone is the default model's; build is a setting too; nothing is taken without an offer.
-        #expect(RouterLaunchCatalog.checked(model: nil, effort: "max", runtimeMode: nil, interactionMode: "default", offer: offer)
-            == RouterV2LaunchAsk(effort: .max, plan: false))
-        #expect(RouterLaunchCatalog.checked(model: "opus", effort: "max", runtimeMode: "auto", interactionMode: "plan", offer: nil) == RouterV2LaunchAsk())
-    }
-
-    @Test func theWordsAreTakenOnlyWhenTheyAreFoundExactlyAndSomethingIsLeftToSend() {
-        let said = RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium)
-        let draft = "split the snapshot tests (use opus medium)"
-        #expect(RouterLaunchCatalog.taken("(use opus medium)", in: draft, said: said) == "(use opus medium)")
-        // Not in the draft (the model changed a word): nothing is cut.
-        #expect(RouterLaunchCatalog.taken("(use Opus medium)", in: draft, said: said) == nil)
-        #expect(RouterLaunchCatalog.taken("use opus on medium", in: draft, said: said) == nil)
-        // No setting survived the check: no words either. The whole draft is never taken.
-        #expect(RouterLaunchCatalog.taken("(use opus medium)", in: draft, said: RouterV2LaunchAsk()) == nil)
-        #expect(RouterLaunchCatalog.taken("use opus medium", in: "use opus medium", said: said) == nil)
-        #expect(RouterLaunchCatalog.taken("", in: draft, said: said) == nil)
-    }
-
-    @Test func theCutWidensOverBracketsAndDanglingSeparators() {
-        let said = RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium)
-        func left(_ words: String, _ draft: String) -> String? {
-            RouterLaunchCatalog.taken(words, in: draft, said: said).map { cut in
-                draft.replacingOccurrences(of: cut, with: "").trimmingCharacters(in: .whitespaces)
-            }
-        }
-        // The model quoted the words without their brackets.
-        #expect(left("use opus medium", "fix x (use opus medium)") == "fix x")
-        #expect(left("use opus medium", "fix x [ use opus medium ]") == "fix x")
-        #expect(left("use opus medium", "(use opus medium) fix x") == "fix x")
-        // A dash or comma the words leave at the end (or the start) goes too.
-        #expect(left("use sonnet high", "fix x — use sonnet high") == "fix x")
-        #expect(left("use sonnet high", "fix x - use sonnet high") == "fix x")
-        #expect(left("use opus, dont edit anything", "fix the readme, use opus, dont edit anything") == "fix the readme")
-        #expect(left("use opus", "use opus, fix the readme") == "fix the readme")
-        // Near-misses stay: a comma in the middle of the message, brackets that don't match or aren't right around the words.
-        #expect(RouterLaunchCatalog.taken("use opus medium", in: "fix x, then y use opus medium", said: said) == "use opus medium")
-        #expect(RouterLaunchCatalog.taken("use opus medium", in: "fix x (use opus medium]", said: said) == "use opus medium")
-        #expect(RouterLaunchCatalog.taken("use opus medium", in: "fix (see use opus medium here)", said: said) == "use opus medium")
-        // Nothing left to send once the brackets go: nothing is taken.
-        #expect(RouterLaunchCatalog.taken("use opus medium", in: "(use opus medium)", said: said) == nil)
-    }
-
-    // MARK: The feed
 
     @Test func theFeedReadsTheConfigWhenConnectedAndTellsThePageOnlyWhatChanged() async {
         let counter = Counter()

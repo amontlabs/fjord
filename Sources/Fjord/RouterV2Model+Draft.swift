@@ -13,12 +13,13 @@ extension RouterV2Model {
         draft = text
         // Typing again takes the words back from a held Return.
         unhold()
+        if scripted || still { updateScriptedMention() }
         if text.isEmpty {
             mentions = []
             animate(.spatial) {
                 read = nil; explicit = nil; waved = false; lit = 0; placesMenu = false
                 reading = false
-                launchMine = RouterV2LaunchAsk(); launchFocus = nil; launchMenu = nil; launchRolls = [:]
+                launchMine = RouterV2LaunchAsk(); launchPills = RouterV2LaunchAsk(); launchFocus = nil; launchMenu = nil; launchRolls = [:]
             }
             return
         }
@@ -29,9 +30,7 @@ extension RouterV2Model {
     }
 
     func unhold() {
-        heldPlace = nil
         heldPrior = nil
-        heldTaken = nil
         heldDigit = nil
         if held { animate(.fade) { held = false } }
     }
@@ -64,6 +63,7 @@ extension RouterV2Model {
         let before = mentions
         mentions = marks
         if before.map(\.pointer) != marks.map(\.pointer) {
+            followPills(before: before.map(\.pointer), now: marks.map(\.pointer))
             var added = marks.map(\.pointer)
             for old in before.map(\.pointer) { if let i = added.firstIndex(of: old) { added.remove(at: i) } }
             let place = { (p: RouterPointer) in RouterV2Mentions.place(p, has: { self.thread($0) != nil }, projectName: projectName) }
@@ -114,45 +114,32 @@ extension RouterV2Model {
     /// The Router's read of the draft landed.
     func readLanded(_ new: RouterV2Read) {
         guard !draft.isEmpty, new.draft == plainDraft else { return }
-        let before = read?.launch ?? RouterV2LaunchAsk()
         animate(.fade) {
-            rolling {
-                read = new
-                reading = false
-                // A pick you made yourself is never changed by a later read.
-                if let explicit, let i = new.places.firstIndex(of: explicit) { lit = i } else if explicit == nil { lit = 0 }
-                // ⌘1–3 pressed while the places were being read: that place is lit, and yours.
-                if let digit = heldDigit, explicit == nil, !new.sure, digit < min(3, new.places.count) {
-                    explicit = new.places[digit]
-                    lit = digit
-                }
-                heldDigit = nil
-                // A setting you wrote since the last read wins over the one you set by hand before writing it.
-                if new.launch.model != nil, new.launch.model != before.model { launchMine.clear(.model) }
-                if new.launch.effort != nil, new.launch.effort != before.effort { launchMine.clear(.effort) }
-                if new.launch.access != nil, new.launch.access != before.access { launchMine.clear(.access) }
-                if new.launch.plan != nil, new.launch.plan != before.plan { launchMine.clear(.mode) }
-                settleLaunch()
+            read = new
+            reading = false
+            // A pick you made yourself is never changed by a later read.
+            if let explicit, let i = new.places.firstIndex(of: explicit) { lit = i } else if explicit == nil { lit = 0 }
+            // ⌘1–3 pressed while the places were being read: that place is lit, and yours.
+            if let digit = heldDigit, explicit == nil, !new.sure, digit < min(3, new.places.count) {
+                explicit = new.places[digit]
+                lit = digit
             }
+            heldDigit = nil
+            settleLaunch()
         }
         // Return came first: the words go if the read is sure and agrees with what the row showed. With nothing shown
         // yet (the skeleton), they go where Fjord is sure; unsure, the row shows the places and Return is asked again.
         guard held else { return }
-        let shown = heldPlace, prior = heldPrior, marked = heldTaken
+        let prior = heldPrior
         unhold()
         let goes: Bool
-        if let shown {
-            goes = explicit == shown || (new.sure && new.places.first == shown)
-        } else if let prior {
+        if let prior {
             goes = new.sure && new.places.first == .thread(prior)
         } else {
             goes = new.sure && !new.places.isEmpty
         }
         guard goes else { return }
-        // Words are left out of the message only when you saw them marked before Return: otherwise the settings apply
-        // and the draft goes as typed.
-        let seen = marked != nil && marked == taken.map { String(draft[$0]) }
-        send(asTyped: !seen)
+        send()
     }
 
     private func mode(_ place: RouterV2Place) -> String {
@@ -320,8 +307,8 @@ extension RouterV2Model {
     // MARK: Return
 
     /// Return (⌥Return: `queue`): sends what the destination row shows. With no row: Send again on a focused failure
-    /// line, otherwise nothing. It never settles. `asTyped`: a held Return whose marked words were never on screen.
-    func send(queue: Bool = false, asTyped: Bool = false) {
+    /// line, otherwise nothing. It never settles.
+    func send(queue: Bool = false) {
         guard let destination else {
             if case .failure(let id)? = selection, !connectionLost { sendAgain(id) }
             return
@@ -337,7 +324,7 @@ extension RouterV2Model {
                 animate(.spatial) { formAt[id] = open }
                 return
             }
-            deliver(words, to: .thread(id), queue: false, asTyped: true, kind: answerKind(t))
+            deliver(words, to: .thread(id), queue: false, kind: answerKind(t))
         case .place(let place, _):
             if case .thread(let id) = place, let t = thread(id), !t.form.isEmpty, selection == .line(id) {
                 // Typed on a form: the words answer the current question; they go with the rest of the form.
@@ -350,11 +337,9 @@ extension RouterV2Model {
                 setDraft("")
                 return
             }
-            if waitsForRead(place) { return }
-            deliver(plainDraft, to: place, queue: queue, asTyped: asTyped)
+            deliver(plainDraft, to: place, queue: queue)
         case .unsure(let places, let lit, _, _):
-            if waitsForRead(places[lit]) { return }
-            deliver(plainDraft, to: places[lit], queue: queue, asTyped: asTyped)
+            deliver(plainDraft, to: places[lit], queue: queue)
         case .prior(let id):
             // Not before the read: the words wait, shown held, and go if it agrees with the thread shown.
             heldPrior = id
@@ -366,16 +351,6 @@ extension RouterV2Model {
         }
     }
 
-    /// A new thread starts with the settings the row shows: while the draft is still being read (it may name some),
-    /// Return waits for the read, as it does before a first one.
-    private func waitsForRead(_ place: RouterV2Place) -> Bool {
-        guard reading, case .newThread = place else { return false }
-        heldPlace = place
-        heldTaken = taken.map { String(draft[$0]) }
-        animate(.fade) { held = true }
-        return true
-    }
-
     /// What a picked answer is: options on a T3 request, or (a step's, which are the model's) plain words.
     private func answerKind(_ t: RouterV2Thread) -> RouterV2Outgoing.Kind {
         switch t.state {
@@ -385,19 +360,16 @@ extension RouterV2Model {
         }
     }
 
-    private func deliver(_ words: String, to place: RouterV2Place, queue: Bool, asTyped: Bool, kind: RouterV2Outgoing.Kind = .words) {
+    private func deliver(_ words: String, to place: RouterV2Place, queue: Bool, kind: RouterV2Outgoing.Kind = .words) {
         let name = read?.name
         // What the row showed, for the decision log.
         let shown = read
-        // Without the words taken as a new thread's settings, when you saw them marked: those went into the chips.
-        let message = asTyped ? words : message
         let launch = launch
         // The composer empties first: the row leaves saying what it said at Return, not what the send made of the thread.
         setDraft("")
         switch place {
         case .thread(let id):
             guard let t = thread(id) else { return }
-            // Words for a thread that exists are never taken: they go as written.
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
                 source?.send(RouterV2Outgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown))
@@ -406,14 +378,14 @@ extension RouterV2Model {
             }
         case .newThread(let project):
             let id = source?.mintThread() ?? "new-\(fresh())"
-            var t = RouterV2Thread(id: id, name: name ?? RouterV2.firstWords(message), title: message, project: project, state: .sent,
+            var t = RouterV2Thread(id: id, name: name ?? RouterV2.firstWords(words), title: words, project: project, state: .sent,
                                    sentence: .init(text: ""), since: now)
             t.naming = true
             t.order = fresh()
-            t.sent = .init(words: message, status: .sending)
+            t.sent = .init(words: words, status: .sending)
             t.launch = launch
             animate(.spatial) { threads.append(t) }
-            source?.start(id, words: message, project: project, launch: launch, read: shown)
+            source?.start(id, words: words, project: project, launch: launch, read: shown)
         case .here:
             break
         }
@@ -507,6 +479,7 @@ enum RouterV2Mentions {
         var next = marks.makeIterator()
         var leading = true
         var skipSpace = false
+        var dropped = false
         for c in draft {
             if skipSpace, c == " " { skipSpace = false; continue }
             skipSpace = false
@@ -520,12 +493,20 @@ enum RouterV2Mentions {
                 skipSpace = true
                 continue
             }
+            // A setting's pill is for the row's chips, not the message: it goes, with the space after it.
+            if mark.pointer.isSetting {
+                skipSpace = true
+                dropped = true
+                continue
+            }
             leading = false
             let text = "@" + mark.name
             kept.append(RouterMention(range: count..<(count + text.count), pointer: mark.pointer, name: mark.name))
             out += text
             count += text.count
         }
+        // The space a pill at the end was typed with goes too.
+        if dropped { while out.last?.isWhitespace == true { out.removeLast() } }
         return (out, kept)
     }
 

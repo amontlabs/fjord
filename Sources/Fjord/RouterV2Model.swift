@@ -136,10 +136,7 @@ final class RouterV2Model {
     /// sure and agrees with what the row showed; with nothing shown yet, where Fjord is sure.
     var held = false
     /// What the row showed when Return came: a new thread whose draft was still being read, or the selection as the prior.
-    @ObservationIgnored var heldPlace: RouterV2Place?
     @ObservationIgnored var heldPrior: String?
-    /// The words marked as taken in the composer when Return came: only those are left out of the message.
-    @ObservationIgnored var heldTaken: String?
     /// ⌘1–3 pressed while the places were still being read: lit when the read lands unsure.
     @ObservationIgnored var heldDigit: Int?
     var optionHeld = false
@@ -153,6 +150,12 @@ final class RouterV2Model {
     var launchDefault = RouterV2Launch.t3Default
     var launchModels = RouterV2Launch.demoModels
     var launchMine = RouterV2LaunchAsk()
+    /// What the settings pills in the draft name (`RouterSetting`): they win over what you set by hand before, and a chip you
+    /// change by hand afterwards wins over them.
+    var launchPills = RouterV2LaunchAsk()
+    /// Scripted only (the demo types into a drawn composer): the @ word being typed, and the list's row lit.
+    var scriptedMention: String?
+    var scriptedMentionIndex = 0
     var launchFocus: RouterV2LaunchField?
     var launchMenu: RouterV2LaunchField?
     /// Each setting's last change: the value it had and which way the new one rolls in.

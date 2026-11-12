@@ -54,15 +54,20 @@ enum RouterV2Shots {
                             v2Pointer: state.pointer)
     }
 
-    /// A draft for a new thread in silo, read: the row shows what it starts with. `aside`: the words that say its
-    /// settings, as the Router's model returns them.
-    private static func newThread(_ model: RouterV2Model, aside: String = "", launch: RouterV2LaunchAsk = RouterV2LaunchAsk()) {
+    /// A draft for a new thread in silo, read: the row shows what it starts with. `pills`: settings picked from the @ list,
+    /// after the words. `typing`: an @ word being typed, its list open.
+    private static func newThread(_ model: RouterV2Model, pills: [RouterSetting] = [], typing: String? = nil) {
         model.select(nil)
-        model.setDraft("silo: write the changelog for 0.4" + aside)
-        model.apply(.read(RouterV2Read(draft: model.draft, places: [.newThread(project: "silo")], sure: true,
-                                       name: "write the changelog for 0.4", launch: launch,
-                                       taken: aside.isEmpty ? nil : aside.trimmingCharacters(in: .whitespaces))))
+        let words = "silo: write the changelog for 0.4"
+        let marks = String(repeating: MentionText.markString + " ", count: pills.count)
+        let text = words + (pills.isEmpty ? "" : " " + marks) + (typing.map { (pills.isEmpty ? " " : "") + "@" + $0 } ?? "")
+        model.edit(text, marks: RouterV2Mentions.marks(text, pointers: pills.map { .setting($0) }, name: { _ in "" }))
+        model.apply(.read(RouterV2Read(draft: model.plainDraft, places: [.newThread(project: "silo")], sure: true,
+                                       name: "write the changelog for 0.4")))
     }
+
+    private static let opus = RouterSetting(kind: .model, value: "claude-opus-5-5", label: "Opus 5.5")
+    private static let medium = RouterSetting(kind: .effort, value: "medium", label: "Medium")
 
     private static let states: [State] = [
         State(name: "v2-home") { _ in },
@@ -153,11 +158,20 @@ enum RouterV2Shots {
         }, pointer: { $0.stepLaunch(down: true) }),  // ↓: its menu opens, High to Extra high.
         State(name: "v2-new-thread-menu", make: { newThread($0) }, pointer: { $0.toggleLaunchMenu(.model) }),
         State(name: "v2-new-thread-access-menu", make: { newThread($0) }, pointer: { $0.toggleLaunchMenu(.access) }),
-        State(name: "v2-new-thread-written") { model in
-            newThread(model, aside: " (use opus medium)", launch: RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium))
+        State(name: "v2-new-thread-pills") { model in
+            newThread(model, pills: [opus, medium])
+        },
+        State(name: "v2-new-thread-mention") { model in
+            // "@op" typed after the words: the list offers Opus 5.5 (and the threads and projects it also finds).
+            newThread(model, typing: "op")
+        },
+        State(name: "v2-new-thread-mention-bare") { model in
+            // A bare @: a few threads, then the settings.
+            newThread(model, typing: "")
         },
         State(name: "v2-new-thread-plan") { model in
-            newThread(model, aside: " (plan it first, and ask before running anything)", launch: RouterV2LaunchAsk(access: .supervised, plan: true))
+            newThread(model, pills: [RouterSetting(kind: .access, value: "approval-required", label: "Supervised"),
+                                     RouterSetting(kind: .mode, value: "plan", label: "Plan")])
         },
         State(name: "v2-new-thread-unsure") { model in
             model.select(nil)
@@ -167,7 +181,7 @@ enum RouterV2Shots {
             model.light(2)
         },
         State(name: "v2-new-thread-sent") { model in
-            newThread(model, aside: " (use opus medium)", launch: RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium))
+            newThread(model, pills: [opus, medium])
             model.send()
             if let id = model.threads.last?.id { model.select(.line(id)) }
         },

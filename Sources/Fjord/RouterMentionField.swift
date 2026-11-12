@@ -73,32 +73,6 @@ final class MentionTextView: NSTextView {
     var makePill: (RouterPointer) -> MentionAttachment? = { _ in nil }
     var name: (RouterPointer) -> String = { _ in "" }
     var base: [NSAttributedString.Key: Any] = [:]
-    /// The words the Router took as a new thread's settings (router v2): a rounded ground behind them, on each line they
-    /// are on. Drawn by the view itself, so it follows the text as it is typed and wraps with it.
-    var marked: NSRange? {
-        didSet { if marked != oldValue { needsDisplay = true } }
-    }
-    var markedFill = NSColor.clear
-    var markedRadius: CGFloat = 4
-
-    override func draw(_ dirtyRect: NSRect) {
-        drawMarked(dirtyRect)
-        super.draw(dirtyRect)
-    }
-
-    private func drawMarked(_ dirtyRect: NSRect) {
-        guard let range = marked, range.length > 0, range.upperBound <= (string as NSString).length,
-              let layout = layoutManager, let container = textContainer else { return }
-        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        markedFill.setFill()
-        layout.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                                       in: container) { rect, _ in
-            let ground = rect.offsetBy(dx: self.textContainerOrigin.x, dy: self.textContainerOrigin.y).insetBy(dx: -3, dy: 0)
-            guard ground.intersects(dirtyRect) else { return }
-            NSBezierPath(roundedRect: ground, xRadius: self.markedRadius, yRadius: self.markedRadius).fill()
-        }
-    }
-
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok { onFocus(true) }
@@ -202,9 +176,6 @@ struct MentionField: NSViewRepresentable {
     /// The text changed by the owner's typing, a pick or an undo (not by the model): the draft with a mark for each pill, and
     /// what the pills point to. Called in the same turn as the edit, after the model has it.
     var onEdit: ((String, [RouterPointer]) -> Void)? = nil
-    /// Words to draw a ground behind (UTF-16 range in the text), with its fill: router v2's taken settings.
-    var marked: NSRange? = nil
-    var markedFill: NSColor = .clear
 
     private static var role: (CGFloat, CGFloat) { CDS.Density.compact.prose }
 
@@ -257,8 +228,6 @@ struct MentionField: NSViewRepresentable {
         c.onSelection = onSelection
         c.onEdit = onEdit
         model.editor = view
-        view.markedFill = markedFill
-        if view.marked != marked { view.marked = marked }
         // Set only when they change: the text view's font set again lays out its whole storage, on every update (each
         // keystroke's) otherwise.
         let (font, base) = Self.attributes()

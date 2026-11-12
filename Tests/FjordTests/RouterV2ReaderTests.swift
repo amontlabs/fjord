@@ -167,41 +167,15 @@ import Testing
     // MARK: Decision to read
 
     @Test func aSurePlaceThatCantBeSentToAnymoreIsNoAnswerAndAnAnswerHereIsHere() {
-        var sure = RouterProjectDecision(kind: .thread("th-login"), confidence: 0.95, decider: .sonnet)
-        sure.launch = RouterV2LaunchAsk(effort: .low)
+        let sure = RouterProjectDecision(kind: .thread("th-login"), confidence: 0.95, decider: .sonnet)
         let gone = RouterV2Reader.read("fix it now please", decision: sure, selected: nil, eligible: { _ in false })
-        #expect(gone.places.isEmpty && !gone.sure && gone.launch == RouterV2LaunchAsk())
+        #expect(gone.places.isEmpty && !gone.sure)
         let here = RouterV2Reader.read("what runs now?", decision: RouterProjectDecision(kind: .answer, confidence: 0.9, decider: .sonnet),
                                        selected: "th-login", eligible: { _ in true })
         #expect(here.places == [.here] && here.sure)
         let some = RouterV2Reader.read("fix it now please", decision: Self.ask([.thread("th-login"), .thread("th-docs"), .thread("th-login")]),
                                        selected: nil, eligible: { $0 != RouteTarget.thread("th-docs").targetID })
         #expect(some.places == [.thread("th-login")] && !some.sure)
-    }
-
-    @Test func aNewThreadsSettingsComeWithTheWordsOnlyWhenTheyAreInTheDraft() {
-        var d = RouterProjectDecision(kind: .newThread(project: "p1"), confidence: 0.9, decider: .sonnet)
-        d.launch = RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium)
-        d.launchWords = "(use opus medium)"
-        let draft = "split the snapshot tests (use opus medium)"
-        let read = RouterV2Reader.read(draft, decision: d, selected: nil, eligible: { _ in true })
-        #expect(read.places == [.newThread(project: "p1")] && read.sure)
-        #expect(read.launch == d.launch && read.taken == "(use opus medium)")
-        // The model changed a word of its quote: the settings apply, nothing is cut from the message.
-        d.launchWords = "(use Opus medium)"
-        let changed = RouterV2Reader.read(draft, decision: d, selected: nil, eligible: { _ in true })
-        #expect(changed.launch == d.launch && changed.taken == nil)
-        // Words for a thread that exists are never taken, and its read carries no settings.
-        var existing = RouterProjectDecision(kind: .thread("th-login"), confidence: 0.95, decider: .sonnet)
-        existing.launch = d.launch
-        existing.launchWords = "(use opus medium)"
-        let there = RouterV2Reader.read(draft, decision: existing, selected: nil, eligible: { _ in true })
-        #expect(there.launch == RouterV2LaunchAsk() && there.taken == nil)
-        // An unsure read that offers a new thread among others carries them (the page shows them if it is lit).
-        d.launchWords = "(use opus medium)"
-        d.kind = .ask([.thread("th-login"), .newThread(project: "p1")])
-        let unsure = RouterV2Reader.read(draft, decision: d, selected: nil, eligible: { _ in true })
-        #expect(!unsure.sure && unsure.taken == "(use opus medium)")
     }
 
     /// Holds a call until the test opens the gate.

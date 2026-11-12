@@ -606,9 +606,8 @@ final class RouterV2DemoScript {
         model.setOption(false)
     }
 
-    /// The new thread's words, and the aside that sets how it starts.
+    /// The new thread's words.
     private static let newThread = "silo: write the changelog for 0.4"
-    private static let aside = " (use opus medium)"
 
     private func beat26() async {
         await beat(26, "A new thread: the row shows how it starts")
@@ -642,18 +641,19 @@ final class RouterV2DemoScript {
     }
 
     private func beat29() async {
-        await beat(29, "Or write it: Fjord reads the aside")
-        // What the Router's model returns for the whole draft: the place, the settings the aside names, and the aside
-        // itself as the words it took.
-        let full = Self.newThread + Self.aside
-        source.reads[full] = RouterV2Read(draft: full, places: [.newThread(project: "silo")], sure: true, name: "write the changelog for 0.4",
-                                          launch: RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium),
-                                          taken: Self.aside.trimmingCharacters(in: .whitespaces))
-        await type(Self.aside)
+        await beat(29, "Or type @: the list offers the settings")
+        // @op: Opus 5.5 is the list's first row; Return makes it a pill and the chip rolls to it. @med: Medium, the same.
+        await type(" @op")
+        await pause(1.0)
+        model.pickScripted()
+        await pause(1.1)
+        await type("@med")
+        await pause(1.0)
+        model.pickScripted()
     }
 
     private func beat30() async {
-        await beat(30, "Return starts it; the marked words stay behind")
+        await beat(30, "Return starts it; the pills stay behind")
         enter()
     }
 

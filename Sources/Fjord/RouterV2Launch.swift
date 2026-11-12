@@ -4,10 +4,9 @@ import SwiftUI
 // Router v2: what a new thread starts with (docs/design/router-v2/DESIGN.md 1.9.1). When the draft goes to a new thread,
 // the destination row previews its settings as chips: the model, the reasoning effort, the access (T3's runtime mode)
 // and the mode (build or plan). They start at T3's defaults. Three ways to change them, all live: Tab into the row and
-// the arrows (which open the chip's menu and move through it), a click for the same menu, or the draft's own words
-// ("… (use opus medium)"), which the Router's model reads as structured output (`RouterV2Read.launch`). The words that
-// only say the settings are marked in the composer once read, and left out of the message only if you saw them marked
-// before Return; a Return that came first applies the settings and sends the draft as typed. T3's
+// the arrows (which open the chip's menu and move through it), a click for the same menu, or an @ in the composer, whose
+// list also offers the settings: picking one puts a pill in the draft and sets the chip. The pill is not sent; taking
+// it out puts the setting back. Free text never sets anything: "use opus for subagents" is for the agent. T3's
 // `orchestration.launchThread` takes them as `modelSelection`, `runtimeMode` and `interactionMode`.
 
 // MARK: - The settings
@@ -39,6 +38,8 @@ struct RouterV2LaunchModel: Equatable, Identifiable {
     var defaultEffort: RouterV2Launch.Effort?
     /// The runtime modes its provider supports, from the most supervised to the least.
     var access: [RouterV2Launch.Access]
+    /// T3's other names for it ("opus"): what the @ list finds it by.
+    var aliases: [String] = []
 }
 
 /// What a new thread starts with.
@@ -157,9 +158,9 @@ struct RouterV2LaunchChoice: Equatable {
 // MARK: - The model's side
 
 extension RouterV2Model {
-    /// What the draft's words say of the settings: only the models T3 has count.
+    /// What the draft's settings pills name: only the models T3 has count.
     private var said: RouterV2LaunchAsk {
-        var ask = read?.launch ?? RouterV2LaunchAsk()
+        var ask = launchPills
         if let slug = ask.model, !launchModels.contains(where: { $0.id == slug }) { ask.model = nil }
         return ask
     }
@@ -246,7 +247,7 @@ extension RouterV2Model {
     /// It isn't T3's default: its chip is lit.
     func launchChanged(_ field: RouterV2LaunchField) -> Bool { launchIndex(field) != index(field, of: launchDefault) }
 
-    /// The draft's words set it (and you haven't set it by hand since): its chip glows as it changes.
+    /// A pill in the draft set it (and you haven't set it by hand since): its chip glows as it changes.
     func launchSaid(_ field: RouterV2LaunchField) -> Bool { said.names(field) && !launchMine.names(field) }
 
     /// Sets a setting by hand: yours until the draft's words name it again.
@@ -322,23 +323,6 @@ extension RouterV2Model {
             launchFocus = nil
             launchMenu = nil
         }
-    }
-
-    /// The draft's words that only say the settings, where they are in it: drawn as taken in the composer. Only while
-    /// the row shows the new thread they are for.
-    var taken: Range<String.Index>? {
-        guard launchShown, let span = read?.taken, !span.isEmpty else { return nil }
-        return draft.range(of: span, options: .backwards)
-    }
-
-    /// The words that go to the thread: the draft without the ones taken as settings.
-    var message: String {
-        guard let taken else { return plainDraft }
-        let head = draft[..<taken.lowerBound].trimmingCharacters(in: .whitespaces)
-        let tail = draft[taken.upperBound...].trimmingCharacters(in: .whitespaces)
-        // The taken words hold no pill, so the pills keep their order through the cut.
-        let joined = [head, tail].filter { !$0.isEmpty }.joined(separator: " ")
-        return mentions.isEmpty ? joined : RouterV2Mentions.plain(joined, marks: mentions).text
     }
 
     /// The model and the effort (and the access or plan mode when they aren't T3's default): after a new thread's words
@@ -418,15 +402,9 @@ struct RouterV2LaunchChip: View {
                         .transition(.opacity)
                 }
                 RouterV2RollText(text: label, roll: roll, tint: ink,
-                                 // What the words set rolls one chip after the other.
+                                 // What the pills set roll one chip after the other.
                                  delay: said ? Double(field.rawValue) * RouterV2.rollStagger : 0)
-                    // The draft is being read again: the value may be about to change.
-                    .overlay {
-                        if model.reading {
-                            RouterV2Sheen().mask { RouterV2RollText.face(label, tint: .black) }.transition(.opacity)
-                        }
-                    }
-            }
+                                }
             .padding(.horizontal, M.padX)
             .frame(height: M.chip)
             // Your words set it: the accent's tint over its ground, then gone. A colour, no edge.
@@ -440,9 +418,8 @@ struct RouterV2LaunchChip: View {
             .clipShape(shape)
             .overlay { if ringed { RouterV2Ring(radius: M.radius).matchedGeometryEffect(id: "ring", in: ring) } }
         }
-        .motion(.fade, value: model.reading)
         .onChange(of: roll?.tick) {
-            // Your words set it: the chip glows, then settles.
+            // A pill set it: the chip glows, then settles.
             guard said, !model.still else { return }
             glow = 1
             // A colour fading, no movement: the same under Reduce Motion.
@@ -570,64 +547,5 @@ struct RouterV2LaunchMenu: View {
         .routerV2Floating()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(field.title)
-    }
-}
-
-// MARK: - The words taken as settings
-
-/// Under the composer's text: an accent ground behind the words the Router took as the new thread's settings (they set
-/// the chips and are not sent). The text itself is the field's; this draws only the ground, laid out as the field's
-/// words are.
-struct RouterV2TakenUnderlay: View {
-    let draft: String
-    let taken: Range<String.Index>
-
-    var body: some View {
-        let font = CDS.sans(CDS.Density.compact.prose.0)
-        let fill = CDS.Text.accent.opacity(RouterV2.Launch.takenFill)
-        Group {
-            if #available(macOS 15, *) {
-                (Text(draft[..<taken.lowerBound]) + Text(draft[taken]).customAttribute(RouterV2TakenRun()) + Text(draft[taken.upperBound...]))
-                    .font(font)
-                    .textRenderer(RouterV2TakenRenderer(fill: fill))
-            } else {
-                Text(ground(fill)).font(font)
-            }
-        }
-        .foregroundStyle(.clear)
-        .lineLimit(1...8)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private func ground(_ fill: Color) -> AttributedString {
-        var out = AttributedString(draft)
-        if let lower = AttributedString.Index(taken.lowerBound, within: out), let upper = AttributedString.Index(taken.upperBound, within: out) {
-            out[lower..<upper].backgroundColor = fill
-        }
-        return out
-    }
-}
-
-@available(macOS 15, *)
-struct RouterV2TakenRun: TextAttribute {}
-
-/// Draws a rounded ground behind the taken words on each line they are on, and none of the text.
-@available(macOS 15, *)
-struct RouterV2TakenRenderer: TextRenderer {
-    let fill: Color
-
-    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
-        for line in layout {
-            var box: CGRect?
-            for run in line where run[RouterV2TakenRun.self] != nil {
-                let rect = run.typographicBounds.rect
-                box = box.map { $0.union(rect) } ?? rect
-            }
-            if let box {
-                let ground = box.insetBy(dx: -3, dy: 0)
-                context.fill(Path(roundedRect: ground, cornerRadius: RouterV2.Surface.token, style: .continuous), with: .color(fill))
-            }
-        }
     }
 }

@@ -19,6 +19,9 @@ enum RouterPointer: Hashable, Codable {
     /// In a category's "Then" prompt only: the thing the action runs for, "this notification". It is never sent as it is:
     /// the action makes it the thing's notification pill (`ActionPrompt.parts`).
     case thisItem
+    /// In the Router v2 composer: a setting of the new thread the message starts (its model, effort, access or mode), picked from
+    /// the @ list. It is not part of the message: it sets the destination row's chip while it stands in the draft.
+    case setting(RouterSetting)
 
     /// Whether it says where the message goes (a T3 place): such a pill is taken out of your words where they start
     /// with it, as an address (`RouterContext.pills`). A local project, a notification or a category is what you talk about,
@@ -26,11 +29,11 @@ enum RouterPointer: Hashable, Codable {
     var addresses: Bool {
         switch self {
         case .t3: true
-        case .project, .notification, .category, .thisItem: false
+        case .project, .notification, .category, .thisItem, .setting: false
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem }
+    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem, setting }
 
     /// `{"project": "/code/lookout"}` and so on; a bare string, a project's folder (as the pills were kept before there
     /// were other kinds), is a project.
@@ -45,6 +48,7 @@ enum RouterPointer: Hashable, Codable {
         else if let v = try c.decodeIfPresent(String.self, forKey: .notification) { self = .notification(v) }
         else if let v = try c.decodeIfPresent(UUID.self, forKey: .category) { self = .category(v) }
         else if c.contains(.thisItem) { self = .thisItem }
+        else if let v = try c.decodeIfPresent(RouterSetting.self, forKey: .setting) { self = .setting(v) }
         else { throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "Not a pointer")) }
     }
 
@@ -56,6 +60,7 @@ enum RouterPointer: Hashable, Codable {
         case .notification(let id): try c.encode(id, forKey: .notification)
         case .category(let id): try c.encode(id, forKey: .category)
         case .thisItem: try c.encode(true, forKey: .thisItem)
+        case .setting(let v): try c.encode(v, forKey: .setting)
         }
     }
 }
@@ -80,6 +85,8 @@ struct MentionLook: Equatable {
     var label: String
     var symbol: String?
     var tint: Color?
+    /// A setting's pill (Router v2): drawn quieter than a thread's, with no "@", on an outline.
+    var setting = false
 }
 
 // MARK: - Names and looks
@@ -100,6 +107,8 @@ extension Store {
             return categories.first { $0.id == id }.map { RouterPointers.inert($0.title, 40) } ?? "category"
         case .thisItem:
             return ActionPrompt.thisItemName
+        case .setting(let setting):
+            return setting.label
         }
     }
 
@@ -125,6 +134,8 @@ extension Store {
             return MentionLook(label: RouterDecision.clip(c.title, 32), symbol: c.symbol, tint: c.color.swatch)
         case .thisItem:
             return MentionLook(label: ActionPrompt.thisItemName, symbol: "bell", tint: CDS.Text.accent)
+        case .setting(let setting):
+            return setting.look
         }
     }
 
@@ -293,7 +304,7 @@ enum RouterPointers {
                 let open = store.entries(in: c.id)
                 blocks.append(category(name: m.name, rules: RuleWords(store: store).summary(c), open: open.count,
                                        unread: open.filter(\.isUnread).count))
-            case .project, .t3, .thisItem:
+            case .project, .t3, .thisItem, .setting:
                 continue
             }
         }
@@ -356,13 +367,17 @@ enum RouterPointers {
 struct MentionSuggestion: Identifiable, Equatable {
     /// The list's sections, in order.
     enum Section: Int, CaseIterable, Comparable {
-        case projects, notifications, categories
+        case projects
+        /// A new thread's settings (Router v2): its model, effort, access and mode.
+        case settings
+        case notifications, categories
         /// Text to insert (a snippet's): picked, it takes the @ word's place as text, not as a pill.
         case snippets
 
         var title: String {
             switch self {
             case .projects: "Projects"
+            case .settings: "Settings"
             case .notifications: "Notifications"
             case .categories: "Categories"
             case .snippets: "Snippets"
@@ -397,9 +412,16 @@ struct MentionSuggestion: Identifiable, Equatable {
         case .pointer(.notification(let v)): "notification:" + v
         case .pointer(.category(let v)): "category:" + v.uuidString
         case .pointer(.thisItem): "this"
+        case .pointer(.setting(let v)): "setting:" + v.kind.rawValue + ":" + v.value
         case .text(let v): snippet.map { "snippet:" + $0.uuidString } ?? "text:\(section.rawValue):" + name + ":" + String(v.hashValue)
         }
     }
+
+    /// What the row says first: a name, after an "@" for a pill of a place or a thing.
+    var rowName: String { insertsText || isSetting ? name : "@" + name }
+
+    /// Whether it is a setting's row (it reads as a name, with no "@").
+    var isSetting: Bool { if case .pointer(.setting) = pick { true } else { false } }
 
     /// The project's folder, for a project's row.
     var folder: String? { if case .pointer(.project(let folder)) = pick { folder } else { nil } }
@@ -511,7 +533,10 @@ extension RouterMentions {
 
     /// The rows the @ word matches, in their sections' order and best first in each (`score`), a few per section.
     static func suggest(_ candidates: [MentionSuggestion], query: String) -> [MentionSuggestion] {
-        let per = query.isEmpty ? perSection.bare : perSection.typed
+        func cap(_ section: MentionSuggestion.Section) -> Int {
+            // The settings of a new thread are short lists of their own: a typed word shows what it finds.
+            section == .settings ? (query.isEmpty ? 4 : 6) : (query.isEmpty ? perSection.bare : perSection.typed)
+        }
         let scored = candidates.compactMap { c -> (MentionSuggestion, Int)? in
             let best = c.keys.isEmpty ? 0 : c.keys.compactMap { score($0, query: query) }.min()
             return best.map { (c, $0) }
@@ -525,7 +550,7 @@ extension RouterMentions {
         }.map(\.element.0)
         var shown: [MentionSuggestion.Section: Int] = [:]
         var out: [MentionSuggestion] = []
-        for row in ordered where shown[row.section, default: 0] < per && out.count < maxRows {
+        for row in ordered where shown[row.section, default: 0] < cap(row.section) && out.count < maxRows {
             shown[row.section, default: 0] += 1
             out.append(row)
         }
@@ -573,8 +598,9 @@ enum MentionPill {
     static let height: CGFloat = 18
 
     /// The pill: "@label" on a rounded fill, after its symbol in its tint (or its tint's dot), in `font` a point smaller.
-    static func image(_ look: MentionLook, font: NSFont) -> NSImage {
-        let label = "@" + look.label
+    static func image(_ look: MentionLook, font: NSFont, dark: Bool? = nil) -> NSImage {
+        // A setting's pill has no "@": it is not a place in the message.
+        let label = (look.setting ? "" : "@") + look.label
         let pillFont = NSFont(descriptor: font.fontDescriptor, size: font.pointSize - 1) ?? font
         let ink = NSAttributedString(string: label, attributes: [.font: pillFont, .foregroundColor: NSColor(CDS.Text.primary)])
         let textWidth = ceil(ink.size().width)
@@ -589,9 +615,28 @@ enum MentionPill {
         let width = 6 + (lead > 0 ? lead + 4 : 0) + textWidth + 6
         let height = Self.height
         return NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
+            // `dark`: drawn for that appearance, where the picture is shown by SwiftUI's text (it draws with the process's own).
+            let appearance = dark.flatMap { NSAppearance(named: $0 ? .darkAqua : .aqua) }
+            appearance.map { $0.performAsCurrentDrawingAppearance { Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink) } }
+                ?? Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink)
+            return true
+        }
+    }
+
+    private static func paint(_ look: MentionLook, rect: NSRect, glyph: NSImage?, lead: CGFloat, dot: CGFloat, tint: NSColor?,
+                              ink: NSAttributedString) {
+        let height = Self.height
+        do {
             let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-            NSColor(CDS.Fill.secondary).setFill()
-            shape.fill()
+            if look.setting {
+                // On the page's quiet ground with an outline: a setting reads apart from a thread's filled pill.
+                NSColor(CDS.Text.muted).withAlphaComponent(0.55).setStroke()
+                shape.lineWidth = 1
+                shape.stroke()
+            } else {
+                NSColor(CDS.Fill.secondary).setFill()
+                shape.fill()
+            }
             var x: CGFloat = 6
             if let glyph {
                 glyph.draw(in: NSRect(x: x, y: (height - glyph.size.height) / 2, width: glyph.size.width, height: glyph.size.height))
@@ -602,7 +647,6 @@ enum MentionPill {
                 x += dot + 4
             }
             ink.draw(at: NSPoint(x: x, y: (height - ink.size().height) / 2))
-            return true
         }
     }
 }

@@ -168,6 +168,7 @@ struct RouterV2Composer: View {
     @State private var cardWidth: CGFloat = 0
     @Environment(\.routerV2Composer) private var host
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias C = CDS.Composer
@@ -195,6 +196,9 @@ struct RouterV2Composer: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardWidth = $0 }
         // The @ list hangs over the card, so it never pushes the dock about.
         .overlay(alignment: .topLeading) { mentionList }
+        .overlay(alignment: .topLeading) { scriptedList }
+        .onAppear { host?.text.settingRows = { [model] in model.settingRows($0) } }
+        .onDisappear { host?.text.settingRows = nil }
         .zIndex(1)
         .modifier(RouterV2Pills(model: model, host: viewHost))
     }
@@ -222,16 +226,16 @@ struct RouterV2Composer: View {
             .opacity(empty ? 1 : 0)
             .animation(empty ? Motion.fade.resolved(reduce: reduce)?.delay(RouterV2.swapOut) : nil, value: empty)
             .allowsHitTesting(false).accessibilityHidden(true)
-            if let taken = model.taken, viewHost == nil {
-                // The words the Router took as the new thread's settings: on an accent ground.
-                RouterV2TakenUnderlay(draft: model.draft, taken: taken)
-                    .transition(.opacity)
-            }
             if model.still {
                 // A still has no field to type in: its words alone (a field there draws them selected).
-                Text(model.draft).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
+                Self.drawn(model, dark: scheme == .dark).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
             } else if let host = viewHost {
                 mentionField(host)
+            } else if !model.mentions.isEmpty {
+                // The script's pills: drawn with the words (a TextField can't hold them).
+                Self.drawn(model, dark: scheme == .dark).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .allowsHitTesting(false)
             } else {
                 TextField("", text: Binding(get: { model.draft }, set: { model.setDraft($0) }), axis: .vertical)
                     .textFieldStyle(.plain)
@@ -244,7 +248,7 @@ struct RouterV2Composer: View {
             }
             if model.scripted, !model.filterMode {
                 // Before the placeholder's first letter while the draft is empty, after the last word once there is one.
-                Text(model.draft).font(CDS.sans(d.prose.0)).lineLimit(1).hidden()
+                Self.drawn(model, dark: scheme == .dark).font(CDS.sans(d.prose.0)).lineLimit(1).hidden()
                     .overlay(alignment: .trailing) { RouterV2Caret().offset(x: empty ? -1.5 : 2.5).opacity(model.held ? 0 : 1) }
                     .allowsHitTesting(false)
                     // The caret is where the words end, at once: it doesn't slide back across the placeholder.
@@ -252,15 +256,12 @@ struct RouterV2Composer: View {
             }
         }
         .frame(minHeight: 20, alignment: .topLeading)
-        .motion(.fade, value: model.taken != nil)
         .motion(.fade, value: model.held)
     }
 
-    /// The @ field in the card's text: pills inline, and the words taken as settings on their accent ground (drawn by the
-    /// text view itself, so it moves with the text).
+    /// The @ field in the card's text: pills inline.
     private func mentionField(_ host: RouterV2ComposerHost) -> some View {
         let d = CDS.Density.compact
-        let taken = model.taken.map { NSRange($0, in: model.draft) }
         return MentionField(store: host.store, model: host.text, maxHeight: 8 * d.prose.1, editable: true, focusTick: fieldTick,
                             onFocus: { now in
                                 fieldFocused = now
@@ -270,8 +271,7 @@ struct RouterV2Composer: View {
                             hint: "Return sends, Option Return queues after the turn, Shift Return starts a new line, @ names a thread or a project",
                             onSelection: { mentionAt = Self.mentionPoint($0) },
                             onEdit: { text, pointers in model.edit(text, marks: RouterV2Mentions.marks(text, pointers: pointers, name: host.store.pointerName),
-                                                                  projectName: { RouteTarget.projectName($0, store: host.store) }) },
-                            marked: taken, markedFill: NSColor(CDS.Text.accent.opacity(RouterV2.Launch.takenFill)))
+                                                                  projectName: { RouteTarget.projectName($0, store: host.store) }) })
             .opacity(model.held ? 0.55 : 1)
             .accessibilityLabel("Message")
     }
@@ -291,6 +291,69 @@ struct RouterV2Composer: View {
                     .transition(.opacity)
             }
         }
+    }
+
+    /// The @ list of the demo's drawn composer (stills and the script): the settings, over the @ word as the field's is.
+    @ViewBuilder private var scriptedList: some View {
+        let rows = viewHost == nil ? model.scriptedRows : []
+        if !rows.isEmpty, let at = model.draft.lastIndex(of: "@") {
+            let x = C.pad + C.textInset + Self.drawnWidth(String(model.draft[..<at]), model: model)
+            let place = MentionList.place(caretX: x, available: cardWidth)
+            MentionList(suggestions: rows, index: model.scriptedMentionIndex, width: place.width, store: nil, hover: nil) { _ in }
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                .offset(x: place.x, y: C.pad + (C.row - 20) / 2 - C.mentionOffset - listHeight)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
+    }
+
+    /// The draft as the drawn composer shows it: its words, and each pill as the field draws it (a settings pill quiet, with
+    /// its glyph; another pointer by its name).
+    static func drawn(_ model: RouterV2Model, dark: Bool) -> Text {
+        let font = CDS.nsSans(CDS.Density.compact.prose.0)
+        var pills = model.mentions.makeIterator()
+        var out = Text(verbatim: "")
+        var run = ""
+        for ch in model.draft {
+            guard ch == MentionText.mark, let mention = pills.next() else {
+                run.append(ch)
+                continue
+            }
+            out = Text("\(out)\(Text(verbatim: run))")
+            run = ""
+            let pill = Text(Image(nsImage: MentionPill.image(look(mention), font: font, dark: dark)))
+                .baselineOffset(font.descender + ((font.ascender - font.descender) - MentionPill.height) / 2)
+            out = Text("\(out)\(pill)")
+        }
+        return Text("\(out)\(Text(verbatim: run))")
+    }
+
+    private static func look(_ mention: RouterMention) -> MentionLook {
+        if case .setting(let s) = mention.pointer { return s.look }
+        return MentionLook(label: mention.name, symbol: nil, tint: nil)
+    }
+
+    /// How wide `text` (a prefix of the draft) is drawn.
+    private static func drawnWidth(_ text: String, model: RouterV2Model) -> CGFloat {
+        let font = CDS.nsSans(CDS.Density.compact.prose.0)
+        var pills = model.mentions.makeIterator()
+        var width: CGFloat = 0
+        var run = ""
+        func flush() {
+            width += (run as NSString).size(withAttributes: [.font: font]).width
+            run = ""
+        }
+        for ch in text {
+            guard ch == MentionText.mark, let mention = pills.next() else {
+                run.append(ch)
+                continue
+            }
+            flush()
+            width += MentionPill.image(look(mention), font: font).size.width
+        }
+        flush()
+        return width
     }
 
     /// Where the @ word before the caret starts, in the card: x of its "@", y of its line's top.

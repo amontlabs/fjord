@@ -262,12 +262,6 @@ final class RouterV2Reader {
         // A sure place that can't be sent to (gone) is no answer.
         let sure = decision.sure && !places.isEmpty
         if !sure { places = Array(places.prefix(3)) }
-        var read = RouterV2Read(draft: draft, places: places, sure: sure)
-        // Words for a thread that exists are never taken: only a read that offers a new thread carries its settings.
-        if places.contains(where: { if case .newThread = $0 { true } else { false } }) {
-            read.launch = decision.launch
-            read.taken = RouterLaunchCatalog.taken(decision.launchWords, in: draft, said: decision.launch)
-        }
-        return read
+        return RouterV2Read(draft: draft, places: places, sure: sure)
     }
 }

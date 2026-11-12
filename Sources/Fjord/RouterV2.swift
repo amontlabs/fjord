@@ -121,7 +121,6 @@ enum RouterV2 {
         static let menuWidth: CGFloat = 220
         /// A setting's glow as your words set it, and the ground of those words in the composer: the accent's tint.
         static let glowFill: Double = Surface.tintStrong
-        static let takenFill: Double = Surface.tint
     }
 
     // MARK: Curves (section 3). Each resolves for Reduce Motion where it is used.
@@ -359,6 +358,8 @@ struct RouterV2Thread: Identifiable, Equatable {
     var prs: [PR] = []
     var diff: Diff?
     var steps: [Step] = []
+    /// Its subagents, background commands and waits: a few glyphs on the line, listed in the peek and the card.
+    var activity = RouterV2Activity()
     /// What it was started with from here (a new thread's settings), through its first run.
     var launch: RouterV2Launch?
 
@@ -434,6 +435,8 @@ struct RouterV2Failure: Identifiable, Equatable {
 /// same ones.
 enum RouterV2Hit: Hashable {
     case row(String), name(String), pill(String)
+    /// The line's activity glyphs: the pointer on them shows their peek.
+    case activity(String)
     case project(String?), state(RouterV2Section), clear
     case header(RouterV2Section)
     case option(String, Int)
@@ -472,8 +475,4 @@ struct RouterV2Read: Equatable {
     var sure: Bool
     /// A new thread's first name, when the read strips an address off the words.
     var name: String?
-    /// The settings the draft names for a new thread ("use opus medium"): the model's structured output, never a word list.
-    var launch = RouterV2LaunchAsk()
-    /// The draft's words that only say those settings, verbatim: shown as taken in the composer, not sent to the thread.
-    var taken: String?
 }

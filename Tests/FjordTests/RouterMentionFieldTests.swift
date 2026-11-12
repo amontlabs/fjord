@@ -374,25 +374,44 @@ import Testing
         #expect(!v.removePill(at: 0))
     }
 
-    @Test func theTakenWordsKeepTheirPlaceWhenTypingBeforeThem() {
+    @Test func aSettingsPillIsNotTheMessageAndTheOtherPillsKeepTheirPlace() {
         let model = RouterV2Demo.records()
         model.select(nil)
-        let pill = RouterMention(range: 0..<1, pointer: .project("/code/silo"), name: "silo")
-        let aside = "(use opus medium)"
-        model.edit(mark + " write the changelog " + aside, marks: [pill])
+        let silo = RouterMention(range: 0..<1, pointer: .project("/code/silo"), name: "silo")
+        let opus = RouterMention(range: 0..<1, pointer: .setting(RouterSetting(kind: .model, value: "claude-haiku-5-5", label: "Haiku 5.5")), name: "Haiku 5.5")
+        model.edit(mark + " write the changelog " + mark + " now", marks: [silo, opus])
         model.choose(.newThread(project: "silo"))
-        model.apply(.read(RouterV2Read(draft: model.plainDraft, places: [.newThread(project: "silo")], sure: true,
-                                       launch: RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium), taken: aside)))
-        func taken() -> String? { model.taken.map { String(model.draft[$0]) } }
-        #expect(taken() == aside)
-        // The view's text and the model's draft share offsets (a pill is one character): the same words in the view.
-        let range = NSRange(model.taken!, in: model.draft)
-        #expect((model.draft as NSString).substring(with: range) == aside)
-        model.edit(mark + " now write the changelog " + aside, marks: [pill])
-        #expect(taken() == aside)
-        #expect((model.message) == "@silo now write the changelog")
-        let v = view()
-        v.marked = NSRange(model.taken!, in: model.draft)
-        #expect(v.marked?.length == aside.count)
+        #expect(model.plainDraft == "@silo write the changelog now")
+        #expect(model.launch.model == "claude-haiku-5-5")
+        // Taking the pill out puts the chip back.
+        model.edit(mark + " write the changelog now", marks: [silo])
+        #expect(model.launch.model == RouterV2Launch.t3Default.model)
+    }
+
+    @Test func theAtListOffersTheSettingsByNameAndAliasAndNeverByLooseLetters() {
+        let model = RouterV2Demo.records()
+        func names(_ q: String) -> [String] { RouterMentions.suggest(model.settingRows(q), query: q).map(\.name) }
+        #expect(names("op") == ["Opus 5.5"])
+        #expect(names("med") == ["Medium"])
+        #expect(names("full") == ["Full access"] && names("plan") == ["Plan"])
+        #expect(names("zz").isEmpty)
+        // The efforts offered are the chosen model's own.
+        model.setLaunch(.model, 3)
+        #expect(model.settingRows("").contains { $0.name == "Medium" })
+    }
+
+    @Test func aSettingsPillSetsItsChipAndBeatsAHandPickUntilTheHandPicksAgain() {
+        let model = RouterV2Demo.records()
+        model.select(nil)
+        model.choose(.newThread(project: "silo"))
+        model.setLaunch(.effort, 0)
+        #expect(model.launch.effort == .low)
+        let medium = RouterMention(range: 0..<1, pointer: .setting(RouterSetting(kind: .effort, value: "medium", label: "Medium")), name: "Medium")
+        model.edit("go " + mark + " ", marks: [medium])
+        #expect(model.launch.effort == .medium && model.launchSaid(.effort))
+        model.setLaunch(.effort, 4)
+        #expect(model.launch.effort == .max)
+        // The pill never goes in the message, and a thread that exists never reads it either.
+        #expect(model.plainDraft == "go")
     }
 }
