@@ -40,6 +40,8 @@ struct RouterV2Toast: Equatable, Identifiable {
     var before: String
     var name: String
     var after = ""
+    /// A Revert to offer: false for a toast that only says why an act didn't go.
+    var revertible = true
 }
 
 struct RouterV2SnoozeMenu: Equatable {
@@ -194,7 +196,8 @@ final class RouterV2Model {
     /// Inside a `.batch`: nothing animates.
     @ObservationIgnored private var unanimated = 0
 
-    @ObservationIgnored var undos: [(toast: Int, undo: () -> Void)] = []
+    /// The acts with a Revert, newest last: the toast they showed, the threads they hid, how to take them back.
+    @ObservationIgnored var undos: [(toast: Int, threads: [String], undo: () -> Void)] = []
     @ObservationIgnored private var nextID = 0
     /// What a send in flight changed, to put back if it is refused, and what it was.
     @ObservationIgnored var backups: [String: (thread: RouterV2Thread, picks: [Int: Int]?, kind: RouterV2Outgoing.Kind)] = [:]
@@ -672,6 +675,8 @@ final class RouterV2Model {
             readLanded(read)
         case .refused(let id, let reason, let offline):
             sendRefused(id, reason: reason, offline: offline)
+        case .actRefused(let id, let reason):
+            actRefused(id, reason: reason)
         case .connection(let lost):
             guard lost != connectionLost else { return }
             animate(.spatial) { connectionLost = lost }

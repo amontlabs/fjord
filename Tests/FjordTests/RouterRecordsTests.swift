@@ -282,7 +282,7 @@ import Testing
     @Test func aNewThreadStartedHereIsSentBeforeT3ListsIt() {
         let h = Harness()
         let launch = RouterV2Launch.t3Default
-        h.records.began(send: send(.start(project: "app", launch: launch), words: "Add a dark mode to the settings page", thread: "n1"))
+        h.records.began(send: send(.start(project: "app", launch: launch, name: nil), words: "Add a dark mode to the settings page", thread: "n1"))
         let r = h.records.record("n1")
         #expect(r?.state == .sent)
         #expect(r?.naming == true)
@@ -304,7 +304,7 @@ import Testing
 
     @Test func aRefusedNewThreadLeaves() async {
         let h = Harness()
-        let s = send(.start(project: "app", launch: .t3Default), words: "Start it", thread: "n1")
+        let s = send(.start(project: "app", launch: .t3Default, name: nil), words: "Start it", thread: "n1")
         h.records.began(send: s)
         _ = h.take()
         h.records.ended(send: s)

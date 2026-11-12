@@ -26,6 +26,9 @@ enum RouterV2Change: Equatable {
     case read(RouterV2Read)
     /// A send didn't go: the line returns to what it was, a failure line enters.
     case refused(String, reason: String, offline: Bool)
+    /// T3 refused a settle or a snooze: the thread is back (its record says so), the toast says why, and the act has
+    /// nothing left to revert.
+    case actRefused(String, reason: String)
     case connection(lost: Bool)
     /// T3's defaults for a new thread and the models it offers (`server.getConfig`).
     case launch(defaults: RouterV2Launch, models: [RouterV2LaunchModel])

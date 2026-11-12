@@ -248,10 +248,10 @@ final class RouterRecords {
     /// before T3 lists it.
     func began(send s: RouterActs.Send) {
         operation {
-            if case .start(let project, let launch) = s.kind {
+            if case .start(let project, let launch, let name) = s.kind {
                 let e = entry(s.thread)
                 e.send = Send(words: s.words, status: .sending, steering: false, run: nil, runStarted: nil, request: nil,
-                              plan: false, at: s.at, start: Start(project: project, launch: launch, name: RouterV2.firstWords(s.words)))
+                              plan: false, at: s.at, start: Start(project: project, launch: launch, name: name ?? RouterV2.firstWords(s.words)))
                 e.launch = launch
                 refresh(s.thread)
                 return
@@ -784,7 +784,7 @@ final class RouterRecords {
             case .older: olderList = c
             case .connection: connection = c
             case .batch(let all): all.forEach(fold)
-            case .refused, .read, .launch: rest.append(c)
+            case .refused, .actRefused, .read, .launch: rest.append(c)
             }
         }
         changes.forEach(fold)

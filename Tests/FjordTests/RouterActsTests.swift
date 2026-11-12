@@ -330,6 +330,10 @@ import Testing
         f.holds[0](false)
         f.refusals[0]("T3 said no")
         #expect(f.hidden.map(\.1) == [true, false])
+        // The page hears why, and a later Revert has no change of this act's to mark.
+        #expect(f.emitted == [.actRefused("t1", reason: "T3 said no")])
+        acts.settle(["t1"], on: false)
+        #expect(f.reverted.isEmpty)
     }
 
     // MARK: A new thread
@@ -345,7 +349,7 @@ import Testing
         launch.plan = true
         acts.start(id, words: "add dark mode", project: "Garden", launch: launch, read: nil)
         #expect(f.log == ["began", "submit"])
-        #expect(f.began.first?.kind == .start(project: "Garden", launch: launch))
+        #expect(f.began.first?.kind == .start(project: "Garden", launch: launch, name: nil))
         let context = f.submitted.first?.context
         #expect(context?.target == RouterAskBack.newThread + "p1")
         #expect(context?.launch == RouterLaunchPlan(thread: id, settings: ThreadLaunchSettings(

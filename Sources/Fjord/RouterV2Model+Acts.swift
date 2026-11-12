@@ -28,8 +28,8 @@ extension RouterV2Model {
 
     // MARK: Acts with a Revert
 
-    private func act(_ toast: RouterV2Toast, undo: @escaping () -> Void) {
-        undos.append((toast.id, undo))
+    private func act(_ toast: RouterV2Toast, threads: [String], undo: @escaping () -> Void) {
+        undos.append((toast.id, threads, undo))
         animate(.fade) { self.toast = toast }
         startToastLife(RouterV2.toastLife)
         undoManager?.registerUndo(withTarget: self) { model in model.revert(toast.id) }
@@ -64,13 +64,32 @@ extension RouterV2Model {
     var canUndo: Bool { !undos.isEmpty }
 
     func revert(_ id: Int) {
-        guard let i = undos.firstIndex(where: { $0.toast == id }) else { return }
+        guard let i = undos.firstIndex(where: { $0.toast == id }) else {
+            // A toast with nothing left to revert (the act was refused): Revert only takes it away.
+            if toast?.id == id { dismissToast() }
+            return
+        }
         let entry = undos.remove(at: i)
         entry.undo()
         if toast?.id == id {
             toastLife?.cancel()
             animate(.fade) { toast = nil }
         }
+    }
+
+    /// T3 refused a settle or a snooze: the line is back through its record; the act has nothing left to revert for that
+    /// thread (an act on several keeps its Revert for the others), and the toast says why, with no Revert.
+    func actRefused(_ id: String, reason: String) {
+        var named = thread(id)?.name ?? older.first { $0.id == id }?.name ?? ""
+        if let i = undos.firstIndex(where: { $0.threads.contains(id) }) {
+            if toast?.id == undos[i].toast, named.isEmpty { named = toast?.name ?? "" }
+            undos[i].threads.removeAll { $0 == id }
+            if undos[i].threads.isEmpty { undos.remove(at: i) }
+        }
+        let refusal = RouterV2Toast(id: fresh(), before: "T3 refused it for", name: named.isEmpty ? "this thread" : named,
+                                    after: "· " + reason, revertible: false)
+        animate(.fade) { toast = refusal }
+        startToastLife(RouterV2.toastLife)
     }
 
     /// Settle: the line leaves at once.
@@ -112,7 +131,7 @@ extension RouterV2Model {
             settleFilters()
         }
         advanced(to: next)
-        act(toast) { [weak self] in
+        act(toast, threads: [t.id]) { [weak self] in
             guard let self else { return }
             // It grows back where it was, selected.
             self.animate(.spatial) {
@@ -143,7 +162,7 @@ extension RouterV2Model {
         }
         let name = gone.count == 1 ? gone[0].name : "\(gone.count) older threads"
         let ids = gone.map(\.id)
-        act(RouterV2Toast(id: fresh(), before: "Settled", name: name)) { [weak self] in
+        act(RouterV2Toast(id: fresh(), before: "Settled", name: name), threads: ids) { [weak self] in
             guard let self else { return }
             self.animate(.spatial) { self.older = all }
             self.source?.settle(ids, on: false)
@@ -169,7 +188,7 @@ extension RouterV2Model {
             selection = next
         }
         advanced(to: next)
-        act(RouterV2Toast(id: fresh(), before: "Moved", name: t.name, after: "to Done")) { [weak self] in
+        act(RouterV2Toast(id: fresh(), before: "Moved", name: t.name, after: "to Done"), threads: [id]) { [weak self] in
             guard let self else { return }
             self.move(id) {
                 self.update(id) { $0 = t }

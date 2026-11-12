@@ -314,6 +314,22 @@ import Testing
         #expect(model.thread(ID.guide) != nil)
     }
 
+    @Test func aRefusedSettleSaysWhyAndLeavesNothingToUndo() throws {
+        let (model, source) = recorded()
+        let line = try #require(model.thread(ID.guide))
+        model.settle(ID.guide)
+        // T3 refused it: the store puts the line back, the port says why.
+        model.apply(.upsert(line))
+        model.apply(.actRefused(ID.guide, reason: "the thread is busy"))
+        let toast = try #require(model.toast)
+        #expect(!toast.revertible)
+        #expect(toast.after.contains("the thread is busy"))
+        #expect(!model.canUndo)
+        model.undo()
+        #expect(source.calls == [.settle([ID.guide], on: true)])
+        #expect(model.thread(ID.guide) != nil)
+    }
+
     @Test func snoozeAndItsRevert() throws {
         let (model, source) = recorded()
         model.snooze(ID.valCenis, choice: 1)

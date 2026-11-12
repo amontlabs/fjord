@@ -41,8 +41,8 @@ extension RouterActsRecords {
             case answer
             /// Continue on a Stopped card.
             case continuing
-            /// A new thread, started with these settings.
-            case start(project: String, launch: RouterV2Launch)
+            /// A new thread, started with these settings; `name`: the read's first name for it, when it had one.
+            case start(project: String, launch: RouterV2Launch, name: String?)
         }
 
         var thread: String
@@ -196,7 +196,7 @@ extension RouterActsRecords {
     func mintThread() -> String { UUID().uuidString.lowercased() }
 
     func start(_ thread: String, words: String, project: String, launch: RouterV2Launch, read: RouterV2Read?) {
-        let send = Send(thread: thread, words: words, kind: .start(project: project, launch: launch), at: env.now())
+        let send = Send(thread: thread, words: words, kind: .start(project: project, launch: launch, name: read?.name), at: env.now())
         records?.began(send: send)
         guard let id = env.projectID(project) else { return refuse(send, "That project isn't in T3 anymore: nothing was started") }
         var context = RouterContext(target: RouterAskBack.newThread + id)
@@ -241,10 +241,20 @@ extension RouterActsRecords {
     func notForMe(_ thread: String, on: Bool) { records?.notForMe(thread, on: on) }
 
     private func doAct(_ act: BriefAction, _ thread: String, detail: String = "") {
+        let logged = Logged()
         let id = env.act(act, thread, detail, env.title(thread), { [weak self] on in self?.records?.hide(thread, on: on) },
-                         { _ in })
+                         { [weak self] reason in
+                             // The line is back: nothing is left to revert, and the page says why.
+                             guard let self else { return }
+                             if let change = logged.id { self.changes[thread]?[act]?.removeAll { $0 == change } }
+                             self.emit(.actRefused(thread, reason: reason))
+                         })
+        logged.id = id
         if let id { changes[thread, default: [:]][act, default: []].append(id) }
     }
+
+    /// The change an act logged, for its refusal (which may come after `act` returns it).
+    @MainActor private final class Logged { var id: UUID? }
 
     /// The Revert: the thread's line may return at once; the change History logged is marked reverted, which sends the opposite
     /// command. With no change to revert (it was refused, or not logged here) the opposite command goes by itself.

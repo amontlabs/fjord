@@ -636,15 +636,17 @@ struct RouterV2ToastView: View {
                     .id(toast.id)
                     .transition(.routerV2Swap)
             }
-            RouterV2Button(model: model, hit: .revert, action: { model.revert(toast.id) }) { hot, pressed in
-                HStack(spacing: 5) {
-                    Text("Revert").font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.accent)
-                        .underline(hot, color: CDS.Text.accent.opacity(0.6))
-                    RouterV2KeyHint(keys: ["cmd", "Z"])
+            if toast.revertible {
+                RouterV2Button(model: model, hit: .revert, action: { model.revert(toast.id) }) { hot, pressed in
+                    HStack(spacing: 5) {
+                        Text("Revert").font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.accent)
+                            .underline(hot, color: CDS.Text.accent.opacity(0.6))
+                        RouterV2KeyHint(keys: ["cmd", "Z"])
+                    }
+                    .opacity(pressed ? 0.7 : 1)
                 }
-                .opacity(pressed ? 0.7 : 1)
+                .accessibilityLabel("Revert")
             }
-            .accessibilityLabel("Revert")
         }
         .padding(.horizontal, 10)
         .frame(height: RouterV2.Dock.toastHeight)
