@@ -14,10 +14,10 @@ import Foundation
 
 @MainActor
 final class RouterV2Reader {
-    /// How long typing pauses before Jev reads the draft, and before Sonnet decides (counted from the same keystroke); the
-    /// fewest characters worth a model call. Track 7 moves the two pauses into `enum RouterV2`.
-    var jevPause: Duration = .milliseconds(600)
-    var sonnetPause: Duration = .milliseconds(1200)
+    /// How long typing pauses before Jev reads the draft, and before Sonnet decides (`RouterV2.jevPause`,
+    /// `RouterV2.sonnetPause`; tests set their own); the fewest characters worth a model call.
+    var jevPause: Duration = RouterV2.jevPause
+    var sonnetPause: Duration = RouterV2.sonnetPause
     static let minLength = 12
 
     /// Jev's fused path on the draft (`Store.readDraft`); nil without Jev.

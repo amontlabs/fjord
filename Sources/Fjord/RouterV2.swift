@@ -157,6 +157,10 @@ enum RouterV2 {
     static let dangerFill = CDS.Text.danger.opacity(Surface.tint)
     /// The revert toast's life; the clock stops under the pointer.
     static let toastLife: Double = 8
+    /// How long typing pauses before Jev reads the draft, and before Sonnet decides (both from the same keystroke):
+    /// the one timer between a key and a read (IMPLEMENTATION.md risk 3). Return never waits for them.
+    static let jevPause: Duration = .milliseconds(300)
+    static let sonnetPause: Duration = .milliseconds(600)
     /// The failure line's shake: 6 pt, 2 cycles, 0.3 s.
     static let shake: (distance: CGFloat, cycles: Double, duration: Double) = (6, 2, 0.3)
 
