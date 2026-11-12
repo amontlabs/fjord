@@ -42,31 +42,48 @@ import Testing
         #expect(output.needsYou.isEmpty && output.items.isEmpty)
     }
 
-    @Test func needsYouIsTheBriefsEntriesInItsOrderWithAttentionDots() throws {
-        let f = fixture()
-        let output = PaletteRouterSource.make(f.context)
-        let entries = f.store.routerBriefs.page().entries
-        #expect(!entries.isEmpty)
-        #expect(output.needsYou.map(\.id) == entries.map { "thread:" + $0.target.key })
-        #expect(output.needsYou.allSatisfy { $0.kind == .thread && $0.dot == .attention && $0.weight == 1.3 })
-        // The threads touched today follow them, once each.
-        let recent = output.items.filter { $0.kind == .thread }.dropFirst(entries.count)
-        #expect(!recent.isEmpty && recent.allSatisfy { !output.needsYou.map(\.id).contains($0.id) })
+    /// The Router page's records over the demo's sessions: one ask, one stopped, one finished and one working thread.
+    private func seeded(_ f: Fixture) {
+        typealias F = RecordFixture
+        let records = f.store.routerRecords
+        records.now = { F.now }
+        var ask = F.thread("ta", title: "Pick the database", status: .waiting)
+        ask.pendingRequest = F.pending(minutes: 4)
+        var stopped = F.thread("tb", title: "Ship the release", status: .failed, minutes: 20)
+        stopped.lastError = "build failed"
+        var running = F.thread("tc", title: "Index the docs", status: .running)
+        running.runStartedAt = F.ago(3)
+        records.replace([ask, stopped, F.thread("td", title: "Tidy the notes", minutes: 40), running])
     }
 
-    @Test func anEntrysFirstActionFocusesItAndGoesToTheRouter() throws {
+    @Test func needsYouIsTheRecordsOfThatSectionWithAttentionDots() throws {
         let f = fixture()
+        seeded(f)
+        let output = PaletteRouterSource.make(f.context)
+        let lines = f.store.routerRecords.lines(in: .needsYou)
+        #expect(lines.count == 2)
+        #expect(output.needsYou.map(\.id) == lines.map { "thread:" + $0.id })
+        #expect(output.needsYou.allSatisfy { $0.kind == .thread && $0.dot == .attention && $0.weight == 1.3 })
+        // What is done and what works follow them, once each.
+        let recent = output.items.filter { $0.kind == .thread }.dropFirst(lines.count)
+        #expect(recent.count == 2 && recent.allSatisfy { !output.needsYou.map(\.id).contains($0.id) })
+        #expect(recent.contains { $0.dot == .running })
+    }
+
+    @Test func aLinesShowActionSelectsItOnThePageAndGoesToTheRouter() throws {
+        let f = fixture()
+        seeded(f)
         let item = try #require(PaletteRouterSource.make(f.context).needsYou.first)
-        let entry = try #require(f.store.routerBriefs.page().entries.first)
         try action("show", of: item).run()
-        #expect(f.store.routerBriefs.focused == entry.target && f.went.places == [.router])
-        // Archive takes it off the brief, with a change Revert sets back.
-        try action("archive", of: item).run()
-        #expect(!f.store.routerBriefs.page().entries.contains { $0.target == entry.target })
-        let change = try #require(f.store.router.changes.last)
-        #expect(change.isBriefAction)
-        f.store.revertFjordChange(change.id)
-        #expect(f.store.routerBriefs.page().entries.contains { $0.target == entry.target })
+        #expect(f.store.routerPage.selection == .line(String(item.id.dropFirst("thread:".count))) && f.went.places == [.router])
+        _ = try action("open", of: item)
+    }
+
+    @Test func theStampMovesWhenALineDoes() {
+        let f = fixture()
+        let before = PaletteModel(store: f.store, navigator: AppNavigator(start: .router, defaults: nil), routerModel: f.model, hub: f.hub).sourceStamp
+        seeded(f)
+        #expect(PaletteModel(store: f.store, navigator: AppNavigator(start: .router, defaults: nil), routerModel: f.model, hub: f.hub).sourceStamp != before)
     }
 
     @Test func everySessionIsListedWithItsOwnWeight() throws {

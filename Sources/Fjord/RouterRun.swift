@@ -16,7 +16,7 @@ enum RouterAgent {
 /// then the message. Pure, so the context is tested as text.
 struct RouterRunContext: Equatable {
     struct Entry: Equatable {
-        /// `BriefTarget.key`.
+        /// The T3 thread's id.
         var thread: String
         var kind: String
         var title: String
@@ -62,16 +62,27 @@ struct RouterRunContext: Equatable {
     }
 }
 
+extension RouterV2Thread {
+    /// What it waits on you for, as the Router's board names it: `question`, `form`, `plan`, `permission`, `step` or `stopped`.
+    var askKey: String {
+        switch state {
+        case .needsYou(.question): "question"
+        case .needsYou(.form): "form"
+        case .needsYou(.plan): "plan"
+        case .needsYou(.permission): "permission"
+        case .needsYou(.step): "step"
+        default: "stopped"
+        }
+    }
+}
+
 extension Store {
     /// The state a run starts from, as it is now.
     func routerRunContext(message: String, projects: [String] = [], tagged: String? = nil, excluding: UUID? = nil,
                           now: Date = Date()) -> RouterRunContext {
-        let briefs = routerBriefs
         return RouterRunContext(
-            entries: briefs.page().entries.prefix(30).map { e in
-                .init(thread: e.target.key, kind: e.kind.rawValue, title: briefs.title(e.target),
-                      project: briefs.names[e.project].flatMap { $0.isEmpty ? nil : $0 } ?? BriefPage.fallbackName(e.project),
-                      question: e.question ?? "")
+            entries: routerRecords.lines(in: .needsYou).prefix(30).map { r in
+                .init(thread: r.id, kind: r.askKey, title: r.name, project: r.project ?? "", question: r.question ?? r.sentence.text)
             },
             working: routerWorkingRows.prefix(30).map { row in
                 .init(title: row.session.title, project: row.projectName, doing: row.activity?.text ?? "Working")

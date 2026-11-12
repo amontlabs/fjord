@@ -190,20 +190,15 @@ final class PaletteModel {
     struct Stamp: Equatable {
         var inbox: Int, display: Int, router: Int, corpus: Int
         var routerOn: Bool, canSend: Bool, tools: Set<Tool>
-        /// The brief: its threads, what needs you and your marks.
+        /// The Router's lines: their names, sentences and sections.
         var brief: Int
     }
 
     var sourceStamp: Stamp {
-        let briefs = store.routerBriefs
         var brief = Hasher()
-        for (project, doc) in briefs.docs.sorted(by: { $0.key < $1.key }) {
-            brief.combine(project)
-            for t in doc.threads { brief.combine(t.id); brief.combine(t.title); brief.combine(t.status) }
-            for e in doc.needsYou { brief.combine(e) }
+        for r in store.routerRecords.lines(in: .needsYou) + store.routerRecords.lines(in: .done) + store.routerRecords.lines(in: .working) {
+            brief.combine(r.id); brief.combine(r.name); brief.combine(r.sentence.text); brief.combine(r.section)
         }
-        brief.combine(briefs.read)
-        brief.combine(briefs.archived)
         return Stamp(inbox: store.inboxRevision, display: store.inboxDisplayRevision, router: store.routerRevision,
                      corpus: store.corpusRevision, routerOn: store.routerOn, canSend: routerModel.canSend(store),
                      tools: store.tools, brief: brief.finalize())

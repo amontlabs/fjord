@@ -495,7 +495,7 @@ extension Store {
 
     /// Something you did on a brief entry (answered its form, approved its plan).
     func logEntryAction(_ text: String, target: BriefTarget, now: Date = Date()) {
-        let title = routerBriefs.title(target)
+        let title = routerRecords.record(target.thread)?.name ?? threads[target.thread]?.title.nonEmpty ?? "Untitled thread"
         var entry = RouterDecision(at: now, trigger: .you(text), decision: .init(target: title, intent: "answer"), outcome: .done)
         entry.add(.answered(thread: title), thread: target)
         logDecision(entry)

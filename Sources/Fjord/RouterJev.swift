@@ -27,7 +27,11 @@ extension RouterModel {
 
     /// The same, for the draft as it will be sent, worked out once by the caller (`sentDraft` writes every pill's name).
     func context(_ store: Store, sent: (text: String, mentions: [RouterMention])) -> RouterContext {
-        let reply = store.routerBriefs.focused.flatMap { t in store.routerBriefs.docs[t.project]?.thread(t.thread) != nil ? t : nil }
+        // The thread whose card is open on the Router page: the draft answers it.
+        let reply: BriefTarget? = {
+            guard case .line(let id)? = store.routerPage.selection else { return nil }
+            return RouteTarget.thread(id).briefTarget(store: store)
+        }()
         // The place picked in the composer is where it goes; the one waved off is never sent to unasked.
         let preview = store.routerPreview
         var context = RouterContext(replyTo: reply, target: preview.pinned, notTo: preview.dismissed)

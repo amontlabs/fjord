@@ -1,6 +1,6 @@
 import Foundation
 
-// The palette's source for Router: the brief's entries waiting on you, then the threads touched in the last 24 hours, every
+// The palette's source for Router: the Router's lines waiting on you, then the threads touched in the last 24 hours, every
 // session and their actions, and the send-to-the-Router row (docs/design/palette/DESIGN.md, jobs 1–3). Nothing at all while
 // the Router is off.
 
@@ -15,19 +15,19 @@ enum PaletteRouterSource {
         static let older = 0.8
     }
 
-    /// What the palette finds in the Router: one pass over the brief and the sessions, with the lookups the rows share (a
+    /// What the palette finds in the Router: one pass over the records and the sessions, with the lookups the rows share (a
     /// session's linked PR) built once. Runs once per open, on the main actor.
     static func make(_ context: PaletteContext) -> PaletteSourceOutput {
         let store = context.store
         guard store.routerOn else { return PaletteSourceOutput() }
-        let page = store.routerBriefs.page()
+        let records = store.routerRecords
         let now = Date()
         let rows = Dictionary(store.allAgentRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let links = Links(store)
 
         var output = PaletteSourceOutput()
-        output.needsYou = page.sections.flatMap { s in s.entries.map { entryItem($0, section: s, context: context) } }
-        let recent = page.sections.flatMap { s in s.recent.map { threadItem($0, section: s, context: context) } }
+        output.needsYou = records.lines(in: .needsYou).map { lineItem($0, context: context) }
+        let recent = (records.lines(in: .done) + records.lines(in: .working)).map { lineItem($0, context: context) }
         output.items = output.needsYou + recent
         output.items += store.threads.values.map { session in
             sessionItem(session, row: rows[session.id], now: now, context: context, links: links)
@@ -39,53 +39,50 @@ enum PaletteRouterSource {
 // MARK: - Entries and threads
 
 extension PaletteRouterSource {
-    private static func entryItem(_ e: BriefEntry, section: BriefPage.Section, context: PaletteContext) -> PaletteItem {
-        let store = context.store
-        let briefs = store.routerBriefs
-        let t = e.target
-        let label = BriefEntryText.kindLabel(e)
-        var keywords = [label, section.name]
-        if let q = e.question, !q.isEmpty { keywords.append(String(q.prefix(200))) }
-        let actions = [
-            PaletteAction(id: "show", title: "Show in Router", symbol: "rectangle.stack") {
-                briefs.focus(t)
-                context.go(.router)
-            },
-            PaletteAction(id: "reply", title: "Reply", symbol: "arrowshape.turn.up.left", caps: ["↩"]) {
-                briefs.focus(t)
-                context.routerModel.reply()
-                context.go(.router)
-            },
-            PaletteAction(id: "open", title: "Open in T3", symbol: ThreadMark.openSymbol) {
-                briefs.open(t, store: store)
-            },
-            PaletteAction(id: "read", title: "Mark read", symbol: "checkmark.circle") { briefs.markRead(t, store: store) },
-            PaletteAction(id: "archive", title: "Archive", symbol: "archivebox", destructive: true) { briefs.archive(t, store: store) },
-        ]
-        return PaletteItem(id: "thread:" + t.key, kind: .thread, title: briefs.title(t), subtitle: label + " · " + section.name,
-                           keywords: keywords, icon: .symbol(BriefEntryText.symbol(e.kind)), dot: .attention,
-                           date: Date(timeIntervalSince1970: e.since), weight: Weight.needsYou, actions: actions)
+    private static func kindWord(_ r: RouterV2Thread) -> String {
+        switch r.state {
+        case .needsYou(.plan): "proposes a plan"
+        case .needsYou(.permission): "waits for a permission"
+        case .needsYou(.form): "asks several things"
+        case .needsYou(.step): "needs a step from you"
+        case .needsYou(.question): "asks"
+        case .stopped: "stopped"
+        default: r.section.title
+        }
     }
 
-    private static func threadItem(_ th: BriefThread, section: BriefPage.Section, context: PaletteContext) -> PaletteItem {
+    private static func kindSymbol(_ r: RouterV2Thread) -> String {
+        switch r.state {
+        case .needsYou(.plan): "list.bullet.clipboard"
+        case .needsYou(.permission): "lock.fill"
+        case .stopped: "exclamationmark.triangle.fill"
+        default: "questionmark.circle.fill"
+        }
+    }
+
+    /// A line of the Router page: what needs you first (the kind of ask in its keywords), then the lines that are done or
+    /// working. Show selects its line on the page.
+    private static func lineItem(_ r: RouterV2Thread, context: PaletteContext) -> PaletteItem {
         let store = context.store
-        let briefs = store.routerBriefs
-        let t = BriefTarget(project: section.id, thread: th.id)
-        let word = BriefThreadWord.word(th.status)
+        let needsYou = r.section == .needsYou
+        let label = needsYou ? kindWord(r) : r.section.title
+        var keywords = [label, r.section.title, r.title]
+        if let project = r.project { keywords.append(project) }
+        if let q = r.question, !q.isEmpty { keywords.append(String(q.prefix(200))) }
+        keywords.append(String(r.sentence.text.prefix(200)))
+        let id = r.id
         let actions = [
-            PaletteAction(id: "open", title: "Open in T3", symbol: ThreadMark.openSymbol) {
-                briefs.open(t, store: store)
-            },
-            PaletteAction(id: "reply", title: "Reply", symbol: "arrowshape.turn.up.left") {
-                briefs.focus(t)
-                context.routerModel.reply()
+            PaletteAction(id: "show", title: "Show in Router", symbol: "rectangle.stack") {
+                store.routerPage.select(.line(id))
                 context.go(.router)
             },
+            PaletteAction(id: "open", title: "Open in T3", symbol: ThreadMark.openSymbol) { _ = store.openThread(id) },
         ]
-        return PaletteItem(id: "thread:" + t.key, kind: .thread, title: th.title.nonEmpty ?? "Untitled thread",
-                           subtitle: word + " · " + section.name, keywords: [word, section.name], icon: .symbol("bubble.left"),
-                           dot: th.status == .working ? .running : nil, date: Date(timeIntervalSince1970: th.age),
-                           weight: Weight.open, actions: actions)
+        return PaletteItem(id: "thread:" + id, kind: .thread, title: r.name,
+                           subtitle: label + (r.project.map { " · " + $0 } ?? ""),
+                           keywords: keywords, icon: .symbol(needsYou ? kindSymbol(r) : "bubble.left"),
+                           dot: needsYou ? .attention : r.isRunning ? .running : nil, date: r.since,
+                           weight: needsYou ? Weight.needsYou : Weight.open, actions: actions)
     }
 }
 

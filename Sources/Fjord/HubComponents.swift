@@ -1055,14 +1055,47 @@ struct UpdateAnnouncer: View {
     }
 }
 
-/// The Router in the bar: its symbol, and on its corner, amber, how many of the brief's entries need you (untold), nothing at
+/// The Router in the bar: its symbol, and on its corner, amber, how many of the Router's lines need you, nothing at
 /// zero. A click opens the Router in the app window. The count is read here: only it redraws as it changes.
 struct CountedRouterCell: View {
     let store: Store
     let action: () -> Void
 
     var body: some View {
-        RouterCell(needsYou: store.routerBriefs.untoldNeedsYou, action: action)
+        RouterCell(needsYou: store.routerRecords.needsYou, action: action)
+    }
+}
+
+/// One Needs-you record in the bar's Router panel: its short name, the sentence it waits on, how long it has waited.
+struct RouterRecordLine: View {
+    let record: RouterV2Thread
+    let open: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Image(systemName: record.state == .stopped ? "exclamationmark.circle.fill" : "questionmark.circle.fill")
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(Theme.amber)
+                    Text(record.name).font(Theme.Typography.bodyMedium).foregroundStyle(Theme.text).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Ticking(coarse: true) { now in
+                        Text(BriefAge.text(now.timeIntervalSince(record.since)))
+                            .font(Theme.Typography.caption.monospacedDigit()).foregroundStyle(Theme.tertiary)
+                    }
+                }
+                Text(record.sentence.text)
+                    .font(Theme.Typography.meta).foregroundStyle(Theme.secondary).lineLimit(1).truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .rowHighlight(hover)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(record.name)
+        .accessibilityValue(record.sentence.text)
+        .accessibilityHint("Opens the Router on it")
     }
 }
 

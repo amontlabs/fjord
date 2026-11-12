@@ -761,7 +761,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() { showWindow(.settings) }
-    @objc private func rewriteBriefs() { store?.routerBriefs.rewriteAll() }
 
     /// SIGTERM would skip `applicationWillTerminate` and lose a pending save.
     private func handleSigterm() {
@@ -805,13 +804,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editItem.submenu = edit
         main.addItem(editItem)
         main.addItem(GoMenu.shared.makeItem())
-        let routerItem = NSMenuItem()
-        let routerMenu = NSMenu(title: "Router")
-        let rewrite = NSMenuItem(title: "Rewrite Briefs", action: #selector(rewriteBriefs), keyEquivalent: "")
-        rewrite.target = self
-        routerMenu.addItem(rewrite)
-        routerItem.submenu = routerMenu
-        main.addItem(routerItem)
         main.addItem(SidebarMenu.shared.makeItem())
         // ⌘W closes the window, which puts the bar back; ⌘Q quits.
         let windowItem = NSMenuItem()

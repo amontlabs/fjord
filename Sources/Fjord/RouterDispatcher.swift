@@ -515,7 +515,7 @@ struct RouterAskBack: Identifiable, Equatable {
         let unattended = context.action != nil
         if !unattended, forRouter(text, pills: context.pills) { return .answer }
         if !unattended, let t = context.replyTo {
-            if let session = store.routerBriefs.desktopSession(t, store: store) {
+            if let session = (store.threads[t.thread] != nil ? t.thread : nil) {
                 return .reply(project: t.project, thread: t.thread, session: session)
             }
             // Your reply is for that thread alone: it doesn't go to another place a model would pick.
@@ -604,7 +604,7 @@ struct RouterAskBack: Identifiable, Equatable {
     /// The focus signals at send time: the thread open in Fjord, the one your latest message went to, the unseen candidates.
     static func focus(_ store: Store) -> DeciderLog.Focus {
         let board = store.deciderBoard()
-        return DeciderLog.Focus(open: store.routerBriefs.focused.map { store.routerBriefs.threadID($0) },
+        return DeciderLog.Focus(open: { () -> String? in if case .line(let id)? = store.routerPage.selection { id } else { nil } }(),
                                 lastTold: board.threads.first(where: \.youLatest)?.key,
                                 unseen: board.candidates.filter { store.threads[$0.key]?.unseen == true }.map(\.key))
     }
@@ -653,7 +653,7 @@ struct RouterAskBack: Identifiable, Equatable {
         guard let store else { return }
         // What the session would get, its addressing taken out ("@router no rush"), is what answers its form.
         let said = (try? Addressing.edit(job.text, pills: job.context.pills).text) ?? job.text
-        let title = store.routerBriefs.title(t)
+        let title = store.lineTitle(t)
         if let request = store.heldRequest(t), request.live {
             // An answer is given only while the thread still holds that very request (it may have moved on while it was
             // read), and at the send itself once more.
@@ -927,7 +927,7 @@ extension RouterDispatcher.Effects {
                 try tools.live(tools.ticket())
                 guard snapshot.holds(store) else { throw RouterTools.Failure(RequestSnapshot.changedWords) }
                 guard let request = store.heldRequest(target) else { throw RouterTools.Failure("That isn't waiting anymore") }
-                let title = store.routerBriefs.title(target)
+                let title = store.lineTitle(target)
                 let ticket = tools.ticket()
                 let valid: @MainActor () -> Bool = { (try? tools.live(ticket)) != nil }
                 switch answer {

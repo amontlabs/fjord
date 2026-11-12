@@ -180,12 +180,6 @@ enum PalettePlacesSource {
                 showSettings(context, section: SettingsView.codeFoldersID)
             }
         }
-        if store.routerOn {
-            command("rewrite-briefs", "Rewrite briefs", "Command · Router", "arrow.triangle.2.circlepath",
-                    keywords: ["router", "brief", "refresh", "rewrite", "lead", "projects"], caps: store.shortcut(.refresh).caps) {
-                store.routerBriefs.rewriteAll()
-            }
-        }
         if store.triageOn {
             command("refresh", "Refresh now", "Command · Check GitHub again", "arrow.clockwise",
                     keywords: ["reload", "sync", "poll", "github", "update", "inbox"], caps: store.shortcut(.refresh).caps) {

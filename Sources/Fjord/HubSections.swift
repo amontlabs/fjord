@@ -222,13 +222,14 @@ extension FjordHub {
     }
 
     /// An entry clicked on the bar: the Router opens on it, focused. Its thread isn't opened.
-    func openBriefEntry(_ target: BriefTarget) {
-        pickBriefEntry(target)
+    func openRouterRecord(_ record: RouterV2Thread) {
+        // The environment closure still takes a `BriefTarget` (HubView, HubController and the window are 9a's); its thread is the record's id.
+        pickBriefEntry(BriefTarget(project: record.project ?? "", thread: record.id))
         openApp(.router)
     }
 
     var routerStatusParts: [(String, Color)] {
-        let needsYou = store.routerBriefs.untoldNeedsYou
+        let needsYou = store.routerRecords.needsYou
         return needsYou > 0 ? [("\(needsYou) need you", Theme.amber)] : [("nothing open", Theme.tertiary)]
     }
 
@@ -238,15 +239,15 @@ extension FjordHub {
     /// The Router in its panel: the header, the entries that need you (in the brief's order), then what works and the way to
     /// the window.
     @ViewBuilder var peekRouter: some View {
-        let entries = store.routerBriefs.page().entries
+        let entries = store.routerRecords.lines(in: .needsYou)
         routerHeader.frame(height: Self.peekLine)
         if entries.isEmpty {
             Text("Nothing needs you").font(Theme.Typography.body).chromeInk(.tertiary, Theme.tertiary)
                 .padding(.horizontal, Theme.Space.md).frame(height: Theme.Metrics.line)
         } else {
             VStack(alignment: .leading, spacing: 1) {
-                ForEach(entries.prefix(Self.routerEntryLimit), id: \.target) { e in
-                    BriefEntryLine(entry: e, store: store) { openBriefEntry(e.target) }
+                ForEach(entries.prefix(Self.routerEntryLimit)) { e in
+                    RouterRecordLine(record: e) { openRouterRecord(e) }
                 }
             }
             if entries.count > Self.routerEntryLimit {
@@ -273,7 +274,7 @@ extension FjordHub {
             Spacer(minLength: 0)
             ActionButton("Open Router") { openApp(.router) }
                 .fixedSize()
-                .tip("Open Router", "The brief and the composer · \(store.shortcut(.router).display)")
+                .tip("Open Router", "The page and the composer · \(store.shortcut(.router).display)")
         }
         .padding(.leading, Theme.Space.md)
         .frame(minHeight: Theme.Metrics.line)
