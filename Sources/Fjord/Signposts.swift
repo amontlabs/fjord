@@ -43,3 +43,43 @@ enum LatencySignposts {
         DispatchQueue.main.async { signposter.endInterval(name, state) }
     }
 }
+
+/// The Router page's signposts (subsystem com.amontlabs.fjord, category "router"; docs/design/router-v2/IMPLEMENTATION.md
+/// 2.3): "T3 event" (a T3 item taken to the page's change committed), "Key" (a key to its commit) and "Key work" (to the
+/// handler's return), "Send", "Select", "Flush" (one turn's streamed changes applied), "Read" (the typing pause to the
+/// read landed), "Verdict state" and "Verdict done". `scripts/morph-timings.sh` prints them. Each is begun by what it
+/// times: nothing runs at rest.
+enum RouterSignposts {
+    nonisolated static let signposter = OSSignposter(subsystem: InboxLog.subsystem, category: "router")
+
+    /// A begun interval: its name and its state.
+    struct Interval: Sendable {
+        let name: StaticString
+        let state: OSSignpostIntervalState
+    }
+
+    static func begin(_ name: StaticString) -> Interval {
+        Interval(name: name, state: signposter.beginInterval(name, id: signposter.makeSignpostID()))
+    }
+
+    /// Ends `interval`: now, or (`afterCommit`) once this turn's Core Animation transaction has been committed, the
+    /// change on its way to its first frame (`LatencySignposts.endAfterCommit`).
+    static func end(_ interval: Interval, afterCommit: Bool = false) {
+        if afterCommit {
+            DispatchQueue.main.async { signposter.endInterval(interval.name, interval.state) }
+        } else {
+            signposter.endInterval(interval.name, interval.state)
+        }
+    }
+
+    /// Times `work`, ended after the commit of the change it makes: "Key" around a key's handler, with "Key work" to the
+    /// handler's return.
+    @MainActor static func key<T>(_ work: () -> T) -> T {
+        let key = begin("Key"), handler = begin("Key work")
+        defer {
+            end(handler)
+            end(key, afterCommit: true)
+        }
+        return work()
+    }
+}
