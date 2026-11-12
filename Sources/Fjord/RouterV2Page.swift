@@ -395,6 +395,11 @@ struct RouterV2Floating: View {
                     .id("peek-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
+            if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {
+                hung(from: frame, width: RouterV2.Peek.width) { RouterV2ActivityPeek(model: model, thread: thread) }
+                    .id("activity-" + id)
+                    .transition(.scaleFade(0.98, reduce: reduce))
+            }
             if model.flags(.housekeepingWords).hot, let frame = frames[.housekeepingWords], !model.shownOlder.isEmpty {
                 hung(from: frame, width: RouterV2.Peek.olderWidth) { RouterV2OlderPeek(model: model, older: model.shownOlder) }
                     .transition(.scaleFade(0.98, reduce: reduce))
@@ -417,6 +422,7 @@ struct RouterV2Floating: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .motion(.fade, value: model.peeked)
+        .motion(.fade, value: model.activityPeeked)
         .motion(.fade, value: model.flags(.housekeepingWords).hot)
         .motion(.fade, value: model.snoozeMenu != nil)
         .motion(.fade, value: model.placesMenu)

@@ -245,6 +245,8 @@ struct RouterV2LineView: View {
             RouterV2Name(model: model, thread: thread, rowHot: hot)
                 .layoutPriority(2)
             RouterV2SentenceView(model: model, box: box)
+                // Its subagents, background commands and waits, right after the words (RouterV2ActivityViews.swift).
+                .routerV2Activity(model, thread)
                 .padding(.leading, M.sentenceGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let project = thread.project {
