@@ -60,3 +60,11 @@
 - Brackets cut with the aside; "don't edit anything" → approval-required; Sonnet only when Jev is unsure, ≥12 chars and ≥10 new chars since the last start (Jev 300 ms, Sonnet 600 ms).
 - 9a: in `makeRouterReader()` set `reader.log = <store's DeciderLog>` (typing pause/start/skip/cancel/done lines).
 - Watch live: new work pushed into old threads 1.5% (was 0.7%); refit the idle bar after ~200 live decisions (`refit.py`).
+
+## 9a (store, window, drawer, shots) — 3647701b e3723422 f38f9add
+- `Store+RouterV2.swift` makes and wires records, verdicts, reader, acts, launch feed, PRs and `ProjectPurposes`; `wireThreads` feeds the records first. `routerFocus(thread)` replaces `routerBriefs.focus`; `routerDrawerOpen`, `routerNeedsYou` on the store.
+- `RouterV2Screen(model:store:text:)` hosts the History drawer (beside from `sideFrom` ≈ 1130 pt, else under), its ⌥⌘B toggle and `RouterSetupNotice`. Shots: `v2-drawer`, `v2-drawer-narrow`, `v2-setup`, `v2-off`.
+- Shots reset `RouterV2Demo.model` before each store: a store's lazy `routerPage` adopted the last shot's demo model and the second v2 shot spun in a SwiftUI update loop (cause inside the loop not pinned down; `routerPage = RouterV2Demo.model ?? …` is worth a look in wave 3).
+- Wave 3: `RouterSetupNotice` (in RouterView.swift) spans the page's width with Theme padding instead of the column's edges; move it out and align it. Playground's `openRouterWindow` still draws `RouterCodeView` (old brief shots).
+- Flaky under the full suite's load only (pass alone): `RouterVerdictsTests.theStateComesBeforeTheWordsAndTheWordsGrow`, `RouterV2ReaderTests.notSureSonnetDecides…`, `RouterV2RenderTests.aHoverFromOneRowToAnotherRunsTwoLineBodies`.
+- Not done: the live check on the owner's T3 (needs the owner's go).
