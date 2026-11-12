@@ -212,6 +212,22 @@ import Testing
         #expect(h.asks.filter { $0.kind == .name }.count == 1)
     }
 
+    @Test func aNameForATitleT3ChangedMeanwhileIsDroppedAndTheNewTitleAsked() {
+        let h = Harness()
+        var t = F.thread(status: .running)
+        t.runStartedAt = F.ago(1)
+        h.records.put(t)
+        let first = t.title
+        t.title = "Water the tomatoes"
+        h.records.put(t)
+        h.records.verdict("t1", fingerprint: first, .done(RouterVerdict(kind: .name, name: "Garden notes")))
+        #expect(h.records.record("t1")?.name != "Garden notes")
+        #expect(h.asks.last?.kind == .name)
+        #expect(h.asks.last?.fingerprint == "Water the tomatoes")
+        h.records.verdict("t1", fingerprint: "Water the tomatoes", .done(RouterVerdict(kind: .name, name: "Tomatoes")))
+        #expect(h.records.record("t1")?.name == "Tomatoes")
+    }
+
     // MARK: Pending acts
 
     @Test func aPendingSendHoldsSentUntilTheRunShows() {

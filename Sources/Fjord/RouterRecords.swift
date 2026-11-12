@@ -177,15 +177,19 @@ final class RouterRecords {
         operation {
             guard let e = entries[id], let t = e.thread else { return }
             if fingerprint != e.fingerprint {
-                guard e.naming, fingerprint == t.title else { return }
+                // A name call's answer, keyed on the title it was asked for: kept only while that is still T3's title; the
+                // call is over either way, and a new title is asked for again.
+                guard e.naming, fingerprint == e.namingFor else { return }
                 switch event {
                 case .done(let v):
                     e.naming = false
-                    if !v.name.isEmpty { save(id) { $0.name = v.name; $0.nameKey = t.title } }
+                    e.namingFor = nil
+                    if !v.name.isEmpty, fingerprint == t.title { save(id) { $0.name = v.name; $0.nameKey = t.title } }
                     refresh(id)
                 case .failed:
                     e.naming = false
-                    e.nameFailed = t.title
+                    e.namingFor = nil
+                    e.nameFailed = fingerprint
                     refresh(id)
                 case .state, .words: break
                 }
@@ -450,6 +454,7 @@ final class RouterRecords {
         guard e.asked || e.naming else { return }
         e.asked = false
         e.naming = false
+        e.namingFor = nil
         cancel(id)
     }
 
@@ -467,6 +472,7 @@ final class RouterRecords {
         }
         if saved[id]?.nameKey != t.title, e.nameFailed != t.title, onPage, !e.asked, !e.naming {
             e.naming = true
+            e.namingFor = t.title
             ask(RouterVerdictRequest(thread: id, fingerprint: t.title, kind: .name, input: input(t, e), at: t.lastActivity))
         }
     }
@@ -898,6 +904,8 @@ extension RouterRecords {
         var failed = false
         /// A name call is queued or running.
         var naming = false
+        /// The title the name call under way was asked for.
+        var namingFor: String?
         /// The title a name call failed for: not asked again until the title changes.
         var nameFailed: String?
         /// The verdict's state, landed before its words.
