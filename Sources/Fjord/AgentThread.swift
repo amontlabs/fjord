@@ -56,6 +56,12 @@ struct AgentThread: Identifiable, Hashable {
     var pendingTasks: [T3PendingTask] = []
     /// The run holds until another thread's work ends (`blockedOnThreadWait`).
     var blockedOnThreadWait = false
+    /// T3's latest run id (`latestRunId`): what a pending send, a verdict's fingerprint and a Continue name.
+    var latestRunID: String?
+    /// When the run now live began (`activityRunStartedAt`): a working line's `since`, and how a send knows its run started.
+    var runStartedAt: Date?
+    /// You asked the latest run to stop (`latestRunStopRequested`): an interrupt that is yours, not a failure.
+    var stopRequested = false
 
     var folderName: String { folder.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Scratch" }
     /// Mute and colour key: the folder path, or "" for scratch threads.
@@ -119,6 +125,9 @@ extension AgentThread {
         settledAt = t.settledAt.flatMap(Self.date)
         lastVisitedAt = t.lastVisitedAt.flatMap(Self.date)
         lastAuthoredAt = t.latestUserAuthoredMessageAt.flatMap(Self.date)
+        latestRunID = t.latestRunId
+        runStartedAt = t.activityRunStartedAt.flatMap(Self.date)
+        stopRequested = t.latestRunStopRequested
     }
 
     /// What stands for the latest message when the shell carries none (T3 0.1.7 always sends `latestVisibleMessage: null`): the

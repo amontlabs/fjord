@@ -213,6 +213,27 @@ struct T3TypesTests {
         #expect(p.turnItems.last!.detail == .assistantMessage(messageId: "am9", text: "The beds are done.", streaming: false))
     }
 
+    // MARK: The router v2 wire (wave 0)
+
+    @Test func theShellSaysWhenItsRunStartedAndWhetherYouStoppedIt() {
+        let now = F.ago(2)
+        let t = T3ThreadShell(json: F.thread("t1", status: "running", extra: ["latestRunId": "r7", "activityRunStartedAt": .string(now), "latestRunStopRequested": true]))
+        #expect(t.activityRunStartedAt?.text == now && t.latestRunStopRequested && t.latestRunId == "r7")
+        let bare = T3ThreadShell(json: F.thread("t2"))
+        #expect(bare.activityRunStartedAt == nil && !bare.latestRunStopRequested)
+        let nulled = T3ThreadShell(json: F.thread("t3", extra: ["activityRunStartedAt": nil]))
+        #expect(nulled.activityRunStartedAt == nil)
+    }
+
+    @Test func anAgentThreadCarriesTheRunItsRowNames() {
+        let at = F.ago(3)
+        let row = F.thread("t1", status: "interrupted", extra: ["latestRunId": "r7", "activityRunStartedAt": .string(at), "latestRunStopRequested": true])
+        let t = AgentThread(T3ThreadShell(json: row), project: nil)
+        #expect(t.latestRunID == "r7" && t.stopRequested && t.runStartedAt == T3Timestamp(at).date)
+        let idle = AgentThread(T3ThreadShell(json: F.thread("t2")), project: nil)
+        #expect(idle.latestRunID == nil && !idle.stopRequested && idle.runStartedAt == nil)
+    }
+
     // MARK: Commands (exact shapes from S1)
 
     private func payload(_ c: T3Command) -> T3JSON { c.payload(commandId: "c1") }

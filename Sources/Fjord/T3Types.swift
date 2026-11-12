@@ -291,6 +291,10 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
     var latestRunId: String?
     var activeRunId: String?
     var latestRunCompletedAt: T3Timestamp?
+    /// When the run now live began (`activityRunStartedAt`; null between runs).
+    var activityRunStartedAt: T3Timestamp?
+    /// You asked the latest run to stop (`latestRunStopRequested`): an interrupt that is yours, not a failure.
+    var latestRunStopRequested: Bool
     var activityRunStatus: T3Status?
     var status: T3Status
     var lastError: String?
@@ -329,6 +333,8 @@ struct T3ThreadShell: T3Decodable, Hashable, Sendable, Identifiable {
         historyOrigin = j.str("historyOrigin")
         latestRunId = j.str("latestRunId"); activeRunId = j.str("activeRunId")
         latestRunCompletedAt = j.ts("latestRunCompletedAt")
+        activityRunStartedAt = j.ts("activityRunStartedAt")
+        latestRunStopRequested = j.flag("latestRunStopRequested")
         activityRunStatus = j.str("activityRunStatus").map { T3Status(rawValue: $0) }
         status = T3Status(rawValue: j.str("status") ?? "idle")
         lastError = j.str("lastError")
