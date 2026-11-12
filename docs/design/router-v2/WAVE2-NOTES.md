@@ -12,3 +12,10 @@
 - `RouterDetail.make(projection, now:)`: working (todo step → first sentence of latest words → tool → "starting"), steps, reply/writing, request, queued, diff (summed per turn; may double-count a file touched in two checkpoints), lastStep, steers.
 - `RouterPullRequests(link:github:)`: `states(for:reply:)` (cheap, T3 state wins, named PRs linked once), `onChange(threadId)`, `refresh()` (window open + Triage sync), `forget(_:)`. 9a/track 3 wire `link` to `dispatch(.pullRequestLink)` and pass the last reply text.
 - A PR with unknown state is hidden (no `.unknown` state).
+
+## Track 5 (reader, launch catalog) — 86e314e5 5ac956c3 c159e1ad
+- `RouterV2Reader`: read/cancel/now/searchHits; closures jev, decide, search, boardKey, eligible, allowed, tagged, onRead. Pauses still 600/1200 ms in the reader (plan default 300/600; move into `enum RouterV2` and set 300/600 in wave 2).
+- `RouterLaunchCatalog.make/offer/checked/taken`; `RouterLaunchFeed` reads `server.getConfig` on `connected()`, emits `.launch` on change. Lists every ready provider (Codex too); efforts only from option id `effort`.
+- Decider: `DeciderContext.Inputs.open/launch`, `Built.schema/launch`; answer decodes `launch`, `launch_words`; DeciderLog records them.
+- 9b wiring: feed on connect/reconnect; reader `decide` passes `open: selected`, `launch: feed.offer`; jev→readDraft, search→searchDraft, boardKey→deciderBoardKey, eligible→routerDispatcher.eligible, tagged→RouterPointers.context; searchHits in place of routerPreview.searchHits; `onRead` decision → `RouterContext.decided` (and RouterActs.decision).
+- Eval (wave 2): 300 dev moments vs N4 (top-1, wrong-thread sends, new-work starts); 40 drafts with settings asides (launch/launch_words, nothing meant for the agent taken); share of Sonnet calls cancelled by keystrokes.
