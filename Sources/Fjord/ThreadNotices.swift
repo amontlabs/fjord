@@ -5,7 +5,7 @@ import Foundation
 // a model, and is keyed by what it is about (a request, a plan, a run) so it is posted once, kept in briefs.db (`notified`).
 
 struct ThreadNotice: Equatable {
-    enum Kind: String { case needsYou, finished, failed, usageLimit }
+    enum Kind: String { case needsYou, finished, failed, usageLimit, step }
 
     var kind: Kind
     /// The told-once key: the request, the plan or the run the banner is about.
@@ -22,6 +22,7 @@ struct ThreadNotice: Equatable {
         case .finished: "finished"
         case .failed: "failed"
         case .usageLimit: "hit its usage limit"
+        case .step: "left you a step"
         }
     }
 }
@@ -75,6 +76,48 @@ enum ThreadNotices {
             return [make(.finished, "done:\(t.id)@\(Int(ended.timeIntervalSince1970))", clip(t.latestMessage ?? "", "It finished."))]
         }
         return []
+    }
+
+    /// The banner a Router v2 record's code state deserves (`RouterNotifier`), keyed on what it is about: the request, the
+    /// plan's run, the run that finished, failed or hit its limit. Nothing for Working, Sent, a step (the verdict's own, see
+    /// `step`) or a run you stopped. Pure.
+    static func notice(_ t: AgentThread, state: RouterCodeState, request: ThreadRequest?, project: String) -> ThreadNotice? {
+        func make(_ kind: ThreadNotice.Kind, _ key: String, _ body: String) -> ThreadNotice {
+            ThreadNotice(kind: kind, key: key, thread: t.id, project: project, title: t.title, body: body)
+        }
+        let run = t.latestRunID ?? String(Int(state.since.timeIntervalSince1970))
+        switch state.state {
+        case .needsYou(.plan):
+            return make(.needsYou, "plan:\(t.id)@\(run)", clip(request?.planMarkdown ?? "", "A plan to approve."))
+        case .needsYou(.step):
+            return nil
+        case .needsYou:
+            let key = "ask:" + (t.pendingRequest?.id ?? request?.id ?? "\(t.id)@\(run)")
+            switch request?.body {
+            case .approval(let kind, let prompt, _)?:
+                return make(.needsYou, key, prompt.isEmpty ? "It waits for a permission (\(kind))." : clip(prompt, ""))
+            case .question(let questions)?:
+                return make(.needsYou, key, clip(questions.map(\.question).joined(separator: "\n"), "It asks you a question."))
+            default:
+                return make(.needsYou, key, t.pendingRequest?.isUserInput == false ? "It waits for a permission." : "It asks you a question.")
+            }
+        case .working where state.paused:
+            return make(.usageLimit, "limit:\(t.id)@\(run)", limitBody(t, resumesBySelf: true))
+        case .stopped:
+            if t.limitStopped { return make(.usageLimit, "limit:\(t.id)@\(run)", limitBody(t, resumesBySelf: false)) }
+            let fallback = t.status == .failed ? "It stopped with an error." : "It was interrupted."
+            return make(.failed, "failed:\(t.id)@\(run)", clip(t.lastError ?? "", fallback))
+        case .done where state.wants == .finished:
+            return make(.finished, "done:\(t.id)@\(run)", clip(t.latestMessage ?? "", "It finished."))
+        case .done, .working, .sent:
+            return nil
+        }
+    }
+
+    /// The banner for a finished turn the verdict found a step in, keyed on the fingerprint it judged.
+    static func step(_ t: AgentThread, fingerprint: String, ask: String, project: String) -> ThreadNotice {
+        ThreadNotice(kind: .step, key: "step:\(t.id)@\(fingerprint)", thread: t.id, project: project, title: t.title,
+                     body: clip(ask, "It left you a step."))
     }
 
     private static func clip(_ text: String, _ fallback: String) -> String {
