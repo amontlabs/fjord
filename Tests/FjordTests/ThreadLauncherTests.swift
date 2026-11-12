@@ -105,6 +105,40 @@ import Testing
         #expect(payload(sent, 0)["modelSelection"]?.str("model") == "claude-opus-5")
     }
 
+    @Test func aLaunchCarriesTheMintedIdAndTheSettingsTheRowShowed() async throws {
+        let (s, sent) = store()
+        let settings = ThreadLaunchSettings(model: "gpt-6", effort: "medium", runtimeMode: .autoAcceptEdits, interactionMode: .plan)
+        let launched = try await s.launchThread(in: "p1", message: ThreadMessage(text: "fix the fence"), thread: "minted-1", settings: settings)
+        #expect(launched.thread == "minted-1")
+        let p = payload(sent, 0)
+        #expect(p["threadId"]?.string == "minted-1")
+        #expect(p["modelSelection"]?.str("model") == "gpt-6" && p["modelSelection"]?.str("instanceId") == "codex")
+        #expect(p["modelSelection"]?["options"]?.array?.first?.str("id") == "effort")
+        #expect(p["modelSelection"]?["options"]?.array?.first?.str("value") == "medium")
+        #expect(p["runtimeMode"]?.string == "auto-accept-edits" && p["interactionMode"]?.string == "plan")
+        #expect(p["workspaceStrategy"]?.str("type") == "root")
+    }
+
+    @Test func aLaunchWithNoSettingsKeepsT3sDefaultsAndSendsNoEffort() async throws {
+        let (s, sent) = store()
+        try await s.launchThread(in: "p1", message: ThreadMessage(text: "fix the fence"))
+        #expect(payload(sent, 0)["modelSelection"]?["options"] == nil && payload(sent, 0)["interactionMode"]?.string == "default")
+    }
+
+    @Test func aModelT3DoesntOfferStartsNothingAndSaysSo() async {
+        let (s, sent) = store()
+        let settings = ThreadLaunchSettings(model: "nope-1", effort: nil, runtimeMode: .auto)
+        do { try await s.launchThread(in: "p1", message: ThreadMessage(text: "x"), settings: settings); Issue.record("started") }
+        catch { #expect(error.localizedDescription.contains("nope-1")) }
+        #expect(sent.commands.isEmpty)
+    }
+
+    @Test func aModelIsFoundOnTheInstanceThatRunsIt() {
+        #expect(ThreadLauncher.model(slug: "claude-opus-5", project: nil, config: config, siblings: []) == .init(instanceId: "claudeAgent", model: "claude-opus-5"))
+        #expect(ThreadLauncher.model(slug: "gpt-6", project: nil, config: config, siblings: []) == .init(instanceId: "codex", model: "gpt-6"))
+        #expect(ThreadLauncher.model(slug: "x", project: nil, config: config, siblings: []) == nil)
+    }
+
     @Test func aLaunchNeverGoesToAProjectT3DoesntHave() async {
         let (s, sent) = store()
         await #expect(throws: ThreadLaunchFailure.self) { try await s.launchThread(in: "nope", message: ThreadMessage(text: "x")) }

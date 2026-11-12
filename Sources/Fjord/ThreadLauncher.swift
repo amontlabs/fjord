@@ -39,6 +39,16 @@ enum ThreadLaunchWorkspace: Equatable, Sendable {
     }
 }
 
+/// What a new thread starts with besides its words, as the Router v2 row showed it (T3's own names and lists).
+struct ThreadLaunchSettings: Equatable, Sendable {
+    /// T3's model slug; its provider instance is read from the server's config.
+    var model: String
+    /// The reasoning effort, sent as `modelSelection.options`; nil sends none (the model's default).
+    var effort: String?
+    var runtimeMode: T3RuntimeMode
+    var interactionMode: T3InteractionMode = .default
+}
+
 enum ThreadLauncher {
     /// The title the thread starts with; T3 writes the real one from the message (`generateTitle`).
     static func provisionalTitle(_ text: String) -> String {
@@ -59,6 +69,23 @@ enum ThreadLauncher {
             if let instance = provider.str("instanceId"), let model = provider["models"]?.array?.first?.str("slug") ?? provider["models"]?.array?.first?.str("id") {
                 return ThreadLaunchModel(instanceId: instance, model: model)
             }
+        }
+        return nil
+    }
+
+    /// The provider instance that runs a model somebody chose by its slug: the project's or the server's default selection
+    /// when it names that model, else the first ready provider that lists it, else a sibling thread that ran it.
+    static func model(slug: String, project: T3JSON?, config: T3JSON?, siblings: [T3ThreadShell]) -> ThreadLaunchModel? {
+        for selection in [project?["defaultModelSelection"], config?["settings"]?["defaultModelSelection"]] {
+            if let m = ThreadLaunchModel(json: selection), m.model == slug { return m }
+        }
+        for provider in config?["providers"]?.array ?? [] where provider.str("status") == "ready" && provider["enabled"]?.bool != false {
+            guard let instance = provider.str("instanceId"),
+                  provider["models"]?.array?.contains(where: { $0.str("slug") == slug || $0.str("id") == slug }) == true else { continue }
+            return ThreadLaunchModel(instanceId: instance, model: slug)
+        }
+        if let t = siblings.first(where: { $0.model == slug && !$0.providerInstanceId.isEmpty }) {
+            return ThreadLaunchModel(instanceId: t.providerInstanceId, model: slug)
         }
         return nil
     }
@@ -183,8 +210,11 @@ extension Store {
     /// A new thread in a T3 project, started with `message`: one `launchThread`, in the project's own checkout for your words
     /// and in a worktree of its own for an action's (`origin`). Logged as a change of Fjord's that Revert archives.
     /// `run`: the Router entry it belongs to. In a demo or a playground nothing is sent.
+    /// `thread`: the id the thread will have, when the page minted it already (default: a fresh one). `settings`: the model with
+    /// its effort and the runtime and interaction modes the row showed (default: T3's own defaults).
     @discardableResult
     func launchThread(in projectID: String, message: ThreadMessage, origin: SessionOrigin? = nil, run: UUID? = nil,
+                      thread minted: String? = nil, settings: ThreadLaunchSettings? = nil,
                       now: Date = Date()) async throws -> LaunchedThread {
         guard let project = t3.store.shell.projects[projectID], project.archivedAt == nil else {
             throw ThreadLaunchFailure("That project isn't in T3 anymore: nothing was started")
@@ -193,13 +223,22 @@ extension Store {
         let unattended = origin != nil
         let config = try? await launchSupport.config()
         let siblings = t3.store.shell.listedThreads(in: projectID).sorted { ($0.updatedAt?.text ?? "") > ($1.updatedAt?.text ?? "") }
-        guard let model = ThreadLauncher.model(project: project.raw, config: config, siblings: siblings) else {
-            throw ThreadLaunchFailure("T3 has no model set up for new threads: set one in T3's settings")
+        let chosen: ThreadLaunchModel?
+        if let settings {
+            chosen = ThreadLauncher.model(slug: settings.model, project: project.raw, config: config, siblings: siblings)
+        } else {
+            chosen = ThreadLauncher.model(project: project.raw, config: config, siblings: siblings)
+        }
+        guard let model = chosen else {
+            throw ThreadLaunchFailure(settings.map { "T3 doesn't offer the model “\($0.model)”: pick another" }
+                                      ?? "T3 has no model set up for new threads: set one in T3's settings")
         }
         let baseRef = unattended ? await launchSupport.defaultBranch(project.workspaceRoot) : ""
-        let thread = UUID().uuidString.lowercased()
+        let thread = minted ?? UUID().uuidString.lowercased()
         let request = ThreadLauncher.request(thread: thread, project: projectID, message: message, model: model,
-                                             runtimeMode: ThreadLauncher.runtimeMode(asked: origin?.runtimeMode, config: config),
+                                             runtimeMode: settings?.runtimeMode ?? ThreadLauncher.runtimeMode(asked: origin?.runtimeMode, config: config),
+                                             interactionMode: settings?.interactionMode ?? .default,
+                                             options: settings?.effort.map { [T3ModelOption.effort($0)] } ?? [],
                                              workspace: ThreadLauncher.workspace(unattended: unattended, baseRef: baseRef))
         try await dispatch(.launchThread(request), commandId: message.commandID)
         var launched = LaunchedThread(thread: thread, project: projectID, projectTitle: project.title, message: message, unattended: unattended)
@@ -272,7 +311,8 @@ extension RouterDispatcher {
         try job.tools.live(job.tools.ticket())
         let launched: LaunchedThread
         do {
-            launched = try await store.launchThread(in: project.id, message: message, origin: job.context.action?.origin, run: job.id)
+            launched = try await store.launchThread(in: project.id, message: message, origin: job.context.action?.origin, run: job.id,
+                                                    thread: job.context.launch?.thread, settings: job.context.launch?.settings)
         } catch {
             throw RouterTools.Failure(error.localizedDescription)
         }

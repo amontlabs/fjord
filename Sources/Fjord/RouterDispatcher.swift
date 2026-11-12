@@ -39,6 +39,8 @@ struct RouterContext: Equatable {
     /// The composer's decision for these words on this board: acted on (or, with `target`, logged with your pick) instead of
     /// deciding again.
     var decided: RouterProjectDecision?
+    /// A new thread started from the Router v2 page: the id its line already has and the settings its row showed.
+    var launch: RouterLaunchPlan?
 
     init(replyTo: BriefTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
         self.replyTo = replyTo
@@ -47,6 +49,13 @@ struct RouterContext: Equatable {
         self.notTo = notTo
         self.pills = pills
     }
+}
+
+/// What a new thread from the Router v2 page starts with: its minted id (the line is on the page before T3 answers) and the
+/// model, effort and modes the row showed.
+struct RouterLaunchPlan: Equatable, Sendable {
+    var thread: String
+    var settings: ThreadLaunchSettings
 }
 
 // MARK: - The ask-back
