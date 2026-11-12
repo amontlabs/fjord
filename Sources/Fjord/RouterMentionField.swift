@@ -73,6 +73,31 @@ final class MentionTextView: NSTextView {
     var makePill: (RouterPointer) -> MentionAttachment? = { _ in nil }
     var name: (RouterPointer) -> String = { _ in "" }
     var base: [NSAttributedString.Key: Any] = [:]
+    /// The words the Router took as a new thread's settings (router v2): a rounded ground behind them, on each line they
+    /// are on. Drawn by the view itself, so it follows the text as it is typed and wraps with it.
+    var marked: NSRange? {
+        didSet { if marked != oldValue { needsDisplay = true } }
+    }
+    var markedFill = NSColor.clear
+    var markedRadius: CGFloat = 4
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawMarked(dirtyRect)
+        super.draw(dirtyRect)
+    }
+
+    private func drawMarked(_ dirtyRect: NSRect) {
+        guard let range = marked, range.length > 0, range.upperBound <= (string as NSString).length,
+              let layout = layoutManager, let container = textContainer else { return }
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        markedFill.setFill()
+        layout.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                       in: container) { rect, _ in
+            let ground = rect.offsetBy(dx: self.textContainerOrigin.x, dy: self.textContainerOrigin.y).insetBy(dx: -3, dy: 0)
+            guard ground.intersects(dirtyRect) else { return }
+            NSBezierPath(roundedRect: ground, xRadius: self.markedRadius, yRadius: self.markedRadius).fill()
+        }
+    }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
@@ -125,6 +150,26 @@ final class MentionTextView: NSTextView {
         return true
     }
 
+    /// Takes the `n`th pill out of the text (an edit of the view's own: one step of its undo). False when there is none.
+    func removePill(at n: Int) -> Bool {
+        guard let storage = textStorage else { return false }
+        var seen = 0
+        var found: NSRange?
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+            guard value is MentionAttachment else { return }
+            if seen == n { found = range; stop.pointee = true }
+            seen += 1
+        }
+        guard let found else { return false }
+        // The space the pill was followed by goes with it.
+        var cut = found
+        if NSMaxRange(found) < storage.length, (storage.string as NSString).character(at: NSMaxRange(found)) == 0x20 { cut.length += 1 }
+        breakUndoCoalescing()
+        insertPlain("", replacing: cut)
+        breakUndoCoalescing()
+        return true
+    }
+
     /// Inserts text as it is: an "@name" in it, a project's or not, stays text. The attachment character other apps put
     /// in their text for an inline image is left out: here it would be a pill with nothing behind it.
     func insertPlain(_ text: String, replacing range: NSRange) {
@@ -154,6 +199,12 @@ struct MentionField: NSViewRepresentable {
     var onCommand: ((Selector) -> Bool)? = nil
     /// The selection moved (the caret, for the @ suggestions), with the text view.
     var onSelection: ((NSTextView) -> Void)? = nil
+    /// The text changed by the owner's typing, a pick or an undo (not by the model): the draft with a mark for each pill, and
+    /// what the pills point to. Called in the same turn as the edit, after the model has it.
+    var onEdit: ((String, [RouterPointer]) -> Void)? = nil
+    /// Words to draw a ground behind (UTF-16 range in the text), with its fill: router v2's taken settings.
+    var marked: NSRange? = nil
+    var markedFill: NSColor = .clear
 
     private static var role: (CGFloat, CGFloat) { CDS.Density.compact.prose }
 
@@ -204,7 +255,10 @@ struct MentionField: NSViewRepresentable {
         c.store = store
         c.onCommand = onCommand
         c.onSelection = onSelection
+        c.onEdit = onEdit
         model.editor = view
+        view.markedFill = markedFill
+        if view.marked != marked { view.marked = marked }
         // Set only when they change: the text view's font set again lays out its whole storage, on every update (each
         // keystroke's) otherwise.
         let (font, base) = Self.attributes()
@@ -283,6 +337,7 @@ struct MentionField: NSViewRepresentable {
         var appliedFont: NSFont?
         var onCommand: ((Selector) -> Bool)?
         var onSelection: ((NSTextView) -> Void)?
+        var onEdit: ((String, [RouterPointer]) -> Void)?
         /// The text's height at a width, for the text it had then (a pill is one character of it; pills made anew clear it).
         var fits: [Fit: CGFloat] = [:]
         /// While an input method composes and the model changed meanwhile (a prefill): the view's text as the model last
@@ -332,6 +387,7 @@ struct MentionField: NSViewRepresentable {
             if model.pointers != merged.pointers { model.pointers = merged.pointers }
             if model.draft != merged.draft { model.draft = merged.draft }
             show(model, in: view)
+            onEdit?(model.draft, model.pointers)
             if model.caretRequest != nil {
                 model.caretRequest = nil
                 view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
@@ -392,6 +448,7 @@ struct MentionField: NSViewRepresentable {
                 told = (draft, pointers)
                 if model.pointers != pointers { model.pointers = pointers }
                 if model.draft != draft { model.draft = draft }
+                onEdit?(draft, pointers)
             }
         }
 
@@ -412,6 +469,7 @@ struct MentionField: NSViewRepresentable {
             told = (draft, pointers)
             if model.pointers != pointers { model.pointers = pointers }
             if model.draft != draft { model.draft = draft }
+            onEdit?(draft, pointers)
             view.typingAttributes = view.base
             view.invalidateIntrinsicContentSize()
             view.enclosingScrollView?.invalidateIntrinsicContentSize()

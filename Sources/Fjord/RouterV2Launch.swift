@@ -333,10 +333,12 @@ extension RouterV2Model {
 
     /// The words that go to the thread: the draft without the ones taken as settings.
     var message: String {
-        guard let taken else { return draft }
+        guard let taken else { return plainDraft }
         let head = draft[..<taken.lowerBound].trimmingCharacters(in: .whitespaces)
         let tail = draft[taken.upperBound...].trimmingCharacters(in: .whitespaces)
-        return [head, tail].filter { !$0.isEmpty }.joined(separator: " ")
+        // The taken words hold no pill, so the pills keep their order through the cut.
+        let joined = [head, tail].filter { !$0.isEmpty }.joined(separator: " ")
+        return mentions.isEmpty ? joined : RouterV2Mentions.plain(joined, marks: mentions).text
     }
 
     /// The model and the effort (and the access or plan mode when they aren't T3's default): after a new thread's words

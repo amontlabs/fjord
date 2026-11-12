@@ -242,11 +242,16 @@ import Testing
     @Test func typedWordsGoWithTheReadTheRowShowedAndTheReadWithTheMentions() {
         let (model, source) = recorded()
         model.select(nil)
-        model.mentions = [RouterMention(range: 0..<9, pointer: .t3("t3-thread:\(ID.bar)"), name: "Bar count")]
-        let read = typed(model, "push it and open the PR", to: .thread(ID.bar))
+        // A project pill in the text: the read gets "@fjord" in the words and the pill by its place in them.
+        let pill = RouterMention(range: 0..<1, pointer: .project("/code/fjord"), name: "fjord")
+        model.edit(MentionText.markString + " push it and open the PR", marks: [pill])
+        let words = "@fjord push it and open the PR"
+        let mention = RouterMention(range: 0..<6, pointer: .project("/code/fjord"), name: "fjord")
+        #expect(source.calls.contains(.read(words, selected: nil, mentions: [mention])))
+        let read = RouterV2Read(draft: words, places: [.thread(ID.bar)], sure: true)
+        model.apply(.read(read))
         model.send()
-        #expect(source.calls.contains(.read("push it and open the PR", selected: nil, mentions: model.mentions)))
-        #expect(source.sends == [RouterV2Outgoing(thread: ID.bar, words: "push it and open the PR", kind: .words,
+        #expect(source.sends == [RouterV2Outgoing(thread: ID.bar, words: words, kind: .words,
                                                   steering: false, queue: false, read: read)])
     }
 

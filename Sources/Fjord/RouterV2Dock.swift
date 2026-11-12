@@ -46,6 +46,21 @@ struct RouterV2Dock: View {
     }
 }
 
+// MARK: - The @ field
+
+private struct RouterV2ComposerKey: EnvironmentKey {
+    static let defaultValue: RouterV2ComposerHost? = nil
+}
+
+extension EnvironmentValues {
+    /// The store and the text model of the Router's @ field. With it set the composer is a `MentionField` (the @ list over
+    /// the caret, pills in the text); without it, and in a still or while the script types, it draws as the demo did.
+    var routerV2Composer: RouterV2ComposerHost? {
+        get { self[RouterV2ComposerKey.self] }
+        set { self[RouterV2ComposerKey.self] = newValue }
+    }
+}
+
 // MARK: - Composer
 
 /// The Router's composer card, as `RouterComposer` draws it, with no strip above it: the placeholder names what Return
@@ -55,6 +70,13 @@ struct RouterV2Composer: View {
     let model: RouterV2Model
     @FocusState private var focused: Bool
     @State private var hovering = false
+    /// The @ field: whether its text view has the keyboard, what asks it to take it, and the @ list's place.
+    @State private var fieldFocused = false
+    @State private var fieldTick = 0
+    @State private var mentionAt: CGPoint?
+    @State private var listHeight: CGFloat = 0
+    @State private var cardWidth: CGFloat = 0
+    @Environment(\.routerV2Composer) private var host
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -62,7 +84,7 @@ struct RouterV2Composer: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: C.radius, style: .continuous)
-        let hot = focused || hovering || model.scripted
+        let hot = focused || fieldFocused || hovering || model.scripted
         let ring = contrast == .increased ? CDS.Text.primary.opacity(0.5) : hot ? C.ringHot : C.ring
         ZStack(alignment: .bottomTrailing) {
             field
@@ -74,12 +96,24 @@ struct RouterV2Composer: View {
         }
         .background(shape.fill(CDS.Surface.s3))
         .overlay(shape.strokeBorder(ring, lineWidth: 1))
-        .bakedShadow(focused || model.scripted ? C.dropFocus : C.drop, .rounded(C.radius), radius: 10, y: 4)
+        .bakedShadow(focused || fieldFocused || model.scripted ? C.dropFocus : C.drop, .rounded(C.radius), radius: 10, y: 4)
         .contentShape(shape)
         .onHover { hovering = $0 }
-        .onTapGesture { focused = true }
-        .onChange(of: model.focusTick) { if !model.scripted { focused = true } }
-        .onAppear { if !model.scripted, !model.still { focused = true } }
+        .onTapGesture { ask() }
+        .onChange(of: model.focusTick) { if !model.scripted { ask() } }
+        .onAppear { if !model.scripted, !model.still { ask() } }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardWidth = $0 }
+        // The @ list hangs over the card, so it never pushes the dock about.
+        .overlay(alignment: .topLeading) { mentionList }
+        .zIndex(1)
+        .modifier(RouterV2Pills(model: model, host: viewHost))
+    }
+
+    /// The @ field: in a still, or while the script types, the field is the demo's.
+    private var viewHost: RouterV2ComposerHost? { model.still || model.scripted ? nil : host }
+
+    private func ask() {
+        if viewHost != nil { fieldTick &+= 1 } else { focused = true }
     }
 
     private var field: some View {
@@ -98,7 +132,7 @@ struct RouterV2Composer: View {
             .opacity(empty ? 1 : 0)
             .animation(empty ? Motion.fade.resolved(reduce: reduce)?.delay(RouterV2.swapOut) : nil, value: empty)
             .allowsHitTesting(false).accessibilityHidden(true)
-            if let taken = model.taken {
+            if let taken = model.taken, viewHost == nil {
                 // The words the Router took as the new thread's settings: on an accent ground.
                 RouterV2TakenUnderlay(draft: model.draft, taken: taken)
                     .transition(.opacity)
@@ -106,6 +140,8 @@ struct RouterV2Composer: View {
             if model.still {
                 // A still has no field to type in: its words alone (a field there draws them selected).
                 Text(model.draft).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
+            } else if let host = viewHost {
+                mentionField(host)
             } else {
                 TextField("", text: Binding(get: { model.draft }, set: { model.setDraft($0) }), axis: .vertical)
                     .textFieldStyle(.plain)
@@ -130,6 +166,58 @@ struct RouterV2Composer: View {
         .motion(.fade, value: model.held)
     }
 
+    /// The @ field in the card's text: pills inline, and the words taken as settings on their accent ground (drawn by the
+    /// text view itself, so it moves with the text).
+    private func mentionField(_ host: RouterV2ComposerHost) -> some View {
+        let d = CDS.Density.compact
+        let taken = model.taken.map { NSRange($0, in: model.draft) }
+        return MentionField(store: host.store, model: host.text, maxHeight: 8 * d.prose.1, editable: true, focusTick: fieldTick,
+                            onFocus: { now in
+                                fieldFocused = now
+                                host.text.composerFocused = now
+                            },
+                            label: "Message",
+                            hint: "Return sends, Option Return queues after the turn, Shift Return starts a new line, @ names a thread or a project",
+                            onSelection: { mentionAt = Self.mentionPoint($0) },
+                            onEdit: { text, pointers in model.edit(text, marks: RouterV2Mentions.marks(text, pointers: pointers, name: host.store.pointerName),
+                                                                  projectName: { RouteTarget.projectName($0, store: host.store) }) },
+                            marked: taken, markedFill: NSColor(CDS.Text.accent.opacity(RouterV2.Launch.takenFill)))
+            .opacity(model.held ? 0.55 : 1)
+            .accessibilityLabel("Message")
+    }
+
+    /// The @ list over the caret, as the old composer hung it.
+    @ViewBuilder private var mentionList: some View {
+        if let host = viewHost {
+            let suggestions = host.text.suggestions(host.store)
+            if !suggestions.isEmpty {
+                let at = mentionAt ?? CGPoint(x: C.pad + C.textInset, y: C.pad + (C.row - 20) / 2)
+                let place = MentionList.place(caretX: at.x, available: cardWidth)
+                MentionList(suggestions: suggestions, index: host.text.mentionIndex, width: place.width, store: host.store,
+                            hover: { host.text.mentionIndex = $0 }) { host.text.pickMention($0) }
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                    .offset(x: place.x, y: at.y - C.mentionOffset - listHeight)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    /// Where the @ word before the caret starts, in the card: x of its "@", y of its line's top.
+    private static func mentionPoint(_ editor: NSTextView) -> CGPoint? {
+        guard let layout = editor.layoutManager, let container = editor.textContainer else { return nil }
+        let text = editor.string as NSString
+        let caret = editor.selectedRange().location
+        guard caret != NSNotFound, caret <= text.length else { return nil }
+        let at = text.range(of: "@", options: .backwards, range: NSRange(location: 0, length: caret))
+        let char = at.location == NSNotFound ? max(0, caret - 1) : at.location
+        guard text.length > 0 else { return nil }
+        let glyph = layout.glyphIndexForCharacter(at: min(char, text.length - 1))
+        let rect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        let shown = editor.visibleRect.origin
+        return CGPoint(x: C.pad + C.textInset + rect.minX - shown.x, y: C.pad + (C.row - 20) / 2 + rect.minY - shown.y)
+    }
+
     private var sendButton: some View {
         let held = model.held
         return Button { model.send() } label: {
@@ -145,6 +233,38 @@ struct RouterV2Composer: View {
         .motion(.fade, value: held)
         .accessibilityLabel(held ? "Sending once Fjord knows where" : "Send")
         .help("Return sends · ⌥Return queues after this turn · ⇧Return for a new line")
+    }
+}
+
+/// Keeps the page's draft and the @ field's text the one text. Typing reaches the page in the keystroke's own turn
+/// (`MentionField.onEdit`); this carries what the field's model gets some other way (a pick from the @ list, an
+/// "Open in Router" prefill) to the page, and what the page does to its draft (Return empties it, a failed send or a
+/// cancelled queued message puts words back) to the field.
+private struct RouterV2Pills: ViewModifier {
+    let model: RouterV2Model
+    let host: RouterV2ComposerHost?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { pull() }
+            .onChange(of: model.draft) { pull() }
+            .onChange(of: host?.text.draft) { push() }
+            .onChange(of: host?.text.pointers) { push() }
+    }
+
+    private func push() {
+        guard let host else { return }
+        let text = host.text
+        guard text.draft != model.draft else { return }
+        model.edit(text.draft, marks: RouterV2Mentions.marks(text.draft, pointers: text.pointers, name: host.store.pointerName),
+                   projectName: { RouteTarget.projectName($0, store: host.store) })
+    }
+
+    private func pull() {
+        guard let host, host.text.draft != model.draft else { return }
+        // Words from the page carry no pills.
+        host.text.pointers = []
+        host.text.draft = model.draft.replacingOccurrences(of: MentionText.markString, with: "")
     }
 }
 

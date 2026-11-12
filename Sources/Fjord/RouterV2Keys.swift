@@ -13,24 +13,42 @@ struct RouterV2Key {
     /// The character the key gives, without its modifiers.
     var characters: String?
     var isRepeat = false
+    /// The composer's caret is at the very start of its text, with nothing selected.
+    var caretAtStart = false
 }
+
+/// What the keys need of the composer when its field is the @ field (`routerV2Composer`): its suggestions and the text
+/// they pick into.
+typealias RouterV2ComposerHost = (store: Store, text: RouterModel)
 
 @MainActor
 enum RouterV2Keys {
-    /// Whether the key was handled.
-    static func key(_ event: NSEvent, model: RouterV2Model) -> Bool {
+    /// Whether the key was handled. `composer`: set when the composer's field is the @ field.
+    static func key(_ event: NSEvent, model: RouterV2Model, composer: RouterV2ComposerHost? = nil) -> Bool {
         let responder = event.window?.firstResponder
         // An input method composing: its keys are its own.
         if (responder as? NSTextView)?.hasMarkedText() == true { return false }
         let flags = event.modifierFlags.intersection(Shortcut.relevant)
-        let key = RouterV2Key(code: Int(event.keyCode), flags: flags,
+        let field = responder as? MentionTextView
+        var key = RouterV2Key(code: Int(event.keyCode), flags: flags,
                               characters: flags.subtracting(.shift).isEmpty ? event.characters : event.charactersIgnoringModifiers,
                               isRepeat: event.isARepeat)
-        return handle(key, model: model, inField: responder is NSText)
+        if let field { key.caretAtStart = field.selectedRange() == NSRange(location: 0, length: 0) }
+        // "Key" to the commit of what the key changed, "Key work" to this handler's return (docs: the budgets).
+        if RouterSignposts.key({ handle(key, model: model, inField: responder is NSText, composer: composer) }) { return true }
+        // The @ field is a text view, not a field editor: ⇧Return is a new line there, and a Tab is never a tab character.
+        if let field {
+            if (key.code == kVK_Return || key.code == kVK_ANSI_KeypadEnter), flags == .shift {
+                field.insertNewlineIgnoringFieldEditor(nil)
+                return true
+            }
+            if key.code == kVK_Tab, flags.subtracting(.shift).isEmpty { return true }
+        }
+        return false
     }
 
     /// `inField`: the composer has the keyboard (its text view types what isn't handled here).
-    static func handle(_ key: RouterV2Key, model: RouterV2Model, inField: Bool) -> Bool {
+    static func handle(_ key: RouterV2Key, model: RouterV2Model, inField: Bool, composer: RouterV2ComposerHost? = nil) -> Bool {
         let code = key.code
         let flags = key.flags
         let letter = key.characters?.lowercased()
@@ -68,6 +86,25 @@ enum RouterV2Keys {
                 }
             }
             return true
+        }
+
+        // The @ list over the caret comes first: ↑↓ move in it, Return or Tab picks, Esc closes it.
+        if inField, let composer, composer.text.mention != nil, flags.isEmpty {
+            let suggestions = composer.text.suggestions(composer.store)
+            if !suggestions.isEmpty {
+                if code == kVK_UpArrow || code == kVK_DownArrow {
+                    composer.text.moveMention(down: code == kVK_DownArrow, count: suggestions.count)
+                    return true
+                }
+                if isReturn || code == kVK_Tab {
+                    if !key.isRepeat { composer.text.pickMention(suggestions[min(composer.text.mentionIndex, suggestions.count - 1)]) }
+                    return true
+                }
+                if code == kVK_Escape {
+                    composer.text.dismissMention()
+                    return true
+                }
+            }
         }
 
         if flags == .command {
@@ -133,6 +170,16 @@ enum RouterV2Keys {
             // Return on an open menu closes it.
             if isReturn, flags.isEmpty, model.launchMenu != nil {
                 model.leaveLaunch()
+                return true
+            }
+        }
+
+        // ⌫ with the caret at the start of the draft drops the place the draft was given (a thread pill, or one picked
+        // from the row's menu).
+        if inField, !empty, code == kVK_Delete, flags.isEmpty, key.caretAtStart, model.explicit != nil {
+            if let pill = model.explicitPill, let editor = composer?.text.editor {
+                if editor.removePill(at: pill) { return true }
+            } else if model.dropExplicit() {
                 return true
             }
         }

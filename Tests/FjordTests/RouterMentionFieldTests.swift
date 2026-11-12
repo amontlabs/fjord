@@ -324,4 +324,75 @@ import Testing
         let decoded = try JSONDecoder().decode(RouterDecision.self, from: Data(entry.utf8))
         #expect(decoded.mentions == nil && decoded.triggerText == "@x hi")
     }
+
+    // MARK: Router v2's field
+
+    private let mark = MentionText.markString
+
+    @Test func aThreadPillBecomesTheExplicitPlaceAndTakesItAwayWithItself() {
+        let model = RouterV2Demo.records()
+        let pill = RouterMention(range: 0..<1, pointer: .t3("t3-thread:\(RouterV2Demo.ID.bar)"), name: "Bar count")
+        model.edit(mark + " push it", marks: [pill])
+        #expect(model.explicit == .thread(RouterV2Demo.ID.bar))
+        #expect(model.destination == .place(.thread(RouterV2Demo.ID.bar), mode: "starts a new turn"))
+        // Nothing is read for it, and the words go without the address.
+        #expect(!model.reading)
+        #expect(model.plainDraft == "push it")
+        // The pill taken out of the text: the place goes with it.
+        model.edit("push it", marks: [])
+        #expect(model.explicit == nil)
+    }
+
+    @Test func aProjectPillStaysInTheWordsAsItsNameAndIsReadWithTheMention() {
+        let model = RouterV2Demo.records()
+        let pill = RouterMention(range: 3..<4, pointer: .project("/code/lcu"), name: "lcu")
+        model.edit("in \(mark) add a flag", marks: [pill])
+        #expect(model.explicit == nil && model.plainDraft == "in @lcu add a flag")
+        #expect(RouterV2Mentions.plain(model.draft, marks: model.mentions).mentions
+            == [RouterMention(range: 3..<7, pointer: .project("/code/lcu"), name: "lcu")])
+    }
+
+    @Test func aNewThreadPillIsAnExplicitNewThreadInThatProject() {
+        let model = RouterV2Demo.records()
+        let pill = RouterMention(range: 0..<1, pointer: .t3("new_thread:p1"), name: "New thread in silo")
+        model.edit(mark + " write the changelog", marks: [pill], projectName: { $0 == "p1" ? "silo" : $0 })
+        #expect(model.explicit == .newThread(project: "silo"))
+        #expect(model.launchShown)
+    }
+
+    @Test func backspaceAtTheStartTakesTheThreadPillOutOfTheText() {
+        let v = view()
+        v.makePill = { pointer in
+            MentionAttachment(pointer: pointer, look: MentionLook(label: "Bar count", symbol: "text.bubble", tint: nil),
+                              font: MentionField.attributes().0)
+        }
+        let text = NSMutableAttributedString(attachment: v.makePill(.t3("t3-thread:bar"))!)
+        text.append(NSAttributedString(string: " push it", attributes: v.base))
+        v.textStorage?.setAttributedString(text)
+        #expect(v.removePill(at: 0))
+        #expect(v.string == "push it" && MentionText.serialize(v.attributedString()).pointers.isEmpty)
+        #expect(!v.removePill(at: 0))
+    }
+
+    @Test func theTakenWordsKeepTheirPlaceWhenTypingBeforeThem() {
+        let model = RouterV2Demo.records()
+        model.select(nil)
+        let pill = RouterMention(range: 0..<1, pointer: .project("/code/silo"), name: "silo")
+        let aside = "(use opus medium)"
+        model.edit(mark + " write the changelog " + aside, marks: [pill])
+        model.choose(.newThread(project: "silo"))
+        model.apply(.read(RouterV2Read(draft: model.plainDraft, places: [.newThread(project: "silo")], sure: true,
+                                       launch: RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium), taken: aside)))
+        func taken() -> String? { model.taken.map { String(model.draft[$0]) } }
+        #expect(taken() == aside)
+        // The view's text and the model's draft share offsets (a pill is one character): the same words in the view.
+        let range = NSRange(model.taken!, in: model.draft)
+        #expect((model.draft as NSString).substring(with: range) == aside)
+        model.edit(mark + " now write the changelog " + aside, marks: [pill])
+        #expect(taken() == aside)
+        #expect((model.message) == "@silo now write the changelog")
+        let v = view()
+        v.marked = NSRange(model.taken!, in: model.draft)
+        #expect(v.marked?.length == aside.count)
+    }
 }
