@@ -49,6 +49,32 @@ import Testing
         #expect(toolOnly.working?.text == "ls seeds")
     }
 
+    // Shapes of T3's projection (Orchestration V2 `WireProjection`): a Bash call is a command_execution with only its
+    // command (the tool's `description` input is not kept); Read carries a title; other tools are dynamic_tool with a summarized input.
+    @Test func aToolsOwnDescriptionBeatsNarrationAndACommandIsLast() {
+        let say1 = say("a", "Looking at the reader.", ordinal: 1)
+        let bash = command("c", "python3 - <<'EOF'\nprint(1)\nEOF", ordinal: 2)
+        let read = F.item("r", type: "dynamic_tool", ordinal: 2, status: "running",
+                          ["toolName": "Read", "title": "Read /a/RouterDetail.swift", "input": ["file_path": "/a/RouterDetail.swift"]])
+        let withDesc = F.item("d", type: "command_execution", ordinal: 2, status: "running",
+                              ["input": "grep -n \"projectName(of\" Sources", "description": "Find where project names are read"])
+        #expect(RouterDetail.make(projection(items: [say1, read]), now: now).working?.text == "Read /a/RouterDetail.swift")
+        #expect(RouterDetail.make(projection(items: [say1, withDesc]), now: now).working?.text == "Find where project names are read")
+        let narrated = RouterDetail.make(projection(items: [say1, bash]), now: now).working
+        #expect(narrated?.text == "Looking at the reader." && narrated?.mono == false)
+        let bare = RouterDetail.make(projection(items: [bash]), now: now).working
+        #expect(bare?.text == "python3 - <<'EOF'" && bare?.mono == true)
+    }
+
+    @Test func aToolWithNoDescriptionGetsAPlainLabelOverItsInput() {
+        let grep = F.item("g", type: "dynamic_tool", ordinal: 1, status: "running",
+                          ["toolName": "Grep", "input": ["pattern": "projectName(of", "path": "/a/Sources"]])
+        let w = RouterDetail.make(projection(items: [grep]), now: now).working
+        #expect(w?.text == "Grep · projectName(of" && w?.mono == false)
+        let bare = F.item("t", type: "dynamic_tool", ordinal: 1, status: "running", ["toolName": "Glob", "input": [:]])
+        #expect(RouterDetail.make(projection(items: [bare]), now: now).working?.text == "Glob")
+    }
+
     @Test func aCommandIsMonoAndAnEditIsNot() {
         #expect(RouterDetail.make(projection(items: [command("c", "swift test\n--filter X", ordinal: 1)]), now: now).working
             == .init(text: "swift test", mono: true, since: RouterDetail.make(projection(), now: now).working!.since))

@@ -36,6 +36,8 @@ struct RouterDetail: Equatable {
     var lastStep: String?
     /// Its agent takes words mid-turn.
     var steers = true
+    /// Its subagents, background commands and waits.
+    var activity = RouterV2Activity()
 
     /// Reads a projection. `now` stands in for a missing run start.
     static func make(_ p: T3Projection, now: Date) -> RouterDetail {
@@ -92,6 +94,7 @@ struct RouterDetail: Equatable {
         }
 
         d.steers = ThreadSender.steers(session: p.capabilities, driver: p.thread.providerInstanceId)
+        d.activity = RouterV2Activity.make(p)
         return d
     }
 
@@ -105,24 +108,56 @@ struct RouterDetail: Equatable {
         }
     }
 
-    /// The running to-do step, else the first sentence of the agent's latest words in this run, else the running tool or
-    /// command (else the last one it ran). "starting" before the run has an item.
+    /// What the line says, first match wins: the running to-do step; the running tool's own description (T3's `title`, or a
+    /// `description` the item carries); the first sentence of the agent's latest words in this run; a plain label from the
+    /// tool kind and its main object; a command in mono, first line only, as the last resort. "starting" before any item.
     private static func working(_ items: [T3TurnItem], steps: [RouterV2Thread.Step], messages: [T3Message], since: Date) -> Working {
-        if let step = steps.first(where: { $0.state == .running }) {
-            return Working(text: sentence(step.text), mono: false, since: since)
-        }
+        func plain(_ t: String) -> Working { Working(text: t, mono: false, since: since) }
+        if let step = steps.first(where: { $0.state == .running }) { return plain(sentence(step.text)) }
+        func live(_ i: T3TurnItem) -> Bool { i.status == "running" || i.status == "waiting" }
+        let tool = items.last(where: { ThreadWork.isTool($0) && !isThinking($0) && live($0) })
+        if let tool, let own = ownDescription(tool) { return plain(own) }
         for item in items.reversed() {
             guard case .assistantMessage(let id, var text, _) = item.detail else { continue }
             if text.isEmpty { text = messages.first { $0.id == id }?.text ?? "" }
             let first = sentence(text)
-            if !first.isEmpty { return Working(text: first, mono: false, since: since) }
+            if !first.isEmpty { return plain(first) }
         }
-        func live(_ i: T3TurnItem) -> Bool { i.status == "running" || i.status == "waiting" }
-        if let tool = items.last(where: { ThreadWork.isTool($0) && live($0) }) ?? items.last(where: ThreadWork.isTool) {
-            if case .commandExecution = tool.detail { return Working(text: ThreadWork.describe(tool), mono: true, since: since) }
-            return Working(text: ThreadWork.describe(tool), mono: false, since: since)
+        if let tool = tool ?? items.last(where: { ThreadWork.isTool($0) && !isThinking($0) }) {
+            if let own = ownDescription(tool) { return plain(own) }
+            if case .commandExecution(let input, _, _) = tool.detail {
+                let line = firstLine(input)
+                return line.isEmpty ? plain("Running a command") : Working(text: line, mono: true, since: since)
+            }
+            return plain(plainLabel(tool))
         }
-        return Working(text: RouterV2.Copy.starting, mono: false, since: since)
+        if let thinking = items.last(where: isThinking) { return plain(ThreadWork.describe(thinking)) }
+        return plain(RouterV2.Copy.starting)
+    }
+
+    /// The words a tool call carries about itself: T3's title (a read, a search, a skill), else a `description` on the item
+    /// or in its input (Claude's Bash tool). T3's projection keeps neither for a plain Bash call, which has only its command.
+    private static func ownDescription(_ i: T3TurnItem) -> String? {
+        for c in [i.title, i.raw.str("description"), i.raw["input"]?.str("description")] {
+            if let c, case let t = sentence(c), !t.isEmpty { return t }
+        }
+        return nil
+    }
+
+    /// A short label from the tool's kind and its main object, never from the command's text.
+    private static func plainLabel(_ i: T3TurnItem) -> String {
+        guard case .dynamicTool(let name) = i.detail else { return ThreadWork.describe(i) }
+        if name.isEmpty { return "Working" }
+        let input = i.raw["input"]
+        let object = ["file_path", "pattern", "query", "url", "path"].lazy.compactMap { input?.str($0) }.first
+        let target = object.map { ($0 as NSString).lastPathComponent }
+        return target.map { $0.isEmpty ? name : "\(name) · \($0)" } ?? name
+    }
+
+    private static func firstLine(_ text: String, cap: Int = 120) -> String {
+        guard let line = text.split(whereSeparator: \.isNewline).lazy
+            .map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }) else { return "" }
+        return line.count > cap ? String(line.prefix(cap - 1)) + "…" : line
     }
 
     private static func isThinking(_ i: T3TurnItem) -> Bool { if case .reasoning = i.detail { true } else { false } }
