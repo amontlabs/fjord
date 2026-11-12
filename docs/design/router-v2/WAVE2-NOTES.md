@@ -23,3 +23,10 @@
 ## Track 8 (composer, dock, keys) — c6bf9a8a fdbbc311 479577b2 db35e0ab
 - 9a: set `routerV2Composer` env (store + RouterModel) so the composer is `MentionField`; pass `composer:` into `RouterV2Keys.key(event, model:, composer:)` from the window's key monitor; set `routerV2Waiting` env, fill `RouterV2Waiting.items` (unattended actions with no place), wire its `pick`.
 - Live-only checks for wave 3: caret-anchored @ list position, IME in the new field, ⇧Return, new-thread pill vs real project names.
+
+## Track 4 (verdicts) — 1b601827 788b165a 5298cf78 cedf3faa
+- `ClaudeStream` (streamed claude -p, PartialJSON field-by-field), `RouterVerdicts` (ask/cancel/isAsked/onEvent, cap 4, purpose()), `ProjectPurposes` (9b wires into decider block B), eval export `evals/router/verdict/export.py` + `VerdictEvalDump` (FJORD_VERDICT_EVAL_DIR, FJORD_VERDICT_EVAL_RUN=1); 169 real cases dumped.
+- MISMATCH: track 3's RouterRecords defines its own VerdictAsk/VerdictStep(+named)/Verdict. Wave 2 maps VerdictAsk(thread+RouterDetail) → RouterVerdictRequest and events back (name call `.done` → `.named`), or aligns the types.
+- Latency: state 2.3 s alone, 4.7–5.1 s for finished turns with 4 at once (Haiku 5.5 thinks ~150 tokens; no flag to stop it). Plan said ~1.9 s. Options for wave 2: smaller input for finished turns, ask-only first pass, or a faster model by eval.
+- Ask only once the reply is loaded (same fingerprint with new input is ignored). `.words(done:true)` precedes `.done` by 0.3–0.5 s.
+- Seam wanted: `RouterTools.redacted` nonisolated (RouterMCP.swift) so input builds fully off main.
