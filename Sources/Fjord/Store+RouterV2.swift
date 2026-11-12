@@ -20,7 +20,7 @@ extension Store {
         records.rows = { [weak self] in self?.t3.store.shell ?? T3ShellState() }
         records.projectName = { [weak self] t in
             guard let self, t.folder != nil else { return nil }
-            return self.folderName(t.folderKey)
+            return self.projectName(of: t)
         }
         records.pullRequests = { [weak self] t, reply in self?.routerPullRequests.states(for: t, reply: reply) ?? RouterRecords.linked(t) }
         // The model calls run only with the Router on, and never in a demo.
@@ -181,12 +181,17 @@ extension Store {
         routerNoticePrefix + BriefTarget(project: n.project, thread: n.thread).key
     }
 
-    /// A project as a banner names it: its folder's name, else T3's title.
+    /// A project as a banner names it: T3's title, else its folder's name.
     func routerProjectName(_ project: String) -> String {
         if let p = t3.store.shell.projects[project] {
-            let name = folderName(p.workspaceRoot)
-            return name.isEmpty ? p.title : name
+            return p.title.nonEmpty ?? folderName(p.workspaceRoot)
         }
         return project
+    }
+
+    /// A thread's project as the owner named it in T3, which can differ from its folder's name; the folder's name only
+    /// when T3 doesn't give one.
+    func projectName(of t: AgentThread) -> String {
+        t3.store.shell.projects[t.projectID]?.title.nonEmpty ?? folderName(t.folderKey)
     }
 }
