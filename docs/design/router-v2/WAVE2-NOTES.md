@@ -55,3 +55,8 @@
 - For 9a: construct `ProjectPurposes(verdicts:url: ProjectPurposes.live(paths))` → `store.routerPurposes`, `keep(only:)` + `flush()` on quit; window's `pickBriefEntry` handler → `routerPage.select(.line(thread))`.
 - Wave 3: delete remaining RouterBriefs readers (RouterComposer, RouterKeys, RouterView, RouterDrawer, Playground, AppWindowShots, AppSidebar, AppWindow, DemoBriefs) and change pickBriefEntry's type; RouterV2WiringTests; HubTests coverage for RouterRecordLine; RouterRunContext heading wording.
 - Open: a project's purpose stays empty while any live thread lacks a readable first ask.
+
+## Decider eval fixes — a6f3ab8b (eval) e8f5fe73 0cc83bc8
+- Brackets cut with the aside; "don't edit anything" → approval-required; Sonnet only when Jev is unsure, ≥12 chars and ≥10 new chars since the last start (Jev 300 ms, Sonnet 600 ms).
+- 9a: in `makeRouterReader()` set `reader.log = <store's DeciderLog>` (typing pause/start/skip/cancel/done lines).
+- Watch live: new work pushed into old threads 1.5% (was 0.7%); refit the idle bar after ~200 live decisions (`refit.py`).
