@@ -285,5 +285,6 @@ extension RouterDispatcher {
                                                     outcome: .started, note: nil, at: Date())
             if $0.outcome == .pending { $0.outcome = .done }
         }
+        report(job.id, .taken)
     }
 }

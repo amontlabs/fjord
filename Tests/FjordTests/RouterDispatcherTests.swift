@@ -138,6 +138,38 @@ import Testing
         #expect(f.sent.map(\.mode) == [.queue] && f.sent.first?.unattended == false)
     }
 
+    @Test func aSendToAThreadSaysOnceThatT3TookIt() async {
+        let (_, d, f) = setup()
+        var events: [(UUID, RouterDispatcher.SendEvent)] = []
+        d.onSend = { events.append(($0, $1)) }
+        let id = d.submit("use postgres", context: reply("th-login"))
+        await finish(f, id)
+        #expect(events.count == 1 && events.first?.0 == id && events.first?.1 == .taken)
+    }
+
+    @Test func aSendThatDoesNotGoSaysWhyOnceAndNeverTaken() async throws {
+        let (_, d, f) = setup()
+        var events: [(UUID, RouterDispatcher.SendEvent)] = []
+        d.onSend = { events.append(($0, $1)) }
+        let sent = d.effects.send
+        d.effects.send = { _, _ in throw ThreadSendFailure("T3 said no") }
+        _ = sent
+        let id = d.submit("use postgres", context: reply("th-login"))
+        await finish(f, id)
+        #expect(events.count == 1 && events.first?.0 == id)
+        guard case .refused(let reason, let offline)? = events.first?.1 else { Issue.record("not refused"); return }
+        #expect(reason == "T3 said no" && !offline)
+    }
+
+    @Test func aSendToAThreadT3NoLongerListsIsReportedRefused() async {
+        let (_, d, f) = setup()
+        var events: [RouterDispatcher.SendEvent] = []
+        d.onSend = { events.append($1) }
+        let id = d.submit("ship it", context: reply("th-gone"))
+        await finish(f, id)
+        #expect(events == [.refused(reason: "Not sent: that thread isn't in T3 anymore", offline: false)])
+    }
+
     @Test func aReplyToAThreadT3NoLongerListsIsRefusedNotSentElsewhere() async {
         let (s, d, f) = setup()
         let id = d.submit("ship it", context: reply("th-gone"))

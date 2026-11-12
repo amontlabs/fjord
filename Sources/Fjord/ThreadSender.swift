@@ -121,6 +121,9 @@ extension RouterDecision {
 }
 
 extension Store {
+    /// T3 can't be reached now (not connected): a refused send says so, and only while it is true.
+    var t3Away: Bool { requestSender == nil && !routerIsPretend && t3.store.connection != .connected }
+
     /// The driver of a thread's agent, for what its provider session hasn't said yet.
     func threadSteers(_ id: String) -> Bool {
         ThreadSender.steers(session: t3.store.projections[id]?.capabilities, driver: threads[id]?.provider ?? "")

@@ -129,6 +129,14 @@ struct RouterAskBack: Identifiable, Equatable {
     /// with your words.
     enum RequestAnswer: Sendable { case answers([String: T3Answer]), plan(PlanDecision), decline(String) }
 
+    /// What a send to a thread came to.
+    enum SendEvent: Equatable {
+        /// T3 took it: the message (or the answer) is in.
+        case taken
+        /// It didn't go. `offline`: T3 was away, so the reason is only true while it still is.
+        case refused(reason: String, offline: Bool)
+    }
+
     /// Asks waiting for a pick, oldest first.
     private(set) var askBacks: [RouterAskBack] = []
     /// How far each run under way is, by its entry in the log ("finding where it goes", "sending"…).
@@ -152,6 +160,11 @@ struct RouterAskBack: Identifiable, Equatable {
     @ObservationIgnored var configure: ((RouterTools) -> Void)?
     /// A run is over (tests wait on it).
     @ObservationIgnored var onFinish: ((UUID) -> Void)?
+    /// What became of each entry's send to a thread, once: T3 took it, or it didn't go (Router v2's pending sends end on
+    /// this). Called on the main actor, after the entry's own state is updated.
+    @ObservationIgnored var onSend: ((UUID, SendEvent) -> Void)?
+    /// The entries whose send was reported (`onSend`), until they end.
+    @ObservationIgnored private var reported: Set<UUID> = []
     @ObservationIgnored var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored var runTools: [UUID: RouterTools] = [:]
     /// Jev's questions (tests answer for him); else `RouterTools.chooser`, else TypeSafe with your key.
@@ -403,6 +416,7 @@ struct RouterAskBack: Identifiable, Equatable {
         live[job.id] = nil
         tasks[job.id] = nil
         runTools[job.id] = nil
+        reported.remove(job.id)
         // Waiting for your pick is not over; anything else not settled is done.
         if !askBacks.contains(where: { $0.id == job.id }) {
             store?.updateDecision(job.id) { if $0.outcome == .pending { $0.outcome = .done } }
@@ -419,6 +433,13 @@ struct RouterAskBack: Identifiable, Equatable {
     private func fail(_ job: Job, _ reason: String) {
         let first = reason.split(separator: "\n").first.map(String.init) ?? "failed"
         store?.updateDecision(job.id) { $0.add(.failed(RouterDecision.clip(first, 120))) }
+        report(job.id, .refused(reason: first, offline: store?.t3Away ?? false))
+    }
+
+    /// Tells `onSend` once per entry: the first word is the last.
+    func report(_ id: UUID, _ event: SendEvent) {
+        guard reported.insert(id).inserted else { return }
+        onSend?(id, event)
     }
 
     func stage(_ job: Job, _ text: String) { progress[job.id] = text }
@@ -639,6 +660,7 @@ struct RouterAskBack: Identifiable, Equatable {
                     stage(job, decision.approve ? "approving" : "sending it back")
                     _ = try await effects.answer(job.tools, t, .plan(decision), snapshot)
                     note(job, .answered(thread: title), session: session, thread: t)
+                    report(job.id, .taken)
                     return
                 }
             case .approval:
@@ -647,6 +669,7 @@ struct RouterAskBack: Identifiable, Equatable {
                     stage(job, "declining")
                     _ = try await effects.answer(job.tools, t, .decline(said), snapshot)
                     note(job, .answered(thread: title), session: session, thread: t)
+                    report(job.id, .taken)
                     return
                 }
             case .question(let questions):
@@ -661,6 +684,7 @@ struct RouterAskBack: Identifiable, Equatable {
                     stage(job, "answering")
                     _ = try await effects.answer(job.tools, t, .answers(answers), snapshot)
                     note(job, .answered(thread: title), session: session, thread: t)
+                    report(job.id, .taken)
                     return
                 }
             }
@@ -678,6 +702,7 @@ struct RouterAskBack: Identifiable, Equatable {
             $0.delivered = sent
             if let why = sent.note { $0.note = why }
         }
+        report(job.id, .taken)
     }
 
     /// A wrong send to a thread: asked again with that place left out. What was sent there stays (take it back from its entry
