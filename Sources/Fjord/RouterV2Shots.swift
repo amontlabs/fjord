@@ -11,8 +11,32 @@ enum RouterV2Shots {
     static var catalog: [AppWindowShots.Shot] {
         states.flatMap { state in
             [shot(state.name, .aqua, state), shot(state.name + "-dark", .darkAqua, state)]
+        } + screens.flatMap { screen in
+            [shot(screen.name, .aqua, screen), shot(screen.name + "-dark", .darkAqua, screen)]
         }
     }
+
+    /// What the screen around the page draws from the app's store: the History drawer, the setup notice.
+    private struct Screen {
+        let name: String
+        var size = CGSize(width: 1280, height: 960)
+        let compose: (RouterModel, Store) -> Void
+    }
+
+    private static func shot(_ name: String, _ look: NSAppearance.Name, _ screen: Screen) -> AppWindowShots.Shot {
+        AppWindowShots.Shot(name: name, destination: { _ in .router }, size: screen.size, compose: screen.compose,
+                            appearance: look, v2: { RouterV2Demo.records(still: true) })
+    }
+
+    private static let screens: [Screen] = [
+        // The History drawer beside the page (from `RouterV2Screen.sideFrom`), and under it in a narrower window.
+        Screen(name: "v2-drawer", size: CGSize(width: 1600, height: 960)) { _, store in store.routerDrawerOpen = true },
+        Screen(name: "v2-drawer-narrow", size: CGSize(width: 900, height: 960)) { _, store in store.routerDrawerOpen = true },
+        // Claude Code not found: the notice under the title, with Look again.
+        Screen(name: "v2-setup") { model, _ in model.claudeCodeMissing = true },
+        // The Router off: the notice with Turn on.
+        Screen(name: "v2-off") { _, store in store.switchRouter(false) },
+    ]
 
     private struct State {
         let name: String
