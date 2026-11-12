@@ -26,42 +26,70 @@ enum RouterV2LaunchField: Int, CaseIterable, Hashable {
     }
 }
 
-/// One of T3's models, as its picker names it.
+/// One of T3's models, as its picker names it (`server.getConfig`), with what it can be started with.
 struct RouterV2LaunchModel: Equatable, Identifiable {
     /// T3's slug.
     let id: String
     var name: String
     var provider: String
+    /// T3's provider instance it runs on (`modelSelection.instanceId`).
+    var instance: String
+    /// The reasoning efforts it takes, in T3's order (empty: none).
+    var efforts: [RouterV2Launch.Effort]
+    var defaultEffort: RouterV2Launch.Effort?
+    /// The runtime modes its provider supports, from the most supervised to the least.
+    var access: [RouterV2Launch.Access]
 }
 
 /// What a new thread starts with.
 struct RouterV2Launch: Equatable {
-    enum Effort: String, CaseIterable {
-        case low, medium, high, xhigh, max
+    /// A reasoning effort, as T3 names it: T3's lists are the lists, the names below only the ones known by sight.
+    struct Effort: RawRepresentable, Hashable {
+        let rawValue: String
+        init(rawValue: String) { self.rawValue = rawValue }
+
+        static let low = Effort(rawValue: "low"), medium = Effort(rawValue: "medium"), high = Effort(rawValue: "high")
+        static let xhigh = Effort(rawValue: "xhigh"), max = Effort(rawValue: "max")
+        /// Claude's, in order: the demo's lists.
+        static let claude: [Effort] = [.low, .medium, .high, .xhigh, .max]
 
         var label: String {
-            switch self {
-            case .low: "Low"
-            case .medium: "Medium"
-            case .high: "High"
-            case .xhigh: "Extra high"
-            case .max: "Max"
+            switch rawValue {
+            case "low": "Low"
+            case "medium": "Medium"
+            case "high": "High"
+            case "xhigh": "Extra high"
+            case "max": "Max"
+            default: RouterV2Launch.label(rawValue)
             }
         }
     }
 
-    /// T3's runtime modes, from the most supervised to the least, under the names T3's composer gives them.
-    enum Access: String, CaseIterable {
-        case supervised = "approval-required", autoEdits = "auto-accept-edits", auto, full = "full-access"
+    /// A runtime mode, as T3 names it, under the name T3's composer gives it.
+    struct Access: RawRepresentable, Hashable {
+        let rawValue: String
+        init(rawValue: String) { self.rawValue = rawValue }
+
+        static let supervised = Access(rawValue: "approval-required"), autoEdits = Access(rawValue: "auto-accept-edits")
+        static let auto = Access(rawValue: "auto"), full = Access(rawValue: "full-access")
+        /// From the most supervised to the least: the demo's list.
+        static let all: [Access] = [.supervised, .autoEdits, .auto, .full]
 
         var label: String {
-            switch self {
-            case .supervised: "Supervised"
-            case .autoEdits: "Auto-accept edits"
-            case .auto: "Auto"
-            case .full: "Full access"
+            switch rawValue {
+            case "approval-required": "Supervised"
+            case "auto-accept-edits": "Auto-accept edits"
+            case "auto": "Auto"
+            case "full-access": "Full access"
+            default: RouterV2Launch.label(rawValue)
             }
         }
+    }
+
+    /// A name T3 gave that has no label here: its words, the first one capitalised ("on-request" → "On request").
+    static func label(_ raw: String) -> String {
+        let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
     }
 
     var model: String
@@ -76,11 +104,12 @@ struct RouterV2Launch: Equatable {
 
     /// The demo's models: this install's.
     static let demoModels: [RouterV2LaunchModel] = [
-        .init(id: "claude-fable-5-2", name: "Fable 5.2", provider: "Claude"),
-        .init(id: "claude-opus-5-5", name: "Opus 5.5", provider: "Claude"),
-        .init(id: "claude-sonnet-5-5", name: "Sonnet 5.5", provider: "Claude"),
-        .init(id: "claude-haiku-5-5", name: "Haiku 5.5", provider: "Claude"),
-    ]
+        ("claude-fable-5-2", "Fable 5.2"), ("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-5-5", "Sonnet 5.5"),
+        ("claude-haiku-5-5", "Haiku 5.5"),
+    ].map {
+        RouterV2LaunchModel(id: $0.0, name: $0.1, provider: "Claude", instance: "claudeAgent", efforts: Effort.claude,
+                            defaultEffort: .high, access: Access.all)
+    }
 }
 
 /// The settings someone named, and only those: the draft's words as the Router's model read them, or what you set by
@@ -135,14 +164,30 @@ extension RouterV2Model {
         return ask
     }
 
-    /// What the new thread would start with: what you set by hand, else what the draft says, else T3's default.
+    /// What the new thread would start with: what you set by hand, else what the draft says, else T3's default (for
+    /// another model than the default one, that model's default effort). An effort or an access the model doesn't
+    /// take falls back to its default.
     var launch: RouterV2Launch {
         let said = said
-        return RouterV2Launch(model: launchMine.model ?? said.model ?? launchDefault.model,
-                              effort: launchMine.effort ?? said.effort ?? launchDefault.effort,
-                              access: launchMine.access ?? said.access ?? launchDefault.access,
-                              plan: launchMine.plan ?? said.plan ?? launchDefault.plan)
+        let model = launchMine.model ?? said.model ?? launchDefault.model
+        let info = launchModel(model)
+        let fallback = model == launchDefault.model ? launchDefault.effort : info?.defaultEffort ?? launchDefault.effort
+        var effort = launchMine.effort ?? said.effort ?? fallback
+        if let info, !info.efforts.isEmpty, !info.efforts.contains(effort) {
+            effort = info.efforts.contains(fallback) ? fallback : info.defaultEffort ?? info.efforts[0]
+        }
+        var access = launchMine.access ?? said.access ?? launchDefault.access
+        if let info, !info.access.isEmpty, !info.access.contains(access) {
+            access = info.access.contains(launchDefault.access) ? launchDefault.access : info.access[0]
+        }
+        return RouterV2Launch(model: model, effort: effort, access: access, plan: launchMine.plan ?? said.plan ?? launchDefault.plan)
     }
+
+    func launchModel(_ slug: String) -> RouterV2LaunchModel? { launchModels.first { $0.id == slug } }
+
+    /// The efforts and the access the row's model offers (T3's lists for it).
+    private var launchEfforts: [RouterV2Launch.Effort] { launchModel(launch.model)?.efforts ?? [] }
+    private var launchAccess: [RouterV2Launch.Access] { launchModel(launch.model)?.access ?? [] }
 
     /// The row shows a new thread: its settings are there to see and to change.
     var launchShown: Bool {
@@ -175,8 +220,8 @@ extension RouterV2Model {
     func launchChoices(_ field: RouterV2LaunchField) -> [RouterV2LaunchChoice] {
         switch field {
         case .model: launchModels.map { RouterV2LaunchChoice(label: $0.name, detail: $0.provider) }
-        case .effort: RouterV2Launch.Effort.allCases.map { RouterV2LaunchChoice(label: $0.label) }
-        case .access: RouterV2Launch.Access.allCases.map { RouterV2LaunchChoice(label: $0.label) }
+        case .effort: launchEfforts.map { RouterV2LaunchChoice(label: $0.label) }
+        case .access: launchAccess.map { RouterV2LaunchChoice(label: $0.label) }
         case .mode: [RouterV2LaunchChoice(label: "Build"), RouterV2LaunchChoice(label: "Plan")]
         }
     }
@@ -184,8 +229,8 @@ extension RouterV2Model {
     private func index(_ field: RouterV2LaunchField, of launch: RouterV2Launch) -> Int {
         switch field {
         case .model: launchModels.firstIndex { $0.id == launch.model } ?? 0
-        case .effort: RouterV2Launch.Effort.allCases.firstIndex(of: launch.effort) ?? 0
-        case .access: RouterV2Launch.Access.allCases.firstIndex(of: launch.access) ?? 0
+        case .effort: launchEfforts.firstIndex(of: launch.effort) ?? 0
+        case .access: launchAccess.firstIndex(of: launch.access) ?? 0
         case .mode: launch.plan ? 1 : 0
         }
     }
@@ -215,8 +260,8 @@ extension RouterV2Model {
             rolling {
                 switch field {
                 case .model: launchMine.model = launchModels[index].id
-                case .effort: launchMine.effort = RouterV2Launch.Effort.allCases[index]
-                case .access: launchMine.access = RouterV2Launch.Access.allCases[index]
+                case .effort: launchMine.effort = launchEfforts[index]
+                case .access: launchMine.access = launchAccess[index]
                 case .mode: launchMine.plan = index == 1
                 }
             }

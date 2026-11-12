@@ -354,4 +354,32 @@ import Testing
         model.open(ID.tab)
         #expect(source.calls == [.visit(ID.tab), .stop(ID.tab), .open(ID.tab)])
     }
+
+    // MARK: A new thread's settings are T3's lists
+
+    @Test func theChipsOfferWhatTheRowsModelTakes() {
+        let (model, trace) = page()
+        let codex = RouterV2LaunchModel(id: "gpt-6.1-sol", name: "GPT-6.1 Sol", provider: "Codex", instance: "codex",
+                                        efforts: [.init(rawValue: "minimal"), .low, .high], defaultEffort: .low,
+                                        access: [.supervised, .full])
+        model.apply(.launch(defaults: RouterV2Launch.t3Default, models: RouterV2Launch.demoModels + [codex]))
+        #expect(trace.curves == [.fade])
+        model.select(nil)
+        model.setDraft("silo: write the changelog")
+        model.apply(.read(RouterV2Read(draft: model.draft, places: [.newThread(project: "silo")], sure: true)))
+        #expect(model.launchChoices(.effort).map(\.label) == ["Low", "Medium", "High", "Extra high", "Max"])
+        model.setLaunch(.model, RouterV2Launch.demoModels.count)
+        // Its own efforts and default; T3's default access isn't one of its modes: its first.
+        #expect(model.launch == RouterV2Launch(model: "gpt-6.1-sol", effort: .low, access: .supervised))
+        #expect(model.launchChoices(.effort).map(\.label) == ["Minimal", "Low", "High"])
+        #expect(model.launchChoices(.access).map(\.label) == ["Supervised", "Full access"])
+        model.setLaunch(.effort, 2)
+        #expect(model.launch.effort == .high)
+        #expect(model.launchLabel(.effort) == "High")
+    }
+
+    @Test func aNameWithNoLabelIsShownAsItsWords() {
+        #expect(RouterV2Launch.Access(rawValue: "on-request").label == "On request")
+        #expect(RouterV2Launch.Effort(rawValue: "xhigh").label == "Extra high")
+    }
 }
