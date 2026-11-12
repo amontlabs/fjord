@@ -36,6 +36,9 @@ final class RouterV2LineBox {
     /// under it, and its card's own height as laid out.
     private(set) var queued: Bool
     var cardHeight: CGFloat = 0
+    /// Its row's and its queued words' heights as laid out (0 before the line is first laid out, or with none queued).
+    var rowHeight: CGFloat = 0
+    var queuedHeight: CGFloat = 0
 
     /// The whole record as last taken.
     @ObservationIgnored private(set) var record: RouterV2Thread

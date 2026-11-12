@@ -24,11 +24,15 @@ struct RouterV2HostedLine: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        // What the line's height follows: its card opening or shutting (in the same transaction as the change, so the
-        // rows under it slide on the card's own curve), its queued words, its card's content as laid out.
-        let _ = (box.selected, box.moving, box.built, box.queued)
+        // The line's height from what the model sets, in the transaction that sets it: the card's place opens and shuts
+        // on the change's own curve and the rows under it slide with it, whenever the line's own view takes the change.
+        // The line's height as measured until it has been laid out once.
+        let open = box.selected && !box.moving
         let card = box.cardHeight
+        let rest = box.rowHeight + box.queuedHeight
+        let height: CGFloat? = box.rowHeight > 0 ? rest + (open ? card : 0) : nil
         RouterV2LineHost(model: model, box: box, setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival))
+            .frame(height: height, alignment: .top)
             // Its content grew or shrank while open: the slot follows, as the card does inside.
             .motion(.spatial, value: card)
             .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(RouterV2.space)).origin } action: { [model, id = box.id] in
@@ -63,6 +67,8 @@ struct RouterV2LineRoot: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .coordinateSpace(.named(RouterV2.rowSpace))
+            // Room for what a line draws past its edges (the veil of a line in flight).
+            .padding(.vertical, RouterV2LineSlotView.overflow)
             .foregroundStyle(Theme.text)
             .environment(\.colorScheme, setup.scheme)
             .environment(\.routerV2Still, setup.still)
@@ -75,6 +81,50 @@ struct RouterV2LineRoot: View {
 /// A line's hosting view, measured by its controller (`sizeThatFits(in:)`).
 typealias RouterV2LineHosting = NSHostingView<RouterV2LineRoot>
 
+/// What the list places: the line's hosting view at its top, as tall as the slot, or taller while the line's card rolls
+/// shut (the card is still drawn below the slot's new bottom until its roll has ended: `box.built`). Nothing clips it.
+final class RouterV2LineSlotView: NSView {
+    let hosting: RouterV2LineHosting
+    let box: RouterV2LineBox
+    /// The slot's height while the card was last open: the hosting view keeps it until the card's body goes.
+    private var held: CGFloat = 0
+    /// The room the hosting view has above and below the slot: the veil of a line in flight fades out past its row.
+    static let overflow = RouterV2.Surface.veilOut
+
+    init(hosting: RouterV2LineHosting, box: RouterV2LineBox) {
+        self.hosting = hosting
+        self.box = box
+        super.init(frame: .zero)
+        wantsLayer = true
+        addSubview(hosting)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        fit()
+    }
+
+    /// The hosting view's frame: the slot's width, and its height or the held one.
+    func fit() {
+        let height = bounds.height
+        if box.selected, !box.moving { held = height } else if !box.built { held = 0 }
+        let o = Self.overflow
+        let frame = CGRect(x: 0, y: -o, width: bounds.width, height: max(height, box.built ? held : 0) + 2 * o)
+        if hosting.frame != frame { hosting.frame = frame }
+    }
+
+    // The overflow is drawn, never hit: only the slot can be pointed at.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard frame.contains(point) else { return nil }
+        return super.hitTest(point)
+    }
+}
+
 private struct RouterV2LineHost: NSViewRepresentable {
     let model: RouterV2Model
     let box: RouterV2LineBox
@@ -86,30 +136,31 @@ private struct RouterV2LineHost: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> RouterV2LineHosting {
+    func makeNSView(context: Context) -> RouterV2LineSlotView {
         let controller = NSHostingController(rootView: RouterV2LineRoot(model: model, box: box, setup: setup))
         // The list sizes it (`sizeThatFits`): no preferred size or constraints to keep up to date on each change, and no
         // safe area of the window's.
         controller.sizingOptions = []
         context.coordinator.controller = controller
-        let view = controller.view as! RouterV2LineHosting
-        view.sizingOptions = []
-        view.safeAreaRegions = []
-        return view
+        let hosting = controller.view as! RouterV2LineHosting
+        hosting.sizingOptions = []
+        hosting.safeAreaRegions = []
+        return RouterV2LineSlotView(hosting: hosting, box: box)
     }
 
-    func updateNSView(_ view: RouterV2LineHosting, context: Context) {
+    func updateNSView(_ view: RouterV2LineSlotView, context: Context) {
         // A new root only when what it takes changed: setting one runs the line's whole body again.
-        let root = view.rootView
+        let root = view.hosting.rootView
         if root.box !== box || root.model !== model || root.setup != setup {
-            view.rootView = RouterV2LineRoot(model: model, box: box, setup: setup)
+            view.hosting.rootView = RouterV2LineRoot(model: model, box: box, setup: setup)
         }
+        view.fit()
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: RouterV2LineHosting, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: RouterV2LineSlotView, context: Context) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > 0, let controller = context.coordinator.controller else { return nil }
         // A zero height: the root's flexible frame comes back at the line's own height.
         let size = controller.sizeThatFits(in: CGSize(width: width, height: 0))
-        return CGSize(width: width, height: size.height)
+        return CGSize(width: width, height: max(0, size.height - 2 * RouterV2LineSlotView.overflow))
     }
 }

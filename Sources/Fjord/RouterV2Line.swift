@@ -153,6 +153,8 @@ struct RouterV2LineView: View {
                     .fill(open || moving ? .clear : pressed ? RouterV2.Surface.pressed : hot ? RouterV2.Surface.hover : .clear)
                     .transaction { $0.animation = nil }
             }
+            // Its height, for the list's slot (`RouterV2HostedLine`).
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { box.rowHeight = $0 }
             // A line changing section glides there as itself: no plate, no edge, no shadow. What it passes fades out
             // under it and back behind it (the veil), there from the frame it takes off and gone once it has landed in
             // the gap the rows opened for it.
@@ -163,6 +165,8 @@ struct RouterV2LineView: View {
             }
             if let queued = thread.queued {
                 RouterV2QueuedRow(model: model, thread: id, words: queued)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { box.queuedHeight = $0 }
+                    .onDisappear { box.queuedHeight = 0 }
                     .transition(.routerV2Fold(reduce: reduce))
             }
             // The card is in its line, closed to no height: it rolls open and shut in place, at full opacity, clipped to
