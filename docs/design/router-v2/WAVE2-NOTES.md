@@ -49,3 +49,9 @@
 - Refused settle/snooze: a port case for a toast with the reason, and drop the page's undo entry (track 6 open item).
 - Reader pauses to 300/600 ms, moved into `enum RouterV2`.
 - `RouterTools.redacted` nonisolated (RouterMCP.swift, 9b's file) so verdict input builds off main.
+
+## 9b (bar, palette, MCP, decider) — 86240d4b 721ad8e7
+- Bar/palette/MCP/RouterRun/RouterJev/decider read the records; Rewrite Briefs (⌘R, menu, palette) gone; `RouterTools.redacted` nonisolated; `Store.lineTitle` in RouterDispatcher.
+- For 9a: construct `ProjectPurposes(verdicts:url: ProjectPurposes.live(paths))` → `store.routerPurposes`, `keep(only:)` + `flush()` on quit; window's `pickBriefEntry` handler → `routerPage.select(.line(thread))`.
+- Wave 3: delete remaining RouterBriefs readers (RouterComposer, RouterKeys, RouterView, RouterDrawer, Playground, AppWindowShots, AppSidebar, AppWindow, DemoBriefs) and change pickBriefEntry's type; RouterV2WiringTests; HubTests coverage for RouterRecordLine; RouterRunContext heading wording.
+- Open: a project's purpose stays empty while any live thread lacks a readable first ask.
