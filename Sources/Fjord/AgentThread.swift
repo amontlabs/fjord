@@ -204,12 +204,7 @@ extension ThreadWork {
         guard let run = p.activeRun ?? p.runs.last(where: { $0.status.isLive }) else { return nil }
         let items = p.turnItems.filter { $0.runId == nil || $0.runId == run.id }
         func live(_ i: T3TurnItem) -> Bool { i.status == "running" || i.status == "waiting" }
-        func tool(_ i: T3TurnItem) -> Bool {
-            switch i.detail {
-            case .commandExecution, .fileChange, .dynamicTool, .reasoning: true
-            default: [T3ItemType.webSearch, .fileSearch].contains(i.type) || i.type.rawValue == "subagent"
-            }
-        }
+        func tool(_ i: T3TurnItem) -> Bool { Self.isTool(i) }
         let current = items.last { tool($0) && live($0) } ?? items.last(where: tool)
         text = current.map(Self.describe) ?? "Working"
         since = (run.startedAt ?? run.requestedAt).flatMap(AgentThread.date) ?? now
@@ -224,8 +219,16 @@ extension ThreadWork {
         files = Set(items.compactMap { i -> String? in if case .fileChange(let name, _, _) = i.detail { name } else { nil } }).count
     }
 
+    /// An item the agent does rather than says: a command, an edit, a tool, a search, a subagent, its thinking.
+    static func isTool(_ i: T3TurnItem) -> Bool {
+        switch i.detail {
+        case .commandExecution, .fileChange, .dynamicTool, .reasoning: true
+        default: [T3ItemType.webSearch, .fileSearch].contains(i.type) || i.type.rawValue == "subagent"
+        }
+    }
+
     /// An item in a few words: a command is its input, a file change its file, a search its query.
-    private static func describe(_ i: T3TurnItem) -> String {
+    static func describe(_ i: T3TurnItem) -> String {
         func line(_ s: String, _ cap: Int = 120) -> String {
             let one = s.split(whereSeparator: \.isNewline).first.map(String.init) ?? s
             let t = one.trimmingCharacters(in: .whitespaces)
