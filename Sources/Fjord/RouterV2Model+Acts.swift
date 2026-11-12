@@ -12,7 +12,7 @@ extension RouterV2Model {
             failures.removeAll { $0.id == failure }
             if selection == .failure(failure) { selection = nil }
         }
-        dispatch(f.words, to: t, continuing: f.continuing)
+        dispatch(f.words, to: t, kind: f.kind)
     }
 
     /// Edit: the words go back to the composer, the line goes.
@@ -76,15 +76,33 @@ extension RouterV2Model {
     /// Settle: the line leaves at once.
     func settle(_ id: String) {
         guard let t = thread(id) else { return }
-        remove(t, toast: RouterV2Toast(id: fresh(), before: "Settled", name: t.name))
+        remove(t, toast: RouterV2Toast(id: fresh(), before: "Settled", name: t.name)) { [weak self] in
+            self?.source?.settle([id], on: false)
+        }
+        source?.settle([id], on: true)
     }
 
     func snooze(_ id: String, choice: Int) {
         guard let t = thread(id) else { return }
-        remove(t, toast: RouterV2Toast(id: fresh(), before: "Snoozed", name: t.name, after: RouterV2.Copy.snoozedUntil[choice]))
+        remove(t, toast: RouterV2Toast(id: fresh(), before: "Snoozed", name: t.name, after: RouterV2.Copy.snoozedUntil[choice])) { [weak self] in
+            self?.source?.snooze(id, until: nil)
+        }
+        source?.snooze(id, until: Self.snoozeEnd(choice, from: Date()))
     }
 
-    private func remove(_ t: RouterV2Thread, toast: RouterV2Toast) {
+    /// When a snooze choice ends (`RouterV2.Copy.snoozeChoices`): in an hour, in three, tomorrow at 9:00.
+    static func snoozeEnd(_ choice: Int, from now: Date, calendar: Calendar = .current) -> Date {
+        switch choice {
+        case 0: return now.addingTimeInterval(3_600)
+        case 1: return now.addingTimeInterval(3 * 3_600)
+        default:
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now.addingTimeInterval(86_400)
+            return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        }
+    }
+
+    /// `reverted`: what the Revert tells the source, after the line is back.
+    private func remove(_ t: RouterV2Thread, toast: RouterV2Toast, reverted: @escaping () -> Void) {
         let next = selection == .line(t.id) ? neighbour(of: t.id) : selection
         let kept = (picks[t.id], typed[t.id])
         animate(.spatial) {
@@ -104,6 +122,7 @@ extension RouterV2Model {
                 self.selection = .line(t.id)
             }
             self.show(t.id)
+            reverted()
         }
     }
 
@@ -123,10 +142,13 @@ extension RouterV2Model {
             if hoverControl == .housekeepingWords || hoverControl == .settleAll { hoverControl = nil }
         }
         let name = gone.count == 1 ? gone[0].name : "\(gone.count) older threads"
+        let ids = gone.map(\.id)
         act(RouterV2Toast(id: fresh(), before: "Settled", name: name)) { [weak self] in
             guard let self else { return }
             self.animate(.spatial) { self.older = all }
+            self.source?.settle(ids, on: false)
         }
+        source?.settle(ids, on: true)
     }
 
     /// Doesn't need me: a wrong verdict goes to Done, its line the verdict's result and no longer the ask.
@@ -153,7 +175,9 @@ extension RouterV2Model {
                 self.update(id) { $0 = t }
                 self.selection = .line(id)
             }
+            self.source?.notForMe(id, on: false)
         }
+        source?.notForMe(id, on: true)
     }
 
     /// ⌘⌫: settles the selected row (the housekeeping line: all; a failure line: Edit).

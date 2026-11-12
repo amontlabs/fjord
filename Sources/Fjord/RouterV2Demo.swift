@@ -334,7 +334,7 @@ final class RouterV2DemoSource: RouterV2Source {
 
     private func current(_ id: String, _ print: Int) -> Bool { prints[id] == print }
 
-    func read(_ draft: String, selected: String?) {
+    func read(_ draft: String, selected: String?, mentions: [RouterMention]) {
         let read = reads[draft] ?? fallback(draft, selected: selected)
         after(time(of: read)) { [model] in model.apply(.read(read)) }
     }
@@ -361,7 +361,16 @@ final class RouterV2DemoSource: RouterV2Source {
         return RouterV2Read(draft: draft, places: [], sure: false)
     }
 
-    func send(_ words: String, to thread: String, steering: Bool, continuing: Bool) {
+    func send(_ out: RouterV2Outgoing) {
+        // Queued words wait in the line's row until the turn ends (`turnEnded`).
+        guard !out.queue else { return }
+        go(out.thread, steering: out.steering)
+    }
+
+    /// T3 sends a thread's queued words as its turn ends: taken, then a run, as a send.
+    func queuedWent(_ thread: String) { go(thread, steering: false) }
+
+    private func go(_ thread: String, steering: Bool) {
         let print = bump(thread)
         if unreachable {
             // T3 is down: the error comes at once.
@@ -380,12 +389,16 @@ final class RouterV2DemoSource: RouterV2Source {
         }
     }
 
-    func queue(_ words: String, on thread: String) {}
+    func cancelQueued(_ thread: String) {}
 
-    /// T3 sends a thread's queued words as its turn ends: taken, then a run, as a send.
-    func queuedWent(_ thread: String) { send("", to: thread, steering: false, continuing: false) }
+    private var minted = 0
 
-    func start(_ thread: String, words: String, project: String, launch: RouterV2Launch) {
+    func mintThread() -> String {
+        minted += 1
+        return "new-\(minted)"
+    }
+
+    func start(_ thread: String, words: String, project: String, launch: RouterV2Launch, read: RouterV2Read?) {
         let print = bump(thread)
         let name = names[words]
         let step = newSteps[words] ?? Line(text: "Thinking")
@@ -402,6 +415,10 @@ final class RouterV2DemoSource: RouterV2Source {
 
     func visit(_ thread: String) {}
     func open(_ thread: String) {}
+    // T3 answers these at once: the page has already changed.
+    func settle(_ threads: [String], on: Bool) {}
+    func snooze(_ thread: String, until: Date?) {}
+    func notForMe(_ thread: String, on: Bool) {}
 
     // MARK: Scripted T3 events
 

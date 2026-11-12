@@ -412,10 +412,13 @@ struct RouterV2Failure: Identifiable, Equatable {
     var thread: String
     var words: String
     var reason: String
-    /// Continue on a Stopped card, not words you typed.
-    var continuing = false
+    /// What it was: your words, picked options, or Continue on a Stopped card.
+    var kind: RouterV2Outgoing.Kind = .words
     /// T3 was away: the reason is said only while it still is.
     var offline = false
+
+    /// Continue on a Stopped card, not words you typed.
+    var continuing: Bool { kind == .continuing }
 }
 
 /// What can be pointed at on the page: the real pointer's hover and clicks and the demo's drawn pointer go through the

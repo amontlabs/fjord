@@ -154,4 +154,204 @@ import Testing
         #expect(!model.reading)
         #expect(model.destinationThread == ID.bar)
     }
+
+    // MARK: Acts reach the source
+
+    /// A source that keeps every call.
+    final class Recorder: RouterV2Source {
+        enum Call: Equatable {
+            case read(String, selected: String?, mentions: [RouterMention])
+            case send(RouterV2Outgoing)
+            case cancelQueued(String)
+            case mint
+            case start(String, words: String, project: String, launch: RouterV2Launch, read: RouterV2Read?)
+            case stop(String), visit(String), open(String)
+            case settle([String], on: Bool)
+            case snooze(String, until: Date?)
+            case notForMe(String, on: Bool)
+        }
+
+        var calls: [Call] = []
+        var sends: [RouterV2Outgoing] { calls.compactMap { if case .send(let out) = $0 { out } else { nil } } }
+
+        func read(_ draft: String, selected: String?, mentions: [RouterMention]) {
+            calls.append(.read(draft, selected: selected, mentions: mentions))
+        }
+        func send(_ out: RouterV2Outgoing) { calls.append(.send(out)) }
+        func cancelQueued(_ thread: String) { calls.append(.cancelQueued(thread)) }
+        func mintThread() -> String {
+            calls.append(.mint)
+            return "minted-1"
+        }
+        func start(_ thread: String, words: String, project: String, launch: RouterV2Launch, read: RouterV2Read?) {
+            calls.append(.start(thread, words: words, project: project, launch: launch, read: read))
+        }
+        func stop(_ thread: String) { calls.append(.stop(thread)) }
+        func visit(_ thread: String) { calls.append(.visit(thread)) }
+        func open(_ thread: String) { calls.append(.open(thread)) }
+        func settle(_ threads: [String], on: Bool) { calls.append(.settle(threads, on: on)) }
+        func snooze(_ thread: String, until: Date?) { calls.append(.snooze(thread, until: until)) }
+        func notForMe(_ thread: String, on: Bool) { calls.append(.notForMe(thread, on: on)) }
+    }
+
+    private func recorded() -> (RouterV2Model, Recorder) {
+        let model = RouterV2Demo.records()
+        let source = Recorder()
+        model.source = source
+        return (model, source)
+    }
+
+    /// The draft typed with nothing selected, and the read that lands sure for `place`.
+    private func typed(_ model: RouterV2Model, _ words: String, to place: RouterV2Place) -> RouterV2Read {
+        model.setDraft(words)
+        let read = RouterV2Read(draft: words, places: [place], sure: true)
+        model.apply(.read(read))
+        return read
+    }
+
+    @Test func aPickedOptionGoesAsAnAnswer() {
+        let (model, source) = recorded()
+        model.pick(2)
+        model.send()
+        #expect(source.calls == [.send(RouterV2Outgoing(thread: ID.settings, words: "One scrolling page",
+                                                         kind: .answer(picks: [0: 2], typed: [:]), steering: false, queue: false))])
+    }
+
+    @Test func aFormGoesWithEveryPickAndTypedAnswer() {
+        let (model, source) = recorded()
+        model.select(.line(ID.updater))
+        model.pick(1)
+        model.setDraft("beta, but only on my machine")
+        model.apply(.read(RouterV2Read(draft: model.draft, places: [.thread(ID.updater)], sure: true)))
+        model.send()
+        model.send()
+        #expect(source.sends == [RouterV2Outgoing(thread: ID.updater, words: "Silently · beta, but only on my machine",
+                                                  kind: .answer(picks: [0: 1], typed: [1: "beta, but only on my machine"]),
+                                                  steering: false, queue: false)])
+    }
+
+    @Test func aStepsOptionGoesAsWords() {
+        let (model, source) = recorded()
+        model.select(.line(ID.valCenis))
+        model.pick(1)
+        model.send()
+        #expect(source.sends.map(\.kind) == [.words])
+        #expect(source.sends.first?.words == "Reserve for five (+€62)")
+    }
+
+    @Test func typedWordsGoWithTheReadTheRowShowedAndTheReadWithTheMentions() {
+        let (model, source) = recorded()
+        model.select(nil)
+        model.mentions = [RouterMention(range: 0..<9, pointer: .t3("t3-thread:\(ID.bar)"), name: "Bar count")]
+        let read = typed(model, "push it and open the PR", to: .thread(ID.bar))
+        model.send()
+        #expect(source.calls.contains(.read("push it and open the PR", selected: nil, mentions: model.mentions)))
+        #expect(source.sends == [RouterV2Outgoing(thread: ID.bar, words: "push it and open the PR", kind: .words,
+                                                  steering: false, queue: false, read: read)])
+    }
+
+    @Test func aRunningThreadIsSteeredOrQueuedAndAQueueCanBeCancelled() {
+        let (model, source) = recorded()
+        model.select(nil)
+        _ = typed(model, "also check the log", to: .thread(ID.tab))
+        model.send()
+        #expect(source.sends.last?.steering == true)
+        #expect(source.sends.last?.queue == false)
+        _ = typed(model, "then the README", to: .thread(ID.snapshot))
+        model.send(queue: true)
+        #expect(source.sends.last?.thread == ID.snapshot)
+        #expect(source.sends.last?.steering == false)
+        #expect(source.sends.last?.queue == true)
+        model.cancelQueued(ID.snapshot)
+        // The words are back in the composer, so they are read again.
+        #expect(source.calls.suffix(2) == [.cancelQueued(ID.snapshot), .read("then the README", selected: nil, mentions: [])])
+        #expect(source.sends.count == 2)
+    }
+
+    @Test func continueOnAStoppedCard() {
+        let (model, source) = recorded()
+        model.select(.line(ID.disk))
+        model.send()
+        #expect(source.sends == [RouterV2Outgoing(thread: ID.disk, words: RouterV2.Copy.continueWords, kind: .continuing,
+                                                  steering: false, queue: false)])
+    }
+
+    @Test func aNewThreadTakesTheSourcesIdAndTheSettingsTheRowShowed() {
+        let (model, source) = recorded()
+        model.select(nil)
+        let read = typed(model, "silo: write the changelog", to: .newThread(project: "silo"))
+        let launch = model.launch
+        model.send()
+        #expect(source.calls.suffix(2) == [.mint, .start("minted-1", words: "silo: write the changelog", project: "silo",
+                                                         launch: launch, read: read)])
+        #expect(model.thread("minted-1")?.state == .sent)
+    }
+
+    @Test func aSendAgainKeepsWhatTheSendWas() throws {
+        let (model, source) = recorded()
+        model.pick(2)
+        model.send()
+        model.apply(.refused(ID.settings, reason: "T3 Code isn't reachable.", offline: true))
+        let failure = try #require(model.failures.first)
+        #expect(failure.kind == .answer(picks: [0: 2], typed: [:]))
+        #expect(model.picks[ID.settings] == [0: 2])
+        model.sendAgain(failure.id)
+        #expect(source.sends.count == 2)
+        #expect(source.sends.last == source.sends.first)
+    }
+
+    @Test func settleAndItsRevert() {
+        let (model, source) = recorded()
+        model.settle(ID.guide)
+        #expect(source.calls == [.settle([ID.guide], on: true)])
+        model.undo()
+        #expect(source.calls.last == .settle([ID.guide], on: false))
+        #expect(model.thread(ID.guide) != nil)
+    }
+
+    @Test func snoozeAndItsRevert() throws {
+        let (model, source) = recorded()
+        model.snooze(ID.valCenis, choice: 1)
+        guard case .snooze(let id, let until)? = source.calls.first else { Issue.record("no snooze"); return }
+        #expect(id == ID.valCenis)
+        let end = try #require(until)
+        #expect(abs(end.timeIntervalSinceNow - 3 * 3_600) < 60)
+        model.undo()
+        #expect(source.calls.last == .snooze(ID.valCenis, until: nil))
+        #expect(source.calls.count == 2)
+    }
+
+    @Test func theLastSnoozeChoiceEndsTomorrowAtNine() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 23, minute: 30)))
+        let end = RouterV2Model.snoozeEnd(2, from: now, calendar: calendar)
+        #expect(calendar.dateComponents([.day, .hour, .minute], from: end) == DateComponents(day: 13, hour: 9, minute: 0))
+    }
+
+    @Test func notForMeAndItsRevert() {
+        let (model, source) = recorded()
+        model.notForMe(ID.valCenis)
+        #expect(source.calls == [.notForMe(ID.valCenis, on: true)])
+        model.undo()
+        #expect(source.calls.last == .notForMe(ID.valCenis, on: false))
+        #expect(model.thread(ID.valCenis)?.state == .needsYou(.step))
+    }
+
+    @Test func settleAllAndItsRevert() {
+        let (model, source) = recorded()
+        let ids = model.older.map(\.id)
+        model.settleAll()
+        #expect(source.calls == [.settle(ids, on: true)])
+        model.undo()
+        #expect(source.calls.last == .settle(ids, on: false))
+        #expect(model.older.map(\.id) == ids)
+    }
+
+    @Test func stopVisitAndOpen() {
+        let (model, source) = recorded()
+        model.select(.line(ID.tab))
+        model.stop(ID.tab)
+        model.open(ID.tab)
+        #expect(source.calls == [.visit(ID.tab), .stop(ID.tab), .open(ID.tab)])
+    }
 }

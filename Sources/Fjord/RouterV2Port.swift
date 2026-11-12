@@ -32,3 +32,55 @@ enum RouterV2Change: Equatable {
     /// The first load, or what a held window morph kept: one update, nothing animated.
     case batch([RouterV2Change])
 }
+
+/// What Return (or Continue, or Send again) sends.
+struct RouterV2Outgoing: Equatable {
+    enum Kind: Equatable {
+        /// Your words: a message, a steer, a queued message, words on a request (T3 takes them as its answer: a
+        /// refusal with feedback on a permission, changes on a plan).
+        case words
+        /// Options picked on a T3 request (question, form, plan, permission), by question (0 for a single question)
+        /// the option's number through the card (`RouterV2Thread.numbered`), and a form's typed answers by question.
+        /// `words` is what the line shows. A step's options (the model's) go as `.words`.
+        case answer(picks: [Int: Int], typed: [Int: String])
+        /// Continue on a Stopped card: T3's "Continue where you left off.", with the run's id when it allows.
+        case continuing
+    }
+
+    var thread: String
+    var words: String
+    var kind: Kind
+    /// The thread is running and the words steer it now (`deliveryIntent: steer`).
+    var steering: Bool
+    /// The thread is running and the words wait for its turn to end (⌥, or an agent that can't steer).
+    var queue: Bool
+    /// The read the row showed, for the decision log; nil for a picked answer or Continue.
+    var read: RouterV2Read?
+}
+
+/// What takes the page's acts: the demo's fake T3 (RouterV2DemoSource), or the real one (RouterActs). The page has
+/// already changed its own copy when it calls these; the store mirrors the act as a pending one and ends it on T3's
+/// word (or its refusal: `.refused`). Nothing here is awaited on the way to the frame.
+@MainActor protocol RouterV2Source: AnyObject {
+    /// Reads where a draft goes; answers with `.read`. `selected`: the card open now (the prior); `mentions`: the
+    /// composer's @ pills.
+    func read(_ draft: String, selected: String?, mentions: [RouterMention])
+    func send(_ out: RouterV2Outgoing)
+    /// Cancel on a queued row: the words came back to the composer.
+    func cancelQueued(_ thread: String)
+    /// The id a new thread will have (T3's own: a lowercase UUID), so its line is there before T3 answers.
+    func mintThread() -> String
+    /// Starts a thread with your words and the settings the row showed.
+    func start(_ thread: String, words: String, project: String, launch: RouterV2Launch, read: RouterV2Read?)
+    func stop(_ thread: String)
+    /// A card opened here: T3's `thread.visit`.
+    func visit(_ thread: String)
+    /// Open in T3.
+    func open(_ thread: String)
+    /// Settle (several: Settle all); `on: false` is its Revert.
+    func settle(_ threads: [String], on: Bool)
+    /// Snooze until then; nil is its Revert (unsnooze).
+    func snooze(_ thread: String, until: Date?)
+    /// Doesn't need me (Fjord's own mark on the verdict); `on: false` is its Revert.
+    func notForMe(_ thread: String, on: Bool)
+}

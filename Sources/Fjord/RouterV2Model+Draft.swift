@@ -38,7 +38,7 @@ extension RouterV2Model {
     /// The Router's model reads the draft: its mark shows in the row until the read lands.
     private func startRead() {
         reading = true
-        source?.read(draft, selected: selectedThread?.id)
+        source?.read(draft, selected: selectedThread?.id, mentions: mentions)
     }
 
     /// A character typed with no field focused goes to the composer.
@@ -278,7 +278,7 @@ extension RouterV2Model {
                 animate(.spatial) { formAt[id] = open }
                 return
             }
-            deliver(words, to: .thread(id), queue: false, asTyped: true)
+            deliver(words, to: .thread(id), queue: false, asTyped: true, kind: answerKind(t))
         case .place(let place, _):
             if case .thread(let id) = place, let t = thread(id), !t.form.isEmpty, selection == .line(id) {
                 // Typed on a form: the words answer the current question; they go with the rest of the form.
@@ -317,8 +317,19 @@ extension RouterV2Model {
         return true
     }
 
-    private func deliver(_ words: String, to place: RouterV2Place, queue: Bool, asTyped: Bool) {
+    /// What a picked answer is: options on a T3 request, or (a step's, which are the model's) plain words.
+    private func answerKind(_ t: RouterV2Thread) -> RouterV2Outgoing.Kind {
+        switch t.state {
+        case .needsYou(.step): return .words
+        case .needsYou: return .answer(picks: picks[t.id] ?? [:], typed: typed[t.id] ?? [:])
+        default: return .words
+        }
+    }
+
+    private func deliver(_ words: String, to place: RouterV2Place, queue: Bool, asTyped: Bool, kind: RouterV2Outgoing.Kind = .words) {
         let name = read?.name
+        // What the row showed, for the decision log.
+        let shown = read
         // Without the words taken as a new thread's settings, when you saw them marked: those went into the chips.
         let message = asTyped ? draft : message
         let launch = launch
@@ -330,12 +341,12 @@ extension RouterV2Model {
             // Words for a thread that exists are never taken: they go as written.
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
-                source?.queue(words, on: id)
+                source?.send(RouterV2Outgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown))
             } else {
-                dispatch(words, to: t, continuing: false)
+                dispatch(words, to: t, kind: kind, read: shown)
             }
         case .newThread(let project):
-            let id = "new-\(fresh())"
+            let id = source?.mintThread() ?? "new-\(fresh())"
             var t = RouterV2Thread(id: id, name: name ?? RouterV2.firstWords(message), title: message, project: project, state: .sent,
                                    sentence: .init(text: ""), since: now)
             t.naming = true
@@ -343,7 +354,7 @@ extension RouterV2Model {
             t.sent = .init(words: message, status: .sending)
             t.launch = launch
             animate(.spatial) { threads.append(t) }
-            source?.start(id, words: message, project: project, launch: launch)
+            source?.start(id, words: message, project: project, launch: launch, read: shown)
         case .here:
             break
         }
@@ -351,9 +362,9 @@ extension RouterV2Model {
 
     /// The thread's line becomes Sent, at the top of Working, in the same frame; the selection goes on to the next line
     /// that needs you when the words went from its card.
-    func dispatch(_ words: String, to t: RouterV2Thread, continuing: Bool) {
+    func dispatch(_ words: String, to t: RouterV2Thread, kind: RouterV2Outgoing.Kind, read shown: RouterV2Read? = nil) {
         let id = t.id
-        backups[id] = (t, picks[id])
+        backups[id] = (t, picks[id], kind)
         let next: RouterV2Selection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
         move(id) {
             update(id) {
@@ -374,7 +385,7 @@ extension RouterV2Model {
             }
         }
         if let next { advanced(to: next) }
-        source?.send(words, to: id, steering: t.isRunning, continuing: continuing)
+        source?.send(RouterV2Outgoing(thread: id, words: words, kind: kind, steering: t.isRunning, queue: false, read: shown))
     }
 
     /// Your act moved the selection on: the card is shown; its "new" dot waits for your next key or pointer move.
@@ -394,7 +405,7 @@ extension RouterV2Model {
     /// Continue on a Stopped card. T3 has no rerun: its own button sends these words, and the thread then shows them.
     func resume(_ id: String) {
         guard let t = thread(id), t.state == .stopped, !connectionLost else { return }
-        dispatch(RouterV2.Copy.continueWords, to: t, continuing: true)
+        dispatch(RouterV2.Copy.continueWords, to: t, kind: .continuing)
     }
 
     func stop(_ id: String) { source?.stop(id) }
@@ -404,6 +415,7 @@ extension RouterV2Model {
     func cancelQueued(_ id: String) {
         guard let words = thread(id)?.queued else { return }
         animate(.spatial) { update(id) { $0.queued = nil } }
+        source?.cancelQueued(id)
         setDraft(words)
         focusTick &+= 1
     }

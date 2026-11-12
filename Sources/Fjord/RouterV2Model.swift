@@ -6,21 +6,6 @@ import SwiftUI
 // acts are its methods (the keys, the pointer and the demo's script all call the same ones); what T3 and the model do
 // arrives as whole records through `apply` (RouterV2Port.swift). A source takes the acts that leave the page.
 
-/// What takes the page's acts and feeds its events: the demo's fake T3 today, the real engine later.
-@MainActor protocol RouterV2Source: AnyObject {
-    /// Reads where a draft goes; answers with `readLanded`.
-    func read(_ draft: String, selected: String?)
-    /// `continuing`: Continue on a Stopped card (T3's "Continue where you left off.", with the run's id when it allows).
-    func send(_ words: String, to thread: String, steering: Bool, continuing: Bool)
-    func queue(_ words: String, on thread: String)
-    /// Starts a thread with your words and the settings the row showed.
-    func start(_ thread: String, words: String, project: String, launch: RouterV2Launch)
-    func stop(_ thread: String)
-    /// A card opened here: T3's `threadVisit`.
-    func visit(_ thread: String)
-    func open(_ thread: String)
-}
-
 enum RouterV2Selection: Equatable {
     case line(String), housekeeping, failure(Int)
 }
@@ -154,6 +139,8 @@ final class RouterV2Model {
     var optionHeld = false
     /// The Router's model is reading the draft: Fjord's mark is in the row's arrow slot.
     var reading = false
+    /// The composer's @ pills: they go with each read of the draft.
+    @ObservationIgnored var mentions: [RouterMention] = []
 
     // A new thread's settings (RouterV2Launch.swift): T3's default and models, what you set by hand, where the keyboard
     // is in the row, the chip whose menu is open.
@@ -205,7 +192,8 @@ final class RouterV2Model {
 
     @ObservationIgnored var undos: [(toast: Int, undo: () -> Void)] = []
     @ObservationIgnored private var nextID = 0
-    @ObservationIgnored var backups: [String: (thread: RouterV2Thread, picks: [Int: Int]?)] = [:]
+    /// What a send in flight changed, to put back if it is refused, and what it was.
+    @ObservationIgnored var backups: [String: (thread: RouterV2Thread, picks: [Int: Int]?, kind: RouterV2Outgoing.Kind)] = [:]
     @ObservationIgnored var toastLife: Task<Void, Never>?
     /// The pointer's last move over a line-removing button, by generation: a button is armed only by a move made after
     /// the last removal (the 2026-10-12 rule, without a timer).
@@ -738,7 +726,7 @@ final class RouterV2Model {
     private func sendRefused(_ id: String, reason: String, offline: Bool) {
         guard let t = thread(id), let sent = t.sent else { return }
         let failure = RouterV2Failure(id: fresh(), thread: id, words: sent.words, reason: reason,
-                                      continuing: backups[id]?.thread.state == .stopped, offline: offline)
+                                      kind: backups[id]?.kind ?? .words, offline: offline)
         if let backup = backups[id] {
             move(id) {
                 update(id) { $0 = backup.thread }
