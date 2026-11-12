@@ -30,3 +30,10 @@
 - Latency: state 2.3 s alone, 4.7–5.1 s for finished turns with 4 at once (Haiku 5.5 thinks ~150 tokens; no flag to stop it). Plan said ~1.9 s. Options for wave 2: smaller input for finished turns, ask-only first pass, or a faster model by eval.
 - Ask only once the reply is loaded (same fingerprint with new input is ignored). `.words(done:true)` precedes `.done` by 0.3–0.5 s.
 - Seam wanted: `RouterTools.redacted` nonisolated (RouterMCP.swift) so input builds fully off main.
+
+## Track 3 (records, banners) — 84a829c2 ea8ba6c4 cfdcd8f1 655021c0
+- Uses track 4's types now: `records.verdict(id, fingerprint:, RouterVerdictEvent)` ← `verdicts.onEvent`; `records.ask` → `verdicts.ask` (RouterVerdictRequest). The earlier type mismatch is resolved.
+- Conforms to `RouterActsRecords` (+ `delivered(_:)`, `cancelledQueue(_:)`).
+- 9a: `records.shell(item)` first in `onShell`; `detail(id, RouterDetail.make(…))` in `onThread`; `delivered(_:)` from whoever watches `Store.delivery`; `projectName` = `Store.folderName`; `notifier.post` = `Store.notifyRouter`; `pullRequests` → track 2's `RouterPullRequests.states`; `RouterVerdictFile.live(supportDir)`, `flush()` on quit.
+- Open: `RouterActs.Send.Kind.start` needs `name: String?` so a new thread's line keeps the read's name; permission `warning/warned` empty (ThreadRequest has none); Stopped lines kept 7 days.
+- Perf: 500-row shell reduces in 2.85 ms (debug).
