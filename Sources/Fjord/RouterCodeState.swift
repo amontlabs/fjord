@@ -149,6 +149,14 @@ struct RouterCodeState: Equatable {
         }
     }
 
+    /// The row is off the page whatever its state (out of play, or ended more than a week ago with nothing live or waiting):
+    /// `scope` would say `.out`, read without making the state. Most of a shell is this.
+    static func plainlyOut(_ t: AgentThread, inPlay: Bool, now: Date) -> Bool {
+        if !inPlay { return true }
+        if t.pendingRequest != nil || t.hasPlan || t.usageLimit && !t.limitStopped || t.running { return false }
+        return now.timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) > olderWindow
+    }
+
     /// The next time this thread's scope changes by the clock alone (a day after it finished, a week after, the end of a
     /// snooze): the store keeps one one-shot timer for the earliest of them.
     static func boundary(_ t: AgentThread, state: RouterCodeState, now: Date) -> Date? {

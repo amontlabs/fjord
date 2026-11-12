@@ -200,6 +200,33 @@ enum RecordFixture {
         #expect(RouterCodeState.scope(waiting, state: make(waiting), now: now) == .line)
     }
 
+    @Test func aRowPlainlyOffThePageIsOneScopeSaysIsOut() {
+        var rows: [AgentThread] = []
+        let statuses: [T3Status] = [.completed, .running, .failed, .interrupted, .idle, .waiting]
+        let day: Double = 24 * 60
+        let ages: [Double] = [5, day - 60, day + 60, 6 * day, 8 * day, 30 * day]
+        for status in statuses {
+            for minutes in ages {
+                for variant in 0..<6 {
+                    var t = F.thread(status: status, minutes: minutes)
+                    switch variant {
+                    case 1: t.settled = true
+                    case 2: t.snoozedUntil = now.addingTimeInterval(60)
+                    case 3: t.pendingRequest = F.pending()
+                    case 4: t.usageLimit = true
+                    case 5: t.lastRunEndedAt = nil
+                    default: break
+                    }
+                    if status == .running { t.runStartedAt = F.ago(1) }
+                    rows.append(t)
+                }
+            }
+        }
+        for t in rows where RouterCodeState.plainlyOut(t, inPlay: t.inPlay(now: now), now: now) {
+            #expect(RouterCodeState.scope(t, state: make(t), now: now) == .out, "\(t.status.rawValue) \(t.lastActivity)")
+        }
+    }
+
     @Test func theNextBoundaryIsADayThenAWeekAfterTheFinish() {
         let t = F.thread(minutes: 60)
         #expect(RouterCodeState.boundary(t, state: make(t), now: now) == F.ago(60).addingTimeInterval(86_400))
