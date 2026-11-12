@@ -55,6 +55,19 @@ enum T3Fixture {
          "event": ["id": .string("e\(seq)"), "threadId": .string(thread), "runId": "r1", "occurredAt": "2026-01-02T03:04:07.000Z", "type": .string(type), "payload": payload]]
     }
 
+    /// A turn's checkpoint, as `OrchestrationV2Checkpoint` (`files` is a prefix when `total` is given).
+    static func checkpoint(_ id: String, run: String? = "r1", files: [(path: String, additions: Int, deletions: Int)],
+                           total: (count: Int, additions: Int, deletions: Int)? = nil) -> T3JSON {
+        var o: [String: T3JSON] = [
+            "id": .string(id), "threadId": "t1", "scopeId": "s1", "runId": run.map(T3JSON.string) ?? nil, "nodeId": "n1",
+            "parentCheckpointId": nil, "ordinalWithinScope": 1, "appRunOrdinal": 1, "ref": "refs/x", "status": "ready",
+            "files": .array(files.map { ["path": .string($0.path), "kind": "modified", "additions": .number(Double($0.additions)), "deletions": .number(Double($0.deletions))] }),
+            "capturedAt": "2026-01-02T03:04:06.000Z",
+        ]
+        if let total { o["filesTotal"] = ["count": .number(Double(total.count)), "additions": .number(Double(total.additions)), "deletions": .number(Double(total.deletions))] }
+        return .object(o)
+    }
+
     static func projection() -> T3JSON {
         ["kind": "snapshot", "snapshotSequence": 500, "projection": [
             "thread": thread("t1", status: "running"), "runs": [run("r1", status: "running")],

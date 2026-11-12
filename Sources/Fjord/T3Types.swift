@@ -677,6 +677,9 @@ struct T3Projection: T3Decodable, Equatable, Sendable {
     var others: [String: [T3JSON]]
     var updatedAt: T3Timestamp?
 
+    /// The checkpoints of every turn, from the raw collection (`files`, their totals).
+    var checkpoints: [T3Checkpoint] { (others["checkpoints"] ?? []).map(T3Checkpoint.init) }
+
     static let otherKeys = ["attempts", "nodes", "subagents", "providerThreads", "providerTurns", "checkpointScopes",
                             "checkpoints", "contextHandoffs", "contextTransfers"]
 
@@ -925,6 +928,44 @@ struct T3Error: Error, Equatable, Sendable, CustomStringConvertible {
     var commandType: String? = nil
     var tag: String? = nil
     var description: String { "T3 \(kind)\(tag.map { " (\($0))" } ?? ""): \(message)" }
+}
+
+/// One turn's checkpoint (`OrchestrationV2Checkpoint`): the files it changed. `filesTotal` is sent only when `files` is a
+/// prefix of the whole list, so the totals below read it first.
+struct T3Checkpoint: T3Decodable, Equatable, Sendable, Identifiable {
+    struct File: Equatable, Sendable {
+        var path: String
+        var kind: String
+        var additions: Int
+        var deletions: Int
+    }
+    var id: String
+    var runId: String?
+    var status: String
+    var files: [File]
+    var capturedAt: T3Timestamp?
+    /// Set when the wire carried only a prefix of `files`.
+    private var total: (count: Int, additions: Int, deletions: Int)?
+
+    init(json j: T3JSON) {
+        id = j.str("id") ?? ""
+        runId = j.str("runId")
+        status = j.str("status") ?? ""
+        files = (j["files"]?.array ?? []).map {
+            File(path: $0.str("path") ?? "", kind: $0.str("kind") ?? "", additions: $0.num("additions") ?? 0, deletions: $0.num("deletions") ?? 0)
+        }
+        capturedAt = j.ts("capturedAt")
+        total = j["filesTotal"].map { (count: $0.num("count") ?? 0, additions: $0.num("additions") ?? 0, deletions: $0.num("deletions") ?? 0) }
+    }
+
+    var fileCount: Int { total?.count ?? files.count }
+    var additions: Int { total?.additions ?? files.reduce(0) { $0 + $1.additions } }
+    var deletions: Int { total?.deletions ?? files.reduce(0) { $0 + $1.deletions } }
+
+    static func == (a: T3Checkpoint, b: T3Checkpoint) -> Bool {
+        a.id == b.id && a.runId == b.runId && a.status == b.status && a.files == b.files && a.capturedAt == b.capturedAt
+            && a.fileCount == b.fileCount && a.additions == b.additions && a.deletions == b.deletions
+    }
 }
 
 

@@ -270,6 +270,24 @@ struct T3TypesTests {
         #expect(T3PullRequestRef(url: "https://GitHub.com/a/b/pull/7/files") == T3PullRequestRef(url: "https://github.com/a/b/pull/7"))
     }
 
+    @Test func checkpointsDecodeFromTheProjectionAndSum() {
+        var j = F.projection()["projection"]!
+        guard case .object(var o) = j else { return }
+        o["checkpoints"] = [
+            F.checkpoint("c1", files: [("a.swift", 10, 2), ("b.swift", 5, 0)]),
+            F.checkpoint("c2", run: "r2", files: [("c.swift", 1, 1)], total: (count: 40, additions: 300, deletions: 120)),
+            F.checkpoint("c3", run: nil, files: []),
+        ]
+        j = .object(o)
+        let p = T3Projection(json: j)
+        #expect(p.checkpoints.count == 3)
+        #expect(p.checkpoints[0].fileCount == 2 && p.checkpoints[0].additions == 15 && p.checkpoints[0].deletions == 2 && p.checkpoints[0].runId == "r1")
+        #expect(p.checkpoints[0].files[1] == .init(path: "b.swift", kind: "modified", additions: 5, deletions: 0))
+        // `filesTotal` is sent when `files` is a prefix of the list: the totals cover the whole of it.
+        #expect(p.checkpoints[1].files.count == 1 && p.checkpoints[1].fileCount == 40 && p.checkpoints[1].additions == 300 && p.checkpoints[1].deletions == 120)
+        #expect(p.checkpoints[2].runId == nil && p.checkpoints[2].fileCount == 0)
+    }
+
     // MARK: Commands (exact shapes from S1)
 
     private func payload(_ c: T3Command) -> T3JSON { c.payload(commandId: "c1") }
