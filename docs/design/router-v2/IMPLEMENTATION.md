@@ -224,10 +224,7 @@ skeleton; a new thread's default chips). The reader only ever sends `.read(Route
 1. **No model:** a `@thread` pill is an explicit place (the model's `explicit`); nothing is read.
 2. **Jev** (`Store.readDraft`, `JevPath`): at the typing pause; sure (P ≥ 0.90, an idle thread) → `sure`, one place.
 3. **Sonnet** (`Store.decideDestination`, `ClaudePrint`, structured output) when Jev isn't sure. Its schema
-   (`DeciderContext.schema`) gains, after the place: `launch` (`model`, `effort`, `runtime_mode`, `interaction_mode`,
-   each optional, each an enum of what T3 offers) and `launch_words` (the draft's words that only say them, quoted
-   exactly). Code drops a model T3 doesn't have, and the model marks the words only if they are found in the draft
-   (`taken`, `SF/RouterV2Launch.swift:284`). The decider never writes the message.
+   (`DeciderContext.schema`) is N4b's alone: it reads no settings (they are `@` pills, `RouterSetting.swift`; owner, 2026-11-12). The decider never writes the message.
 4. **The selection as a prior:** one line in Sonnet's Now block ("the owner has this thread's card open"). Jev's
    request is not changed (his weights are fitted).
 5. A read is cancelled by the next keystroke and reused for the same words on the same board

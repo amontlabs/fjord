@@ -15,8 +15,8 @@
 
 ## Track 5 (reader, launch catalog) — 86e314e5 5ac956c3 c159e1ad
 - `RouterV2Reader`: read/cancel/now/searchHits; closures jev, decide, search, boardKey, eligible, allowed, tagged, onRead. Pauses still 600/1200 ms in the reader (plan default 300/600; move into `enum RouterV2` and set 300/600 in wave 2).
-- `RouterLaunchCatalog.make/offer/checked/taken`; `RouterLaunchFeed` reads `server.getConfig` on `connected()`, emits `.launch` on change. Lists every ready provider (Codex too); efforts only from option id `effort`.
-- Decider: `DeciderContext.Inputs.open/launch`, `Built.schema/launch`; answer decodes `launch`, `launch_words`; DeciderLog records them.
+- `RouterLaunchCatalog.make/offer`; `RouterLaunchFeed` reads `server.getConfig` on `connected()`, emits `.launch` on change. Lists every ready provider (Codex too); efforts only from option id `effort`.
+- Decider: `DeciderContext.Inputs.open`. (Removed 2026-11-12: `launch`, `launch_words`, `launchRole`, `taken` and the "approval-required" mapping; settings are `@` pills now, `RouterSetting.swift`, `RouterV2Settings.swift`.)
 - 9b wiring: feed on connect/reconnect; reader `decide` passes `open: selected`, `launch: feed.offer`; jev→readDraft, search→searchDraft, boardKey→deciderBoardKey, eligible→routerDispatcher.eligible, tagged→RouterPointers.context; searchHits in place of routerPreview.searchHits; `onRead` decision → `RouterContext.decided` (and RouterActs.decision).
 - Eval (wave 2): 300 dev moments vs N4 (top-1, wrong-thread sends, new-work starts); 40 drafts with settings asides (launch/launch_words, nothing meant for the agent taken); share of Sonnet calls cancelled by keystrokes.
 
@@ -76,3 +76,8 @@
 4. Verdict/name wording changes between launches (fresh support folder, no cache) and one vague line; check the verdict file persists and loads before the first paint.
 5. The three state tokens at the top right do nothing when pressed: they must filter by state (DESIGN 1.2).
 6. Not yet seen live: a real turn end streaming a verdict and moving a line; PR states.
+
+
+## Settings pills (2026-11-12)
+
+Owner: free text never sets a new thread's settings. `@` lists models (T3 names, slugs, aliases), the model's efforts and access, `@plan`/`@build` in a Settings section; a pick is `RouterPointer.setting(RouterSetting)` (a pill, not sent: `RouterV2Mentions.plain` drops it); `RouterV2Model.launchPills` feeds `launch` (hand picks give way when a pill names the same field). The demo types it (`updateScriptedMention`, `pickScripted`, `RouterV2Dock.drawn`). Shots `v2-new-thread-pills`, `-mention`, `-mention-bare`, `-plan`. Known: in the script a mid-roll pill crossfade overlaps briefly.

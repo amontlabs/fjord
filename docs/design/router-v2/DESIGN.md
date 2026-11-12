@@ -96,7 +96,7 @@ glyph, not a surface.
 
 | Radius | For (by height) |
 |---|---|
-| 4 `token` | up to 18 tall: project pill, PR badge, setting chip, the words taken in the composer |
+| 4 `token` | up to 18 tall: project pill, PR badge, setting chip, a settings pill in the composer |
 | 6 `control` | 20 to 24: a name's ground, a place in the row, filter pill, button, menu row, code block |
 | 8 `row` | 28 to 36: a line under the pointer, an option, the reason banner, toast, failure line, housekeeping |
 | 12 `card` | the selected line with its card |
@@ -114,7 +114,7 @@ What floats keeps CDS Menu's 10, the composer CDS's 14.
 | Tint | Means |
 |---|---|
 | a state's colour at 12 % (24 % under the pointer) | a name that asks something of you (principle 5); the danger ground of a stop's reason and of a failed send |
-| the accent at 12 % or 24 % | it came from you: the words taken as settings (12 %), a setting as your words set it (24 %, fading), a place you picked yourself (24 %) |
+| the accent at 12 % or 24 % | it came from you: a setting as a pill sets it (24 %, fading), a place you picked yourself (24 %) |
 
 - **Selection is a fill, focus is the ring.** A picked option, the lit place, the active filter and the selected card
   change ground; none gains an edge.
@@ -318,10 +318,8 @@ Typing anywhere on the page goes to the composer, as today. With an empty draft,
 starts a draft and digits are words again. **R3.** The placeholder goes in the frame the first character lands, and a
 new placeholder swaps in the same way (old out, new in; never two at once).
 
-**R2.** Words the Router took as a new thread's settings (1.9.1) sit on an accent ground in the draft
-(`CDS.Text.accent` 14 %, radius 5, 3 pt past the words): they set the chips. **R3.** They are left out of the message
-only if that mark was on screen before Return. A Return that came before the read (held, 1.9) applies the settings and
-sends the draft as typed.
+**R2.** A new thread's settings are named with `@` (1.9.1): picking one puts a quiet settings pill in the draft (no "@", an
+outline, the kind's glyph). The pill is not part of the sent message. Free text never sets anything.
 
 **R3.** Held look: a Return before the read lands keeps the words in the composer, their ink muted, the caret hidden,
 and the send button keeps its pressed fill with its glyph in the accent. Typing or Esc takes the words back.
@@ -392,7 +390,7 @@ When the row's place is a new thread, the mode words' place holds what the threa
 ```
 → new thread in silo  [Opus 5.5] [High] [Auto] [Build] ⇥                 T3's defaults (this install's)
 → new thread in silo  [Opus 5.5] [(High)] [Auto] [Build]                Tab into the row: ring on a chip, ↑↓ open its menu and move through it
-→ new thread in silo  [Opus 5.5] [Medium] [Auto] [Build]                after "… (use opus medium)"
+→ new thread in silo  [Opus 5.5] [Medium] [Auto] [Build]                after the pills @Opus 5.5 and @Medium
 → new thread in silo  [Opus 5.5] [High] [Supervised] [▤ Plan]           plan mode on
 ```
 
@@ -420,34 +418,29 @@ quietly. After the last chip the key `⇥` says Tab goes in; it is hidden while 
      bar's; **R3.** it slides between chips (`Motion.glass`) and goes when the pointer enters the row. No letter key is
      involved, so it is the same on AZERTY.
   2. **Click.** A chip opens its menu above it (CDS menu, 220 wide): a title, the choices, a check on the current
-     one. A click on a choice sets it and closes the menu; Esc or Return closes it. (**R3.** The access menu no
-     longer holds the mode: its chip is always there.)
-  3. **In the words.** "split the snapshot tests (use opus medium)": the Router's model reads the draft and returns,
-     with the place, the settings it names and the exact words that say them (structured output; no word list, no
-     regex). The chips change when the read lands, and those words go on the accent ground in the composer (1.8). **R3.**
-     While the draft is read again, the chips' values sheen. The decider returns settings only and never writes the
-     message.
+     one. A click on a choice sets it and closes the menu; Esc or Return closes it. 
+  3. **With `@`.** Typing `@` in the composer opens the mention list (threads, projects), which also has a **Settings**
+     section: T3's models (by name, slug and its aliases: `@op` finds Opus 5.5), the efforts and the access the row's
+     model takes (`@med`, `@low`, `@supervised`, `@auto-accept`, `@full`), and `@plan` / `@build`. Typing after the `@`
+     filters it as it does threads (a setting is found by a prefix, a word or a substring, never by loose letters).
+     Return or Tab on a row makes a **settings pill** in the draft and sets that chip at once, with the roll below.
+     The pill is quieter than a thread's: no "@", an outline and no fill, the kind's glyph (cpu, gauge, lock, clipboard).
+     It is **never sent**: it is taken out of the message with the space after it. ⌫ takes it out like any pill and the
+     chip goes back to your pick, else T3's default. A pill beats a chip you set by hand before it; a chip you change by
+     hand afterwards beats the pill. Two pills of one kind: the last wins. With the row on an existing thread the pill is
+     dropped from the message and sets nothing. **R4 (owner, 2026-11-12):** free text never sets a setting: "use opus
+     for subagents" and "don't edit anything" are for the agent. The decider reads no settings (no `launch`, no
+     `launch_words`); a model never turns words into a runtime mode.
 - **The change.** The value **rolls**: the new one comes in from below when it is further down its list and from
   above when it is further up, the old one leaves the other way, inside the chip (13 pt travel,
   `RouterV2.roll` = spring 0.34, bounce 0.22); the chip's width follows on the same curve. **R3.** Both faces are drawn
   once and moved by one progress, keyed on a count the model moves in the same mutation as the value; the old face is
-  gone by the roll's middle; the faces fade at the chip's top and bottom edge, so there is no hard cut. A setting your words set also **glows**: the
+  gone by the roll's middle; the faces fade at the chip's top and bottom edge, so there is no hard cut. A setting a pill sets also **glows**: the
   accent's tint (24 %) over its ground, no ring (**R4**), held 0.35 s then fading over 0.9 s; several roll one after the other, 70 ms
   apart, so the eye follows the sentence into the row. Reduce Motion: the values cross-fade in place; the glow stays
   (a colour, no movement).
-- **Who wins.** By hand beats the words, until the words name that setting again: a setting written after you set it
-  by hand takes it back. Deleting the words puts it back to your pick, else T3's default. Settings last for the draft
+- **Who wins.** The last act: a pill beats an earlier hand pick, a hand pick beats the pills. Taking the pill out puts it back to your pick, else T3's default. Settings last for the draft
   only: the next new thread starts from T3's defaults.
-- **The words that say the settings (R3).** The new thread gets "split the snapshot tests", not the aside, if the
-  taken words were marked in the composer on screen before Return. A Return that came before the read (held, 1.9)
-  applies the settings and sends the draft as typed. Why leave the aside out: it is an instruction to Fjord about how
-  to start the thread, not to the agent in it; left in, an agent told "use opus" may start an Opus subagent or argue
-  about the model it runs on, and T3 would name the thread after it. It is safe because nothing is taken unseen: the
-  taken words are marked in the composer before Return, the chips show what they became, and code removes exactly the
-  span the model quoted (if the quote isn't in the draft, nothing is removed). Words for a thread that exists are
-  never taken: they go as written.
-- **Return waits for the read** when the row shows a new thread and the draft is still being read (it may name a
-  setting): this is the held Return of 1.9.
 - **Unsure, and you light a new thread yourself** (⌘3): the row shows that chip and its settings; the other places
   fold into the menu (⌘1–3 still light them, Esc brings them back), so the row never outgrows the column.
 - **Accessibility.** The row reads "Starts a new thread in silo with Opus 5.5 · High · Auto"; each chip is
@@ -684,7 +677,7 @@ Curves, in one place:
 | Fjord's mark, the model at work | `FjordLoader`: Core Animation, 2.6 s loop, each part fading to a trace in turn; **R3:** it starts as the whole mark each time it appears | the whole mark, still |
 | Mark ↔ arrow in the destination row | `Motion.fade` | the same |
 | A setting's value changing | `RouterV2.roll` (spring 0.34, bounce 0.22), 13 pt; both faces drawn once and moved by one progress, the old gone by the middle, faces fading at the chip's edges (**R3**); chips your words set 70 ms apart; widths on the same curve | cross-fade in place |
-| A setting set by your words | accent glow, held 0.35 s, ease-out 0.9 s | the same |
+| A setting set by a pill | accent glow, held 0.35 s, ease-out 0.9 s | the same |
 | Words streaming | 0.12 ease-out per word, one every 50 ms | whole line, `Motion.fade` |
 | Working dots | Core Animation (as `BlinkingDot`) | still |
 | Scroll to selection | `Motion.follow` | jumps |
@@ -744,6 +737,7 @@ has that many options (POLISH-interaction 21, kept).
 | ⇧1…⇧9 | card open, empty draft | pick that option (again: unpick; multi-select: toggle). Never sends. Shift is required (owner, 2026-11-12) so a bare digit-row key (é, &, ") always types |
 | → / ← | card open, empty draft | open / close the long text (plan, last lines) |
 | Tab / ⇧Tab | form card | next / previous question |
+| @ (⌥+à on AZERTY), then ↑ ↓ / Return or Tab | draft | the mention list, with a Settings section; Return or Tab makes a settings pill and sets its chip; ⌫ takes the pill out and the chip goes back |
 | Tab / ⇧Tab | draft, the row shows a new thread | into the row's settings: the next / previous chip; past the last (before the first) back to the words |
 | Tab | draft, the row asks for a place | opens the places menu (↑↓ Return picks; Tab or Esc closes) |
 | ← → | keyboard in the settings | the chip after / before |
@@ -821,8 +815,8 @@ It never closes the window and never clears a draft.
   `v2-card-plan`, `v2-card-permission`, `v2-card-step`, `v2-card-done`, `v2-card-stopped`, `v2-card-working`, `v2-peek`,
   `v2-reassessing`, `v2-filter`, `v2-destination-unsure`, `v2-queued`, `v2-failure`, `v2-toast`, `v2-empty`).
   R2: `v2-reading` (the mark in the arrow's slot), `v2-new-thread` (T3's defaults), `v2-new-thread-keys` (the ring, a
-  changed effort, the mode's chip), `v2-new-thread-menu`, `v2-new-thread-access-menu`, `v2-new-thread-written` (the
-  aside taken, the chips glowing), `v2-new-thread-plan`, `v2-new-thread-unsure`, `v2-new-thread-sent`.
+  changed effort, the mode's chip), `v2-new-thread-menu`, `v2-new-thread-access-menu`, `v2-new-thread-pills` (the
+  pills @Opus 5.5 and @Medium, the chips set), `v2-new-thread-mention` ("@op" typed, the list), `v2-new-thread-mention-bare`, `v2-new-thread-plan`, `v2-new-thread-unsure`, `v2-new-thread-sent`.
   R3: `v2-held` (a Return before the read), `v2-card-flagged` (a step the verdict found), `v2-pick-a-place`,
   `v2-unreachable`.
 - Where nothing can be filmed (no Screen Recording permission for the app the binary runs under), `--frames <dir>`
@@ -932,8 +926,8 @@ Needs you / Done / Working, given where they can be derived with certainty. **R3
 | 26 | 155.3 | Esc. Type "silo: write the changelog for 0.4". The read takes 3.2 s | A new thread: the row shows how it starts | While it is read, Fjord's mark is in the arrow's slot; then → new thread in silo and four chips: Opus 5.5 · High · Auto · Build, quiet (they are T3's defaults), and the key ⇥ |
 | 27 | 164.9 | Tab. →. ↓ | Tab into the row: arrows change a setting | The ring lands on the model's chip and slides to the effort with →; ↓ opens its menu and moves High to Extra high, the value rolling as it moves and its ink now primary; nothing is sent |
 | 28 | 171.3 | Click the model's chip. Click "Sonnet 5.5". Pointer parks | Or click a chip: its menu | The ring goes (the pointer has the row); the menu hangs over the chip: the models with their providers, a check on Opus 5.5; the click rolls the chip to Sonnet 5.5 and closes the menu |
-| 29 | 176.9 | Type " (use opus medium)". The read takes 3.2 s | Or write it: Fjord reads the aside | The mark is back in the arrow's slot while you type and the chips' values sheen; then, in one beat: the aside goes on an accent ground in the composer, Sonnet 5.5 rolls to Opus 5.5 and Extra high to Medium a moment after it (the words win over the hand), both glowing in the accent, then settling |
-| 30 | 185.1 | Return | Return starts it; the marked words stay behind | A line is born Sent as ↑ “silo: write the changelog for 0.4”, without the aside, with Opus 5.5 · Medium after the status; its name is "write the changelog for 0.4", sheens with the mark after it, becomes "Changelog 0.4" at 2.2 s; the run starts at 0.9 s with `git log v0.3..HEAD --oneline`; silo 4 → 5 |
+| 29 | 176.9 | Type " @op", Return, then "@med", Return | Or type @: the list offers the settings | The list over the @ word: Fable 5.2 · Opus 5.5 · Sonnet 5.5 · Haiku 5.5 at a bare @, only Opus 5.5 at "@op"; Return makes a quiet pill (glyph, outline, no "@") and the model chip rolls from Sonnet 5.5 to Opus 5.5 with the accent glow; the same for "@med": the list holds Medium, the pill lands and the effort chip rolls from Extra high to Medium a moment after |
+| 30 | 185.1 | Return | Return starts it; the pills stay behind | A line is born Sent as ↑ “silo: write the changelog for 0.4”, without the pills, with Opus 5.5 · Medium after the status; its name is "write the changelog for 0.4", sheens with the mark after it, becomes "Changelog 0.4" at 2.2 s; the run starts at 0.9 s with `git log v0.3..HEAD --oneline`; silo 4 → 5 |
 | 31 | 190.5 | Type "lcu: add a --dry-run flag to lcu apps". Return 0.15 s after the last key, before the read lands | Return early: it goes when Fjord knows where | The held look: the words stay in the composer, muted, the caret hidden, the send button pressed, the mark in the arrow's slot; when the read lands sure (3.2 s) the words go to a new thread in lcu; a line is born Sent, named "add a --dry-run flag", then "Dry-run flag"; Working "Reading Apps.swift" |
 | 32 | 199.9 | Type "snapshot api: RestoreToken moved to SiloCore". Return. 0.3 s later T3 drops. 2.2 s on, T3 is back. 1.4 s later, Return | A send fails: it stays by the composer | The connection line and the red failure line at once (the Sent line returns to its flagged state), the failure line shaking once and taking the keyboard; once T3 is back the connection line leaves and the failure reads "… didn't go to Snapshot API."; Return = Send again: the failure line goes, the thread goes Sent, then Working "Editing Snapshots.swift" |
 
@@ -970,8 +964,7 @@ Out of the demo:
 - Attachments, splitting one message across several threads, Triage.
 - Narrow windows (under 760) and Increased Contrast variants; stills only.
 - A new thread's worktree choice and its attachments; effort lists that differ per model (the demo has one list);
-  the taken words' ground on a draft of several lines (the demo's underlay is laid out as the field's words are, which
-  holds for one line; the real composer marks the range in its own text view).
+  a pill's look in the demo's drawn composer is a picture in the text (the real field draws it as an attachment).
 
 For the real page later:
 
@@ -994,14 +987,11 @@ For the real page later:
   you open clears it at once, a card your own act advanced to at your next key or pointer move.
 - **Destination read (R3):** show what code knows at once (the selected thread as a prior); hold Return until the read
   lands (1.9). The decider returns settings only and never writes the message.
-- **A new thread's settings (R2):** the decider's schema gains, after the place, `launch` (`model`, `effort`,
-  `runtime_mode`, `interaction_mode`, each optional: only what the words name) and `launch_words` (the draft's words
-  that only say them, quoted exactly). It is given T3's model list, so `model` is one of T3's slugs; code drops a slug
-  T3 doesn't have, and removes `launch_words` from the message only when it finds them in the draft. Defaults and the
-  model list (with each model's effort choices and its default) come from T3's settings and provider status, not from
-  constants; a provider that doesn't support a runtime mode shows only the ones it does (T3's
-  `resolveCompatibleRuntimeMode`). `launchThread` gets them as `modelSelection`, `runtimeMode`, `interactionMode`.
-  Score it on real drafts before it ships (settings read right, nothing taken that was meant for the agent).
+- **A new thread's settings (R2, R4):** not read from words at all. They come from `@` pills (1.9.1); the decider's
+  schema is N4b's alone (no `launch`, no `launch_words`). Defaults and the model list (with each model's effort choices,
+  its default and its aliases) come from T3's settings and provider status, not from constants; a provider that doesn't
+  support a runtime mode shows only the ones it does (T3's `resolveCompatibleRuntimeMode`). `launchThread` gets them as
+  `modelSelection`, `runtimeMode`, `interactionMode`.
 - **Fjord's mark:** `FjordLoader` as it is; the row shows it for every decider call, a line for every verdict call.
 - **Undo:** Settle, Snooze, Doesn't need me and Settle all registered with the window's `UndoManager` and in History.
 - **Banners:** keyed on the request id, not on `unseen` (state review, item 2).
@@ -1022,11 +1012,10 @@ Where this goes past the reviews, or picks between them:
 7. **T3 events never open a card or move the selection**; only your own acts advance it.
 8. **Quiet Done lines have no ground**; the blue ground is the model saying "worth a look".
 9. **⌘R and Rewrite Briefs go.** A wrong verdict is fixed with Doesn't need me, not a rerun.
-10. **(R2, R3) The aside is taken, not sent, if it was marked first.** "(use opus medium)" sets the chips and its
-    words are marked in the composer once the read lands. They are left out of the message only if that mark was on
-    screen before Return. A Return that came before the read (held) applies the settings and sends the draft as typed.
-    Words to a thread that exists are never taken. The other choice (always send it as written) keeps your words whole
-    but hands the agent an instruction that was for Fjord.
+10. **(R2, R4) Settings are explicit tokens, never read from words.** `@` lists T3's models, efforts, access and plan
+    beside threads and projects; a pick is a pill that sets the chip and is not sent. "use opus for subagents" and
+    "don't edit anything" are instructions for the agent and stay in the message untouched (owner, 2026-11-12; the
+    model-read path, "don't edit anything → approval-required" included, was removed).
 11. **(R2) The mark and the sheen together.** On a line being read the sheen stays (which words will change) and the
     mark is added after them (the model is at it). In the destination row the mark takes the arrow's slot.
 12. **(R2, R3) Tab is the way into the settings**; ↑ ↓ on a chip open its menu (the one a click opens) and move through

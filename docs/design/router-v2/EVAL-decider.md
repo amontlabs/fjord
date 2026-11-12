@@ -1,3 +1,5 @@
+> **Superseded in part (owner, 2026-11-12):** the `launch` / `launch_words` path, its section 2 and the `launchRole` and `taken` fixes below were removed; settings are `@` pills and free text sets nothing. The open-card prior results (section 1) stand.
+
 # Track 5 eval: the decider with `launch`, `launch_words` and the open-card prior
 
 2026-11-12. Aggregates only; nothing here is a real message. Code: `evals/router/t3/w2run.py` (300 moments, prior runs),
