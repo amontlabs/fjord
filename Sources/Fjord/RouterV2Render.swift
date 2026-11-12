@@ -32,6 +32,10 @@ final class RouterV2LineBox {
     var marked = false
     /// Its card has a body: from its opening until its closing roll has ended.
     var built = false
+    /// What the line's height follows besides those flags, for the list's slot (`RouterV2HostedLine`): words queued
+    /// under it, and its card's own height as laid out.
+    private(set) var queued: Bool
+    var cardHeight: CGFloat = 0
 
     /// The whole record as last taken.
     @ObservationIgnored private(set) var record: RouterV2Thread
@@ -44,6 +48,7 @@ final class RouterV2LineBox {
         lastLines = thread.lastLines
         writing = thread.writing
         talking = !thread.lastLines.isEmpty || thread.writing
+        queued = thread.queued != nil
     }
 
     private static let blank = RouterV2Thread.Sentence(text: "")
@@ -77,6 +82,7 @@ final class RouterV2LineBox {
         if t.writing != writing { writing = t.writing }
         let talks = !t.lastLines.isEmpty || t.writing
         if talks != talking { talking = talks }
+        if (t.queued != nil) != queued { queued = t.queued != nil }
         return RouterV2Model.OrderKey(old) != RouterV2Model.OrderKey(t)
     }
 }

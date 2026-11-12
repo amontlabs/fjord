@@ -39,6 +39,7 @@ struct RouterV2List: View {
                 .padding(.leading, leading).padding(.trailing, trailing)
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .allowsHitTesting(ProcessInfo.processInfo.environment["FJORD_E1"] == nil)
                 .overlayScrollers()
             }
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -85,7 +86,7 @@ struct RouterV2List: View {
             RouterV2SentenceRow(model: model, words: words, clear: clear)
                 .transition(.routerV2Swap)
         case .line(let id):
-            RouterV2LineView(model: model, box: model.box(id))
+            RouterV2HostedLine(model: model, box: model.box(id))
         case .housekeeping(let count):
             RouterV2HousekeepingRow(model: model, count: count)
         }

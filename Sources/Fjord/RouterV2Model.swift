@@ -66,13 +66,29 @@ enum RouterV2Destination: Equatable {
 /// Where the things you can point at are (in the page's space) and what a click on them does: the peek's placement and
 /// the demo's drawn pointer read it. Not observed: writing a frame redraws nothing.
 @MainActor final class RouterV2Targets {
-    /// Every target's frame as laid out, and the ones that can't be pointed at now (inside a closed card).
+    /// Every target's frame as laid out, and the ones that can't be pointed at now (inside a closed card). A target in a
+    /// line's own hosting view (`RouterV2HostedLine`) is laid out in its line's space: `rows` names its line, and the
+    /// line's origin on the page (`origins`) places it.
     var laid: [RouterV2Hit: CGRect] = [:]
+    var rows: [RouterV2Hit: String] = [:]
+    var origins: [String: CGPoint] = [:]
     var off: Set<RouterV2Hit> = []
     var actions: [RouterV2Hit: () -> Void] = [:]
     var viewport: CGSize = .zero
 
-    var frames: [RouterV2Hit: CGRect] { off.isEmpty ? laid : laid.filter { !off.contains($0.key) } }
+    var frames: [RouterV2Hit: CGRect] {
+        var out: [RouterV2Hit: CGRect] = [:]
+        out.reserveCapacity(laid.count)
+        for (hit, frame) in laid where !off.contains(hit) {
+            if let row = rows[hit] {
+                guard let origin = origins[row] else { continue }
+                out[hit] = frame.offsetBy(dx: origin.x, dy: origin.y)
+            } else {
+                out[hit] = frame
+            }
+        }
+        return out
+    }
 }
 
 enum RouterV2Curve {

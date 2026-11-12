@@ -18,12 +18,17 @@ private struct RouterV2TargetModifier: ViewModifier {
     let action: (() -> Void)?
     /// Off inside a closed card: what is there can't be pointed at.
     @Environment(\.routerV2Live) private var live
+    /// The line whose own hosting view this is in: its frame is in that line's space.
+    @Environment(\.routerV2Row) private var row
 
     func body(content: Content) -> some View {
         let _ = (model.targets.actions[hit] = live ? action : nil)
         let _ = live ? model.targets.off.remove(hit) : model.targets.off.insert(hit).memberAfterInsert
+        let _ = (model.targets.rows[hit] = row)
         content
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(RouterV2.space)) } action: { model.targets.laid[hit] = $0 }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(row == nil ? RouterV2.space : RouterV2.rowSpace)) } action: {
+                model.targets.laid[hit] = $0
+            }
             .onChange(of: live) { _, live in
                 if !live { model.hover(hit, false) }
             }
@@ -34,6 +39,7 @@ private struct RouterV2TargetModifier: ViewModifier {
             }
             .onDisappear {
                 model.targets.laid[hit] = nil
+                model.targets.rows[hit] = nil
                 model.targets.off.remove(hit)
                 model.targets.actions[hit] = nil
                 model.hover(hit, false)
@@ -44,6 +50,8 @@ private struct RouterV2TargetModifier: ViewModifier {
 extension EnvironmentValues {
     /// Whether the things inside can be pointed at (a closed card's can't).
     @Entry var routerV2Live = true
+    /// Inside a line's own hosting view (`RouterV2HostedLine`): that line's id.
+    @Entry var routerV2Row: String? = nil
 }
 
 extension View {
@@ -167,7 +175,10 @@ struct RouterV2LineView: View {
                 }
             }
                 .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    cardHeight = $0
+                    box.cardHeight = $0
+                }
                 .opacity(moving ? 0 : shown)
                 .transaction { if moving { $0.animation = nil } }
                 .frame(height: open ? (cardHeight > 0 ? cardHeight : nil) : 0, alignment: .top)
