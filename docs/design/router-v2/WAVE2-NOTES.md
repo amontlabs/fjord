@@ -97,3 +97,23 @@ Owner: free text never sets a new thread's settings. `@` lists models (T3 names,
     `if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] { hung(from: frame, width: RouterV2.Peek.width) { RouterV2ActivityPeek(model: model, thread: thread) }.id("activity-" + id).transition(.scaleFade(0.98, reduce: reduce)) }`
     and after `.motion(.fade, value: model.peeked)` add `.motion(.fade, value: model.activityPeeked)`.
   - Checked with both applied: the three shots and beat 19's frames (`--from 19 --until 19 --frames`).
+
+## Layout performance, part 2 (2026-11-13) — d8046198
+- Found the big one: every line's `NSHostingView` asks AppKit for an update pass (`setNeedsUpdateConstraints`) on each
+  change and each animation frame; SwiftUI's `AppKitPlatformViewHost` took that as "the hosted view's size may have
+  changed" (`_layoutMetricsInvalidatedForHostedView`) and laid the whole list out again: ~260 list layouts a second with
+  records alone, ~500 with moves. `RouterV2GlideView` gives the hosts of the list's own rows `NSView`'s implementation of
+  that one message (row heights come from the model). Records-only load: 3170 list layouts in 12 s -> 18.
+- Every row (headers, reading/sentence rows, housekeeping, filter bar) has a hosting view of its own
+  (`RouterV2HostedRows.swift`); rows are placed at once and glide on Core Animation (`RouterV2Glides`, the change's own
+  curve; a moving line lands when its curve logically ends). The WIP patch's frame observer missed moves (SwiftUI moves
+  an intermediate container); places come from `onGeometryChange` in the list's own space (`RouterV2.listSpace`).
+- The redraw loop 9a saw with a reused demo model no longer reproduces with the shots' reset removed; the reset stays
+  (a new store's lazy `routerPage` would otherwise adopt the last shot's model).
+- Quiet machine, release, `--router-v2-load`: T3 event p50 16-17 -> 7-8, p95 52-57 -> 33-35, max 240-317 -> 108-274 ms;
+  Select (demo, speed 4) p95 26-37 -> 16-24. Still red.
+- What is left (`FJORD_LOAD_OFF=streams,reply,records,moves` leaves parts out): moves ~55 % of the main thread at 4 a
+  second, of which CPU-drawn interpolations ~17 % (the moving line's age `numericText` ~8 %, header/bar count ticks ~5 %,
+  mark replace ~1 %); streams ~30 %; records without moves ~13 %. `.drawingGroup()` on the ticks removes the CPU draw but
+  the commit then waits on the GPU: p95 260-380 ms, don't. Next: count/age ticks as Core Animation digit layers, and
+  cheaper line updates (a record's `.fade` re-renders the whole line's drawing layer per frame).
