@@ -42,6 +42,46 @@ import Testing
         return o
     }
 
+    // MARK: Continue
+
+    @Test func continueNamesTheRunOnlyAfterAnInterruptOrAUsageLimit() {
+        #expect(ThreadSender.continuationRun(status: .interrupted, usageLimit: false, latestRun: "r9") == "r9")
+        #expect(ThreadSender.continuationRun(status: .failed, usageLimit: true, latestRun: "r9") == "r9")
+        #expect(ThreadSender.continuationRun(status: .failed, usageLimit: false, latestRun: "r9") == nil)
+        #expect(ThreadSender.continuationRun(status: .completed, usageLimit: false, latestRun: "r9") == nil)
+        #expect(ThreadSender.continuationRun(status: .interrupted, usageLimit: false, latestRun: nil) == nil)
+    }
+
+    @Test func continueOnAnInterruptedThreadSendsT3sWordsWithItsRunAndMarksItRead() async throws {
+        let s = Store.reading([F.shell("t1", status: "interrupted", extra: ["latestRunId": "r9"])])
+        let sent = Sent()
+        s.requestSender = { command, id in sent.commands.append((command, id)) }
+        try await s.continueThread("t1")
+        let o = dispatchObject(sent)
+        #expect(o["type"]?.string == "message.dispatch" && o["text"]?.string == "Continue where you left off.")
+        #expect(o["manualContinuationOfRunId"]?.string == "r9" && o["dispatchMode"]?.str("type") == "start_immediately")
+        #expect(sent.commands.map { $0.command.payload(commandId: "c").str("type") } == ["message.dispatch", "thread.visit"])
+    }
+
+    @Test func continueAfterAPlainFailureNamesNoRun() async throws {
+        let s = Store.reading([F.shell("t1", status: "failed", extra: ["latestRunId": "r9", "lastError": "boom"])])
+        let sent = Sent()
+        s.requestSender = { command, id in sent.commands.append((command, id)) }
+        try await s.continueThread("t1")
+        #expect(dispatchObject(sent)["manualContinuationOfRunId"] == nil)
+    }
+
+    @Test func continueOnAThreadT3NoLongerListsThrowsAndSendsNothing() async {
+        let (s, sent) = store()
+        await #expect(throws: ThreadSendFailure.self) { try await s.continueThread("gone") }
+        #expect(sent.commands.isEmpty)
+    }
+
+    @Test func theNewestQueuedRunIsTheOneACancelTakesBack() {
+        let (s, _) = store(projection: projection(runs: [run("r2", status: "queued", message: "m2", position: 1), run("r3", status: "queued", message: "m3", position: 2)]))
+        #expect(s.newestQueuedRun("t1") == "r3" && s.newestQueuedRun("nope") == nil)
+    }
+
     // MARK: The plan
 
     @Test func aRunningThreadIsSteeredByDefaultAndQueuedOnRequest() {

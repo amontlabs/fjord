@@ -80,10 +80,17 @@ extension Store {
     }
 
     /// Does an act on the entry's thread: hidden or marked here at once, sent to T3, and logged with its Revert. A refusal puts
-    /// it back and says why on the entry.
-    func threadAct(_ act: BriefAction, on t: BriefTarget, detail: String = "", title: String, now: Date = Date()) {
-        guard !Self.commands(for: act, thread: t.thread, detail: detail, forward: true, now: now).isEmpty else { return }
-        routerBriefs.holdAct(act, t, detail: detail, on: true, store: self)
+    /// it back and says why on the entry. `hold` is what hides the thread meanwhile (default: the brief's); `refused` hears
+    /// the reason after it is put back (default: the brief's `trouble`). Returns the change it logged.
+    @discardableResult
+    func threadAct(_ act: BriefAction, on t: BriefTarget, detail: String = "", title: String, now: Date = Date(),
+                   hold: (@MainActor (_ on: Bool) -> Void)? = nil, refused: (@MainActor (String) -> Void)? = nil) -> UUID? {
+        guard !Self.commands(for: act, thread: t.thread, detail: detail, forward: true, now: now).isEmpty else { return nil }
+        let hide = hold ?? { [weak self] on in
+            guard let self else { return }
+            self.routerBriefs.holdAct(act, t, detail: detail, on: on, store: self)
+        }
+        hide(true)
         let change = FjordChange(date: now, title: "\(act.label) \(title)",
                                  patch: .briefAction(project: t.project, thread: t.thread, act: act, mark: detail))
         var state = router
@@ -94,8 +101,8 @@ extension Store {
         let id = change.id
         send(Self.commands(for: act, thread: t.thread, detail: detail, forward: true, now: now)) { [weak self] reason in
             guard let self else { return }
-            self.routerBriefs.holdAct(act, t, detail: detail, on: false, store: self)
-            self.routerBriefs.trouble[t] = reason
+            hide(false)
+            if let refused { refused(reason) } else { self.routerBriefs.trouble[t] = reason }
             if let i = self.router.changes.firstIndex(where: { $0.id == id }) {
                 var failed = self.router.changes[i]
                 failed.revertedAt = Date()
@@ -103,6 +110,7 @@ extension Store {
                 self.router.changes[i] = failed
             }
         }
+        return id
     }
 
     /// Revert or Apply of an act: the opposite command (or the same again) and the hidden state set to match.

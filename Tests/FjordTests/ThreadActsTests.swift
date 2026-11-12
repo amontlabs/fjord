@@ -39,6 +39,21 @@ import Testing
         #expect(untag.first?.payload(commandId: "c")["tagged"]?.bool == false)
     }
 
+    @Test func anActHidesThroughTheCallersHoldAndReportsARefusalAfterTheLineIsBack() async throws {
+        let (store, sent) = fixture()
+        var holds: [Bool] = []
+        var told: [String] = []
+        let id = store.threadAct(.settle, on: target(), title: "Layout", hold: { holds.append($0) }, refused: { told.append($0) })
+        #expect(id != nil && store.router.changes.last?.id == id && holds == [true])
+        #expect(!store.routerBriefs.awayThreads.contains("t1"))  // the brief's own hold is not used
+        await waitUntil { sent.commands.count == 1 }
+        store.requestSender = { _, _ in throw ThreadSendFailure("T3 said no") }
+        store.threadAct(.settle, on: target(), title: "Layout", hold: { holds.append($0) }, refused: { told.append($0) })
+        await waitUntil { told.count == 1 }
+        #expect(holds == [true, true, false] && told == ["T3 said no"])
+        #expect(store.router.changes.last?.revertNote == "T3 refused it: T3 said no" && store.routerBriefs.trouble[target()] == nil)
+    }
+
     @Test func aTagOver64CharactersIsNotSent() {
         let long = String(repeating: "x", count: 65)
         #expect(Store.commands(for: .tag, thread: "t1", detail: ThreadActDetail.tag(long, on: true), forward: true).isEmpty)

@@ -66,6 +66,16 @@ enum ThreadSender {
         return ThreadSendPlan(dispatch: .startImmediately(intent: .steer), outcome: .steered)
     }
 
+    /// The run a Continue names (`manualContinuationOfRunId`): T3 allows it only after an interrupt or a usage limit. After
+    /// a plain failure, or a run that finished, Continue is a message like any other, and there is no run to name.
+    static func continuationRun(status: T3Status, usageLimit: Bool, latestRun: String?) -> String? {
+        guard status == .interrupted || (status == .failed && usageLimit) else { return nil }
+        return latestRun
+    }
+
+    /// T3's own words for Continue.
+    static let continueWords = "Continue where you left off."
+
     /// The pick line over the composer: what your words do to the thread.
     static func pickLine(title: String, running: Bool, steers: Bool) -> (text: String, steering: Bool) {
         guard running else { return ("send to \(title)", false) }
@@ -150,6 +160,20 @@ extension Store {
         return RouterDecision.Delivered(thread: id, messageID: message.messageID, commandID: message.commandID,
                                         outcome: plan.outcome, note: plan.note, at: Date())
     }
+
+    /// Continue on a stopped thread: T3's own words as a message that starts a run, naming the run it continues when T3 allows
+    /// it. Marks the thread read, as any send of yours does.
+    func continueThread(_ id: String) async throws {
+        guard let thread = threads[id] else { throw ThreadSendFailure("That thread isn't in T3 anymore: nothing was sent") }
+        let run = ThreadSender.continuationRun(status: thread.status, usageLimit: thread.usageLimit, latestRun: thread.latestRunID)
+        let command = T3Command.messageDispatch(threadId: id, messageId: UUID().uuidString.lowercased(), text: ThreadSender.continueWords,
+                                                dispatch: .startImmediately(intent: .auto), continuationOf: run)
+        try await dispatch(command)
+        try? await dispatch(.threadVisit(threadId: id, visitedAt: T3Timestamp(date: Date())))
+    }
+
+    /// The newest message queued behind a thread's run (the one a Cancel on its queued row takes back).
+    func newestQueuedRun(_ id: String) -> String? { t3.store.projections[id]?.queuedRuns.last?.id }
 
     /// Where a delivered message stands now.
     func delivery(_ sent: RouterDecision.Delivered) -> ThreadDelivery {
