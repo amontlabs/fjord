@@ -299,6 +299,83 @@ import Testing
     }
 }
 
+// MARK: - A new thread's settings in the answer
+
+extension RouterProjectDecideTests {
+    static let offer = RouterLaunchCatalog.offer(config: RouterLaunchCatalogTests.config())
+
+    static func ctxWith(_ offer: RouterLaunchOffer?) -> DeciderContext.Built {
+        var c = ctx
+        c.launch = offer
+        c.schema = DeciderContext.schema(launch: offer)
+        return c
+    }
+
+    @Test func theAnswerDecodesLaunchAndTheWordsAndAnAnswerWithoutThemStillDecodes() throws {
+        let json = #"{"message_deliverable":"split","fits":[],"owned_by":"none","referent_unique":false,"action":"new_work","project":"silo","session":"","reason":"r","alternatives":[],"confidence":0.9,"project_confidence":0.9,"p_new":0.9,"launch":{"model":"claude-opus-5-5","effort":"medium","interaction_mode":"plan"},"launch_words":"(use opus medium)"}"#
+        let a = try JSONDecoder().decode(RouterContextAnswer.self, from: Data(json.utf8))
+        #expect(a.launch == .init(model: "claude-opus-5-5", effort: "medium", runtimeMode: nil, interactionMode: "plan") && a.launchWords == "(use opus medium)")
+        let old = #"{"action":"ask","confidence":0.4}"#
+        let b = try JSONDecoder().decode(RouterContextAnswer.self, from: Data(old.utf8))
+        #expect(b.launch == .init() && b.launchWords.isEmpty)
+        // A launch of the wrong shape is no settings, not a failed answer.
+        let odd = try JSONDecoder().decode(RouterContextAnswer.self, from: Data(#"{"action":"ask","confidence":0.4,"launch":"opus"}"#.utf8))
+        #expect(odd.launch == .init())
+    }
+
+    @Test func aDecisionCarriesOnlyWhatT3OffersAndTheWordsOnlyIfSomethingWasNamed() {
+        var a = RouterContextAnswer(action: "new_work", project: "silo", session: "", confidence: 0.9, pNew: 0.9)
+        a.launch = .init(model: "opus", effort: "medium", runtimeMode: "auto", interactionMode: "plan")
+        a.launchWords = "(use opus medium)"
+        let d = RouterProjectDecider(jev: nil, sonnet: nil).contextDecision(a, context: Self.ctxWith(Self.offer), board: Self.board())
+        #expect(d.launch == RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium, access: .auto, plan: true) && d.launchWords == "(use opus medium)")
+        // A model T3 doesn't have is dropped with its effort kept to the default model's list; the words go with nothing named.
+        a.launch = .init(model: "gpt-9", effort: nil, runtimeMode: nil, interactionMode: nil)
+        let dropped = RouterProjectDecider(jev: nil, sonnet: nil).contextDecision(a, context: Self.ctxWith(Self.offer), board: Self.board())
+        #expect(dropped.launch == RouterV2LaunchAsk() && dropped.launchWords.isEmpty)
+        // No offer (T3's models unknown): nothing is taken from the answer.
+        let none = RouterProjectDecider(jev: nil, sonnet: nil).contextDecision(a, context: Self.ctxWith(nil), board: Self.board())
+        #expect(none.launch == RouterV2LaunchAsk() && none.launchWords.isEmpty)
+    }
+
+    @Test func theCallsSchemaIsTheContextsSoTheEnumsAreT3sAtCallTime() async throws {
+        let seen = PrintSeen()
+        let runner: ClaudePrint.Runner = { binary, args, input, timeout in
+            seen.set(binary, args, String(decoding: input, as: UTF8.self), timeout)
+            let out = #"{"type":"result","is_error":false,"usage":{"input_tokens":1,"output_tokens":1},"structured_output":{"action":"new_work","project":"silo","session":"","confidence":0.8,"launch":{"effort":"max"},"launch_words":"max effort"}}"#
+            return OneShot.Output(stdout: Data(out.utf8), stderr: Data(), status: 0)
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("usage-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ModelUsageLog(url: dir.appendingPathComponent("model-usage.jsonl"))
+        let built = Self.ctxWith(Self.offer)
+        let a = try await RouterProjectDecider.claude(binary: { "/bin/claude" }, runner: runner, log: log)(built)
+        let args = seen.args
+        #expect(args.firstIndex(of: "--json-schema").map { args[$0 + 1] } == built.schema && built.schema != DeciderContext.schema)
+        #expect(a.launch.effort == "max" && a.launchWords == "max effort")
+    }
+
+    @Test func theLogKeepsWhatTheMessageNamedForScoring() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("log-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = DeciderLog(url: dir.appendingPathComponent("decider-log.jsonl"))
+        var d = RouterProjectDecision(kind: .newThread(project: "p1"), confidence: 0.9, decider: .sonnet)
+        d.launch = RouterV2LaunchAsk(model: "claude-opus-5-5", effort: .medium, access: nil, plan: false)
+        d.launchWords = "(use opus medium)"
+        log.decision(id: UUID(), message: "split it (use opus medium)", decision: d, board: "b", candidates: [], sent: "split it")
+        log.flush()
+        let line = try #require(String(contentsOf: log.url, encoding: .utf8).split(separator: "\n").first)
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        let launch = try #require(json["launch"] as? [String: String])
+        #expect(launch == ["model": "claude-opus-5-5", "effort": "medium", "interactionMode": "default"] && json["launchWords"] as? String == "(use opus medium)")
+        // A decision with no settings logs none.
+        let plain = DeciderLog(url: dir.appendingPathComponent("plain.jsonl"))
+        plain.decision(id: UUID(), message: "m", decision: RouterProjectDecision(kind: .answer, confidence: 1, decider: .sonnet), board: "b", candidates: [], sent: "")
+        plain.flush()
+        #expect(!(try String(contentsOf: plain.url, encoding: .utf8)).contains("launchWords"))
+    }
+}
+
 final class PrintSeen: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var binary = "", args: [String] = [], input = "", timeout: TimeInterval = 0

@@ -35,6 +35,11 @@ struct RouterProjectDecision: Equatable, Sendable {
     var decider: Decider
     var reason: String = ""
     var projectConfidence: Double = 0
+    /// The settings the message names for a new thread, as T3 has them (only what T3 offers survives: a model it doesn't have
+    /// is dropped), and the message's words that only say them, exactly as the model quoted them. The decider never writes
+    /// the message: the reader takes these words out of it only when it finds them there.
+    var launch = RouterV2LaunchAsk()
+    var launchWords = ""
     /// N4b's fields of Sonnet's answer, for the decision log (nil: not a Sonnet answer).
     var pNew: Double?
     var deliverable = ""
@@ -87,10 +92,25 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
         init(thread: String, how: String, stateOK: Bool) { self.thread = thread; self.how = how; self.stateOK = stateOK }
     }
 
+    /// The settings of a new thread that the message names (`launch`), as the model gave them, unchecked.
+    struct Launch: Equatable, Sendable, Decodable {
+        var model: String?
+        var effort: String?
+        var runtimeMode: String?
+        var interactionMode: String?
+        init(model: String? = nil, effort: String? = nil, runtimeMode: String? = nil, interactionMode: String? = nil) {
+            self.model = model; self.effort = effort; self.runtimeMode = runtimeMode; self.interactionMode = interactionMode
+        }
+        private enum CodingKeys: String, CodingKey { case model, effort; case runtimeMode = "runtime_mode"; case interactionMode = "interaction_mode" }
+    }
+
     var messageDeliverable = ""
     var fits: [Fit] = []
     var ownedBy = ""
     var referentUnique = false
+    var launch = Launch()
+    /// The message's words that only say those settings, as quoted.
+    var launchWords = ""
     var action: String
     var project: String
     var session: String
@@ -105,7 +125,8 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
 
     init(action: String, project: String, session: String, reason: String = "", confidence: Double, projectConfidence: Double = 0,
          alternatives: [String] = [], pNew: Double = 0, fits: [Fit] = [], ownedBy: String = "", referentUnique: Bool = false,
-         deliverable: String = "") {
+         deliverable: String = "", launch: Launch = Launch(), launchWords: String = "") {
+        self.launch = launch; self.launchWords = launchWords
         self.action = action; self.project = project; self.session = session; self.reason = reason; self.confidence = confidence
         self.projectConfidence = projectConfidence; self.alternatives = alternatives; self.pNew = pNew; self.fits = fits
         self.ownedBy = ownedBy; self.referentUnique = referentUnique; self.messageDeliverable = deliverable
@@ -114,6 +135,8 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
     private enum CodingKeys: String, CodingKey {
         case fits, action, project, session, reason, alternatives, confidence
         case messageDeliverable = "message_deliverable"
+        case launch
+        case launchWords = "launch_words"
         case ownedBy = "owned_by"
         case referentUnique = "referent_unique"
         case projectConfidence = "project_confidence"
@@ -134,6 +157,8 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
         ownedBy = try c.decodeIfPresent(String.self, forKey: .ownedBy) ?? ""
         referentUnique = try c.decodeIfPresent(Bool.self, forKey: .referentUnique) ?? false
         pNew = try c.decodeIfPresent(Double.self, forKey: .pNew) ?? 0
+        launch = (try? c.decodeIfPresent(Launch.self, forKey: .launch)) ?? Launch()
+        launchWords = try c.decodeIfPresent(String.self, forKey: .launchWords) ?? ""
     }
 }
 
@@ -398,6 +423,10 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
             d.projectConfidence = a.projectConfidence; d.latency = a.latency; d.usage = a.usage; d.action = a.action
             d.pNew = a.pNew; d.deliverable = a.messageDeliverable; d.fits = a.fits; d.ownedBy = a.ownedBy
             d.referentUnique = a.referentUnique
+            // Only what T3 offers (a model it doesn't have is dropped); the words only if something was named.
+            d.launch = RouterLaunchCatalog.checked(model: a.launch.model, effort: a.launch.effort, runtimeMode: a.launch.runtimeMode,
+                                                   interactionMode: a.launch.interactionMode, offer: context.launch)
+            d.launchWords = d.launch == RouterV2LaunchAsk() ? "" : a.launchWords
             return d
         }
         if let action {
@@ -465,7 +494,7 @@ extension RouterProjectDecider {
         { built in
             guard let path = binary() else { throw ClaudePrint.Failure(message: "Claude Code wasn't found") }
             let reply = try await ClaudePrint.call(binary: path, model: model, system: built.system, user: built.user,
-                                                   schema: DeciderContext.schema, effort: effort, timeout: timeout, role: .decider,
+                                                   schema: built.schema, effort: effort, timeout: timeout, role: .decider,
                                                    log: log, runner: runner)
             var answer: RouterContextAnswer
             do { answer = try JSONDecoder().decode(RouterContextAnswer.self, from: reply.json) } catch {

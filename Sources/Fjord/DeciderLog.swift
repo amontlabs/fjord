@@ -66,6 +66,16 @@ final class DeciderLog: @unchecked Sendable {
             record["ownedBy"] = d.ownedBy
         }
         if let u = d.referentUnique { record["referentUnique"] = u }
+        // A new thread's settings the message named (as T3 has them) and the words that said them, for scoring the reading.
+        if d.launch != RouterV2LaunchAsk() {
+            var launch: [String: Any] = [:]
+            if let m = d.launch.model { launch["model"] = m }
+            if let e = d.launch.effort { launch["effort"] = e.rawValue }
+            if let a = d.launch.access { launch["runtimeMode"] = a.rawValue }
+            if let p = d.launch.plan { launch["interactionMode"] = p ? "plan" : "default" }
+            record["launch"] = launch
+            record["launchWords"] = d.launchWords
+        }
         if !d.contextKey.isEmpty { record["contextKey"] = d.contextKey }
         if !d.contextSizes.isEmpty { record["contextSizes"] = d.contextSizes }
         if let latency = d.latency { record["latencyMs"] = Int(latency * 1000) }
