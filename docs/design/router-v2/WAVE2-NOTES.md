@@ -68,3 +68,11 @@
 - Wave 3: `RouterSetupNotice` (in RouterView.swift) spans the page's width with Theme padding instead of the column's edges; move it out and align it. Playground's `openRouterWindow` still draws `RouterCodeView` (old brief shots).
 - Flaky under the full suite's load only (pass alone): `RouterVerdictsTests.theStateComesBeforeTheWordsAndTheWordsGrow`, `RouterV2ReaderTests.notSureSonnetDecides…`, `RouterV2RenderTests.aHoverFromOneRowToAnotherRunsTwoLineBodies`.
 - Not done: the live check on the owner's T3 (needs the owner's go).
+
+## Live check follow-ups (LIVE-CHECK.md) — to do after the layout-perf agent lands (page files)
+1. While verdicts are pending on a cold launch, the page says "Nothing needs you." and a needs-you thread sits in Done, then jumps. Fix: a finished thread whose verdict is pending shows as being read (logo + sheen) and doesn't count as settled-in-Done; the empty state never says "Nothing needs you" while any verdict is pending ("Reading 2 threads…"). Names cut at ~22 chars with a shimmer disc although the row has room: use the row's width.
+2. Working lines show raw shell commands. Prefer the tool call's own description (Claude's Bash `description`) or the agent's latest sentence; a command only as last resort.
+3. Pill said `lookout` (folder) vs T3 `fjord`: fixed in 10ab9eda.
+4. Verdict/name wording changes between launches (fresh support folder, no cache) and one vague line; check the verdict file persists and loads before the first paint.
+5. The three state tokens at the top right do nothing when pressed: they must filter by state (DESIGN 1.2).
+6. Not yet seen live: a real turn end streaming a verdict and moving a line; PR states.
