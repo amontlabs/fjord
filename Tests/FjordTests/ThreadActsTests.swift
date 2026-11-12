@@ -45,13 +45,12 @@ import Testing
         var told: [String] = []
         let id = store.threadAct(.settle, on: target(), title: "Layout", hold: { holds.append($0) }, refused: { told.append($0) })
         #expect(id != nil && store.router.changes.last?.id == id && holds == [true])
-        #expect(!store.routerBriefs.awayThreads.contains("t1"))  // the brief's own hold is not used
         await waitUntil { sent.commands.count == 1 }
         store.requestSender = { _, _ in throw ThreadSendFailure("T3 said no") }
         store.threadAct(.settle, on: target(), title: "Layout", hold: { holds.append($0) }, refused: { told.append($0) })
         await waitUntil { told.count == 1 }
         #expect(holds == [true, true, false] && told == ["T3 said no"])
-        #expect(store.router.changes.last?.revertNote == "T3 refused it: T3 said no" && store.routerBriefs.trouble[target()] == nil)
+        #expect(store.router.changes.last?.revertNote == "T3 refused it: T3 said no" && store.routerPage.toast == nil)
     }
 
     @Test func aTagOver64CharactersIsNotSent() {
@@ -62,13 +61,10 @@ import Testing
     @Test func archiveGoesToT3AtOnceAndRevertUnarchives() async {
         let (store, sent) = fixture()
         store.threadAct(.archive, on: target(), title: "Layout")
-        #expect(store.routerBriefs.archived.isEmpty)  // no doc holds it here; the thread is hidden by id
-        #expect(store.routerBriefs.awayThreads.contains("t1"))
         let change = store.router.changes.last
         #expect(change?.isBriefAction == true)
         await waitUntil { sent.commands.count == 1 }
         store.revertFjordChange(change!.id)
-        #expect(!store.routerBriefs.awayThreads.contains("t1"))
         await waitUntil { sent.commands.count == 2 }
         #expect(sent.commands.map { $0.payload(commandId: "c").str("type") } == ["thread.archive", "thread.unarchive"])
     }
@@ -78,8 +74,9 @@ import Testing
         struct Refused: LocalizedError { var errorDescription: String? { "thread is busy" } }
         store.requestSender = { _, _ in throw Refused() }
         store.threadAct(.settle, on: target(), title: "Layout")
-        await waitUntil { store.routerBriefs.trouble[BriefTarget(project: "p", thread: "t1")] != nil }
-        #expect(!store.routerBriefs.awayThreads.contains("t1"))
+        // The Router page's toast says why, with nothing to revert.
+        await waitUntil { store.routerPage.toast?.revertible == false }
+        #expect(store.routerPage.toast?.after.contains("thread is busy") == true)
         #expect(store.router.changes.last?.isReverted == true)
     }
 

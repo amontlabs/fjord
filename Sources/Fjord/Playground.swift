@@ -189,7 +189,7 @@ final class Playground: NSObject, NSWindowDelegate {
                                       guard let self else { return }
                                       self.openApp(self.app.navigator.selection)
                                   },
-                                  pickBriefEntry: { [weak self] entry in self?.store.routerBriefs.focus(entry) })
+                                  pickBriefEntry: { [weak self] entry in self?.store.routerFocus(entry.thread) })
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
                           styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "Fjord playground"

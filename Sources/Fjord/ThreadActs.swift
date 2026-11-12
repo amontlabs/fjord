@@ -86,10 +86,7 @@ extension Store {
     func threadAct(_ act: BriefAction, on t: BriefTarget, detail: String = "", title: String, now: Date = Date(),
                    hold: (@MainActor (_ on: Bool) -> Void)? = nil, refused: (@MainActor (String) -> Void)? = nil) -> UUID? {
         guard !Self.commands(for: act, thread: t.thread, detail: detail, forward: true, now: now).isEmpty else { return nil }
-        let hide = hold ?? { [weak self] on in
-            guard let self else { return }
-            self.routerBriefs.holdAct(act, t, detail: detail, on: on, store: self)
-        }
+        let hide = hold ?? { [weak self] on in self?.routerHold(act, t.thread, on: on) }
         hide(true)
         let change = FjordChange(date: now, title: "\(act.label) \(title)",
                                  patch: .briefAction(project: t.project, thread: t.thread, act: act, mark: detail))
@@ -102,7 +99,7 @@ extension Store {
         send(Self.commands(for: act, thread: t.thread, detail: detail, forward: true, now: now)) { [weak self] reason in
             guard let self else { return }
             hide(false)
-            if let refused { refused(reason) } else { self.routerBriefs.trouble[t] = reason }
+            if let refused { refused(reason) } else { self.routerRefused(act, t.thread, reason: reason) }
             if let i = self.router.changes.firstIndex(where: { $0.id == id }) {
                 var failed = self.router.changes[i]
                 failed.revertedAt = Date()
@@ -115,11 +112,25 @@ extension Store {
 
     /// Revert or Apply of an act: the opposite command (or the same again) and the hidden state set to match.
     func replayBriefAction(_ patch: FjordChange.Patch, forward: Bool) {
-        guard case .briefAction(let project, let thread, let act, let detail) = patch else { return }
-        routerBriefs.holdAct(act, BriefTarget(project: project, thread: thread), detail: detail, on: forward, store: self)
+        guard case .briefAction(_, let thread, let act, let detail) = patch else { return }
+        routerHold(act, thread, on: forward)
         send(Self.commands(for: act, thread: thread, detail: detail, forward: forward)) { [weak self] reason in
-            self?.routerBriefs.trouble[BriefTarget(project: project, thread: thread)] = reason
+            guard let self else { return }
+            self.routerHold(act, thread, on: !forward)
+            self.routerRefused(act, thread, reason: reason)
         }
+    }
+
+    /// A settled, snoozed or archived thread has no line on the Router page until `on` is false again (the records hide it).
+    func routerHold(_ act: BriefAction, _ thread: String, on: Bool) {
+        guard act == .settle || act == .snooze || act == .archive else { return }
+        routerRecords.hide(thread, on: on)
+    }
+
+    /// T3 refused an act done outside the page (History, the bar, the palette): the page's toast says why.
+    func routerRefused(_ act: BriefAction, _ thread: String, reason: String) {
+        guard act == .settle || act == .snooze || act == .archive else { return }
+        routerPage.post(.actRefused(thread, reason: reason))
     }
 
     /// Sends the commands in order; `failed` hears T3's words for a refusal.
@@ -137,14 +148,14 @@ extension Store {
     // MARK: Entry points
 
     func snoozeThread(_ t: BriefTarget, until: Date) {
-        threadAct(.snooze, on: t, detail: T3Timestamp(date: until).text, title: routerBriefs.title(t))
+        threadAct(.snooze, on: t, detail: T3Timestamp(date: until).text, title: lineTitle(t))
     }
 
-    func settleThread(_ t: BriefTarget) { threadAct(.settle, on: t, title: routerBriefs.title(t)) }
+    func settleThread(_ t: BriefTarget) { threadAct(.settle, on: t, title: lineTitle(t)) }
 
     /// A new title for the thread (`thread.metadata.update`); the old one is what Revert sends.
     func renameThread(_ t: BriefTarget, to title: String) {
-        let old = threads[t.thread]?.title ?? routerBriefs.title(t)
+        let old = threads[t.thread]?.title ?? lineTitle(t)
         let new = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !new.isEmpty, new != old else { return }
         threadAct(.rename, on: t, detail: ThreadActDetail.rename(from: old, to: new), title: old)
@@ -154,7 +165,7 @@ extension Store {
     func tagThread(_ t: BriefTarget, tag: String, on: Bool = true) {
         let tag = tag.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tag.isEmpty, tag.count <= BriefAction.tagLimit else { return }
-        threadAct(.tag, on: t, detail: ThreadActDetail.tag(tag, on: on), title: routerBriefs.title(t))
+        threadAct(.tag, on: t, detail: ThreadActDetail.tag(tag, on: on), title: lineTitle(t))
     }
 
     /// The times the Snooze menu offers: an hour, three, tomorrow at 9:00.

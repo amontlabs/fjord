@@ -324,7 +324,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         var destination = destination
         if entry != nil { destination = .router }
         if let entry {
-            store.routerBriefs.focus(entry)
+            store.routerFocus(entry.thread)
             changes &+= 1
         }
         // Another place, while on its way in: the navigator says so (see `init`).
@@ -350,6 +350,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
             if !reversing || !window.isVisible { window.alphaValue = 0 }
             window.ignoresMouseEvents = true
             startOpening(window, bar: morph, reversing: reversing)
+            // A close turned round on another line: the overlay's picture shows the card it closed on, so it fades into
+            // the real window rather than cutting to it.
+            if entry != nil, reversing { run?.fadeHandoff() }
         } else {
             // One on its way in with its window still to come gets it then.
             if pending == nil { bringIn(window) }
@@ -942,13 +945,13 @@ final class AppWindowController: NSObject, NSWindowDelegate {
 
     /// A brief entry picked from the bar (the window opens on the Router next).
     func pick(entry: BriefTarget) {
-        store.routerBriefs.focus(entry)
+        store.routerFocus(entry.thread)
         contentChanged()
     }
 
     /// A message asked for from the bar: the Router's history drawer opens (the window opens on the Router next).
     func pick(message: UUID) {
-        store.routerBriefs.drawerOpen = true
+        store.routerDrawerOpen = true
         contentChanged()
     }
 
@@ -1035,12 +1038,13 @@ final class AppWindowController: NSObject, NSWindowDelegate {
                     return true
                 }
                 if self.palette.isOpen { return self.palette.takes(event) }
-                // The Router v2 demo's page has its own key map; while its script plays, the keyboard is the script's.
-                if let v2 = RouterV2Demo.model, self.navigator.selection == .router {
+                // The Router page's own key map; while the demo's script plays, the keyboard is the script's.
+                if self.navigator.selection == .router {
+                    let v2 = RouterV2Demo.model ?? self.store.routerPage
                     if v2.scripted { return !event.modifierFlags.contains(.command) }
-                    return RouterV2Keys.key(event, model: v2)
+                    return RouterV2Keys.key(event, model: v2, composer: (self.store, self.routerModel))
                 }
-                return self.navigator.selection == .router ? self.keys.key(event) : self.inboxKeys.key(event)
+                return self.inboxKeys.key(event)
             }
             return consumed ? nil : event
         }
@@ -1284,14 +1288,14 @@ final class AppRootActions {
     init(store: Store, navigator: AppNavigator, routerModel: RouterModel, hub: HubState, palette: PaletteModel) {
         openPalette = { palette.open(pointer: true) }
         openRouter = { entry in
-            if let entry { store.routerBriefs.focus(entry) }
+            if let entry { store.routerFocus(entry.thread) }
             navigator.go(.router)
         }
-        pickBriefEntry = { entry in store.routerBriefs.focus(entry) }
+        pickBriefEntry = { entry in store.routerFocus(entry.thread) }
         openInRouter = { routerModel.open(thing: $0, in: navigator) }
         openApp = { navigator.go($0.resolved(shown: store.shownCategories.map(\.id), tools: store.tools)) }
         openRouterMessage = { _ in
-            store.routerBriefs.drawerOpen = true
+            store.routerDrawerOpen = true
             navigator.go(.router)
         }
         openChange = { change in

@@ -26,7 +26,7 @@ import Testing
         store.applyShell(nil)
     }
 
-    @Test func thePageHoldsOnlyTheProjectsT3Lists() async {
+    @Test(.disabled("The Router v2 page replaced the brief's feed from T3 (wave 2); track 10 deletes this test")) func thePageHoldsOnlyTheProjectsT3Lists() async {
         let store = Store.reading([T3Fixture.shell("th_1", project: "p1")])
         let (briefs, engine) = await briefs(["p1", "chan_old", "local:folder"], store: store)
         #expect(Set(engine.docs.keys) == ["p1", "chan_old", "local:folder"])

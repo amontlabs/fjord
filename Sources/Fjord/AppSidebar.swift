@@ -57,13 +57,13 @@ final class SidebarMenu: NSObject, NSMenuItemValidation {
 
     @objc private func toggle() { SidebarState.shared.toggle() }
 
-    @objc private func toggleHistory() { AppWindowController.active?.store.routerBriefs.drawerOpen.toggle() }
+    @objc private func toggleHistory() { AppWindowController.active?.store.routerDrawerOpen.toggle() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let window = AppWindowController.active
         let usable = window?.isOpen == true && window?.paletteIsOpen != true
         if menuItem === history {
-            menuItem.title = window?.store.routerBriefs.drawerOpen == true ? "Hide History" : "Show History"
+            menuItem.title = window?.store.routerDrawerOpen == true ? "Hide History" : "Show History"
             return usable && window?.navigator.selection == .router
         }
         menuItem.title = SidebarState.shared.collapsed ? "Expand Sidebar" : "Collapse Sidebar"
@@ -281,8 +281,8 @@ private struct RouterSidebarRow: View {
     typealias M = CDS.Sidebar
 
     var body: some View {
-        // The v2 demo's page counts its own lines (the unfiltered Needs-you count).
-        let needsYou = RouterV2Demo.model?.needsYou ?? store.routerBriefs.untoldNeedsYou
+        // The records' Needs-you count; the v2 demo's page counts its own lines (the unfiltered Needs-you count).
+        let needsYou = RouterV2Demo.model?.needsYou ?? store.routerNeedsYou
         AppSidebarRow(title: "Router", on: navigator.selection == .router,
                       badge: needsYou > 0 ? RailBadge(count: needsYou, fill: CDS.solid(0xFAB219), ink: CDS.solid(0x0B0B0B)) : nil,
                       tip: AppSidebar.routerTip(needsYou),

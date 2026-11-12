@@ -325,6 +325,8 @@ enum AppWindowShots {
     }
 
     private static func open(_ shot: Shot) -> NSWindow {
+        // The last shot's page model goes first: the new store's page is its own, not the last shot's.
+        RouterV2Demo.model = nil
         let store = Store()
         Demo.populate(store, .router)
         shot.prepare?(store)

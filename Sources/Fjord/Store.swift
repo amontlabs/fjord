@@ -207,8 +207,6 @@ final class Store {
     private func updateRouterOn() {
         guard (router.enabled && agents.enabled) != routerOn else { return }
         routerOn = router.enabled && agents.enabled
-        // The briefs' model calls run only with the Router on.
-        routerBriefs.switched(store: self)
     }
 
     /// What Fjord keeps of T3's threads (see Threads.swift).
@@ -417,9 +415,28 @@ final class Store {
     }()
     /// The Router v2 page's records: one per T3 thread, what the page, the bar, the palette and the badge read
     /// (RouterRecords.swift). Not observed by views.
-    @ObservationIgnored lazy var routerRecords: RouterRecords = RouterRecords()
+    @ObservationIgnored lazy var routerRecords: RouterRecords = makeRouterRecords()
     /// The Router v2 page's model: made once per app run and kept across window opens; the demo's when one is set.
-    @ObservationIgnored lazy var routerPage: RouterV2Model = RouterV2Demo.model ?? RouterV2Model()
+    @ObservationIgnored lazy var routerPage: RouterV2Model = RouterV2Demo.model ?? makeRouterPage()
+    /// One streamed Haiku call per thread per fingerprint, four at once (RouterVerdicts.swift).
+    @ObservationIgnored lazy var routerVerdicts: RouterVerdicts = makeRouterVerdicts()
+    /// Where the page's draft goes: Jev, then Sonnet (RouterV2Reader.swift).
+    @ObservationIgnored lazy var routerReader: RouterV2Reader = makeRouterReader()
+    /// The page's acts on T3 (RouterActs.swift): the real page's source.
+    @ObservationIgnored lazy var routerActs: RouterActs = RouterActs.live(store: self, records: routerRecords) { [weak self] change in
+        self?.routerPage.post(change)
+    }
+    /// T3's models and defaults for a new thread, read on each connection (RouterLaunchCatalog.swift).
+    @ObservationIgnored lazy var routerLaunch: RouterLaunchFeed = makeRouterLaunch()
+    /// The threads' pull requests and their states (RouterPullRequests.swift).
+    @ObservationIgnored lazy var routerPullRequests: RouterPullRequests = makeRouterPullRequests()
+    @ObservationIgnored var routerRecordsMade = false
+    /// The records' Needs-you count, observed: the sidebar's badge and the bar read it.
+    var routerNeedsYou = 0
+    /// The page's latest read and the decision it came from, for the decision log.
+    @ObservationIgnored var routerLastDecision: (draft: String, decision: RouterProjectDecision)?
+    /// The Router page's History drawer is open.
+    var routerDrawerOpen = false
     /// Each project's purpose for the decider's block B (9b reads it; 9a makes it with the verdict engine). Nil until wired.
     @ObservationIgnored var routerPurposes: ProjectPurposes?
     /// The entries of the ask-back cards still up: kept when the history is pruned.
@@ -863,6 +880,8 @@ final class Store {
     /// Writes any pending change now (quitting): one that failed before is tried again, twice if need be.
     func flushSave() {
         flushActions()
+        if routerRecordsMade { routerRecords.flush() }
+        routerPurposes?.flush()
         saveTask?.cancel()
         writeSnapshot(wait: true)
         if persistedRevision != savedRevision { writeSnapshot(wait: true) }
@@ -1011,7 +1030,7 @@ final class Store {
         } else if id.hasPrefix(Notifier.summaryPrefix) {
             onOpenInbox?(nil, nil)
             return
-        } else if id.hasPrefix(RouterBriefs.notificationPrefix), let t = BriefTarget(key: String(id.dropFirst(RouterBriefs.notificationPrefix.count))) {
+        } else if id.hasPrefix(Self.routerNoticePrefix), let t = BriefTarget(key: String(id.dropFirst(Self.routerNoticePrefix.count))) {
             onOpenBrief?(t)
             return
         }

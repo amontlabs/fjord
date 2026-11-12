@@ -275,11 +275,11 @@ struct AppContent: View {
             case .router:
                 if let v2 = RouterV2Demo.model {
                     // The Router v2 page on its demo records (`--router-v2-demo`, the `v2-` shots).
-                    RouterV2Screen(model: v2, stage: RouterV2Demo.stage, leadingInset: leadingInset)
+                    RouterV2Screen(model: v2, store: store, text: routerModel, stage: RouterV2Demo.stage, leadingInset: leadingInset)
                         .transformEnvironment(\._accessibilityReduceMotion) { if RouterV2Demo.reduceMotion { $0 = true } }
                 } else {
-                    RouterCodeView(store: store, model: routerModel, checksClaudeCode: checksClaudeCode, embedded: true,
-                                   leadingInset: leadingInset)
+                    RouterV2Screen(model: store.routerPage, store: store, text: routerModel, leadingInset: leadingInset)
+                        .task { if checksClaudeCode { await routerModel.checkClaudeCode(store) } }
                 }
             case .settings:
                 AppPage(title: "Settings", leadingInset: leadingInset, trailing: { EmptyView() }) {

@@ -48,7 +48,7 @@ import Testing
         for part in parts { sock.push(.chunk(requestId: req.id, values: [part])) }
     }
 
-    @Test func theOldRowsGoOnceT3HasSentItsSnapshotAndTheMarker() async throws {
+    @Test(.disabled("The Router v2 page replaced the brief's feed from T3 (wave 2); track 10 deletes this test")) func theOldRowsGoOnceT3HasSentItsSnapshotAndTheMarker() async throws {
         let (store, log, db) = try launch(old: ["chan_old", "local:folder", "p1"])
         #expect(store.routerBriefs.engine != nil)
         await serve(log, snapshot: [F.shell("th_1", project: "p1")], projects: [F.project("p1", root: "/code/app")])
@@ -58,7 +58,7 @@ import Testing
         #expect(store.routerBriefs.t3Listing()?.projects == ["p1"] && store.routerBriefs.docs["chan_old"] == nil)
     }
 
-    @Test func theOldRowsGoWithoutTheMarkerToo() async throws {
+    @Test(.disabled("The Router v2 page replaced the brief's feed from T3 (wave 2); track 10 deletes this test")) func theOldRowsGoWithoutTheMarkerToo() async throws {
         let (store, log, db) = try launch(old: ["chan_old", "p1"])
         await serve(log, snapshot: [F.shell("th_1", project: "p1")], projects: [F.project("p1", root: "/code/app")], marker: false)
         await waitUntil { store.t3.store.shell.threads.count == 1 }

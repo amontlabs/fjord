@@ -6,26 +6,82 @@ import SwiftUI
 
 struct RouterV2Screen: View {
     let model: RouterV2Model
+    /// The app's store and the composer's text model: the History drawer, the setup notice and the @ field read them. A
+    /// shot or a test may leave them out (the page alone).
+    var store: Store?
+    var text: RouterModel?
     /// The demo's stage (its caption, key caps and drawn pointer), when a script plays.
     var stage: RouterV2Stage?
     /// Room the window's buttons take at the header's start (when the sidebar is a rail).
     var leadingInset: CGFloat = 0
 
     @State private var width: CGFloat = 0
+    @State private var screenWidth: CGFloat = 0
     @State private var flags = RouterV2FlagsWatch()
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.windowGlass) private var glass
 
-    /// The column's edges from the page's sides: the title, the headers, the names and the composer share them.
+    /// The width from which the History drawer sits beside the page: the page's column, its margins and the drawer.
+    static let sideFrom: CGFloat = RouterV2.column + 2 * RouterV2.gutter + RouterDrawer.width + WindowChrome.inset
+    /// The drawer's toggle from the window's far edge, as the sidebar's is from its near one; and the room it takes.
+    static let toggleTrailing: CGFloat = WindowChrome.inset + 10
+    static let toggleRoom: CGFloat = toggleTrailing + CDS.TitleBar.button + 8
+
+    private var drawerOpen: Bool { store?.routerDrawerOpen == true }
+    private var side: Bool { screenWidth >= Self.sideFrom }
+
+    /// The column's edges from the page's sides: the title, the headers, the names and the composer share them. With
+    /// the drawer's toggle on the title line, the column's end stays clear of it.
     private var edges: RouterEdges {
         let inset = AppPage<EmptyView, EmptyView>.columnInset((RouterV2.column, RouterV2.gutter), pageWidth: width)
-        return RouterEdges(leading: max(inset, leadingInset + 14), trailing: inset)
+        let toggle = store != nil && !(drawerOpen && side) ? Self.toggleRoom : 0
+        return RouterEdges(leading: max(inset, leadingInset + 14), trailing: max(inset, toggle))
     }
 
     var body: some View {
+        if let store {
+            HStack(spacing: 0) {
+                page(store).frame(maxWidth: .infinity)
+                if drawerOpen && side {
+                    // The window's whole height, inset as the left sidebar is: its title on the title line, the toggle over it.
+                    RouterDrawer(store: store, titleHeight: CDS.TitleBar.header - WindowChrome.inset)
+                        .frame(width: RouterDrawer.width)
+                        .padding([.top, .trailing, .bottom], WindowChrome.inset)
+                        .transition(AnyTransition.slide(from: .trailing, reduce: reduce))
+                }
+            }
+            .overlay(alignment: .topTrailing) { toggle(store) }
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { screenWidth = $0 }
+            .environment(\.routerV2Composer, text.map { (store, $0) })
+        } else {
+            page(nil)
+        }
+    }
+
+    /// The History drawer's toggle (⌥⌘B), mirroring the sidebar's: at the title line's far end.
+    private func toggle(_ store: Store) -> some View {
+        AppIconButton(symbol: side ? "sidebar.right" : "rectangle.bottomthird.inset.filled",
+                      help: drawerOpen ? "Hide history" : "Show history", key: "⌥⌘B", enabled: true) {
+            withAnimation(Motion.spatial.resolved(reduce: reduce)) { store.routerDrawerOpen.toggle() }
+        }
+        .environment(\.onGlass, glass && drawerOpen && side)
+        .padding(.trailing, Self.toggleTrailing)
+        .frame(height: CDS.TitleBar.header)
+    }
+
+    private func page(_ store: Store?) -> some View {
         VStack(spacing: 0) {
             topBar
+            // The Router off, or Claude Code missing: one line under the title, with its button.
+            if let store, let text { RouterSetupNotice(store: store, model: text) }
             RouterV2List(model: model, edges: edges)
+            if let store, drawerOpen, !side {
+                RouterDrawer(store: store)
+                    .frame(height: RouterDrawer.height)
+                    .padding([.leading, .trailing, .bottom], WindowChrome.inset)
+                    .transition(AnyTransition.slide(from: .bottom, reduce: reduce))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { CDS.Surface.s1.padding(.top, AppContent.groundTop) }

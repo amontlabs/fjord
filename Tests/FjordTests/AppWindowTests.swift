@@ -421,9 +421,9 @@ extension WindowSeams {
             let (window, store) = controller()
             window.show(.settings)
             away(window)
-            let entry = try #require(store.routerBriefs.page().entries.first)
-            window.show(entry: entry.target)
-            #expect(window.navigator.selection == .router && store.routerBriefs.focused == entry.target)
+            let line = try #require(store.routerRecords.lines(in: .needsYou).first ?? store.routerRecords.lines(in: .done).first)
+            window.show(entry: BriefTarget(project: line.project ?? "", thread: line.id))
+            #expect(window.navigator.selection == .router && store.routerPage.selection == .line(line.id))
             window.close()
             await waitUntil { !window.isOpen }
         }
@@ -1299,17 +1299,18 @@ extension WindowSeams {
         /// picture shows the card it closed on, fades into the real window at the handoff.
         @Test func aCloseTurnedRoundOnAnotherEntryFadesIntoIt() throws {
             try morphing { controller, ticks in
-                let entries = controller.store.routerBriefs.page().entries
+                let records = controller.store.routerRecords
+                let entries = (records.lines(in: .needsYou) + records.lines(in: .done)).map { BriefTarget(project: $0.project ?? "", thread: $0.id) }
                 try #require(entries.count >= 2)
-                controller.store.routerBriefs.focus(entries[0].target)
+                controller.store.routerFocus(entries[0].thread)
                 openAndStartClosing(controller, ticks, on: .router)
                 guard let run = controller.run, let shown = run.image else { return #expect(Bool(false), "no close morph") }
                 let taken = AppTransition.captures
-                controller.show(entry: entries[1].target)
+                controller.show(entry: entries[1])
                 #expect(controller.phase == .opening && controller.run === run && controller.navigator.selection == .router)
                 ticks.runTurns()
                 run.complete()
-                #expect(run.image === shown && run.fadesOut && AppTransition.captures == taken)
+                #expect(run.image === shown); #expect(run.fadesOut); #expect(AppTransition.captures == taken)
             }
         }
 

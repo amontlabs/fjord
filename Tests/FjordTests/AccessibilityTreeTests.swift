@@ -157,15 +157,15 @@ enum AccessibilityTree {
             store.gh.session = StubbedGitHub.session { _ in .init(200, "[]") }
             let model = RouterModel()
             // The brief with its question entry focused, its options' controls counted too.
-            if name == "Router" { store.routerBriefs.focus(store.routerBriefs.page().entries.first { $0.kind == .question }?.target) }
+            if name == "Router", let line = store.routerRecords.lines(in: .needsYou).first { store.routerFocus(line.id) }
             let root = AppRootView(store: store, navigator: AppNavigator(start: destination(store), defaults: nil),
                                    routerModel: model, hub: HubState(), checksClaudeCode: false)
             let tree = try await AccessibilityTree.render(root, size: CGSize(width: 1200, height: 800))
             missing += tree.all.filter { AXNode.controls.contains($0.role) && $0.label.isEmpty }
                 .map { "\(name): \($0.role) has no label" }
             if name == "Router" {
-                #expect(store.routerBriefs.focused != nil)
-                #expect(tree.all.contains { $0.label == "Message the Router" }, "\(tree.all.map(\.label))")
+                #expect(store.routerPage.selection != nil)
+                #expect(tree.all.contains { $0.label == "Message" }, "\(tree.all.map(\.label))")
             }
         }
         #expect(missing.isEmpty, "\(missing)")

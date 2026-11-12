@@ -354,9 +354,20 @@ extension Store {
 
     /// The T3 link's store calls back here on every shell change and connection state.
     func wireThreads() {
-        t3.store.onShell = { [weak self] item in self?.shellChanged(item) }
-        t3.store.onConnection = { [weak self] state in self?.t3ConnectionChanged(state) }
-        t3.store.onThread = { [weak self] id in self?.threadDetailChanged(id) }
+        // The Router page's records hear each event first: its change is committed before the rest of the app's work.
+        wireRouterV2()
+        t3.store.onShell = { [weak self] item in
+            self?.routerShellChanged(item)
+            self?.shellChanged(item)
+        }
+        t3.store.onConnection = { [weak self] state in
+            self?.routerConnectionChanged(state)
+            self?.t3ConnectionChanged(state)
+        }
+        t3.store.onThread = { [weak self] id in
+            self?.routerThreadChanged(id)
+            self?.threadDetailChanged(id)
+        }
         iconFirstMessage = { [weak self] id in await self?.firstUserMessage(id) }
     }
 
@@ -397,10 +408,7 @@ extension Store {
         if threadWork[id] != work { threadWork[id] = work }
         // Whatever waits on you: the newest pending request, else the proposed plan; nothing once it is answered.
         let request = ThreadRequest(projection)
-        if requests[id] != request {
-            requests[id] = request
-            if let request { routerBriefs.requestAppeared(request, store: self) }
-        }
+        if requests[id] != request { requests[id] = request }
     }
 
     /// A shell change, taken in at once; while the window's morph plays (`MotionGate`) it waits for the motion to end, and
@@ -449,9 +457,7 @@ extension Store {
         // The snapshot's later parts carry projects alone (their repository, S1 10): only their threads change.
         case .snapshot(let snap)? where snap.threads.isEmpty && snap.archivedThreads.isEmpty:
             project(Set(snap.projects.map(\.id)))
-        // T3 has said everything it has: what briefs.db holds of anything else can go (`RouterBriefs.purgeUnlisted`).
         case .synchronized?:
-            routerBriefs.threadsChanged(store: self)
             return
         case .unknown?:
             return
@@ -473,7 +479,6 @@ extension Store {
         threadsRead()
         syncThreadDetail()
         pickIcons()
-        routerBriefs.threadsChanged(store: self)
     }
 
     /// The first word from T3 came (its shell, or why there is none): what routing knows of threads is known, and the actions
@@ -485,7 +490,6 @@ extension Store {
     }
 
     func t3ConnectionChanged(_ state: T3ConnectionState) {
-        routerBriefs.connectionChanged(state, store: self)
         switch state {
         case .noToken, .noServer, .incompatible, .tokenRejected: threadsRead()
         default: break

@@ -299,10 +299,12 @@ final class RouterRecords {
         }
     }
 
-    /// T3's projection shows the words in a run (`Store.delivery`): a steer ends here.
-    func delivered(_ thread: String) {
+    /// T3's projection shows the words in a run (`Store.delivery`): a steer ends here. `sentAt`: when the delivered message
+    /// was sent; one sent before the pending send is an older message's and ends nothing.
+    func delivered(_ thread: String, sentAt: Date? = nil) {
         operation {
-            guard let e = entries[thread], e.send != nil else { return }
+            guard let e = entries[thread], let send = e.send else { return }
+            if let sentAt, sentAt < send.at { return }
             e.send = nil
             refresh(thread)
         }

@@ -44,7 +44,7 @@ import Testing
 
     /// ↓ in the empty composer puts the keyboard on the brief: there, A archives, and the reply target is dropped, never
     /// moved on to the next entry.
-    @Test func onTheBriefAKeyActNeverMovesTheReplyTarget() {
+    @Test(.disabled("The Router v2 page replaced the brief's feed from T3 (wave 2); track 10 deletes this test")) func onTheBriefAKeyActNeverMovesTheReplyTarget() {
         let store = demo()
         let model = RouterModel()
         let keys = RouterKeys(store: store, model: model)
@@ -109,7 +109,7 @@ import Testing
 
     // MARK: One reply target (P3)
 
-    @Test func theReplyTargetIsTheBriefsAndTheContextCarriesIt() {
+    @Test(.disabled("The Router v2 page replaced the brief's feed from T3 (wave 2); track 10 deletes this test")) func theReplyTargetIsTheBriefsAndTheContextCarriesIt() {
         let store = demo()
         let model = RouterModel()
         let t = settings(store)
@@ -230,7 +230,7 @@ import Testing
         #expect(key(request: "r1", since: 5) != key(request: "r2", since: 5))
     }
 
-    @Test func theCountFollowsTheMarks() {
+    @Test(.disabled("The Router v2 page replaced the brief's feed from T3 (wave 2); track 10 deletes this test")) func theCountFollowsTheMarks() {
         let store = demo()
         let briefs = store.routerBriefs
         let before = briefs.untoldNeedsYou

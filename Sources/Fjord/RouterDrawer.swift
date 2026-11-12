@@ -63,9 +63,8 @@ struct RouterDrawer: View {
     @State private var column: CGFloat = RouterDrawer.width
 
     var body: some View {
-        let briefs = store.routerBriefs
         let all = Self.lines(store)
-        let now = briefs.clock()
+        let now = Date()
         let failed = all.filter { if case .message(let s) = $0.kind { s.failed && now.timeIntervalSince($0.at) < 86_400 } else { false } }
         let shown = all.filter { line in (filter == nil || line.filter == filter) && !failed.contains(line) }
         let kinds = Filter.allCases.filter { f in all.contains { $0.filter == f } }
@@ -136,7 +135,6 @@ struct RouterDrawer: View {
     /// Every line, newest first: your messages (RouterDecisions) with where they went and how it went, your answers, and
     /// the changes to Fjord (the Router's, and your acts on the brief).
     static func lines(_ store: Store) -> [Line] {
-        let briefs = store.routerBriefs
         var out: [Line] = []
         for d in store.router.decisions.suffix(80) {
             guard case .you(let words) = d.trigger, !words.isEmpty, d.decision.intent != "answer" else { continue }
@@ -146,9 +144,6 @@ struct RouterDrawer: View {
         }
         for c in store.router.changes.suffix(80) {
             out.append(Line(id: c.id.uuidString, at: c.date, kind: .change(c), text: c.title))
-        }
-        for a in briefs.answers {
-            out.append(Line(id: a.id.uuidString, at: a.at, kind: .answer, text: a.words, target: a.target))
         }
         return out.sorted { $0.at > $1.at }
     }
@@ -258,7 +253,6 @@ private struct HistoryLine: View {
     }
 
     @ViewBuilder private var lineButton: some View {
-        let briefs = store.routerBriefs
         // A line with nothing to say under it (a change) keeps its button on its one line.
         let sub = line.target != nil || line.project != nil || statusWord != nil
         Button(action: tap) {
@@ -275,11 +269,11 @@ private struct HistoryLine: View {
                     if let target = line.target {
                         let state = BriefSpanState.of(target, store: store)
                         Image(systemName: state.symbol).font(.system(size: 8, weight: .semibold)).foregroundStyle(state.tint)
-                        Text(briefs.docs[target.project]?.thread(target.thread)?.title.nonEmpty ?? store.threads[target.thread]?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
+                        Text(store.threads[target.thread]?.title.nonEmpty ?? store.routerRecords.record(target.thread)?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
                             .lineLimit(1)
-                        Text(briefs.projectName(target.project)).font(CDS.sans(11)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
+                        Text(store.routerProjectName(target.project)).font(CDS.sans(11)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
                     } else if let project = line.project {
-                        Text(briefs.projectName(project)).font(CDS.sans(11.5, .medium)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
+                        Text(store.routerProjectName(project)).font(CDS.sans(11.5, .medium)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
                     }
                     if let word = statusWord {
                         Text(word.0).font(CDS.sans(11)).foregroundStyle(word.1).lineLimit(1).fixedSize()
@@ -302,7 +296,8 @@ private struct HistoryLine: View {
     private func tap() {
         if case .change = line.kind { toggle(); return }
         guard let target = line.target else { return }
-        store.routerBriefs.focus(target)
+        // Its line, selected: the composer writes to its card.
+        store.routerFocus(target.thread)
         reply()
     }
 
@@ -327,7 +322,7 @@ private struct HistoryLine: View {
             small("Resume queue") { if let thread = entry?.delivered?.thread { Task { await store.resumeQueue(thread) } } }
         case .message(let status) where status.failed:
             small("Send again") {
-                if let target = line.target { store.routerBriefs.send(line.text, to: target, store: store) } else { _ = store.sendToRouter(line.text) }
+                if let target = line.target { _ = store.sendToRouter(line.text, context: RouterContext(replyTo: target)) } else { _ = store.sendToRouter(line.text) }
             }
             if store.routerDispatcher.canSendElsewhere(line.decision) {
                 small("Elsewhere…") { if let id = line.decision { store.routerDispatcher.sendElsewhere(id) } }
