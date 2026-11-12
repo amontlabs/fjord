@@ -415,6 +415,13 @@ final class Store {
         briefs.store = self
         return briefs
     }()
+    /// The Router v2 page's records: one per T3 thread, what the page, the bar, the palette and the badge read
+    /// (RouterRecords.swift). Not observed by views.
+    @ObservationIgnored lazy var routerRecords: RouterRecords = RouterRecords()
+    /// The Router v2 page's model: made once per app run and kept across window opens; the demo's when one is set.
+    @ObservationIgnored lazy var routerPage: RouterV2Model = RouterV2Demo.model ?? RouterV2Model()
+    /// Each project's purpose for the decider's block B (9b reads it; 9a makes it with the verdict engine). Nil until wired.
+    @ObservationIgnored var routerPurposes: ProjectPurposes?
     /// The entries of the ask-back cards still up: kept when the history is pruned.
     @ObservationIgnored var decisionsInUse: () -> Set<UUID> = { [] }
     /// A Router run's change was taken back with Revert (the run's entry): the dispatcher traces it as the outcome of the action.
