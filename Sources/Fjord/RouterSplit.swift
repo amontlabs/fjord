@@ -27,7 +27,9 @@ extension RouterModel {
         if !draftEmpty, let read {
             if !read.sends.isEmpty {
                 parts = read.sends
-            } else if !answers.isEmpty, !read.places.isEmpty {
+            } else if !answers.isEmpty, let first = read.places.first,
+                      // Words typed on the open card's form answer its question: the form's path, not a split.
+                      !formTyping(first) {
                 parts = [RouterSend(places: read.sure ? [read.places[0]] : Array(read.places.prefix(3)), sure: read.sure,
                                     words: plainDraft)]
             }
@@ -49,6 +51,12 @@ extension RouterModel {
             parts[i].item = Self.asked(t)
         }
         return answers + parts
+    }
+
+    /// Words to the selected thread while its form is open: they answer its current question (`send`'s form path).
+    private func formTyping(_ place: RouterPlace) -> Bool {
+        guard case .thread(let id) = place, selection == .line(id), let t = thread(id) else { return false }
+        return !t.form.isEmpty
     }
 
     /// The send ⌘1–3 light: the one Tab moved to, else the first the Router isn't sure of.
