@@ -66,6 +66,8 @@ import Testing
         r.tagged = { _ in "tagged: x" }
         r.read("the readme needs a section", selected: "th-docs", mentions: [])
         await waitUntil { !calls.reads.isEmpty }
+        // T3's search runs beside Sonnet's pause, not before the decision: under load it may start after it.
+        await waitUntil { !calls.searched.isEmpty }
         #expect(calls.jev.count == 1 && calls.decided == ["the readme needs a section"] && calls.reused == [true])
         #expect(calls.selected == ["th-docs"] && calls.tagged == ["tagged: x"] && calls.searched == ["the readme needs a section"])
         // Three places at most, best first, unsure.

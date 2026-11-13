@@ -26,9 +26,10 @@ import Testing
         return (model, window)
     }
 
-    /// Lets the turn's end and SwiftUI's update run until no body runs any more.
+    /// Lets the turn's end and SwiftUI's update run until no body runs any more: for some time too, not only some turns
+    /// (under a full suite's load, turns pass between frames while the first layouts are still to come).
     private func settle() async {
-        await waitUntilSteady(turns: 6) { RouterBodies.counts }
+        await waitUntilSteady(turns: 6, quiet: 0.25) { RouterBodies.counts }
     }
 
     /// Runs `change` on the settled page and returns the bodies it ran.

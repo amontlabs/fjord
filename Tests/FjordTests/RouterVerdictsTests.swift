@@ -95,12 +95,13 @@ final class FakeClaude: @unchecked Sendable {
         let fake = FakeClaude()
         let (e, told) = engine(fake)
         e.ask(request("Snapshot"))
-        await until(fake.calls.count == 1)
+        // The shared watchdog, not `until`'s two seconds: under a full suite's load the stream's hops take longer.
+        await waitUntil { fake.calls.count == 1 }
         #expect(fake.calls[0].arguments.contains("stream-json"))
         #expect(fake.calls[0].arguments.contains("claude-sonnet-5-5"))
         fake.send(0, FakeClaude.answer(FakeClaude.step, size: 5))
         fake.close(0)
-        await until(told.of("Snapshot").last.map { if case .done = $0 { true } else { false } } ?? false)
+        await waitUntil { told.of("Snapshot").last.map { if case .done = $0 { true } else { false } } ?? false }
         let events = told.of("Snapshot")
         #expect(events.first == .state(needsYou: true, worth: .look))
         let words = events.compactMap { if case .words(let w, let done) = $0, !done { w } else { nil } }
