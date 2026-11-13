@@ -166,4 +166,44 @@ import Testing
         #expect(answered.map(\.0).sorted() == ["a", "b", "c"])
         #expect(answered.first { $0.0 == "c" }?.1 == "2")
     }
+
+    // MARK: #6: a hide ends on T3's word about the act
+
+    @Test func aSettledThreadStillWorkingInTheBackgroundComesBackWhenItAsksAgain() {
+        let h = Harness()
+        var t = F.thread()
+        t.pendingTasks = [T3PendingTask(json: ["taskId": "b1", "description": "Review the changes"])]
+        h.records.put(t)
+        #expect(h.records.record("t1")?.state == .working)
+        h.records.hide("t1", on: true)
+        #expect(h.records.record("t1") == nil)
+        // T3 takes the settle; Fjord still counts the background work as live.
+        t.settled = true
+        t.settledAt = F.now
+        h.records.put(t)
+        // The work ends, T3 wakes the thread and it asks a permission: the line is back.
+        t.pendingTasks = []
+        t.status = .waiting
+        t.latestRunID = "r2"
+        t.pendingRequest = F.pending("perm-1", kind: "command")
+        h.records.put(t)
+        #expect(h.records.record("t1")?.state == .needsYou(.permission))
+    }
+
+    @Test func aSettledPlanStaysSettled() {
+        let h = Harness()
+        var t = F.thread()
+        t.hasPlan = true
+        h.records.put(t)
+        #expect(h.records.record("t1")?.state == .needsYou(.plan))
+        h.records.hide("t1", on: true)
+        t.settled = true
+        t.settledAt = F.now
+        h.records.put(t)
+        #expect(h.records.record("t1") == nil)
+        // And after a relaunch, with nothing pending here.
+        let fresh = Harness()
+        fresh.records.put(t)
+        #expect(fresh.records.record("t1") == nil)
+    }
 }

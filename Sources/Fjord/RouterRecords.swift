@@ -356,11 +356,13 @@ final class RouterRecords {
         }
     }
 
-    /// Settle or snooze (`on`), or their Revert: hidden until T3's row is out of play, shown until it is back in it.
+    /// Settle or snooze (`on`), or their Revert: hidden (or shown) until T3 says something of the act itself (its settle
+    /// or snooze set or cleared), or of the thread (a new run or request: its fingerprint moves).
     func hide(_ thread: String, on: Bool) {
         operation {
             guard let e = entries[thread] else { return }
             e.hidden = on
+            e.hiddenAt = e.thread.map { HideMark(settled: $0.settled, settledAt: $0.settledAt, snoozedUntil: $0.snoozedUntil, fingerprint: RouterCodeState.fingerprint($0)) }
             refresh(thread)
         }
     }
@@ -487,7 +489,11 @@ final class RouterRecords {
             e.queued = nil
             e.queuedRun = nil
         }
-        if let hidden = e.hidden, inPlay != hidden { e.hidden = nil }
+        if e.hidden != nil, let mark = e.hiddenAt,
+           t.settled != mark.settled || t.settledAt != mark.settledAt || t.snoozedUntil != mark.snoozedUntil || RouterCodeState.fingerprint(t) != mark.fingerprint {
+            e.hidden = nil
+            e.hiddenAt = nil
+        }
         if let seen = e.seen, t.lastVisitedAt != seen.visited { e.seen = nil }
     }
 
@@ -974,6 +980,14 @@ extension RouterRecords {
         var worth: RouterThread.Worth
     }
 
+    /// T3's row when a settle, a snooze or its Revert was done here: a move of any of these is T3's word.
+    struct HideMark: Equatable {
+        var settled: Bool
+        var settledAt: Date?
+        var snoozedUntil: Date?
+        var fingerprint: String
+    }
+
     struct Seen: Equatable {
         /// `lastVisitedAt` when the card opened.
         var visited: Date?
@@ -1016,6 +1030,7 @@ extension RouterRecords {
         var cancelled: Set<String> = []
         /// Settle or snooze (true), or its Revert (false), until T3's row agrees.
         var hidden: Bool?
+        var hiddenAt: HideMark?
         var seen: Seen?
         var launch: RouterLaunch?
     }
