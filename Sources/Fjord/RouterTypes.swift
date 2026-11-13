@@ -212,6 +212,8 @@ enum Router {
         static let answerOrStopFirst = "Answer or stop it first"
         /// A settle or snooze T3 refused for no reason the page can see.
         static let t3KeptIt = "T3 didn't take it"
+        /// Cancel on a queued row that T3 refused.
+        static let queueKept = "the queued message still goes"
         static func moreToAnswer(_ n: Int) -> String { "\(n) more to answer" }
     }
 

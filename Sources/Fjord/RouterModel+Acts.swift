@@ -103,6 +103,15 @@ extension RouterModel {
         }
     }
 
+    /// An act that didn't go, in the page's words: a toast with no Revert.
+    func note(_ id: String, _ words: String) {
+        let named = thread(id)?.name ?? ""
+        let note = RouterToast(id: fresh(), before: "T3 kept", name: named.isEmpty ? "this thread" : named,
+                                 after: "· " + words, revertible: false)
+        animate(.fade) { toast = note }
+        startToastLife(Router.toastLife)
+    }
+
     /// A quiet word that the act can't be done here now: no Revert, nothing changed.
     private func hint(_ t: RouterThread, _ why: String) {
         let note = RouterToast(id: fresh(), before: "Can't settle", name: t.name, after: "· " + why, revertible: false)

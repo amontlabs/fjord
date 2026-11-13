@@ -345,13 +345,14 @@ final class RouterRecords {
         }
     }
 
-    /// Cancel on a queued row: the words came back to the composer; T3's queued run stays hidden until it is gone.
-    func cancelledQueue(_ thread: String) {
+    /// Cancel on a queued row: the words came back to the composer; T3's queued run (`run`, once T3 lists it) stays hidden
+    /// until it is gone. `run` nil: T3 kept it after all, and it shows again.
+    func cancelledQueue(_ thread: String, run: String?, on: Bool) {
         operation {
             guard let e = entries[thread] else { return }
             e.queued = nil
             e.queuedRun = nil
-            for q in e.detail?.queued ?? [] { e.cancelled.insert(q.id) }
+            if let run { e.cancelled[run] = on ? (e.cancelled[run] ?? false) : nil }
             refresh(thread)
         }
     }
@@ -443,7 +444,13 @@ final class RouterRecords {
             }
             // A thread started here keeps its settings through its first run.
             if e.launch != nil, e.send == nil, code.state != .working { e.launch = nil }
-            if !e.cancelled.isEmpty { e.cancelled.formIntersection((e.detail?.queued ?? []).map(\.id)) }
+            if !e.cancelled.isEmpty {
+                // A cancelled run is forgotten once T3 has listed it and dropped it, not before it lists it.
+                let listed = Set((e.detail?.queued ?? []).map(\.id))
+                for (run, seen) in e.cancelled {
+                    if listed.contains(run) { if !seen { e.cancelled[run] = true } } else if seen { e.cancelled[run] = nil }
+                }
+            }
             readIfNeeded(id, e, t, code)
             askIfNeeded(id, e, t, code)
             if was != code, e.scope != .out, e.hidden != true, let notifier {
@@ -605,7 +612,7 @@ final class RouterRecords {
         r.steps = d?.steps ?? []
         r.activity = d?.activity ?? .init()
         r.diff = d?.diff
-        r.queued = e.queued ?? d?.queued.first { !e.cancelled.contains($0.id) }?.words
+        r.queued = e.queued ?? d?.queued.first { e.cancelled[$0.id] == nil }?.words
         r.prs = pullRequests(t, d?.reply ?? t.latestMessage)
         r.launch = e.launch
         if code.state == .stopped { r.stop = .init(error: t.lastError ?? code.line, lastStep: d?.lastStep ?? "") }
@@ -878,7 +885,7 @@ final class RouterRecords {
             case .older: olderList = c
             case .connection: connection = c
             case .batch(let all): all.forEach(fold)
-            case .refused, .actRefused, .read, .launch: rest.append(c)
+            case .refused, .actRefused, .note, .read, .launch: rest.append(c)
             }
         }
         changes.forEach(fold)
@@ -1026,8 +1033,8 @@ extension RouterRecords {
         /// Words queued behind the turn, until T3 lists them; the run under way when they were.
         var queued: String?
         var queuedRun: String?
-        /// T3's queued runs you cancelled here, hidden until T3 drops them.
-        var cancelled: Set<String> = []
+        /// T3's queued runs you cancelled here, hidden until T3 drops them; true once T3 has listed it.
+        var cancelled: [String: Bool] = [:]
         /// Settle or snooze (true), or its Revert (false), until T3's row agrees.
         var hidden: Bool?
         var hiddenAt: HideMark?

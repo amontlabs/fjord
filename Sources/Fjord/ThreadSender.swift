@@ -175,6 +175,13 @@ extension Store {
     /// The newest message queued behind a thread's run (the one a Cancel on its queued row takes back).
     func newestQueuedRun(_ id: String) -> String? { t3.store.projections[id]?.queuedRuns.last?.id }
 
+    /// The queued run whose message is these words (the newest such); "" for any words: the newest queued run.
+    func queuedRun(_ id: String, carrying words: String) -> String? {
+        guard let p = t3.store.projections[id] else { return nil }
+        if words.isEmpty { return p.queuedRuns.last?.id }
+        return p.queuedRuns.last { run in run.userMessageId.flatMap { m in p.messages.first { $0.id == m } }?.text == words }?.id
+    }
+
     /// Where a delivered message stands now.
     func delivery(_ sent: RouterDecision.Delivered) -> ThreadDelivery {
         guard let p = t3.store.projections[sent.thread] else { return .unknown }

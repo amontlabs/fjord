@@ -21,10 +21,13 @@ import Foundation
     func notForMe(_ thread: String, on: Bool)
     /// The card was opened here: the new dot is gone before T3 says so.
     func seen(_ thread: String)
+    /// Cancel on a queued row: its run hidden (`on`) until T3 drops it, or shown again when T3 kept it.
+    func cancelledQueue(_ thread: String, run: String?, on: Bool)
 }
 
 extension RouterActsRecords {
     func took(send: RouterActs.Send) {}
+    func cancelledQueue(_ thread: String, run: String?, on: Bool) {}
 }
 
 @MainActor final class RouterActs: RouterSource {
@@ -63,8 +66,8 @@ extension RouterActsRecords {
         var continueThread: (_ thread: String) async throws -> Void
         /// A command to T3, in order.
         var dispatch: (_ command: T3Command) async throws -> Void
-        /// The run a Cancel on a queued row takes back.
-        var queuedRun: (_ thread: String) -> String?
+        /// The queued run that carries these words (its user message's text), when T3 lists it.
+        var queuedRun: (_ thread: String, _ words: String) -> String?
         /// Stops the run the thread is on.
         var stop: (_ thread: String) async -> Bool
         /// An act with a Revert, logged for History: hidden through `hold` at once, `refused` hears T3's refusal after the line
@@ -94,6 +97,10 @@ extension RouterActsRecords {
 
     /// The dispatcher's entries that are sends of the page, by entry.
     private var entries: [UUID: Send] = [:]
+    /// Words queued from the page, per thread: what a Cancel takes back.
+    private var queuedWords: [String: String] = [:]
+    /// Cancels waiting for T3 to list the run they take back (`threadChanged`).
+    private var cancelling: [String: String] = [:]
     /// The changes logged for History, per thread and act, newest last: what a Revert marks reverted.
     private var changes: [String: [BriefAction: [UUID]]] = [:]
 
@@ -119,6 +126,7 @@ extension RouterActsRecords {
         case .words: kind = out.queue ? .queue : out.steering ? .steer : .words
         }
         let send = Send(thread: out.thread, words: out.words, kind: kind, at: env.now())
+        if kind == .queue { queuedWords[out.thread] = out.words }
         records?.began(send: send)
         switch out.kind {
         case .words: words(out, send)
@@ -164,9 +172,31 @@ extension RouterActsRecords {
         }
     }
 
+    /// Cancel on a queued row: the run that carries the words queued here, never another one T3 queued (a subagent's
+    /// completion). Not listed by T3 yet: it is cancelled when it is (`threadChanged`).
     func cancelQueued(_ thread: String) {
-        guard let run = env.queuedRun(thread) else { return }
-        Task { @MainActor [env] in try? await env.dispatch(.queuedRunCancel(threadId: thread, runId: run)) }
+        // Words queued before this run of Fjord: the row shows T3's queued run, its newest.
+        let words = queuedWords.removeValue(forKey: thread) ?? ""
+        guard !words.isEmpty || env.queuedRun(thread, "") != nil else { return }
+        records?.cancelledQueue(thread, run: nil, on: true)
+        cancelling[thread] = words
+        threadChanged(thread)
+    }
+
+    /// The thread's projection changed: a cancel waiting for its run sends it now.
+    func threadChanged(_ thread: String) {
+        guard let words = cancelling[thread], let run = env.queuedRun(thread, words) else { return }
+        cancelling[thread] = nil
+        records?.cancelledQueue(thread, run: run, on: true)
+        Task { @MainActor [env] in
+            do {
+                try await env.dispatch(.queuedRunCancel(threadId: thread, runId: run))
+            } catch {
+                // T3 kept it: it still goes at the turn's end, and the page says so.
+                self.records?.cancelledQueue(thread, run: run, on: false)
+                self.emit(.note(thread, words: Router.Copy.queueKept))
+            }
+        }
     }
 
     /// The dispatcher's word on an entry of the page's (wired to `RouterDispatcher.onSend`).
@@ -284,7 +314,7 @@ extension RouterActs {
             },
             continueThread: { [weak store] id in try await store?.continueThread(id) },
             dispatch: { [weak store] command in try await store?.dispatch(command) },
-            queuedRun: { [weak store] id in store?.newestQueuedRun(id) },
+            queuedRun: { [weak store] id, words in store?.queuedRun(id, carrying: words) },
             stop: { [weak store] id in await store?.stopThread(id) ?? false },
             act: { [weak store] act, id, detail, title, hold, refused in
                 store?.threadAct(act, on: target(id), detail: detail, title: title, hold: hold, refused: refused)

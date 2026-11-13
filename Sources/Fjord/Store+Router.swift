@@ -154,6 +154,8 @@ extension Store {
             routerRecords.detail(id, nil)
             return
         }
+        // A cancel waiting for its queued run hides it before the record shows it.
+        routerActs.threadChanged(id)
         routerRecords.detail(id, RouterDetail.make(projection, now: Date()))
         // The newest message sent into a run of this thread's: it is in the run now (or the run is over).
         if let sent = router.decisions.last(where: { $0.delivered?.thread == id })?.delivered, sent.outcome == .steered {

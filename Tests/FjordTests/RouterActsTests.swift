@@ -23,6 +23,9 @@ import Testing
         var continueFails: Error?
         var commands: [T3Command] = []
         var queuedRun: String? = "run-q"
+        /// Queued runs by the words they carry.
+        var queuedRuns: [String: String] = [:]
+        var cancelled: [(String, String?, Bool)] = []
         var stopped: [String] = []
         var acted: [(act: BriefAction, thread: String, detail: String, title: String)] = []
         var holds: [@MainActor (Bool) -> Void] = []
@@ -39,6 +42,7 @@ import Testing
         func hide(_ thread: String, on: Bool) { hidden.append((thread, on)) }
         func notForMe(_ thread: String, on: Bool) { marked.append((thread, on)) }
         func seen(_ thread: String) { seen.append(thread) }
+        func cancelledQueue(_ thread: String, run: String?, on: Bool) { cancelled.append((thread, run, on)) }
 
         func acts() -> RouterActs {
             let env = RouterActs.Environment(
@@ -57,7 +61,7 @@ import Testing
                     if let continueFails { throw continueFails }
                 },
                 dispatch: { [self] command in commands.append(command) },
-                queuedRun: { [self] _ in queuedRun },
+                queuedRun: { [self] _, words in queuedRuns[words] ?? (words.isEmpty ? queuedRun : nil) },
                 stop: { [self] id in stopped.append(id); return true },
                 act: { [self] act, thread, detail, title, hold, refused in
                     acted.append((act, thread, detail, title))
@@ -272,6 +276,40 @@ import Testing
         let acts = f.acts()
         acts.cancelQueued("t1")
         #expect(f.commands.isEmpty)
+    }
+
+    @Test func cancelTakesBackTheRunCarryingTheWordsOnceT3ListsItAndSaysSoWhenT3KeepsIt() async {
+        let f = Fake()
+        f.queuedRun = "run-subagent"
+        let acts = f.acts()
+        acts.send(out("t1", "and add tests", queue: true))
+        // Cancel before T3 lists the run: nothing cancelled yet, the row hidden, nothing else touched.
+        acts.cancelQueued("t1")
+        #expect(f.commands.isEmpty)
+        #expect(f.cancelled.map(\.1) == [nil])
+        // T3 lists it, behind a subagent's completion: the run with these words is the one cancelled.
+        f.queuedRuns["and add tests"] = "run-mine"
+        acts.threadChanged("t1")
+        await waitUntil { f.commands.count == 1 }
+        #expect(f.commands[0].payload(commandId: "c").str("runId") == "run-mine")
+        #expect(f.cancelled.last.map { $0.1 == "run-mine" && $0.2 } == true)
+        // Once only.
+        acts.threadChanged("t1")
+        #expect(f.commands.count == 1)
+    }
+
+    @Test func aCancelT3RefusesShowsTheRowAgainAndSaysSo() async {
+        let f = Fake()
+        f.queuedRuns["and add tests"] = "run-mine"
+        var refuses = true
+        let acts = f.acts()
+        acts.env.dispatch = { _ in if refuses { throw ThreadSendFailure("Thread 3f2a is gone") } }
+        acts.send(out("t1", "and add tests", queue: true))
+        acts.cancelQueued("t1")
+        await waitUntil { !f.emitted.isEmpty }
+        refuses = false
+        #expect(f.cancelled.last.map { $0.1 == "run-mine" && !$0.2 } == true)
+        #expect(f.emitted == [.note("t1", words: Router.Copy.queueKept)])
     }
 
     @Test func notForMeIsTheRecordsMarkAndItsRevert() {

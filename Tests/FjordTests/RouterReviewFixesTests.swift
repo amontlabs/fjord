@@ -206,4 +206,31 @@ import Testing
         fresh.records.put(t)
         #expect(fresh.records.record("t1") == nil)
     }
+
+    // MARK: #7: a cancelled queued message stays cancelled
+
+    @Test func aCancelledQueuedRunStaysHiddenAndOnlyIt() {
+        let h = Harness()
+        var t = F.thread(status: .running)
+        t.runStartedAt = F.ago(1)
+        h.records.put(t)
+        h.records.began(send: RouterActs.Send(thread: "t1", words: "and add tests", kind: .queue, at: F.now))
+        #expect(h.records.record("t1")?.queued == "and add tests")
+        h.records.cancelledQueue("t1", run: nil, on: true)
+        #expect(h.records.record("t1")?.queued == nil)
+        // T3 lists it with a subagent's completion queued before it: the cancelled one stays hidden, the other shows.
+        var d = RouterDetail()
+        d.queued = [.init(id: "run-mine", words: "and add tests")]
+        h.records.cancelledQueue("t1", run: "run-mine", on: true)
+        h.records.detail("t1", d)
+        #expect(h.records.record("t1")?.queued == nil)
+        d.queued = [.init(id: "run-sub", words: "subagent done"), .init(id: "run-mine", words: "and add tests")]
+        h.records.detail("t1", d)
+        #expect(h.records.record("t1")?.queued == "subagent done")
+        // T3 kept it after all: it shows again.
+        d.queued = [.init(id: "run-mine", words: "and add tests")]
+        h.records.detail("t1", d)
+        h.records.cancelledQueue("t1", run: "run-mine", on: false)
+        #expect(h.records.record("t1")?.queued == "and add tests")
+    }
 }

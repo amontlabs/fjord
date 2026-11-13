@@ -29,6 +29,8 @@ enum RouterChange: Equatable {
     /// T3 refused a settle or a snooze: the thread is back (its record says so), the toast says why, and the act has
     /// nothing left to revert.
     case actRefused(String, reason: String)
+    /// An act on a thread didn't go, in the page's own words (no Revert): a queued message T3 kept.
+    case note(String, words: String)
     case connection(lost: Bool)
     /// T3's defaults for a new thread and the models it offers (`server.getConfig`).
     case launch(defaults: RouterLaunch, models: [RouterLaunchModel])

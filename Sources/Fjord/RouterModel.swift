@@ -754,6 +754,8 @@ final class RouterModel {
             sendRefused(id, reason: reason, offline: offline)
         case .actRefused(let id, let reason):
             actRefused(id, reason: reason)
+        case .note(let id, let words):
+            note(id, words)
         case .connection(let lost):
             guard lost != connectionLost else { return }
             animate(.spatial) { connectionLost = lost }
