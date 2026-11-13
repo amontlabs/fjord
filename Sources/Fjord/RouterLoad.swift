@@ -19,15 +19,20 @@ enum RouterLoad {
     static var isRequested: Bool { CommandLine.arguments.contains("--router-v2-load") }
 
     /// `--router-v2-load real`: the realistic scenario.
-    static var isReal: Bool {
+    static var isReal: Bool { variant == "real" }
+    /// `--router-v2-load select`: the synthetic page with nothing coming from T3, a card opened after another (↓) every
+    /// 300 ms for 24 s, for the Select gate (the demo script selects nine times).
+    static var isSelect: Bool { variant == "select" }
+
+    private static var variant: String? {
         let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--router-v2-load"), i + 1 < args.count else { return false }
-        return args[i + 1] == "real"
+        guard let i = args.firstIndex(of: "--router-v2-load"), i + 1 < args.count else { return nil }
+        return args[i + 1]
     }
 
     static var lines: Int { isReal ? 20 : 60 }
     static var streaming: Int { isReal ? 2 : 8 }
-    static var seconds: Double { isReal ? 30 : 12 }
+    static var seconds: Double { isReal ? 30 : isSelect ? 24 : 12 }
     /// Between two records, in ms: every 30 ms, or about a second (700–1300 ms) in the real one.
     static func recordPause(_ n: Int) -> Int { isReal ? 700 + (n * 7919) % 601 : 30 }
     /// One record in `moveEvery` moves its line.
@@ -71,6 +76,14 @@ enum RouterLoad {
             try? await Task.sleep(for: .seconds(0.6))
             let streams = Array(model.threads.filter { $0.state != .working }.map(\.id).prefix(streaming))
             let end = Date().addingTimeInterval(seconds)
+            if isSelect {
+                while Date() < end {
+                    model.step(down: true)
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+                if CommandLine.arguments.contains("--quit-after") { NSApp.terminate(nil) }
+                return
+            }
             await withTaskGroup(of: Void.self) { group in
                 let off = ProcessInfo.processInfo.environment["FJORD_LOAD_OFF"] ?? ""
                 for (n, id) in streams.enumerated() where !off.contains("streams") {

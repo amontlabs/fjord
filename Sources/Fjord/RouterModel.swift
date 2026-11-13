@@ -246,9 +246,10 @@ final class RouterModel {
 
     /// The list's rows, rewritten only when the order or a header's count changes.
     private(set) var layout: [RouterSlot] = [RouterSlot(id: RouterModel.firstRow, kind: .sentence(Router.Copy.nothingAtAll, clear: false))]
-    /// The layout's last change added or took a row: the list animates that change in SwiftUI (the rows' folds), and
-    /// any other change of order with no animation of its own (`RouterList`: the rows glide on Core Animation).
-    @ObservationIgnored private(set) var rowsCameOrWent = false
+    /// This turn's change of the layout moves rows and adds or takes none: the list places its rows at once and they
+    /// glide on Core Animation (`RouterList`). Any other change keeps its SwiftUI animation (the rows' folds, a card's
+    /// roll).
+    @ObservationIgnored private(set) var placedAtOnce = false
     /// The counts and the projects, stored with the layout.
     private(set) var tally = RouterTally()
     /// There is a thread: the filter bar shows.
@@ -538,8 +539,11 @@ final class RouterModel {
     /// arrow, or a pointer move, so lines walked past aren't marked read on T3's sidebar and phone.
     func select(_ new: RouterSelection?, walk: Bool = false) {
         guard new != selection else { return }
-        let interval = RouterSignposts.begin("Select")
-        defer { RouterSignposts.end(interval, afterCommit: true) }
+        let interval = RouterSignposts.begin("Select"), work = RouterSignposts.begin("Select work")
+        defer {
+            RouterSignposts.end(work)
+            RouterSignposts.end(interval, afterCommit: true)
+        }
         pendingSeen = nil
         animate(.spatial) {
             selection = new
@@ -1018,7 +1022,11 @@ final class RouterModel {
     private func relayout() {
         let slots = slots()
         if slots != layout {
-            rowsCameOrWent = slots.count != layout.count || Set(slots.map(\.id)) != Set(layout.map(\.id))
+            if slots.count == layout.count, Set(slots.map(\.id)) == Set(layout.map(\.id)) {
+                placedAtOnce = true
+                // For this turn's update only.
+                DispatchQueue.main.async { [weak self] in self?.placedAtOnce = false }
+            }
             layout = slots
         }
         var tally = RouterTally()

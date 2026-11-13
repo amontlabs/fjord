@@ -46,8 +46,8 @@ enum LatencySignposts {
 
 /// The Router page's signposts (subsystem com.amontlabs.fjord, category "router"; docs/design/router-v2/IMPLEMENTATION.md
 /// 2.3): "T3 event" (a T3 item taken to the page's change committed), "Key" (a key to its commit) and "Key work" (to the
-/// handler's return), "Send", "Select", "Flush" (one turn's streamed changes applied), "Read" (the typing pause to the
-/// read landed), "Verdict state" and "Verdict done". `scripts/morph-timings.sh` prints them. Each is begun by what it
+/// handler's return), "Send", "Select" (and "Select work", to its handler's return), "Flush" (one turn's streamed changes
+/// applied), "Read" (the typing pause to the read landed), "Verdict state" and "Verdict done". `scripts/morph-timings.sh` prints them. Each is begun by what it
 /// times: nothing runs at rest.
 enum RouterSignposts {
     nonisolated static let signposter = OSSignposter(subsystem: InboxLog.subsystem, category: "router")
