@@ -162,4 +162,15 @@ import Testing
         // The start finds T3's id again from that name.
         #expect(s.routerActs.env.projectID("Garden") == "p1")
     }
+
+    // MARK: The open card reaches the decider (FINAL-REVIEW #9)
+
+    @Test func theOpenCardIsTheDecidersPrior() {
+        let s = store([F.shell("t1", title: "Fix the fence"), F.shell("t2", title: "Plant the beans")])
+        let board = s.deciderBoard()
+        let none = s.deciderContext("yes, the second one", board: board)
+        let open = s.deciderContext("yes, the second one", board: board, open: "t1")
+        #expect(none.key != open.key)
+        #expect(open.blocks.joined() != none.blocks.joined())
+    }
 }

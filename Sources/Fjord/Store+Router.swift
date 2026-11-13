@@ -78,8 +78,8 @@ extension Store {
     func makeRouterReader() -> RouterReader {
         let reader = RouterReader()
         reader.jev = { [weak self] text, tagged in await self?.readDraft(text, tagged: tagged) }
-        reader.decide = { [weak self] text, tagged, _, reuse in
-            await self?.decideDraft(text, tagged: tagged, notTo: nil, reuse: reuse)
+        reader.decide = { [weak self] text, tagged, selected, reuse in
+            await self?.decideDraft(text, tagged: tagged, notTo: nil, reuse: reuse, open: selected)
         }
         reader.search = { [weak self] text in await self?.searchDraft(text) ?? [] }
         reader.boardKey = { [weak self] in self?.deciderBoardKey() ?? "" }
