@@ -226,6 +226,8 @@ struct RouterItemFacts: Equatable, Sendable {
         /// Items you marked Done, for their Revert: the item and where it was.
         var done: [String: (index: Int, item: RouterItem)] = [:]
         var settleToken = 0
+        /// Your words sent from here in this run of Fjord, by key, and whether T3 took them: only taken words are read.
+        var sending: [String: Bool] = [:]
         /// Reads that failed in a row, and the retry's wait: nothing is read (nor sheens) until it ends.
         var failures = 0
         var held = false
@@ -280,13 +282,42 @@ struct RouterItemFacts: Equatable, Sendable {
         pump(id, context: context)
     }
 
-    /// Your words to the thread, sent here: read at once (its open items sheen, your words show in the block).
+    /// Your words to the thread, sent here: they show in the block at once and its open items sheen; they are read once
+    /// T3 takes them (`took`), and not at all if it refuses them (`refused`).
     func sent(_ id: String, words: String, at: Date, context: @autoclosure () -> Context) {
         let l = entry(id)
         var s = load(id) ?? Saved()
         guard !s.items.isEmpty else { return }
+        let input = Input.sent(at: at, words: words)
         s.sent = Array((s.sent + [Sent(at: at, words: words)]).suffix(Self.sentKept))
-        enqueue(l, &s, .sent(at: at, words: words))
+        l.sending[input.key] = false
+        enqueue(l, &s, input)
+        store(id, s)
+        changed(id)
+        pump(id, context: context)
+    }
+
+    /// T3 took your words sent at `at`: they are read.
+    func took(_ id: String, at: Date, context: @autoclosure () -> Context) {
+        let key = Input.sent(at: at, words: "").key
+        guard let l = live[id], l.sending[key] == false else { return }
+        l.sending[key] = true
+        pump(id, context: context)
+    }
+
+    /// T3 refused your words sent at `at` (offline, the thread gone): nothing is read, nothing closes, and T3's later
+    /// messages aren't taken for them.
+    func refused(_ id: String, at: Date, context: @autoclosure () -> Context) {
+        let key = Input.sent(at: at, words: "").key
+        guard let l = live[id], l.sending.removeValue(forKey: key) != nil, var s = load(id) else { return }
+        if l.reading?.key == key {
+            cancel(id)
+            l.reading = nil
+            l.closes = [:]
+            l.found = []
+        }
+        s.pending.removeAll { $0.key == key }
+        s.sent.removeAll { Input.sent(at: $0.at, words: "").key == key }
         store(id, s)
         changed(id)
         pump(id, context: context)
@@ -362,7 +393,9 @@ struct RouterItemFacts: Equatable, Sendable {
         case .messages(_, let upTo):
             // Facts read for it that list the message T3 stamped (the projection may lag the shell).
             spent(l, input.key) || l.factsFor == input.key && l.facts?.messages.contains { $0.at >= upTo.addingTimeInterval(-2) } == true
-        case .message, .sent: true
+        case .message: true
+        // Read once T3 took them.
+        case .sent: l.sending[input.key] == true
         }
     }
 
@@ -381,6 +414,14 @@ struct RouterItemFacts: Equatable, Sendable {
                     continue
                 }
             }
+            if case .sent(let at, _) = input, l.sending[input.key] == nil {
+                // Sent before a relaunch, its fate unknown: T3's copy, if it took it, is read as your message.
+                s.pending.removeFirst()
+                s.sent.removeAll { $0.at == at }
+                store(id, s)
+                continue
+            }
+            if case .sent = input, l.sending[input.key] == false { return }
             guard has(l, input) else {
                 guard let fetch, l.fetching == nil, l.factsFailed != input.key else { return }
                 l.fetching = input.key

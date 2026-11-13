@@ -39,6 +39,13 @@ import Testing
             records.itemFacts(thread, key: key, f)
         }
 
+        /// Your words sent from here, and T3 taking them.
+        func send(_ words: String, _ kind: RouterActs.Send.Kind = .words) {
+            let send = RouterActs.Send(thread: "t1", words: words, kind: kind, at: clock)
+            records.began(send: send)
+            records.took(send: send)
+        }
+
         /// Answers the read under way, whole.
         func answer(_ a: RouterItemsAnswer, thread: String = "t1") {
             guard let r = reads.last(where: { $0.thread == thread }) else { Issue.record("no read"); return }
@@ -154,10 +161,13 @@ import Testing
     @Test func yourWordsSentHereAreReadAtOnceAndT3sStampIsTheSameMessage() throws {
         let h = seeded()
         var t = Self.ended()
-        h.records.began(send: RouterActs.Send(thread: "t1", words: "keep 0.3", kind: .words, at: h.clock))
-        // At once: your words in the block, the items sheen; no projection read needed.
+        let send = RouterActs.Send(thread: "t1", words: "keep 0.3", kind: .words, at: h.clock)
+        h.records.began(send: send)
+        // At once: your words in the block, the items sheen; read once T3 takes them, with no projection read.
         #expect(h.ledger.read == .message("keep 0.3"))
         #expect(h.ledger.items.allSatisfy { $0.state == .checking })
+        #expect(h.reads.count == 1)
+        h.records.took(send: send)
         let read = try #require(h.reads.last)
         guard case .message(let words, _)? = read.items?.input else { Issue.record("not a message"); return }
         #expect(words == "keep 0.3")
@@ -184,6 +194,37 @@ import Testing
         h.records.put(t)
         #expect(h.reads.count == 1)
         #expect(h.saved?.read.contains { $0.hasPrefix("msgs:") } == true)
+    }
+
+    /// REVIEW-items 1.5: words T3 refuses are never read (nothing closes "answered" by words the agent never got), and
+    /// your next real message isn't taken for them.
+    @Test func wordsT3RefusesAreNotReadAndDontSwallowTheNextMessage() throws {
+        let h = seeded()
+        let send = RouterActs.Send(thread: "t1", words: "delete it", kind: .words, at: h.clock)
+        h.records.began(send: send)
+        h.records.ended(send: send)
+        #expect(h.reads.count == 1)
+        #expect(h.saved?.pending.isEmpty == true && h.saved?.sent.isEmpty == true)
+        #expect(h.ledger.read == nil && h.saved?.items.count == 2)
+        // A minute later, the same words from the phone: read.
+        h.clock = h.clock.addingTimeInterval(30)
+        var t = Self.ended()
+        t.lastAuthoredAt = h.clock
+        h.records.put(t)
+        h.facts(RouterItemFacts(messages: [.init(id: "m1", at: h.clock, text: "delete it", before: nil)]))
+        #expect(h.reads.last?.fingerprint == "msg:m1")
+    }
+
+    /// Words sent just before a relaunch, with no word from T3: T3's copy, if it took them, is read as your message.
+    @Test func wordsSentBeforeARelaunchAreReadFromT3sCopy() throws {
+        let h = seeded()
+        h.records.began(send: RouterActs.Send(thread: "t1", words: "delete it", kind: .words, at: h.clock))
+        let again = Harness(saved: RouterVerdictFile.decode(try #require(RouterVerdictFile.encode(h.records.saved))))
+        var t = Self.ended()
+        t.lastAuthoredAt = h.clock
+        again.records.put(t)
+        again.facts(RouterItemFacts(messages: [.init(id: "m1", at: h.clock, text: "delete it", before: nil)]))
+        #expect(again.reads.map(\.fingerprint) == ["msg:m1"])
     }
 
     @Test func aMessageFromThePhoneIsReadWithItsWordsFromT3() throws {
@@ -297,7 +338,7 @@ import Testing
         }
         #expect(h.saved?.read.contains("turn:r2") == true)
         #expect(h.saved?.items.last?.sentence == Router.Items.Copy.unread && h.saved?.items.last?.kind == .know)
-        h.records.began(send: RouterActs.Send(thread: "t1", words: "delete it", kind: .words, at: h.clock))
+        h.send("delete it")
         #expect(h.reads.last?.fingerprint.hasPrefix("sent:") == true)
     }
 
@@ -322,7 +363,7 @@ import Testing
     @Test func inputsAreReadOneAtATimeInTheirOrderEachWithTheLedgerBeforeIt() throws {
         let h = seeded()
         // Your words, then the run they started ends, then a background task wakes it: three inputs, one read at a time.
-        h.records.began(send: RouterActs.Send(thread: "t1", words: "keep 0.3", kind: .words, at: h.clock))
+        h.send("keep 0.3")
         let first = try #require(h.reads.last)
         h.records.put(Self.ended("r2"))
         h.records.put(Self.running("r3"))

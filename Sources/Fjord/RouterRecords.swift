@@ -377,6 +377,7 @@ final class RouterRecords {
     /// T3 took the send (`{sequence}`): its status goes. A steer keeps "steering…" until the run shows it.
     func took(send s: RouterActs.Send) {
         operation {
+            if let e = entries[s.thread], let t = e.thread { items.took(s.thread, at: s.at, context: itemsContext(t, e)) }
             guard let e = entries[s.thread], var send = e.send, !send.steering, send.status != .taken else { return }
             send.status = .taken
             e.send = send
@@ -389,6 +390,8 @@ final class RouterRecords {
     /// back by then.
     func ended(send s: RouterActs.Send) {
         guard let e = entries[s.thread] else { return }
+        // Refused: your words were never read, and nothing they would have closed is closed.
+        if let t = e.thread { operation { items.refused(s.thread, at: s.at, context: itemsContext(t, e)) } }
         if s.kind == .queue { e.queued = nil; e.queuedRun = nil } else { e.send = nil }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
