@@ -1,10 +1,10 @@
 import Foundation
 
 // Banners from the Router v2 records (docs/design/router-v2/IMPLEMENTATION.md 1.9): on a record's code transition (a new
-// ask, a finish, a real stop, a usage limit) and when a verdict finds a step. Each is told once, keyed on the request, plan
-// or run it is about (or the fingerprint the verdict judged); the records keep the told keys in their file, so a relaunch
-// doesn't tell an old story again. The words are `ThreadNotices`'. It fires as the shell shows the change, no model between
-// (a step's waits for its verdict, which is what found it).
+// ask, a finish, a real stop, a usage limit) and when a read finds an open item that needs you. Each is told once, keyed on
+// the request, plan or run it is about (or the input the item was found in); the records keep the told keys in their file,
+// so a relaunch doesn't tell an old story again. The words are `ThreadNotices`'. It fires as the shell shows the change, no
+// model between (an item's waits for its read, which is what found it).
 
 @MainActor
 final class RouterNotifier {
@@ -38,9 +38,9 @@ final class RouterNotifier {
         return n.key
     }
 
-    /// A verdict found a step in a finished turn: told once per fingerprint.
-    func step(_ t: AgentThread, project: String?, fingerprint: String, ask: String, told: [String]) -> String? {
-        let n = ThreadNotices.step(t, fingerprint: fingerprint, ask: ask, project: project ?? "")
+    /// A read found an open item that needs you (Stuck, Decide, Do): told once per input it was found in.
+    func item(_ t: AgentThread, project: String?, input: String, sentence: String, told: [String]) -> String? {
+        let n = ThreadNotices.item(t, input: input, sentence: sentence, project: project ?? "")
         guard !told.contains(n.key) else { return nil }
         pending.append(n)
         return n.key

@@ -5,7 +5,7 @@ import Foundation
 // a model, and is keyed by what it is about (a request, a plan, a run) so it is posted once, kept in briefs.db (`notified`).
 
 struct ThreadNotice: Equatable {
-    enum Kind: String { case needsYou, finished, failed, usageLimit, step }
+    enum Kind: String { case needsYou, finished, failed, usageLimit, item }
 
     var kind: Kind
     /// The told-once key: the request, the plan or the run the banner is about.
@@ -22,7 +22,7 @@ struct ThreadNotice: Equatable {
         case .finished: "finished"
         case .failed: "failed"
         case .usageLimit: "hit its usage limit"
-        case .step: "left you a step"
+        case .item: "needs you"
         }
     }
 }
@@ -79,8 +79,8 @@ enum ThreadNotices {
     }
 
     /// The banner a Router v2 record's code state deserves (`RouterNotifier`), keyed on what it is about: the request, the
-    /// plan's run, the run that finished, failed or hit its limit. Nothing for Working, Sent, a step (the verdict's own, see
-    /// `step`) or a run you stopped. Pure.
+    /// plan's run, the run that finished, failed or hit its limit. Nothing for Working, Sent, an open item (its read's own,
+    /// see `item`) or a run you stopped. Pure.
     static func notice(_ t: AgentThread, state: RouterCodeState, request: ThreadRequest?, project: String) -> ThreadNotice? {
         func make(_ kind: ThreadNotice.Kind, _ key: String, _ body: String) -> ThreadNotice {
             ThreadNotice(kind: kind, key: key, thread: t.id, project: project, title: t.title, body: body)
@@ -89,8 +89,6 @@ enum ThreadNotices {
         switch state.state {
         case .needsYou(.plan):
             return make(.needsYou, "plan:\(t.id)@\(run)", clip(request?.planMarkdown ?? "", "A plan to approve."))
-        case .needsYou(.step):
-            return nil
         case .needsYou:
             let key = "ask:" + (t.pendingRequest?.id ?? request?.id ?? "\(t.id)@\(run)")
             switch request?.body {
@@ -114,10 +112,10 @@ enum ThreadNotices {
         }
     }
 
-    /// The banner for a finished turn the verdict found a step in, keyed on the fingerprint it judged.
-    static func step(_ t: AgentThread, fingerprint: String, ask: String, project: String) -> ThreadNotice {
-        ThreadNotice(kind: .step, key: "step:\(t.id)@\(fingerprint)", thread: t.id, project: project, title: t.title,
-                     body: clip(ask, "It left you a step."))
+    /// The banner for an open item a read found (Stuck, Decide or Do), keyed on the input it was found in.
+    static func item(_ t: AgentThread, input: String, sentence: String, project: String) -> ThreadNotice {
+        ThreadNotice(kind: .item, key: "item:\(t.id)@\(input)", thread: t.id, project: project, title: t.title,
+                     body: clip(sentence, "Something needs you."))
     }
 
     private static func clip(_ text: String, _ fallback: String) -> String {

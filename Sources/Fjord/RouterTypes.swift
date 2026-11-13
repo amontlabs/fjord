@@ -206,7 +206,6 @@ enum Router {
         /// What Continue on a Stopped card sends: T3's own words for it (it has no rerun).
         static let continueWords = "Continue where you left off."
         static let continueTitle = "Continue"
-        static let doesntNeedMe = "Doesn't need me"
         /// Why Settle and Snooze are off on a line T3 won't let go of yet (a request waits, a run is live, a message is queued).
         static let answerOrStopFirst = "Answer or stop it first"
         /// A settle or snooze T3 refused for no reason the page can see.
@@ -264,7 +263,7 @@ enum RouterSection: Int, CaseIterable, Hashable {
 /// One thread, as the page draws it: a code state, the sentence (the code's, or the model's verdict), and what its card
 /// shows. Icon, colour, section, counts and age are all read from it.
 struct RouterThread: Identifiable, Equatable {
-    enum Ask: Equatable { case question, form, plan, permission, step }
+    enum Ask: Equatable { case question, form, plan, permission }
     enum State: Equatable { case needsYou(Ask), stopped, sent, working, done }
     enum Worth: Equatable { case look, quiet }
 
@@ -427,7 +426,6 @@ extension RouterThread {
             Look(symbol: "questionmark.circle.fill", tint: CDS.Text.warning, ground: true, label: "Asks you")
         case .needsYou(.plan): Look(symbol: "list.bullet.clipboard.fill", tint: CDS.Text.warning, ground: true, label: "Plan to approve")
         case .needsYou(.permission): Look(symbol: "lock.fill", tint: CDS.Text.warning, ground: true, label: "Waits for a permission")
-        case .needsYou(.step): Look(symbol: "checklist", tint: CDS.Text.warning, ground: true, label: "Left you a step")
         case .stopped: Look(symbol: "exclamationmark.triangle.fill", tint: CDS.Text.danger, ground: true, label: "Stopped")
         case .sent: Look(symbol: "arrow.up.circle.fill", tint: CDS.Text.accent, ground: false, label: "Sent")
         case .working: Look(symbol: nil, tint: CDS.Text.muted, ground: false, label: "Working")
@@ -487,10 +485,10 @@ enum RouterHit: Hashable {
 }
 
 enum RouterFooterAct: Hashable {
-    case notForMe, snooze, settle, open, stop, rerun
+    case snooze, settle, open, stop, rerun
 
     /// It takes its line off the page: disarmed under a pointer that hasn't moved since it arrived there.
-    var removes: Bool { self == .notForMe || self == .snooze || self == .settle }
+    var removes: Bool { self == .snooze || self == .settle }
 }
 
 /// Where a draft goes.

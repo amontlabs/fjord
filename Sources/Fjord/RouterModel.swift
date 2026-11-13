@@ -858,7 +858,7 @@ final class RouterModel {
 
     /// What T3 and the Router's models change reaches the page here, and only here, as whole records: the store (the
     /// real one or the demo's) says what a thread is, the model works out the motion. A record equal to the one held
-    /// changes nothing. The owner's own acts change the model's copy at once (`dispatch`, `remove`, `notForMe`): the
+    /// changes nothing. The owner's own acts change the model's copy at once (`dispatch`, `remove`, `itemDone`): the
     /// store mirrors them as pending acts, so the record it sends next agrees and changes nothing either.
     func apply(_ change: RouterChange) {
         switch change {

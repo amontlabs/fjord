@@ -63,7 +63,7 @@ struct RouterCard: View {
     // MARK: Kind blocks. Prose keeps to 560 pt; option rows run the card's width, their keycaps under the footer's.
 
     @ViewBuilder private var kind: some View {
-        if case .needsYou(let request) = thread.state, request != .step, !thread.live {
+        if case .needsYou(let request) = thread.state, !thread.live {
             if let question = thread.question { ask(question) }
             if request == .permission, let p = thread.permission { permission(p).prose() }
             notLive
@@ -95,10 +95,6 @@ struct RouterCard: View {
         case .needsYou(.permission):
             if let p = thread.permission { permission(p).prose() }
             RouterOptions(model: model, thread: thread, labels: thread.options, from: 0)
-        case .needsYou(.step):
-            if let question = thread.question { ask(question) }
-            badges
-            if !thread.options.isEmpty { RouterOptions(model: model, thread: thread, labels: thread.options, from: 0) }
         case .done:
             HStack(spacing: 8) {
                 badges
@@ -264,11 +260,6 @@ struct RouterCard: View {
             case .sent:
                 openButton
             default:
-                if thread.state == .needsYou(.step) {
-                    RouterTextButton(model: model, hit: .footer(id, .notForMe), title: Router.Copy.doesntNeedMe, removes: true) {
-                        model.notForMe(id)
-                    }
-                }
                 if let why = model.holdReason(thread) {
                     // T3 won't let go of it yet: shown off, with why.
                     RouterHeldActs(why: why)
@@ -279,7 +270,7 @@ struct RouterCard: View {
                                        removes: true) { model.settle(id) }
                 }
                 // A request that is no longer live has it in its options' place.
-                if thread.live || thread.state == .needsYou(.step) { openButton }
+                if thread.live { openButton }
             }
         }
         .padding(.top, 2)

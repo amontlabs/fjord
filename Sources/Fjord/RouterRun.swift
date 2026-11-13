@@ -70,7 +70,6 @@ extension RouterThread {
         case .needsYou(.form): "form"
         case .needsYou(.plan): "plan"
         case .needsYou(.permission): "permission"
-        case .needsYou(.step): "step"
         default: "stopped"
         }
     }

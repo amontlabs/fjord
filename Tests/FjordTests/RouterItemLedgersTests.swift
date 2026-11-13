@@ -670,7 +670,7 @@ import Testing
         func run(unseen: Bool, minutes: Double) {
             let h = Harness()
             let notifier = RouterNotifier()
-            notifier.post = { if $0.key.hasPrefix("step:") { told.append($0) } }
+            notifier.post = { if $0.key.hasPrefix("item:") { told.append($0) } }
             h.records.notifier = notifier
             var t = Self.ended("r1", minutes: minutes)
             t.unseen = unseen

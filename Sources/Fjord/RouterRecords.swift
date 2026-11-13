@@ -120,7 +120,7 @@ final class RouterRecords {
             // while you haven't seen the thread, and not on the card you have open.
             guard let e = self.entries[id], let t = e.thread, let notifier = self.notifier, let first = new.first, t.unseen, e.seen == nil,
                   self.now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh else { return }
-            let told = notifier.step(t, project: self.project(t), fingerprint: key, ask: first.sentence, told: self.saved[id]?.told ?? [])
+            let told = notifier.item(t, project: self.project(t), input: key, sentence: first.sentence, told: self.saved[id]?.told ?? [])
             if let told { self.tell(id, told) }
         }
     }

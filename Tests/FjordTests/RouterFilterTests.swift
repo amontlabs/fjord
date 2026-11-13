@@ -77,7 +77,7 @@ import Testing
         // The guide's verdict: it needs you. It leaves the group, under its own header; the other is still read.
         var guide = try #require(model.thread(ID.guide))
         guide.judging = false
-        guide.state = .needsYou(.step)
+        guide.ledger.items = [RouterItem(id: "i1", kind: .do, sentence: "check the steps, then merge #41", since: model.now)]
         model.apply(.upsert(guide))
         #expect(model.layout.first?.kind == .header(.needsYou, 1))
         #expect(model.layout.contains { $0.id == RouterModel.readingRow && $0.kind == .reading(1) })

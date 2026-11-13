@@ -155,8 +155,6 @@ extension RouterModel {
         case .needsYou(.form):
             let at = min(formAt[id] ?? 0, t.form.count - 1)
             return "answers “\(t.form[at].title)”"
-        // A step Fjord found: the thread asked nothing, the words start its next turn.
-        case .needsYou(.step): return "answers it"
         case .needsYou: return "answers its question"
         case .stopped, .done: return "starts a new turn"
         // An agent that can't take words mid-turn only queues them.
@@ -300,7 +298,7 @@ extension RouterModel {
     var placeholder: String {
         guard let t = selectedThread else { return "Message your threads" }
         switch t.state {
-        case .needsYou(.question), .needsYou(.step): return "Answer \(t.name)"
+        case .needsYou(.question): return "Answer \(t.name)"
         case .needsYou(.form):
             let at = min(formAt[t.id] ?? 0, t.form.count - 1)
             return "Answer “\(t.form[at].title)”"
@@ -362,10 +360,9 @@ extension RouterModel {
         }
     }
 
-    /// What a picked answer is: options on a T3 request, or (a step's, which are the model's) plain words.
+    /// What a picked answer is: options on a T3 request, else plain words.
     private func answerKind(_ t: RouterThread) -> RouterOutgoing.Kind {
         switch t.state {
-        case .needsYou(.step): return .words
         case .needsYou: return .answer(picks: picks[t.id] ?? [:], typed: typed[t.id] ?? [:])
         default: return .words
         }

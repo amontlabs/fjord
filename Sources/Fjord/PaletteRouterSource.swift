@@ -44,7 +44,6 @@ extension PaletteRouterSource {
         case .needsYou(.plan): "proposes a plan"
         case .needsYou(.permission): "waits for a permission"
         case .needsYou(.form): "asks several things"
-        case .needsYou(.step): "needs a step from you"
         case .needsYou(.question): "asks"
         case .stopped: "stopped"
         default: r.section.title

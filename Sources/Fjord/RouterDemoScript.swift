@@ -859,10 +859,10 @@ final class RouterDemoScript {
     }
 
     private func beat40() async {
-        await beat(40, "Doesn't need me: it goes to Done")
+        await beat(40, "Done on an open item: it strikes, then folds, and the thread goes to Done")
         down()
         await pause(2.2)
-        await click(.footer(ID.upstream, .notForMe))
+        await click(.footer(RouterModel.itemKey(ID.upstream, "i1"), .settle))
         await park()
     }
 
@@ -934,8 +934,7 @@ final class RouterDemoScript {
         // The guide's verdict: it left you a step. Its state first (it moves up under Needs you), then its words.
         if var guide = model.thread(ID.guide) {
             guide.judging = false
-            guide.state = .needsYou(.step)
-            guide.question = "Merge #41 once the Chrome steps are checked?"
+            guide.ledger.items = [RouterItem(id: "i1", kind: .do, sentence: "check the Chrome steps, then merge #41", since: model.now, state: .new)]
             model.apply(.upsert(guide))
             await pause(0.5)
             guide.name = "Install guide"

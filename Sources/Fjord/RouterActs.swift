@@ -269,9 +269,6 @@ extension RouterActsRecords {
         if let until { doAct(.snooze, thread, detail: T3Timestamp(date: until).text) } else { undoAct(.snooze, thread) }
     }
 
-    /// Real threads have no step to mark (their open items have Done): nothing to tell the records.
-    func notForMe(_ thread: String, on: Bool) {}
-
     func itemDone(_ thread: String, item: String, on: Bool) { records?.itemDone(thread, item: item, on: on) }
 
     private func doAct(_ act: ThreadAct, _ thread: String, detail: String = "") {

@@ -424,7 +424,7 @@ import Testing
         let read = h.asks.last { $0.kind == .items }!
         h.records.items("t1", key: read.fingerprint, .done(RouterItemsAnswer(found: [.init(kind: .do, sentence: "merge PR #41")], line: "opened #41")))
         let told = posted()
-        #expect(told.map(\.kind) == [.step])
+        #expect(told.map(\.kind) == [.item])
         #expect(told.first?.body == "merge PR #41")
         h.records.put(t)
         #expect(posted().isEmpty)

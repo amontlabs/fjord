@@ -168,7 +168,6 @@ import Testing
             case stop(String), visit(String), open(String)
             case settle([String], on: Bool)
             case snooze(String, until: Date?)
-            case notForMe(String, on: Bool)
         }
 
         var calls: [Call] = []
@@ -196,10 +195,6 @@ import Testing
         func snooze(_ thread: String, until: Date?) {
             calls.append(.snooze(thread, until: until))
             if until == nil { putBack(thread) }
-        }
-        func notForMe(_ thread: String, on: Bool) {
-            calls.append(.notForMe(thread, on: on))
-            if !on { putBack(thread) }
         }
 
         /// A store that still has the thread: its record comes back on a Revert (`gone`: it has none).
@@ -367,15 +362,6 @@ import Testing
         let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 23, minute: 30)))
         let end = RouterModel.snoozeEnd(2, from: now, calendar: calendar)
         #expect(calendar.dateComponents([.day, .hour, .minute], from: end) == DateComponents(day: 13, hour: 9, minute: 0))
-    }
-
-    @Test func notForMeAndItsRevert() {
-        let (model, source) = recorded()
-        model.notForMe(ID.valCenis)
-        #expect(source.calls == [.notForMe(ID.valCenis, on: true)])
-        model.undo()
-        #expect(source.calls.last == .notForMe(ID.valCenis, on: false))
-        #expect(model.thread(ID.valCenis)?.state == .needsYou(.step))
     }
 
     @Test func settleAllAndItsRevert() {

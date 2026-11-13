@@ -94,14 +94,14 @@ import Testing
         #expect(n.changed(old, project: nil, from: code(old), to: code(old), request: nil, now: now, told: []) == nil)
     }
 
-    @Test func aStepIsToldOncePerFingerprint() {
+    @Test func anOpenItemIsToldOncePerInput() {
         let (n, posted) = notifier()
         let t = F.thread()
-        let key = n.step(t, project: nil, fingerprint: "fp1", ask: "Merge #41?", told: [])
+        let key = n.item(t, project: nil, input: "turn:r1", sentence: "Merge #41?", told: [])
         #expect(key != nil)
         #expect(posted().map(\.body) == ["Merge #41?"])
-        #expect(n.step(t, project: nil, fingerprint: "fp1", ask: "Merge #41?", told: [key!]) == nil)
-        #expect(n.step(t, project: nil, fingerprint: "fp2", ask: "Merge #42?", told: [key!]) != nil)
+        #expect(n.item(t, project: nil, input: "turn:r1", sentence: "Merge #41?", told: [key!]) == nil)
+        #expect(n.item(t, project: nil, input: "turn:r2", sentence: "Merge #42?", told: [key!]) != nil)
     }
 
     @Test func manyAtOnceAreOneBanner() {

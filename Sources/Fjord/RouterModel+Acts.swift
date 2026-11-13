@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-// Router v2's page model: a send that failed, the acts with a Revert (Settle, Snooze, Doesn't need me), and Esc.
+// Router v2's page model: a send that failed, the acts with a Revert (Settle, Snooze, an item's Done), and Esc.
 
 extension RouterModel {
     // MARK: Failures
@@ -200,36 +200,6 @@ extension RouterModel {
             self.source?.settle(ids, on: false)
         }
         source?.settle(ids, on: true)
-    }
-
-    /// Doesn't need me: a wrong verdict goes to Done, its line the verdict's result and no longer the ask.
-    func notForMe(_ id: String) {
-        guard let t = thread(id), t.state == .needsYou(.step) else { return }
-        let next = selection == .line(id) ? neighbour(of: id) : selection
-        parked[id] = t
-        move(id) {
-            update(id) {
-                $0.state = .done
-                $0.worth = .look
-                $0.since = now
-                $0.order = fresh()
-                if let result = $0.result { $0.sentence = .init(text: result, stream: $0.sentence.stream) }
-                $0.question = nil
-                $0.options = []
-            }
-            picks[id] = nil
-            selection = next
-        }
-        advanced(to: next)
-        act(RouterToast(id: fresh(), before: "Moved", name: t.name, after: "to Done"), threads: [id]) { [weak self] in
-            guard let self else { return }
-            // The store's record says what it is now (its ask again, unless T3 moved on).
-            self.source?.notForMe(id, on: false)
-            self.parked[id] = nil
-            guard self.thread(id) != nil else { return }
-            self.animate(.spatial) { self.selection = .line(id) }
-        }
-        source?.notForMe(id, on: true)
     }
 
     /// ⌘⌫: settles the selected row (the housekeeping line: all; a failure line: Edit).

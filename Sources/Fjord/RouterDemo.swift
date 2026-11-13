@@ -138,10 +138,11 @@ enum RouterDemo {
         settings.options = ["A sidebar with sections", "One scrolling page", "Tabs across the top"]
 
         var valCenis = T(id: ID.valCenis, name: "Val Cenis booking", title: "Book the Val Cenis chalet, 14–21 Feb", project: nil,
-                         state: .needsYou(.step), sentence: .init(text: "reserve for five? about €62 more than for four"), since: ago(12))
+                         state: .done, sentence: .init(text: "found a chalet for five; nothing reserved yet"), since: ago(12))
         valCenis.lastLines = "The chalet takes five with the sofa bed. For five it is €1,302 for the week instead of €1,240. I have not reserved anything yet."
-        valCenis.question = "Reserve for five, or keep it at four?"
-        valCenis.options = ["Reserve for five (+€62)", "Keep it at four"]
+        // An open item the turn's read left: a Decide, its options the agent's.
+        valCenis.ledger.items = [RouterItem(id: "i1", kind: .decide, sentence: "reserve for five? about €62 more than for four",
+                                            since: ago(12), options: ["Reserve for five (+€62)", "Keep it at four"])]
 
         var briefs = T(id: ID.briefs, name: "Briefs migration", title: "Move the briefs into NoteLog", project: "fjord",
                        state: .needsYou(.plan), sentence: .init(text: "plan ready: move briefs into NoteLog, copy the old rows once"),
@@ -477,7 +478,6 @@ final class RouterDemoSource: RouterSource {
     // T3 answers these at once: the page has already changed.
     func settle(_ threads: [String], on: Bool) { if !on { threads.forEach(putBack) } }
     func snooze(_ thread: String, until: Date?) { if until == nil { putBack(thread) } }
-    func notForMe(_ thread: String, on: Bool) { if !on { putBack(thread) } }
 
     /// A Revert: the demo's store has the line as it was when the act took it.
     private func putBack(_ id: String) {
@@ -595,15 +595,13 @@ extension RouterModel {
         apply(.upsert(t))
     }
 
-    /// The verdict's state, which comes first: Done worth a look or quiet, or it left you a step (the line moves to Needs
-    /// you at once, still sheening).
+    /// The read's state, which comes first: Done worth a look or quiet, or it left an open item that needs you (`step`: a
+    /// Do; the line moves to Needs you at once, still sheening, its line the turn's).
     func verdict(_ id: String, worth: RouterThread.Worth = .quiet, step ask: String? = nil, options: [String] = [],
                  result: String? = nil) {
         guard var t = thread(id), t.state == .done else { return }
         if let ask {
-            t.state = .needsYou(.step)
-            t.question = ask
-            t.options = options
+            t.ledger.items = [RouterItem(id: "i1", kind: options.isEmpty ? .do : .decide, sentence: ask, since: now, options: options, state: .new)]
             t.result = result
             t.since = now
         } else {
@@ -727,7 +725,7 @@ extension RouterModel {
         if let i = t.prs.firstIndex(where: { $0.number == number }) { t.prs[i].state = state } else {
             t.prs.append(.init(number: number, state: state))
         }
-        if t.state == .done || t.state == .needsYou(.step) { t.sentence.phase = .reassessing }
+        if t.state == .done { t.sentence.phase = .reassessing }
         apply(.upsert(t))
     }
 
