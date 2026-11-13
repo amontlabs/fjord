@@ -29,3 +29,8 @@
 
 ## Process
 Real-app shots + a short recorded beat (send → sheen → resolve) for the owner to approve before wiring to real threads; eval on real threads with mid-run wakes.
+
+## Look (2026-11-13, for approval)
+Demo store only (`RouterDemoItems.swift`), not wired to real threads. Shots `v2-items`, `v2-items-card`,
+`v2-items-checking`, `v2-items-resolved` (light and `-dark`); storyboard beat 45 (`--router-v2-demo --beats 45`). The
+look is written down in DESIGN.md 1.15.

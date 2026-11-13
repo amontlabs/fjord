@@ -134,6 +134,7 @@ final class RouterDemoScript {
         8.0, 12.6, 14.0, 9.6, 6.4, 5.6, 8.2, 5.4, 9.4, 13.0, // 24–33 send
         12.0, 5.6, 3.2, 3.2, 5.6, 5.4, 6.8, 6.4, 20.4, 6.0, // 34–43 clear
         7.0,                                                // 44    a cold launch
+        21.0,                                               // 45    open items
     ]
     /// When each beat starts, and when the last one ends.
     private static let times: [Double] = lengths.reduce(into: [0]) { $0.append($0[$0.count - 1] + $1) }
@@ -337,6 +338,11 @@ final class RouterDemoScript {
         try? await Task.sleep(for: .seconds(1))
         mark = Date()
         clock = 0
+        // Played alone from beat 45: its scene is set before the frames start (the frames are the beat's motion).
+        if (only?.first ?? from) == 45 {
+            itemsScene()
+            try? await Task.sleep(for: .seconds(0.6))
+        }
         if from == nil { RouterDemo.frames?.start() }
         let beats: [(Int, () async -> Void)] = [
             (1, beat1), (2, beat2), (3, beat3), (4, beat4), (5, beat5), (6, beat6), (7, beat7), (8, beat8), (9, beat9), (10, beat10),
@@ -344,7 +350,7 @@ final class RouterDemoScript {
             (20, beat20), (21, beat21), (22, beat22), (23, beat23), (24, beat24), (25, beat25), (26, beat26), (27, beat27),
             (28, beat28), (29, beat29), (30, beat30), (31, beat31), (32, beat32), (33, beat33), (34, beat34), (35, beat35),
             (36, beat36), (37, beat37), (38, beat38), (39, beat39), (40, beat40), (41, beat41), (42, beat42), (43, beat43),
-            (44, beat44),
+            (44, beat44), (45, beat45),
         ]
         if let shape = Self.selectCheck {
             RouterDemo.frames?.start()
@@ -945,5 +951,43 @@ final class RouterDemoScript {
             model.apply(.upsert(bar))
         }
         await pause(1.0)
+    }
+
+    // Act 7: open items (OPEN-ITEMS.md)
+
+    /// The demo's threads as at t = 0 with their open items, in one still step.
+    private func itemsScene() {
+        model.selection = nil
+        model.apply(.batch(RouterDemo.records().threads.map { .upsert($0) }))
+        RouterDemo.items(model)
+    }
+
+    private func beat45() async {
+        // The demo's threads as at t = 0, with Checkpoint boot's open items (Stuck, Decide, Know while it runs) and Bar
+        // count's one: set in one still step, before the caption (the scene, not the beat's motion).
+        if model.thread(ID.checkpoint)?.ledger.isEmpty != false { itemsScene() }
+        await beat(45, "Your message is checked against what's open")
+        await pause(0.8)
+        // Its header's card, then your words: Return shows them in the block at once, the items sheen, Fjord's mark.
+        await click(.row(ID.checkpoint))
+        await park()
+        await type(RouterDemo.Item.reply)
+        await pause(RouterDemoSource.slowRead + 0.3)
+        RouterFrames.note("send")
+        enter()
+        await pause(2.2)
+        // The read lands: the choice it answered strikes, then folds away; a step for you folds in, lit.
+        say("Answered items strike; new ones fold in")
+        RouterFrames.note("read")
+        model.itemsRead(ID.checkpoint, RouterDemo.replyRead)
+        await pause(2.8)
+        // A new turn: the header pulses once, the items sheen, a placeholder where new ones land.
+        say("A new turn is read the same way")
+        RouterFrames.note("turn")
+        model.itemsTurnEnded(ID.checkpoint)
+        await pause(2.2)
+        RouterFrames.note("turn read")
+        model.itemsRead(ID.checkpoint, RouterDemo.turnRead)
+        await pause(2.2)
     }
 }

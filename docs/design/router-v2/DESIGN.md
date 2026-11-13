@@ -572,6 +572,47 @@ All the sentences are the first row (1.3); the bar's place stays. The sentence f
 Needs-you line leaves. The sidebar's Router badge is the unfiltered
 Needs-you count and disappears at 0.
 
+### 1.15 Open items (R7)
+
+**R7** (2026-11-13, owner-approved, [OPEN-ITEMS.md](OPEN-ITEMS.md); `RouterItems.swift`, `RouterDemoItems.swift`, shots
+`v2-items`, `v2-items-card`, `v2-items-checking`, `v2-items-resolved`, beat 45). A thread keeps a ledger of what is open with
+you (`RouterThread.ledger`): items of four kinds, each with an id, a sentence, an age, options if any, and a state (open,
+checking, closing with how, new).
+
+| Kind | Mark | Tint | Section |
+|---|---|---|---|
+| Stuck | `exclamationmark.octagon.fill` | `Text.danger` | Needs you, first |
+| Decide | `questionmark.circle.fill` | `Text.warning` | Needs you |
+| Do | `checklist` | `Text.warning` | Needs you |
+| Know | `info.circle.fill` | `Text.accent` | Done (worth a look) |
+
+- **One block per thread**, in the section of its most urgent open item (a real stop stays Stopped). One item and nothing
+  else to show: the line is the item (its mark and tint on the name's ground, its sentence, its age); its card is the
+  item's.
+- **Two or more** (or one with a read under way): the line becomes a quiet header: no ground, name in `Text.primary`
+  medium, the working dots in the mark's box and the newest summary in `Text.muted` while it runs, project pill, age (how
+  long it has run). Under it, one 28 pt row per item, indented under the name: the kind's mark and word (13 medium) on
+  the kind's 12 % ground in a fixed column, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of
+  air under it.
+- **Working counts it faintly**: "Working 3 +1", the `+1` in `Text.disabled`, for running threads shown in another section.
+- **↑↓** walk the header, then each item. The header's card is the thread's (the working timeline); an item's card is its
+  options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
+  T3 ⌘O`. Done strikes the item "done by you", folds it after 1.6 s, and the toast offers Revert. The open card's ground
+  is under its own row only.
+- **Your words to a block** (Return): in the same frame `↑ "…" · sent` (13, the arrow in the accent) under the items,
+  every open item sheens (`Text.muted` + the sheen), and Fjord's mark sits at the end of the header's words, where the
+  activity glyphs are, so nothing moves. Nothing reads settled until the read lands.
+- **A new turn**: the header's ground lights once (`chosen`, 0.7 s ease-out), the items sheen, a faint "reading the new
+  turn…" (13, `Text.disabled`, sheening) where new items land.
+- **The read lands** (`RouterLedger.land`): a closed item strikes in `Text.muted` with its how after it (12,
+  `Text.secondary`: "answered by your message", "done by the agent", "no longer open"), its kind faded, for 1.6 s, then
+  goes; a new item comes in on its kind's 12 % ground, which fades; a merged item stays and its age resets; the rest
+  stop sheening.
+- **Motion.** Inside a block, rows are placed at once and come and go with a short fade (0.12 s out, 0.2 s in); the
+  block's height changes, and the lines under it glide, on Core Animation (`RouterGlides`). A SwiftUI glide inside the
+  block drew rows outside the slot's mask, and an item's kind apart from its words, for a few frames. A shutting card
+  between a block's rows goes at once.
+
 ## 2. Thread state model
 
 ### 2.1 The record
@@ -987,6 +1028,12 @@ shows a thread's subagents, background work and waits.
 | 42 | 268.1 | PR #2049 merges (Upstream issue goes quiet). 0.6 s on, nine turns end, 0.4 s apart. After 5.4 s: ⌥↓, then ⌘⌫ every 0.6 s while a line is selected | Clearing the rest | Lines go Done as they end; four verdicts run at once, so the fifth line on sheens until a call is free; each ⌘⌫ takes exactly one line down the Done list; pills leave the bar one by one |
 | 43 | 288.5 | Hold. After 2.2 s the last toast is dismissed | Nothing left | "Nothing needs you. Nothing is running." No bar (its 48 pt stay), no badge; the composer says "Message your threads" |
 | 44 | 294.5 | The demo's threads come back as a relaunch finds them: the finished ones' verdicts pending. 2.0 s later the guide's verdict (a step: Needs you, its state first, then its name and words); 1.4 s later the bar's (Done, quiet) | A cold launch: Fjord reads what finished first | "Reading 2 threads…" + the mark in the first row, the two lines under it (dashed circle, sheen); never "Nothing needs you"; the guide glides up under "Needs you 1", the row reads "Reading 1 thread…" under it; then the bar glides into Done and the row goes (**R5**) |
+
+**Act 7: open items (5:01–5:22, OPEN-ITEMS.md)**
+
+| # | t | What happens | Caption | Notice |
+|---|---|---|---|---|
+| 45 | 301.5 | Checkpoint boot runs with Stuck, Decide and Know open; Bar count has one Decide. Click Checkpoint boot's header. Type "keep 0.3 for now; boot it with 4 GB of RAM" (a running thread: the read takes 3.2 s). Return. 2.2 s later the read lands: the Decide closes, the Stuck is restated, a Do is new; 1.6 s on they settle. Then a new turn ends: 2.2 s later its read closes the Stuck | Your message is checked against what's open / Answered items strike; new ones fold in / A new turn is read the same way | One block, in Needs you, its header quiet; at Return, in one frame: `↑ "…" · sent` under the items, every item sheens, Fjord's mark at the header's end; then "keep the 0.3 checkpoint…" struck with "answered by your message", the Do lit amber, the Stuck's age now "now"; the struck line goes, the light fades; the new turn: the header lights once, the items sheen, "reading the new turn…" where new items land; the Stuck strikes "done by the agent" and goes |
 
 Lines the script needs for beat 42 (all `quiet`, in the order the turns end): Updater "asks before installing, never
 mid-call; stable channel" · Disk test "the flake was a 120 s timeout under load; raised and fixed" · Tab handover "the

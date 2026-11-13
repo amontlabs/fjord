@@ -71,6 +71,15 @@ enum RouterShots {
                                        name: "write the changelog for 0.4")))
     }
 
+    /// Your words to Checkpoint boot, sent from its block the way Return sends them; nothing selected after.
+    private static func sendReply(_ model: RouterModel) {
+        model.select(.line(ID.checkpoint))
+        model.setDraft(RouterDemo.Item.reply)
+        model.apply(.read(RouterRead(draft: model.draft, places: [.thread(ID.checkpoint)], sure: true)))
+        model.send()
+        model.select(nil)
+    }
+
     /// The selected card's reply longer than its quote: cut with a fade and "Show all" under it.
     private static func longReply(_ model: RouterModel) {
         guard var settings = model.thread(ID.settings) else { return }
@@ -168,6 +177,27 @@ enum RouterShots {
         State(name: "v2-working-card-steps") { model in
             RouterDemo.workingSummaries(model)
             model.select(.line(ID.checkpoint))
+        },
+        // Open items per thread (OPEN-ITEMS.md): Checkpoint boot's block (Stuck, Decide, Know while it runs), Bar count's
+        // one item as its line; an item's card; right after your words (sheen, Fjord's mark, your line); the read landed.
+        State(name: "v2-items") { model in
+            model.select(nil)
+            RouterDemo.items(model)
+        },
+        State(name: "v2-items-card") { model in
+            RouterDemo.items(model)
+            model.select(.line(ID.checkpoint))
+            model.focusItem(RouterDemo.Item.keep)
+            model.pick(1)
+        },
+        State(name: "v2-items-checking") { model in
+            RouterDemo.items(model)
+            sendReply(model)
+        },
+        State(name: "v2-items-resolved") { model in
+            RouterDemo.items(model)
+            sendReply(model)
+            model.itemsRead(ID.checkpoint, RouterDemo.replyRead, settle: false)
         },
         State(name: "v2-reassessing") { model in
             model.select(nil)

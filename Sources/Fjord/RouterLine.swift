@@ -20,11 +20,15 @@ private struct RouterTargetModifier: ViewModifier {
     @Environment(\.routerLive) private var live
     /// The line whose own hosting view this is in: its frame is in that line's space.
     @Environment(\.routerRow) private var row
+    /// Which view holds the hit now: a view taking another's hit (a line becoming a block's header) can appear before
+    /// the old one disappears, and the old one's leaving mustn't take the new one's place away.
+    @State private var token = UUID()
 
     func body(content: Content) -> some View {
         let _ = (model.targets.actions[hit] = live ? action : nil)
         let _ = live ? model.targets.off.remove(hit) : model.targets.off.insert(hit).memberAfterInsert
         let _ = (model.targets.rows[hit] = row)
+        let _ = (model.targets.owners[hit] = token)
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(row == nil ? Router.space : Router.rowSpace)) } action: {
                 model.targets.laid[hit] = $0
@@ -38,6 +42,8 @@ private struct RouterTargetModifier: ViewModifier {
                 if removes, !model.scripted, case .active(let point) = phase { model.pointerMoved(over: hit, at: point) }
             }
             .onDisappear {
+                guard model.targets.owners[hit] == token else { return }
+                model.targets.owners[hit] = nil
                 model.targets.laid[hit] = nil
                 model.targets.rows[hit] = nil
                 model.targets.off.remove(hit)
@@ -128,6 +134,8 @@ struct RouterLineView: View {
     @State private var shown: Double = 1
     /// The row's width: a name takes up to its share of it (`M.nameShare`).
     @State private var rowWidth: CGFloat = 0
+    /// In a block: the height of the row whose card is open (its ground starts at that row's top).
+    @State private var focusRowHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias M = Router.Line
@@ -145,7 +153,13 @@ struct RouterLineView: View {
         // gone (nothing half-faded is dragged across the page), while the card's place folds on the move's own curve, so
         // the rows under it close up as the next card opens. It opens again once the line has landed.
         let open = selected && !moving
+        let block = thread.ledger.block
         VStack(alignment: .leading, spacing: 0) {
+          if block {
+            // A thread with two or more open items: a quiet header, then a line per item; the open card under its row,
+            // the rows after it under the card (RouterItems.swift).
+            blockHead(thread, open: open, hot: hot, pressed: pressed)
+          } else {
             RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
                 row(thread, hot: hot)
             }
@@ -171,6 +185,7 @@ struct RouterLineView: View {
                     .onDisappear { box.queuedHeight = 0 }
                     .transition(.routerFold(reduce: reduce))
             }
+          }
             // The card is in its line, closed to no height: it rolls open and shut in place, at full opacity, clipped to
             // the line's surface, on the curve the rows around it move on. Only an open card (or one rolling shut) has a
             // body: a closed one costs nothing.
@@ -193,12 +208,17 @@ struct RouterLineView: View {
                     cardHeight = $0
                     box.cardHeight = $0
                 }
-                .opacity(moving ? 0 : shown)
-                .transaction { if moving { $0.animation = nil } }
+                // In a block the card sits between rows: shutting, its words go at once, so they never lie over the rows
+                // closing up under it.
+                .opacity(moving || (block && !open) ? 0 : shown)
+                .transaction { if moving || (block && !open) { $0.animation = nil } }
                 .frame(height: open ? (cardHeight > 0 ? cardHeight : nil) : 0, alignment: .top)
                 .clipped()
                 // Its content grew or shrank while open: the card follows, and the rows under it slide.
-                .motion(.spatial, value: cardHeight)
+                .motion(.spatial, value: block ? 0 : cardHeight)
+                // In a block, rows sit under the card in the same hosting view: a SwiftUI roll carried them past the
+                // slot's mask (which rolls on Core Animation) for a frame or two. Its place changes at once there.
+                .transaction { if block { $0.animation = nil } }
                 .allowsHitTesting(open)
                 .accessibilityHidden(!open)
                 .environment(\.routerLive, open)
@@ -209,12 +229,37 @@ struct RouterLineView: View {
                         if !box.selected { box.built = false }
                     }
                 }
+            if block {
+                blockTail(thread)
+                    // The card above it opening, shutting or moving to another row: the rows under it are placed at once
+                    // (the slot's mask and the lines under the block move on Core Animation); a SwiftUI glide here drew
+                    // them outside the mask for a few frames.
+                    .transaction { $0.animation = nil }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if box.tailHeight > 0, height != box.tailHeight, model.glides.current == nil {
+                            model.glides.began(Motion.spatial.curve(reduce: reduce))
+                        }
+                        box.tailHeight = height
+                    }
+                    .onDisappear { box.tailHeight = 0 }
+            }
+        }
+        .background(alignment: .top) {
+            // A block's open card: its ground under the open row and its card only, not the whole block.
+            if block {
+                RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
+                    .frame(height: max(0, focusRowHeight + cardHeight))
+                    .padding(.top, max(0, box.rowHeight - focusRowHeight))
+                    .opacity(open ? shown : 0)
+                    .motion(.spatial, value: cardHeight)
+                    .transaction { if moving { $0.animation = nil } }
+            }
         }
         .background {
             // Selected, the row and its card share one ground (a fill, no outline), which comes and goes with the
             // card's fold.
             RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
-                .opacity(open ? shown : 0)
+                .opacity(open && !block ? shown : 0)
                 // The card's content grew or shrank while open (a quote or a plan rolling): the ground follows on the
                 // place's curve. Sized by the line outside the place's own animation, it took its new height at once,
                 // and a quote rolling shut was drawn below it until its roll ended.
@@ -238,6 +283,124 @@ struct RouterLineView: View {
         .zIndex(moving ? 1 : 0)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(thread.name), \(thread.look.label)")
+    }
+
+    /// A block's rows, in order: the header, each item, then your words or the placeholder (`RouterItems.swift`).
+    private enum BlockRow: Identifiable {
+        case header, item(RouterItem), sent(String), reading
+        var id: String {
+            switch self {
+            case .header: "header"
+            case .item(let item): item.id
+            case .sent: "sent"
+            case .reading: "reading"
+            }
+        }
+    }
+
+    private func blockRows(_ thread: RouterThread) -> [BlockRow] {
+        var rows: [BlockRow] = [.header] + thread.ledger.items.map { .item($0) }
+        switch thread.ledger.read {
+        case .message(let words)?: rows.append(.sent(words))
+        case .turn?: rows.append(.reading)
+        case nil: break
+        }
+        return rows
+    }
+
+    /// Where the open card goes: after the focused item, else after the header.
+    private func cut(_ rows: [BlockRow]) -> Int {
+        guard let focus = box.item, let i = rows.firstIndex(where: { $0.id == focus }) else { return 1 }
+        return i + 1
+    }
+
+    /// The block's rows down to the one whose card is open (the header when none is): its height is the line's row height.
+    private func blockHead(_ thread: RouterThread, open: Bool, hot: Bool, pressed: Bool) -> some View {
+        let rows = blockRows(thread)
+        let cut = cut(rows)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.prefix(cut))) { row in
+                blockRow(thread, row, last: row.id == rows[cut - 1].id, open: open, hot: hot, pressed: pressed)
+            }
+        }
+        // Inside a block, rows are placed at once: the slot's mask and the lines under the block move on Core Animation,
+        // and a SwiftUI glide here drew rows outside the mask, and an item's kind and words apart, for a few frames.
+        .transaction { $0.animation = nil }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if box.rowHeight > 0, height != box.rowHeight, model.glides.current == nil {
+                model.glides.began(Motion.spatial.curve(reduce: reduce))
+            }
+            box.rowHeight = height
+        }
+        .background {
+            RouterVeil()
+                .opacity(box.moving ? 1 : 0)
+                .animation(box.moving ? nil : Motion.fade.resolved(reduce: reduce), value: box.moving)
+        }
+    }
+
+    /// The block's rows under the open card.
+    private func blockTail(_ thread: RouterThread) -> some View {
+        let rows = blockRows(thread)
+        let cut = cut(rows)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.dropFirst(cut))) { row in
+                blockRow(thread, row, last: false, open: false, hot: false, pressed: false)
+            }
+            // A little air under the block, so it reads as one thing.
+            Color.clear.frame(height: 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func blockRow(_ thread: RouterThread, _ row: BlockRow, last: Bool, open: Bool, hot: Bool, pressed: Bool) -> some View {
+        let id = thread.id
+        switch row {
+        case .header:
+            RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
+                RouterBlockHeader(model: model, thread: thread, hot: hot)
+            }
+            .background {
+                RoundedRectangle(cornerRadius: M.radius, style: .continuous)
+                    .fill(open && box.item == nil ? .clear : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
+                    .transaction { $0.animation = nil }
+            }
+            .modifier(FocusHeight(on: last, height: $focusRowHeight))
+        case .item(let item):
+            let key = RouterModel.itemKey(id, item.id)
+            let flags = model.flags(.row(key))
+            let focused = open && box.item == item.id
+            RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
+                RouterItemRow(model: model, thread: id, item: item, selected: focused, hot: flags.hot, pressed: flags.pressed)
+            }
+            .disabled(!item.live)
+            .modifier(FocusHeight(on: last, height: $focusRowHeight))
+            .geometryGroup()
+            .transition(Self.itemFade)
+        case .sent(let words):
+            RouterItemSentRow(words: words).transition(Self.itemFade)
+        case .reading:
+            RouterItemPlaceholder().transition(Self.itemFade)
+        }
+    }
+
+    /// A block's row coming or going: placed at once (the block's height changes on Core Animation), fading in or out.
+    private static let itemFade = AnyTransition.asymmetric(
+        insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.08)),
+        removal: .opacity.animation(.easeOut(duration: 0.12)))
+
+    /// The open row's height, for the ground under it and its card.
+    private struct FocusHeight: ViewModifier {
+        let on: Bool
+        @Binding var height: CGFloat
+
+        func body(content: Content) -> some View {
+            if on {
+                content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            } else {
+                content
+            }
+        }
     }
 
     private func row(_ thread: RouterThread, hot: Bool) -> some View {
@@ -273,7 +436,7 @@ struct RouterLineView: View {
                     .allowsHitTesting(model.project == nil)
                     .layoutPriority(1)
             }
-            RouterAge(model: model, since: thread.since)
+            RouterAge(model: model, since: thread.ledger.single?.since ?? thread.since)
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .layoutPriority(1)
         }
@@ -407,6 +570,19 @@ struct RouterSentenceView: View {
                     }
                 }
                 .transition(.routerSwap)
+            } else if let item = thread.ledger.single {
+                // The line is its one open item: its sentence, sheening while a read may close it.
+                let text = Text(item.sentence).font(CDS.sans(14))
+                text.foregroundStyle(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
+                    .strikethrough(item.closing, color: CDS.Text.muted)
+                    .lineLimit(1).truncationMode(.tail)
+                    .overlay(alignment: .leading) {
+                        if item.state == .checking {
+                            RouterSheen().mask(alignment: .leading) { text.lineLimit(1).truncationMode(.tail) }
+                        }
+                    }
+                    .id(item.id)
+                    .transition(.routerSwap)
             } else {
                 let s = sentence
                 let reassessing = s.phase == .reassessing

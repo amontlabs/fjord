@@ -127,12 +127,22 @@ struct RouterHeaderRow: View {
     let count: Int
     let first: Bool
 
+    private var elsewhere: Int {
+        let all = model.tally.runningElsewhere
+        return model.project.map { all[$0] ?? 0 } ?? all.values.reduce(0, +)
+    }
+
     var body: some View {
         RouterButton(model: model, hit: .header(section), action: { model.toggle(section: section) }) { hot, _ in
             HStack(alignment: .firstTextBaseline, spacing: Router.Header.countGap) {
                 Text(section.title).font(CDS.sans(12, .semibold)).foregroundStyle(section.tint)
                     .underline(hot, color: section.tint.opacity(0.6))
                 RouterCount(count: count, size: 12)
+                // Running threads shown above with what they have open: counted here too, faintly, so counts add up.
+                if section == .working, elsewhere > 0 {
+                    Text(verbatim: "+\(elsewhere)").font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.disabled)
+                        .help(elsewhere == 1 ? "1 more running, shown above" : "\(elsewhere) more running, shown above")
+                }
             }
             .frame(height: Router.Header.height)
             // The count ticks inside the header and moves with it: it never leaves its label on the way.

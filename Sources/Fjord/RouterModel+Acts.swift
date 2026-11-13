@@ -28,7 +28,7 @@ extension RouterModel {
 
     // MARK: Acts with a Revert
 
-    private func act(_ toast: RouterToast, threads: [String], undo: @escaping () -> Void) {
+    func act(_ toast: RouterToast, threads: [String], undo: @escaping () -> Void) {
         undos.append((toast.id, threads, undo))
         animate(.fade) { self.toast = toast }
         startToastLife(Router.toastLife)
@@ -234,6 +234,11 @@ extension RouterModel {
 
     /// ⌘⌫: settles the selected row (the housekeeping line: all; a failure line: Edit).
     func settleSelected() {
+        // An item's card: ⌘⌫ is its Done.
+        if let (t, item) = selectedItem {
+            itemDone(t.id, item.id)
+            return
+        }
         switch selection {
         case .line(let id)?:
             guard let t = thread(id) else { return }

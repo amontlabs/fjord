@@ -384,9 +384,13 @@ struct RouterThread: Identifiable, Equatable {
     /// Which ask the card answers (T3's request id, the plan's run, the step's fingerprint); nil when it asks nothing.
     /// Picks and typed answers belong to one ask: a new one, or none, drops them.
     var askID: String?
+    /// Its open items (Stuck, Decide, Do, Know) and the read that may change them (RouterItems.swift). The block is
+    /// placed in the section of its most urgent item.
+    var ledger = RouterLedger()
 
     var section: RouterSection {
-        switch state {
+        if let top = ledger.top, state != .stopped { return top.section }
+        return switch state {
         case .needsYou, .stopped: .needsYou
         case .done: .done
         case .sent, .working: .working
@@ -416,7 +420,9 @@ extension RouterThread {
     }
 
     var look: Look {
-        switch state {
+        // One open item: the line is the item.
+        if let item = ledger.single { return item.look }
+        return switch state {
         case .needsYou(.question), .needsYou(.form):
             Look(symbol: "questionmark.circle.fill", tint: CDS.Text.warning, ground: true, label: "Asks you")
         case .needsYou(.plan): Look(symbol: "list.bullet.clipboard.fill", tint: CDS.Text.warning, ground: true, label: "Plan to approve")
@@ -432,7 +438,7 @@ extension RouterThread {
     }
 
     /// The sentence's colour once settled.
-    var sentenceTint: Color { isRunning ? CDS.Text.muted : CDS.Text.secondary }
+    var sentenceTint: Color { isRunning && ledger.single == nil ? CDS.Text.muted : CDS.Text.secondary }
 }
 
 /// A thread that finished more than a day ago and was not settled: no line of its own, one of the housekeeping line's.

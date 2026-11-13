@@ -32,6 +32,10 @@ final class RouterLineBox {
     var marked = false
     /// Its card has a body: from its opening until its closing roll has ended.
     var built = false
+    /// In a block: the item whose card is open (nil: the header's).
+    var item: String?
+    /// A block's rows under the open card, as laid out (0 when it isn't a block).
+    var tailHeight: CGFloat = 0
     /// What the line's height follows besides those flags, for the list's slot (`RouterHostedLine`): words queued
     /// under it, and its card's own height as laid out.
     private(set) var queued: Bool
@@ -130,6 +134,9 @@ struct RouterTally: Equatable {
     var all: [RouterSection: Int] = [:]
     /// Each project's lines, by section.
     var byProject: [String: [RouterSection: Int]] = [:]
+    /// Running threads shown in another section (with items open), by project ("" for none): the Working header's faint
+    /// count, so the counts add up.
+    var runningElsewhere: [String: Int] = [:]
     /// The project's lines being read (no state yet; "" for no project).
     var reading: [String: Int] = [:]
     /// The projects with a line or an older thread, alphabetical.

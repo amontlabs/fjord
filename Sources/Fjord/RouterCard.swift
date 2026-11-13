@@ -17,9 +17,23 @@ struct RouterCard: View {
     private var d: CDS.Density { .compact }
     private var thread: RouterThread { box.head }
 
+    /// The open item's card instead, in a block (its focused item) or on a thread whose one item is the line.
+    private var item: RouterItem? {
+        if let focus = box.item { return thread.ledger.items.first { $0.id == focus } }
+        return thread.ledger.single
+    }
+
     var body: some View {
+        if let item {
+            RouterItemCard(model: model, thread: thread, item: item)
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
         let _ = RouterBodies.count("card", box.id, of: model)
-        VStack(alignment: .leading, spacing: M.gap) {
+        return VStack(alignment: .leading, spacing: M.gap) {
             Text(thread.title).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(1).prose()
             if thread.loading {
                 VStack(alignment: .leading, spacing: 8) {

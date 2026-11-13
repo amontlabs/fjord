@@ -168,6 +168,10 @@ extension RouterModel {
     var destination: RouterDestination? {
         if draft.isEmpty {
             guard let t = selectedThread else { return nil }
+            // An item's card: its picked option goes to the thread as words.
+            if let (_, item) = selectedItem, let n = picks[RouterModel.itemKey(t.id, item.id)]?[0], n <= item.options.count {
+                return .picked(thread: t.id, words: item.options[n - 1])
+            }
             if let words = answerWords(t) { return .picked(thread: t.id, words: words) }
             // A Stopped card: Return continues it, and the row says so as it does for any send.
             if t.state == .stopped { return .picked(thread: t.id, words: Router.Copy.continueWords) }
@@ -415,10 +419,13 @@ extension RouterModel {
             update(id) {
                 $0.state = .sent
                 $0.sent = .init(words: words, status: steering ? .steering : .sending)
-                $0.since = now
+                // A block's header keeps how long it has run: your words show in the block, with their own place.
+                if $0.ledger.live.isEmpty { $0.since = now }
                 $0.order = fresh()
                 $0.isNew = false
                 $0.paused = false
+                // Its open items are checked against your words: they show in the block at once, the items sheen.
+                $0.ledger.sent(words)
             }
             picks[id] = nil
             typed[id] = nil

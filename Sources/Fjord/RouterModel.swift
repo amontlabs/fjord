@@ -75,6 +75,8 @@ enum RouterDestination: Equatable {
     var rows: [RouterHit: String] = [:]
     var origins: [String: CGPoint] = [:]
     var off: Set<RouterHit> = []
+    /// The view that holds each hit now (`RouterTargetModifier`).
+    var owners: [RouterHit: UUID] = [:]
     var actions: [RouterHit: () -> Void] = [:]
     var viewport: CGSize = .zero
 
@@ -125,6 +127,8 @@ final class RouterModel {
     // MARK: The owner's state
 
     var selection: RouterSelection? { didSet { if selection != oldValue { selectionChanged(from: oldValue) } } }
+    /// In the selected block: the item whose card is open (nil: the header's, the thread's own card).
+    var focus: String? { didSet { if focus != oldValue { focusChanged() } } }
     /// The filters: one project or all, one state or all.
     var project: String? { didSet { if project != oldValue { relayout() } } }
     var section: RouterSection? { didSet { if section != oldValue { relayout() } } }
@@ -354,8 +358,10 @@ final class RouterModel {
         func newest(_ a: RouterThread, _ b: RouterThread) -> Bool { a.since != b.since ? a.since > b.since : a.order > b.order }
         switch section {
         case .needsYou:
-            // Asks, longest waiting first; then Stopped, longest first.
-            return all.filter { $0.state != .stopped }.sorted(by: oldest) + all.filter { $0.state == .stopped }.sorted(by: oldest)
+            // A thread stuck on something first; then asks, longest waiting first; then Stopped, longest first.
+            let stuck = all.filter { $0.state != .stopped && $0.ledger.top == .stuck }
+            return stuck.sorted(by: oldest) + all.filter { $0.state != .stopped && $0.ledger.top != .stuck }.sorted(by: oldest)
+                + all.filter { $0.state == .stopped }.sorted(by: oldest)
         case .done:
             // Worth a look (and what just finished, still being read), newest first; then quiet, newest first.
             let top = all.filter { $0.worth == .look || $0.sentence.phase == .reassessing }
@@ -563,6 +569,14 @@ final class RouterModel {
         shownLines.map { .line($0.id) } + (shownOlder.isEmpty ? [] : [.housekeeping]) + failures.map { .failure($0.id) }
     }
 
+    /// What ↑↓ walk, with a block's items: its header, then each of its items (`focus`).
+    private var walkItems: [(RouterSelection, String?)] {
+        walk.flatMap { sel -> [(RouterSelection, String?)] in
+            guard case .line(let id) = sel, let t = thread(id), t.ledger.block else { return [(sel, nil)] }
+            return [(sel, nil)] + t.ledger.live.map { (sel, $0.id) }
+        }
+    }
+
     /// `walk`: the arrows moved it there: a new line's dot goes (and T3 is told) only at your next key that isn't an
     /// arrow, or a pointer move, so lines walked past aren't marked read on T3's sidebar and phone.
     func select(_ new: RouterSelection?, walk: Bool = false) {
@@ -601,13 +615,78 @@ final class RouterModel {
     func click(row id: String) { select(selection == .line(id) ? nil : .line(id)) }
 
     func step(down: Bool) {
-        let rows = walk
+        let rows = walkItems
         guard !rows.isEmpty else { return }
-        guard let selection, let i = rows.firstIndex(of: selection) else {
-            select(down ? rows.first : rows.last, walk: true)
+        guard let selection, let i = rows.firstIndex(where: { $0.0 == selection && $0.1 == focus }) else {
+            let to = down ? rows.first! : rows.last!
+            select(to.0, walk: true)
+            focusItem(to.1)
             return
         }
-        select(rows[(i + (down ? 1 : rows.count - 1)) % rows.count], walk: true)
+        let to = rows[(i + (down ? 1 : rows.count - 1)) % rows.count]
+        if to.0 == selection {
+            focusItem(to.1)
+        } else {
+            select(to.0, walk: true)
+            focusItem(to.1)
+        }
+    }
+
+    /// The block's row whose card is open: one of its items, or nil for its header.
+    func focusItem(_ item: String?) {
+        guard item != focus else { return }
+        animate(.spatial) { focus = item }
+    }
+
+    /// A click on an item's line: its card, or the block's header card if it was the open one.
+    func click(item: String, of id: String) {
+        if selection == .line(id), focus == item {
+            focusItem(nil)
+        } else {
+            if selection != .line(id) { select(.line(id)) }
+            focusItem(item)
+        }
+    }
+
+    /// Picks and hits of an item's card: its thread and its id.
+    static func itemKey(_ thread: String, _ item: String) -> String { thread + "#" + item }
+
+    /// The item whose card is open: the focused one in a block, or a thread's one item.
+    var selectedItem: (thread: RouterThread, item: RouterItem)? {
+        guard let t = selectedThread else { return nil }
+        if let focus, let item = t.ledger.items.first(where: { $0.id == focus }) { return (t, item) }
+        if let item = t.ledger.single { return (t, item) }
+        return nil
+    }
+
+    /// Done on an item's card: it closes, struck "done by you", then folds away; Revert puts it back as it was.
+    func itemDone(_ id: String, _ item: String) {
+        guard let t = thread(id), let was = t.ledger.items.first(where: { $0.id == item }) else { return }
+        let next = t.ledger.live.filter { $0.id != item }
+        animate(.fade) {
+            update(id) { t in
+                if let i = t.ledger.items.firstIndex(where: { $0.id == item }) {
+                    t.ledger.items[i].state = .closing(Router.Items.Copy.doneByYou)
+                }
+            }
+            if focus == item { focus = t.ledger.block ? next.first?.id : nil }
+        }
+        let fold = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(self?.still == true ? 0 : Router.Items.strike))
+            guard let self, !Task.isCancelled else { return }
+            self.animate(.spatial) { self.update(id) { $0.ledger.items.removeAll { $0.id == item } } }
+        }
+        act(RouterToast(id: fresh(), before: "Done:", name: was.sentence), threads: [id]) { [weak self] in
+            guard let self else { return }
+            fold.cancel()
+            self.animate(.spatial) {
+                self.update(id) { t in
+                    if let i = t.ledger.items.firstIndex(where: { $0.id == item }) { t.ledger.items[i] = was } else { t.ledger.items.append(was) }
+                }
+                self.selection = .line(id)
+                self.focus = t.ledger.block ? item : nil
+            }
+        }
     }
 
     /// ⌥↓ / ⌥↑: the first line of the next or previous section shown.
@@ -708,6 +787,12 @@ final class RouterModel {
 
     /// A digit on the open card: picks that option (again: unpicks). Never sends.
     func pick(_ number: Int) {
+        if let (t, item) = selectedItem {
+            guard draft.isEmpty, number >= 1, number <= item.options.count else { return }
+            let key = Self.itemKey(t.id, item.id)
+            picks[key] = picks[key]?[0] == number ? nil : [0: number]
+            return
+        }
         guard let t = selectedThread, draft.isEmpty else { return }
         let options = t.numbered
         guard number >= 1, number <= options.count else { return }
@@ -865,6 +950,8 @@ final class RouterModel {
         if new.sentence.stream != old.sentence.stream, new.sentence.phase == .streaming { return nil }
         // The queued row rises into the line, or comes under it: the line's height changes.
         if (old.queued == nil) != (new.queued == nil) { return .spatial }
+        // A block's rows come or go (an item folds in or away, your words, the placeholder): the block's height changes.
+        if old.ledger.rows != new.ledger.rows || old.ledger.block != new.ledger.block { return .spatial }
         return .fade
     }
 
@@ -1066,6 +1153,8 @@ final class RouterModel {
                 continue
             }
             tally.all[t.section, default: 0] += 1
+            // Running, but shown in another section with what it has open: the Working header counts it faintly.
+            if t.isRunning, t.section != .working { tally.runningElsewhere[t.project ?? "", default: 0] += 1 }
             if let p = t.project { tally.byProject[p, default: [:]][t.section, default: 0] += 1 }
         }
         for o in older { if let p = o.project { projects.insert(p) } }
@@ -1073,8 +1162,13 @@ final class RouterModel {
         if tally != self.tally { self.tally = tally }
     }
 
+    private func focusChanged() {
+        if case .line(let id)? = selection { boxes[id]?.item = focus }
+    }
+
     private func selectionChanged(from old: RouterSelection?) {
-        if case .line(let id)? = old { boxes[id]?.selected = false }
+        if focus != nil { focus = nil }
+        if case .line(let id)? = old { boxes[id]?.selected = false; boxes[id]?.item = nil }
         if case .line(let id)? = selection, let box = boxes[id] {
             box.selected = true
             box.built = true
@@ -1128,7 +1222,8 @@ extension RouterThread {
     enum OrderClass { case ask, stopped, working, look, quiet }
 
     var orderClass: OrderClass {
-        switch state {
+        if let top = ledger.top, state != .stopped { return top == .know ? .look : .ask }
+        return switch state {
         case .needsYou: .ask
         case .stopped: .stopped
         case .sent, .working: .working
