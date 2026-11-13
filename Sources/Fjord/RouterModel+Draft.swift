@@ -247,6 +247,8 @@ extension RouterModel {
     /// lit when the read lands unsure. Never the Go menu's while there is a draft.
     func cmdDigit(_ index: Int) -> Bool {
         guard !draft.isEmpty else { return false }
+        // A split message: they light a place for the part the Router isn't sure of.
+        if lightPart(index) { return true }
         if case .unsure? = destination { light(index) } else if reading, explicit == nil { heldDigit = index }
         return true
     }

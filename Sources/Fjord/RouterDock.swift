@@ -40,7 +40,11 @@ struct RouterDock: View {
                         insertion: .scaleFade(0.96, reduce: reduce).animation(Motion.spatial.resolved(reduce: reduce)?.delay(0.08)),
                         removal: .scaleFade(0.96, reduce: reduce)))
             }
-            if let destination = model.destination {
+            // A message split across threads: one row a destination (SPLIT.md); else the one row.
+            if let split = model.split {
+                RouterSplitRows(model: model, sends: split)
+                    .transition(.scaleFade(0.96, reduce: reduce))
+            } else if let destination = model.destination {
                 RouterDestinationRow(model: model, destination: destination)
                     .transition(.scaleFade(0.96, reduce: reduce))
             }
@@ -51,6 +55,7 @@ struct RouterDock: View {
         .motion(.spatial, value: waiting?.items.map(\.id) ?? [])
         .motion(.spatial, value: model.connectionLost)
         .motion(.spatial, value: model.destination != nil)
+        .motion(.spatial, value: model.split?.count)
     }
 }
 
@@ -331,24 +336,47 @@ struct RouterComposer: View {
     }
 
     /// The draft as the drawn composer shows it: its words, and each pill as the field draws it (a settings pill quiet, with
-    /// its glyph; another pointer by its name).
+    /// its glyph; another pointer by its name). A split message's parts sit on their destination's tint, and an answer
+    /// pill's glyph takes it (SPLIT.md).
     static func drawn(_ model: RouterModel, dark: Bool) -> Text {
         let font = CDS.nsSans(CDS.Density.compact.prose.0)
+        let ink = model.splitInk
         var pills = model.mentions.makeIterator()
+        var pillAt = 0
         var out = Text(verbatim: "")
         var run = ""
-        for ch in model.draft {
+        var runInk: Int?
+        func flush() {
+            guard !run.isEmpty else { return }
+            if let runInk {
+                var words = AttributedString(run)
+                words.backgroundColor = Router.Split.tint(runInk).opacity(Router.Split.ground)
+                out = Text("\(out)\(Text(words))")
+            } else {
+                out = Text("\(out)\(Text(verbatim: run))")
+            }
+            run = ""
+        }
+        for (i, ch) in model.draft.enumerated() {
             guard ch == MentionText.mark, let mention = pills.next() else {
+                let now = ink.flatMap { i < $0.count ? $0[i] : nil }
+                if now != runInk { flush(); runInk = now }
                 run.append(ch)
                 continue
             }
-            out = Text("\(out)\(Text(verbatim: run))")
-            run = ""
-            let pill = Text(Image(nsImage: MentionPill.image(look(mention), font: font, dark: dark)))
+            flush()
+            var look = look(mention)
+            if let send = model.splitSend(answer: pillAt) {
+                look.symbol = "arrowshape.turn.up.left.fill"
+                look.tint = Router.Split.tint(send)
+            }
+            pillAt += 1
+            let pill = Text(Image(nsImage: MentionPill.image(look, font: font, dark: dark)))
                 .baselineOffset(font.descender + ((font.ascender - font.descender) - MentionPill.height) / 2)
             out = Text("\(out)\(pill)")
         }
-        return Text("\(out)\(Text(verbatim: run))")
+        flush()
+        return out
     }
 
     private static func look(_ mention: RouterMention) -> MentionLook {
