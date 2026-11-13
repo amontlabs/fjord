@@ -258,4 +258,29 @@ import Testing
         h.records.put(t)
         #expect(h.records.record("t1")?.state != .sent)
     }
+
+    // MARK: #11: a detail from a closed subscription is read again at the turn's end
+
+    @Test func aSubscriptionsLastDetailGivesWayToTheTurnsRead() throws {
+        let (h, fetched) = reading()
+        var t = F.thread(status: .running)
+        t.runStartedAt = F.ago(1)
+        h.records.put(t)
+        var live = RouterDetail()
+        live.reply = "Moving the beds"
+        live.writing = true
+        h.records.detail("t1", live)
+        // The shell says completed; the subscription closes without a word.
+        t.status = .completed
+        h.records.put(t)
+        let read = try #require(fetched().first)
+        var done = RouterDetail()
+        done.reply = "Moved the beds."
+        done.diff = .init(files: 4, added: 96, removed: 212)
+        h.records.read("t1", key: read.1, done)
+        let r = try #require(h.records.record("t1"))
+        #expect(!r.writing)
+        #expect(r.diff == .init(files: 4, added: 96, removed: 212))
+        #expect(r.lastLines == "Moved the beds.")
+    }
 }
