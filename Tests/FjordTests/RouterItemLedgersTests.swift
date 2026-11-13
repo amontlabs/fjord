@@ -377,6 +377,37 @@ import Testing
         #expect(first.fingerprint.hasPrefix("sent:"))
     }
 
+    /// REVIEW-items 1.7: a message written while a run was under way (a steer, a queued message) is read even when that
+    /// run ends behind it; only a turn your message started reads it in its place.
+    @Test func aMessageIsDroppedOnlyForTheTurnItStarted() throws {
+        let h = seeded()
+        var t = Self.running("r2")
+        h.records.put(t)
+        // You steer "use option B" into r2, then r2 ends: two inputs, your message first.
+        t.lastAuthoredAt = h.clock
+        t.status = .idle
+        t.runStartedAt = nil
+        t.lastRunEndedAt = h.clock
+        h.records.put(t)
+        #expect(h.saved?.pending.count == 2)
+        let r2 = RouterItemFacts.Turn(reply: "Done with option A.", yourWords: "start", woke: nil, started: "m0", status: "completed", live: false)
+        h.facts(RouterItemFacts(turns: ["r2": r2], messages: [.init(id: "m1", at: h.clock, text: "use option B", before: nil)]))
+        #expect(h.reads.last?.fingerprint == "msg:m1")
+        h.answer(RouterItemsAnswer(close: ["i1": .answered]))
+        #expect(h.reads.last?.fingerprint == "turn:r2")
+        h.answer(RouterItemsAnswer())
+        // A message that started the next turn: that turn reads it.
+        h.clock = h.clock.addingTimeInterval(60)
+        t.lastAuthoredAt = h.clock
+        t.latestRunID = "r3"
+        t.lastRunEndedAt = h.clock.addingTimeInterval(30)
+        h.records.put(t)
+        let r3 = RouterItemFacts.Turn(reply: "Deleted.", yourWords: "delete it", woke: nil, started: "m2", status: "completed", live: false)
+        h.facts(RouterItemFacts(turns: ["r2": r2, "r3": r3], messages: [.init(id: "m2", at: h.clock, text: "delete it", before: nil)]))
+        #expect(h.reads.last?.fingerprint == "turn:r3")
+        #expect(h.saved?.read.contains("msg:m2") == true)
+    }
+
     @Test func aTurnThatEndsAndIsWokenAtOnceIsStillReadAndARestartNeverCancelsIt() throws {
         let h = seeded()
         // r2 ends and a background task's end starts r3 in the same shell update: r2 was never seen ended.

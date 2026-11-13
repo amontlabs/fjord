@@ -15,6 +15,8 @@ struct RouterItemFacts: Equatable, Sendable {
         var reply: String
         var yourWords: String?
         var woke: String?
+        /// T3's id for the message of yours that started it.
+        var started: String? = nil
         var status: String
         /// Still running: its reply isn't whole yet.
         var live: Bool
@@ -49,7 +51,8 @@ struct RouterItemFacts: Equatable, Sendable {
             }
             let own = run.userMessageId.flatMap { byID[$0] }
             f.turns[run.id] = Turn(reply: reply ?? "", yourWords: own?.createdBy == "user" ? own?.text : nil,
-                                   woke: own.flatMap { $0.createdBy == "user" ? nil : $0.text }, status: run.status.rawValue,
+                                   woke: own.flatMap { $0.createdBy == "user" ? nil : $0.text },
+                                   started: own?.createdBy == "user" ? own?.id : nil, status: run.status.rawValue,
                                    live: run.status.isLive)
         }
         let ordered = p.messages.filter { $0.createdAt != nil }.sorted { ($0.createdAt?.date ?? .distantPast) < ($1.createdAt?.date ?? .distantPast) }
@@ -280,9 +283,12 @@ struct RouterItemFacts: Equatable, Sendable {
         // A run that is no longer the latest ended: read it, even when the next one started at once (a wake).
         if let prev = s.run, prev != run { enqueue(l, &s, .turn(run: prev)) }
         s.run = run
-        if let run, over { enqueue(l, &s, .turn(run: run)) }
-        if let at = t.lastAuthoredAt, at > (s.message ?? .distantPast) {
-            // You wrote since: every message after the last one seen is listed from the projection, one input each.
+        // You wrote since: every message after the last one seen is listed from the projection, one input each, before
+        // the turn that ended after them (a steer, a queued message) and after one that ended before.
+        let wrote = t.lastAuthoredAt.flatMap { $0 > (s.message ?? .distantPast) ? $0 : nil }
+        let endedFirst = wrote.map { at in t.lastRunEndedAt.map { $0 < at } ?? false } ?? true
+        if endedFirst, let run, over { enqueue(l, &s, .turn(run: run)) }
+        if let at = wrote {
             let after = s.message
             s.message = at
             if let i = s.pending.indices.last, case .messages(let from, _) = s.pending[i], l.reading?.key != s.pending[i].key {
@@ -291,6 +297,7 @@ struct RouterItemFacts: Equatable, Sendable {
                 enqueue(l, &s, .messages(after: after, upTo: at))
             }
         }
+        if !endedFirst, let run, over { enqueue(l, &s, .turn(run: run)) }
         // The inputs and their triggers seen, in one write.
         if s != had { store(id, s) }
         pump(id, context: context)
@@ -420,8 +427,12 @@ struct RouterItemFacts: Equatable, Sendable {
         guard l.reading == nil, !l.held else { return }
         while var s = load(id), let input = s.pending.first {
             if !input.isTurn {
-                // Nothing open: your words can't close anything. A turn after them in the queue reads them too.
-                if s.items.isEmpty || s.pending.dropFirst().contains(where: \.isTurn) {
+                // Nothing open: your words can't close anything. A turn after them that they started reads them too
+                // (not a turn that was only queued, steered or under way when you wrote).
+                let carried = if case .message(let mid, _, _, _) = input {
+                    s.pending.dropFirst().contains { if case .turn(let r) = $0 { l.facts?.turns[r]?.started == mid } else { false } }
+                } else { false }
+                if s.items.isEmpty || carried {
                     markRead(&s, input.key)
                     store(id, s)
                     changed(id)
