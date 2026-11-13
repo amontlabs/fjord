@@ -74,6 +74,18 @@ final class RouterLineBox {
     var rowHeight: CGFloat = 0
     var queuedHeight: CGFloat = 0
 
+    /// The state choice the page is under: `shown` is the record cut to it (`RouterFilter`).
+    var filter: RouterSection? { didSet { if filter != oldValue { revision &+= 1; refreshShown() } } }
+    /// The record as the page draws it: under a state choice, only the items that belong to it.
+    var shown: RouterThread { RouterFilter.lens(record, state: filter) ?? record }
+    /// What the page draws follows the filter: the line's head and block flag are the lensed record's.
+    private func refreshShown() {
+        let lensed = shown
+        let h = Self.head(lensed)
+        if h != head { head = h }
+        if lensed.ledger.block != block { block = lensed.ledger.block }
+    }
+
     /// The whole record as last taken; `revision` changes with it, for what reads the whole record (`model.thread(id)`).
     @ObservationIgnored private(set) var record: RouterThread
     private(set) var revision = 0
@@ -110,7 +122,7 @@ final class RouterLineBox {
         guard t != old else { return false }
         record = t
         revision &+= 1
-        let head = Self.head(t)
+        let head = Self.head(RouterFilter.lens(t, state: filter) ?? t)
         if head != self.head { self.head = head }
         if t.sentence != sentence {
             let s = sentence
@@ -126,7 +138,8 @@ final class RouterLineBox {
         let talks = !t.lastLines.isEmpty || t.writing
         if talks != talking { talking = talks }
         if (t.queued != nil) != queued { queued = t.queued != nil }
-        if t.ledger.block != block { block = t.ledger.block }
+        let showing = shown.ledger.block
+        if showing != block { block = showing }
         return RouterModel.OrderKey(old) != RouterModel.OrderKey(t)
     }
 }
@@ -166,6 +179,9 @@ struct RouterTally: Equatable {
     var all: [RouterSection: Int] = [:]
     /// Each project's lines, by section.
     var byProject: [String: [RouterSection: Int]] = [:]
+    /// Every thread under each state token: a thread with items in two states counts under both (`RouterFilter`).
+    var seen: [RouterSection: Int] = [:]
+    var seenByProject: [String: [RouterSection: Int]] = [:]
     /// Running threads shown in another section (with items open), by project ("" for none): the Working header's faint
     /// count, so the counts add up.
     var runningElsewhere: [String: Int] = [:]
@@ -179,9 +195,8 @@ struct RouterTally: Equatable {
     }
 
     func count(project: String?, section: RouterSection?) -> Int {
-        let counts = project.map { byProject[$0] ?? [:] } ?? all
-        if let section { return counts[section] ?? 0 }
-        return counts.values.reduce(0, +)
+        if let section { return (project.map { seenByProject[$0] ?? [:] } ?? seen)[section] ?? 0 }
+        return (project.map { byProject[$0] ?? [:] } ?? all).values.reduce(0, +)
     }
 }
 

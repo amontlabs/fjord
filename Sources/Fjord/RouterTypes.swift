@@ -550,6 +550,8 @@ enum RouterHit: Hashable {
     /// The line's activity glyphs: the pointer on them shows their peek.
     case activity(String)
     case project(String?), state(RouterSection), clear
+    /// A history row of a card, cut on its line: the pointer on it shows its words whole. `threadID` + US + event id.
+    case history(String)
     case header(RouterSection)
     case option(String, Int)
     case footer(String, RouterFooterAct)

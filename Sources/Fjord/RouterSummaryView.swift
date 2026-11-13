@@ -275,7 +275,7 @@ private struct RouterSummaryCard: View {
             // thread's card but an item's in a block (its header's card has it); for a summed-up working thread it
             // is the source itself. Then the footer's acts.
             controls
-            if !inBlock, RouterTimeline.has(thread) { RouterTimeline(thread: thread) }
+            if !inBlock, RouterTimeline.has(thread) { RouterTimeline(model: model, thread: thread) }
             footer
         }
         .padding(.leading, inBlock ? Router.Items.indent + M.hang : M.leading)

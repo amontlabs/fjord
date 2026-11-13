@@ -186,7 +186,7 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ] + RouterShots.catalog + RouterLayerShots.catalog + RouterMentionShot.catalog + RouterSplitShots.catalog
+    ] + RouterShots.catalog + RouterLayerShots.catalog + RouterMentionShot.catalog + RouterSplitShots.catalog + RouterFilterShots.catalog
 
     /// `--window-shots <dir> [substring...]`.
     static func run(to dir: String) {

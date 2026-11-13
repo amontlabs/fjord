@@ -137,7 +137,7 @@ final class RouterModel {
     var focus: String? { didSet { if focus != oldValue { focusChanged() } } }
     /// The filters: one project or all, one state or all.
     var project: String? { didSet { if project != oldValue { relayout() } } }
-    var section: RouterSection? { didSet { if section != oldValue { relayout() } } }
+    var section: RouterSection? { didSet { if section != oldValue { for box in boxes.values { box.filter = section }; relayout() } } }
     /// ⌘F: the keyboard is on the filter bar, the ring on `ring`.
     var filterMode = false
     var ring: RouterFilterItem = .project(nil)
@@ -358,8 +358,8 @@ final class RouterModel {
     }
 
     /// A section's lines in their stable order (2.1), unfiltered.
-    func ordered(_ section: RouterSection) -> [RouterThread] {
-        let all = threads.filter { $0.section == section }
+    func ordered(_ section: RouterSection, among threads: [RouterThread]? = nil) -> [RouterThread] {
+        let all = (threads ?? self.threads).filter { $0.section == section }
         func oldest(_ a: RouterThread, _ b: RouterThread) -> Bool { a.since != b.since ? a.since < b.since : a.order < b.order }
         func newest(_ a: RouterThread, _ b: RouterThread) -> Bool { a.since != b.since ? a.since > b.since : a.order > b.order }
         switch section {
@@ -378,13 +378,14 @@ final class RouterModel {
         }
     }
 
-    private func matches(_ t: RouterThread, project: String?, section: RouterSection?) -> Bool {
-        (project == nil || t.project == project) && (section == nil || t.section == section)
+    /// The lines under a state choice, as they show there: items cut to the state's (`RouterFilter`).
+    private func lensed(_ section: RouterSection) -> [RouterThread] {
+        threads.compactMap { $0.reading ? nil : RouterFilter.lens($0, state: section) }
     }
 
     /// The lines shown, top to bottom.
     var shownLines: [RouterThread] {
-        layout.compactMap { if case .line(let id) = $0.kind { boxes[id]?.record } else { nil } }
+        layout.compactMap { if case .line(let id) = $0.kind { boxes[id]?.shown } else { nil } }
     }
 
     var shownOlder: [RouterOlder] {
@@ -404,7 +405,7 @@ final class RouterModel {
             case .header(let s, let n): RouterRow(id: slot.id, kind: .header(s, n))
             case .sentence(let words, let clear): RouterRow(id: slot.id, kind: .sentence(words, clear: clear))
             case .reading(let n): RouterRow(id: slot.id, kind: .reading(n))
-            case .line(let id): boxes[id].map { RouterRow(id: slot.id, kind: .line($0.record)) }
+            case .line(let id): boxes[id].map { RouterRow(id: slot.id, kind: .line($0.shown)) }
             case .housekeeping(let n): RouterRow(id: slot.id, kind: .housekeeping(n))
             }
         }
@@ -418,7 +419,12 @@ final class RouterModel {
         var out: [RouterSlot] = []
         let older = shownOlder
         var shown: [RouterSection: [RouterThread]] = [:]
-        for s in RouterSection.allCases { shown[s] = ordered(s).filter { matches($0, project: project, section: section) && !$0.reading } }
+        for s in RouterSection.allCases {
+            // Under a state choice the page is that state's lines, each with its own items only; else every thread in the
+            // section of its most urgent item.
+            let list = section == nil ? ordered(s) : s == section ? ordered(s, among: lensed(s)) : []
+            shown[s] = list.filter { (project == nil || $0.project == project) && !$0.reading }
+        }
         // Finished threads Fjord is still reading: they may need you or not, so they wait in a group of their own under
         // the Needs-you place (under a Needs-you or a Done filter alike), newest first.
         let reading = section == .working ? [] : threads.filter { $0.reading && (project == nil || $0.project == project) }
@@ -590,7 +596,7 @@ final class RouterModel {
     /// What ↑↓ walk, with a block's items: its header, then each of its items (`focus`).
     private var walkItems: [(RouterSelection, String?)] {
         walk.flatMap { sel -> [(RouterSelection, String?)] in
-            guard case .line(let id) = sel, let t = thread(id), t.ledger.block else { return [(sel, nil)] }
+            guard case .line(let id) = sel, let t = boxes[id]?.shown, t.ledger.block else { return [(sel, nil)] }
             return [(sel, nil)] + t.ledger.live.map { (sel, $0.id) }
         }
     }
@@ -1150,6 +1156,7 @@ final class RouterModel {
                 moved = true
             }
         }
+                box.filter = section
         if boxes.count != threads.count {
             let ids = Set(threads.map(\.id))
             // What read a thread that left hears it once more (`thread(id)` follows its box).
@@ -1190,6 +1197,11 @@ final class RouterModel {
         tally.projects = projects.sorted()
         if tally != self.tally { self.tally = tally }
     }
+            // Under a state token a thread counts once for each state it has something in.
+            for s in RouterSection.allCases where RouterFilter.matches(t, state: s) {
+                tally.seen[s, default: 0] += 1
+                if let p = t.project { tally.seenByProject[p, default: [:]][s, default: 0] += 1 }
+            }
 
     private func focusChanged() {
         if case .line(let id)? = selection { boxes[id]?.focus(focus, curve: glides.current?.curve) }

@@ -128,6 +128,8 @@ struct RouterHeaderRow: View {
     let first: Bool
 
     private var elsewhere: Int {
+        // Under the Working token they are listed in it: nothing is elsewhere.
+        if model.section == .working { return 0 }
         let all = model.tally.runningElsewhere
         return model.project.map { all[$0] ?? 0 } ?? all.values.reduce(0, +)
     }
@@ -455,6 +457,12 @@ struct RouterFloating: View {
                 let words = frame.inset(by: Router.Items.indent + Router.Line.markBox + Router.Line.markGap)
                 hung(from: words, width: Router.Peek.width) { RouterSummaryView(model: model, thread: thread, item: item, layer: .hover) }
                     .id("item-peek-" + item.id)
+                    .transition(.scaleFade(0.98, reduce: reduce))
+            }
+            if let (key, words) = model.historyPeeked, let frame = frames[.history(key)] {
+                // A history row cut to one line: its words whole, in the page's usual hover shell, under the row.
+                hung(from: frame, width: Router.Peek.width) { RouterHistoryPeek(words: words) }
+                    .id("history-" + key)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
             if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {

@@ -53,6 +53,7 @@ extension RouterThread {
 /// holds what it showed and a quiet `↑ 1 new` pill springs in at its top edge, counting up; the pill (or scrolling up)
 /// takes it back to its top, where the new ones fold in and the pill fades out.
 struct RouterTimeline: View {
+    let model: RouterModel
     let thread: RouterThread
 
     /// What shows while you read back: the entries as they were when the first new one came; nil at the top.
@@ -271,13 +272,14 @@ struct RouterTimeline: View {
                     .padding(.leading, Router.Card.hang)
             }
         case .started(let start):
-            started(start)
+            started(start, e.event)
         case .raised(let kind, let sentence):
             timed(e.event.at) {
                 quiet(Image(systemName: kind.symbol).foregroundStyle(kind.tint.opacity(0.8))) {
                     Text(RouterInline.text(sentence, size: d.footnote.0)).foregroundColor(CDS.Text.secondary)
                 }
             }
+            .historyPeek(model, thread: thread.id, event: e.event)
             .accessibilityLabel("\(kind.word): \(sentence)")
         case .closed(let kind, let sentence, let how):
             timed(e.event.at) {
@@ -286,6 +288,7 @@ struct RouterTimeline: View {
                         + Text(verbatim: "  " + how).foregroundColor(CDS.Text.muted.opacity(0.8))
                 }
             }
+            .historyPeek(model, thread: thread.id, event: e.event)
             .accessibilityLabel("\(kind.word), closed: \(sentence), \(how)")
         case .finished(let outcome):
             timed(e.event.at) {
@@ -293,6 +296,7 @@ struct RouterTimeline: View {
                     Text(RouterInline.text(outcome, size: d.footnote.0)).foregroundColor(CDS.Text.secondary)
                 }
             }
+            .historyPeek(model, thread: thread.id, event: e.event)
             .accessibilityLabel("Turn ended: \(outcome)")
         }
     }
@@ -317,7 +321,7 @@ struct RouterTimeline: View {
     }
 
     /// Your words that started the run, quoted on one line; or, quieter still and unquoted, what woke it.
-    private func started(_ start: RouterWork.Start) -> some View {
+    private func started(_ start: RouterWork.Start, _ event: RouterEvent) -> some View {
         let ink = Self.yours(start) ? CDS.Text.muted : CDS.Text.muted.opacity(0.7)
         return HStack(alignment: .firstTextBaseline, spacing: Router.Card.glyphGap) {
             Image(systemName: "arrow.up").font(.system(size: 9, weight: .medium)).foregroundStyle(ink)
@@ -325,6 +329,7 @@ struct RouterTimeline: View {
             Self.words(start, size: d.footnote.0).cdsText(d.footnote, .regular, ink).lineLimit(1).truncationMode(.tail)
         }
         .frame(maxWidth: Router.Card.maxWidth + Router.Card.hang, alignment: .leading)
+        .historyPeek(model, thread: thread.id, event: event)
     }
 
     static func yours(_ start: RouterWork.Start) -> Bool { if case .asked = start { true } else { false } }

@@ -87,6 +87,7 @@ import Testing
         bar.judging = false
         model.apply(.upsert(bar))
         #expect(!model.layout.contains { if case .reading = $0.kind { true } else { false } })
-        #expect(model.count(section: .done) == 1)
+        // The guide is a finished thread too (a Do open): it counts under Done as well, with only its Know items there.
+        #expect(model.count(section: .done) == 2)
     }
 }
