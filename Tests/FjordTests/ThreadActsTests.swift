@@ -62,22 +62,24 @@ import Testing
         let (store, sent) = fixture()
         store.threadAct(.archive, on: target(), title: "Layout")
         let change = store.router.changes.last
-        #expect(change?.isBriefAction == true)
+        #expect(change?.isThreadAct == true)
         await waitUntil { sent.commands.count == 1 }
         store.revertFjordChange(change!.id)
         await waitUntil { sent.commands.count == 2 }
         #expect(sent.commands.map { $0.payload(commandId: "c").str("type") } == ["thread.archive", "thread.unarchive"])
     }
 
-    @Test func aRefusedActIsPutBackWithT3sWords() async {
+    @Test func aRefusedActIsPutBackAndSaidInThePagesWords() async {
         let (store, _) = fixture()
         struct Refused: LocalizedError { var errorDescription: String? { "thread is busy" } }
         store.requestSender = { _, _ in throw Refused() }
         store.threadAct(.settle, on: target(), title: "Layout")
-        // The Router page's toast says why, with nothing to revert.
+        // The Router page's toast says why in its own words (never T3's raw text: FINAL-REVIEW #5), with nothing to revert;
+        // History keeps T3's words.
         await waitUntil { store.routerPage.toast?.revertible == false }
-        #expect(store.routerPage.toast?.after.contains("thread is busy") == true)
+        #expect(store.routerPage.toast?.after.contains("thread is busy") == false)
         #expect(store.router.changes.last?.isReverted == true)
+        #expect(store.router.changes.last?.revertNote?.contains("thread is busy") == true)
     }
 
     // MARK: Banners
