@@ -35,10 +35,13 @@ extension Store {
         records.cancelItems = { [weak self] thread in self?.routerVerdicts.cancelItems(thread) }
         records.fetchItems = { [weak self] thread, key in
             guard let self else { return }
-            // A thread whose projection is held (it is working, or open): its facts are there, in the next turn.
+            // A thread whose projection is held (it is working, or open): its facts are made from a copy of it, off the
+            // main thread.
             if let held = self.t3.store.projections[thread] {
-                let facts = RouterItemFacts.make(held)
-                DispatchQueue.main.async { [weak self] in self?.routerRecords.itemFacts(thread, key: key, facts) }
+                Task { [weak self] in
+                    let facts = await Task.detached(priority: .userInitiated) { RouterItemFacts.make(held) }.value
+                    self?.routerRecords.itemFacts(thread, key: key, facts)
+                }
                 return
             }
             self.routerItemReads.read(thread, key: key)
@@ -68,18 +71,22 @@ extension Store {
         return page
     }
 
-    func makeRouterTurnReads() -> RouterTurnReads {
-        let reads = RouterTurnReads(read: { [weak self] id in await self?.t3.store.readSnapshot(id) })
+    func makeRouterTurnReads() -> RouterTurnReads<T3Projection> {
+        let reads = RouterTurnReads<T3Projection>(read: { [weak self] id in await self?.routerSnapshots.read(id) })
         reads.done = { [weak self] id, key, projection in
             self?.routerRecords.read(id, key: key, projection.map { RouterDetail.make($0, now: Date()) })
         }
         return reads
     }
 
-    func makeRouterItemReads() -> RouterTurnReads {
-        let reads = RouterTurnReads(read: { [weak self] id in await self?.t3.store.readSnapshot(id) })
-        reads.done = { [weak self] id, key, projection in
-            self?.routerRecords.itemFacts(id, key: key, projection.map(RouterItemFacts.make))
+    func makeRouterItemReads() -> RouterTurnReads<RouterItemFacts> {
+        // The facts are made off the main thread: a long thread's projection is thousands of items.
+        let reads = RouterTurnReads<RouterItemFacts>(read: { [weak self] id in
+            guard let p = await self?.routerSnapshots.read(id) else { return nil }
+            return await Task.detached(priority: .userInitiated) { RouterItemFacts.make(p) }.value
+        })
+        reads.done = { [weak self] id, key, facts in
+            self?.routerRecords.itemFacts(id, key: key, facts)
         }
         return reads
     }

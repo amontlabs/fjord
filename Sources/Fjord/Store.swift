@@ -406,9 +406,11 @@ final class Store {
     @ObservationIgnored lazy var routerPage: RouterModel = RouterDemo.model ?? makeRouterPage()
     /// One streamed Haiku call per thread per fingerprint, four at once (RouterVerdicts.swift).
     @ObservationIgnored lazy var routerVerdicts: RouterVerdicts = makeRouterVerdicts()
-    @ObservationIgnored lazy var routerTurnReads: RouterTurnReads = makeRouterTurnReads()
-    /// The open items' reads of a turn or a message: apart from the card's, so neither replaces the other in the queue.
-    @ObservationIgnored lazy var routerItemReads: RouterTurnReads = makeRouterItemReads()
+    @ObservationIgnored lazy var routerTurnReads: RouterTurnReads<T3Projection> = makeRouterTurnReads()
+    /// The open items' reads of a turn or a message: apart from the card's, so neither replaces the other in the queue;
+    /// both read T3 through `routerSnapshots`, once per turn end.
+    @ObservationIgnored lazy var routerItemReads: RouterTurnReads<RouterItemFacts> = makeRouterItemReads()
+    @ObservationIgnored lazy var routerSnapshots = RouterSnapshots(read: { [weak self] id in await self?.t3.store.readSnapshot(id) })
     /// Where the page's draft goes: Jev, then Sonnet (RouterReader.swift).
     @ObservationIgnored lazy var routerReader: RouterReader = makeRouterReader()
     /// The page's acts on T3 (RouterActs.swift): the real page's source.

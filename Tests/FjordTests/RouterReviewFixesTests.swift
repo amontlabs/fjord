@@ -148,7 +148,7 @@ import Testing
     @Test func turnReadsRunAFewAtOnceAndTheNewestAskForAThreadWins() async {
         var gates: [String: CheckedContinuation<Void, Never>] = [:]
         var answered: [(String, String)] = []
-        let reads = RouterTurnReads(read: { id in
+        let reads = RouterTurnReads<T3Projection>(read: { id in
             await withCheckedContinuation { gates[id] = $0 }
             return nil
         }, cap: 2)
@@ -167,6 +167,61 @@ import Testing
         await waitUntil { answered.count == 3 }
         #expect(answered.map(\.0).sorted() == ["a", "b", "c"])
         #expect(answered.first { $0.0 == "c" }?.1 == "2")
+    }
+
+    /// REVIEW-items 3.2: the card's read of a turn that just ended and the open items' read of it read T3 once.
+    @Test func theCardsReadAndTheItemsReadOfATurnShareOneProjectionRead() async {
+        var gate: CheckedContinuation<Void, Never>?
+        let snapshots = RouterSnapshots(read: { _ in
+            await withCheckedContinuation { gate = $0 }
+            return T3Projection(json: ["thread": T3Fixture.thread("t1")])
+        })
+        let card = RouterTurnReads<T3Projection>(read: { await snapshots.read($0) })
+        let items = RouterTurnReads<RouterItemFacts>(read: { id in await snapshots.read(id).map(RouterItemFacts.make) })
+        var answered = 0
+        card.done = { _, _, p in if p != nil { answered += 1 } }
+        items.done = { _, _, f in if f != nil { answered += 1 } }
+        card.read("t1", key: "card")
+        items.read("t1", key: "turn:r1")
+        await waitUntil { gate != nil }
+        gate?.resume()
+        await waitUntil { answered == 2 }
+        #expect(snapshots.made == 1)
+    }
+
+    /// REVIEW-items 5.2: the facts walk the projection once from its end, and say the same as before: each kept run's
+    /// whole reply (a turn item's when the messages have none), what started it, your messages and the reply before each.
+    @Test func itemFactsAreMadeInOneWalkFromTheEnd() {
+        func msg(_ id: String, _ role: String, _ text: String, run: String, at: Int, streaming: Bool = false) -> T3Message {
+            var m = T3Message(json: T3Fixture.message(id, role: role, text: text))
+            m.runId = run
+            m.streaming = streaming
+            m.createdAt = T3Timestamp(date: Date(timeIntervalSince1970: Double(at)))
+            return m
+        }
+        var p = T3Projection(json: ["thread": T3Fixture.thread("t1")])
+        p.runs = (1...10).map { n in
+            var r = T3Run(json: T3Fixture.run("r\(n)", status: "completed"))
+            r.ordinal = n
+            r.userMessageId = "u\(n)"
+            return r
+        }
+        var all: [T3Message] = []
+        for n in 1...10 {
+            all.append(msg("u\(n)", "user", "ask \(n)", run: "r\(n)", at: n * 10))
+            if n != 4 { all.append(msg("a\(n)", "assistant", "reply \(n)", run: "r\(n)", at: n * 10 + 5)) }
+        }
+        // Out of order in the projection: sorted by time.
+        p.messages = all.reversed()
+        p.turnItems = [T3TurnItem(json: T3Fixture.item("ti4", type: "assistant_message", ordinal: 1, ["runId": "r4", "text": "reply 4 from items"]))]
+        let f = RouterItemFacts.make(p)
+        #expect(f.order == (1...10).map { "r\($0)" })
+        #expect(Set(f.turns.keys) == Set((3...10).map { "r\($0)" }))
+        #expect(f.turns["r10"] == RouterItemFacts.Turn(reply: "reply 10", yourWords: "ask 10", woke: nil, started: "u10", status: "completed", live: false))
+        #expect(f.turns["r4"]?.reply == "reply 4 from items")
+        #expect(f.messages.map(\.id) == (3...10).map { "u\($0)" })
+        #expect(f.messages.last?.before == "reply 9")
+        #expect(f.messages.first { $0.id == "u5" }?.before == "reply 3")
     }
 
     // MARK: #6: a hide ends on T3's word about the act
