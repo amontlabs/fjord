@@ -197,32 +197,54 @@ fast:
   roll costs SwiftUI nothing per frame.
 - **Verdicts only when they can come**: with the Router off nothing is asked and nothing sheens waiting.
 
-Gates (2.4), release build, 1617 × 1188, 2026-11-13. The machine was **not quiet** (load average 5-11: a browser tab at
-~75 % of a core, WindowServer ~45 %); p95s move several ms between identical runs.
+Gates (2.4), release build, 1617 × 1188, 2026-11-13, at `c889736e`: three runs each, interleaved with the build before
+it (`5abf8131`); load average 4-12 throughout (a browser tab and WindowServer busy), so p95s move several ms between
+identical runs. Before → after where it moved.
 
 | Gate | Run | Budget | Measured (runs) | |
 | --- | --- | --- | --- | --- |
-| T3 event, synthetic | `--router-v2-load` | p95 ≤ 8, max ≤ 16 ms | p95 17 / 17 / 17, max 140 / 244 / 467 | red |
-| Flush, synthetic | same | p95 ≤ 2 ms | 8 / 11 / 11 | red |
-| T3 event, real day | `--router-v2-load real` | p95 ≤ 8, max ≤ 16 ms | p95 22 / 27 / 15, max 23 / 30 / 17 | red |
-| Flush, real day | same | p95 ≤ 2 ms | 10 / 10 / 11 | red |
-| T3 event work (the handler alone) | both | ≤ 2 ms | p95 1, max 2 | green |
-| Select | demo script, speed 4 | p95 ≤ 8 ms | 28 / 35 | red |
-| Key, Send | demo script | p95 ≤ 2 / 8 ms | not logged: the script calls the key map's `handle`, past the signposts | — |
-| Bodies per change | `RouterRenderTests` | 1 line body per upsert, 0 list; 2 per hover | as budgeted | green |
-| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 % | green |
-| Idle, window closed | `scripts/idle-cpu.sh` (rest) | ≤ 0.1 % | 0.000 % | green |
-| Idle, window open on `agents` | `scripts/idle-cpu.sh` (open) | ≤ 0.1 % | 0.200 % (0.233 % on the commit before the deletion) | red, not new |
-| Open / Close | `morph-timings --scenario router --steps "open,close x10"` | p95 ≤ 325 ms | Open 316 / 320, Close 320 / 321 | green |
-| First flush | same | p95 ≤ 16 ms | Open 17 / 18, Close 10 / 8 | Open red by 1-2 ms |
+| T3 event, synthetic | `--router-v2-load` | p95 ≤ 8, max ≤ 16 ms | p95 15 / 15 / 15, max 77 / 86 / 32 | red |
+| Flush, synthetic | same | p95 ≤ 2 ms | 3 / 2 / 6 | red (was 4 / 5 / 5) |
+| T3 event, real day | `--router-v2-load real` | p95 ≤ 8, max ≤ 16 ms | p95 26 / 18 / 20, max 31 / 18 / 29 | red |
+| Flush, real day | same | p95 ≤ 2 ms | 10 / 11 / 11 | red |
+| T3 event work (the handler alone) | synthetic / real | ≤ 2 ms | p95 1 / 3-5, max 2 / 5 (the same before) | real red |
+| Key | `--router-v2-demo --speed 4` | p95 ≤ 8 ms | 27 / 26 / 26 → 25 / 25 / 26 | red |
+| Key work | same | p95 ≤ 2 ms | 11 / 10 / 9 → 7 / 6 / 7 | red |
+| Send | same | p95 ≤ 8 ms | 49 / 49 / 53 → 62 / 49 / 52 (p50 33-34 → 27-33) | red |
+| Select | demo, speed 4 / `--router-v2-load select` | p95 ≤ 8 ms | 31 / 29 / 31 → 29 / 28 / 30; select load 27 / 27 / 24 → 27 / 28 / 27 | red |
+| Select work | same | — | demo 12 / 13 / 12 → 7 / 7 / 7; select load 3 / 3 / 3 (max 15-17) → 0 / 0 / 0 (max 1) | |
+| Bodies per change | `RouterRenderTests` | 1 line body per upsert, 0 list; 2 per hover | as budgeted (counted per page since `0ed63fcc`) | green |
+| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 % (not re-measured) | green |
+| Open / Close | `morph-timings --scenario router --steps "open,close x10"` | p95 ≤ 325 ms | Open 314 / 318 / 315, Close 317 / 318 / 319 | green |
+| First flush | same | p95 ≤ 16 ms | Open 16 / 21 / 18 (before 20 / 16 / 18), Close 10 / 8 / 8 | Open red by 0-5 ms |
 | Captures inside a morph | same | 0 | 0 | green |
 
-What is left red is SwiftUI's own layout and drawing per frame, not Fjord's work (the event handler is 1 ms at p95). The
-next lever, measured in wave 2 and not yet in: during a move every line's hosting view lays out on every frame (about 5000
-line layouts a second under the synthetic load's moves), because the list's stack animates each row's container while
-`routerGlides()` holds the hosting view still inside it, so AppKit tells every `NSHostingView` below that its geometry
-changed. Not animating the stack for changes that add or take no row cut it to about 600 a second; rows that come or go
-then need their fold. See docs/design/router-v2/WAVE2-NOTES.md, "Layout performance".
+What is left red is SwiftUI's own update, layout and drawing at the commit, not Fjord's work. Under the demo script,
+sampled, the main thread's display cycle is 8.9k of 53k samples, 6.1k of them SwiftUI's render (`updateOutputs`,
+display-list rendering); the Router's own frames are a small part.
+
+**One animation per hosting view per turn.** SwiftUI updates a hosting view synchronously, inside the code that writes,
+when that view gets writes under two different animations in one turn: no animation then a spring, a fade then a
+spring, `withAnimation(nil)` after a plain write. The same animation twice, or writes that reach different hosting
+views, cost nothing (a standalone check with two hosting views). Under the demo script these updates were 296 of the
+313 sampled ms inside the key map's handlers (`GraphHost.flushTransactions`). `c889736e` took away the three that
+mattered: the key's "seen" write now goes in the act's own transaction (`RouterModel.takeSeen` / `markSeen`), the
+scroll to the selection is a call (`revealer`), not an observed tick, and the draft empties in the row's reset. The
+handlers' work halved; the key-to-commit time hardly moved: the same update now runs once, at the commit, and costs
+about what its pieces did. Writes in a handler that views read must share one animation; give a view its own curve
+(`.motion(.fade, value:)`) when it must keep one.
+
+**Rows missing while a card opens or shuts** (beat 4 at 1.6-1.9 s: the rows under the card that opens are blank for
+some 0.15 s, then come back faint; the same at `5abf8131`, and reported in the build before 35837c36). Ruled out, each tried and measured on beat
+4's frames (ink in the lower list per frame): the stack's own animation (rows always placed at once: the same blank),
+the row containers' clipping (SwiftUI wraps each row in an `_NSGraphicsView` with `clipsToBounds`; unclipped: the
+same), the glide's key path (`position.y` instead of `transform.translation.y`: the same) and the glides themselves
+(logged: one per row per change, sizes and directions right). With the glides off the rows don't go missing (they
+jump). In the blank frames each row's tick views (small hosting views of their own) are drawn where the row glides,
+and the line's own SwiftUI content is not: the line's drawing, not its place, is what's missing while its place in the
+window animates. Next: check whether the line's text layers are redrawn (CPU, asynchronously) when the hosting view's
+transform changes, the same layers lever 3 (main waiting on the render server) is about. Until then, pre-building the
+neighbours' cards and placing the scroll content's height at once stay out.
 
 ## Rules for new code
 
