@@ -24,6 +24,7 @@ extension Store {
         }
         records.pullRequests = { [weak self] t, reply in self?.routerPullRequests.states(for: t, reply: reply) ?? RouterRecords.linked(t) }
         // The model calls run only with the Router on, and never in a demo.
+        records.canAsk = { [weak self] in self.map { $0.routerOn && !$0.routerIsPretend } ?? false }
         records.ask = { [weak self] request in
             guard let self, self.routerOn, !self.routerIsPretend else { return }
             self.routerVerdicts.ask(request)

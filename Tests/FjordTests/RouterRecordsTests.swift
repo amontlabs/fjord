@@ -131,6 +131,28 @@ import Testing
         #expect(h.records.needsYou == 1)
     }
 
+    /// With the Router off no verdict comes: a finished turn is plain Done on the code's words, not "being read"; switched
+    /// on, it is asked for and read.
+    @Test func withTheRouterOffAFinishedTurnIsPlainDoneAndIsReadOnceItIsOn() {
+        let h = Harness()
+        var on = false
+        h.records.canAsk = { on }
+        h.records.put(F.thread())
+        let off = h.records.record("t1")
+        #expect(h.asks.isEmpty)
+        #expect(off?.state == .done && off?.judging == false && off?.reading == false && off?.naming == false)
+        #expect(off?.sentence.phase == .settled)
+        on = true
+        h.records.askingChanged()
+        #expect(h.verdictAsk()?.kind == .finished)
+        #expect(h.records.record("t1")?.reading == true)
+        // Off again before it lands: the call is cancelled and the line is plain Done again.
+        on = false
+        h.records.askingChanged()
+        #expect(h.cancels.contains("t1"))
+        #expect(h.records.record("t1")?.reading == false && h.records.record("t1")?.state == .done)
+    }
+
     @Test func aVerdictForAnOldFingerprintIsDropped() {
         let h = Harness()
         h.records.put(F.thread())

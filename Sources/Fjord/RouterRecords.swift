@@ -16,6 +16,9 @@ final class RouterRecords {
     var ask: (RouterVerdictRequest) -> Void = { _ in }
     /// The engine's calls for this thread are no longer wanted: a run started, another fingerprint, the thread left.
     var cancel: (String) -> Void = { _ in }
+    /// Whether a verdict or a name may be asked now (the Router on, not a demo). Not: a finished turn is plain Done on the
+    /// code's words, and no line waits ("being read") on a call that won't come.
+    var canAsk: () -> Bool = { true }
     /// The Needs-you count changed (the sidebar badge, the bar).
     var onNeedsYou: ((Int) -> Void)?
     /// The shell as T3's store holds it now (`shell(_:)` reads its rows and projects from it).
@@ -352,6 +355,12 @@ final class RouterRecords {
         }
     }
 
+    /// `canAsk` changed (the Router switched on or off): every line asks what it now may, or stops waiting on what it won't
+    /// get.
+    func askingChanged() {
+        operation { for id in entries.keys { refresh(id) } }
+    }
+
     /// The clock reached a boundary (a day since a finish, a week, a snooze's end): those threads again.
     func tick() {
         let now = now()
@@ -466,6 +475,7 @@ final class RouterRecords {
 
     /// The verdict this state needs, asked once per fingerprint; a name once per T3 title.
     private func askIfNeeded(_ id: String, _ e: Entry, _ t: AgentThread, _ code: RouterCodeState) {
+        guard canAsk() else { return stopCalls(e, id) }
         let onPage = e.scope == .line && e.hidden != true
         let have = saved[id]?.fingerprint == e.fingerprint && saved[id]?.verdict != nil
         if code.wants == .nothing || !onPage || e.send != nil {

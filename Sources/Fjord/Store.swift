@@ -207,7 +207,10 @@ final class Store {
     private func updateRouterOn() {
         guard (router.enabled && agents.enabled) != routerOn else { return }
         routerOn = router.enabled && agents.enabled
+        // Its lines ask their verdicts now, or stop waiting on them (`RouterRecords.canAsk`).
+        if routerRecordsMade { routerRecords.askingChanged() }
     }
+
 
     /// What Fjord keeps of T3's threads (see Threads.swift).
     var agents = ThreadsState() {
