@@ -417,7 +417,13 @@ struct RouterLineView: View {
                     .allowsHitTesting(model.project == nil)
                     .layoutPriority(1)
             }
-            RouterAge(model: model, since: thread.ledger.single?.since ?? thread.since)
+            Group {
+                if single, let item = thread.ledger.single {
+                    RouterAge(model: model, since: item.since).itemDone(model, thread: thread.id, item: item, rowHot: hot && !box.selected)
+                } else {
+                    RouterAge(model: model, since: thread.ledger.single?.since ?? thread.since)
+                }
+            }
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .layoutPriority(1)
         }

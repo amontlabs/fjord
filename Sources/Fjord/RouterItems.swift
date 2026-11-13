@@ -379,6 +379,7 @@ struct RouterItemRow: View {
             .padding(.leading, I.markLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             RouterAge(model: model, since: item.since)
+                .itemDone(model, thread: thread, item: item, rowHot: hot && !selected)
                 .frame(height: I.lineHeight)
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .opacity(closing ? 0 : 1)
@@ -407,6 +408,52 @@ struct RouterItemRow: View {
             .frame(width: M.markBox, height: M.markBox)
             .opacity(item.closing ? 0.45 : 1)
             .accessibilityHidden(true)
+    }
+}
+
+/// The pointer on an item's row (a block's row, or a line that is its thread's one item): its age gives way to a quiet
+/// Done, the card's own act (struck "done by you", Revert in the toast), without opening the card. Drawn over the age,
+/// so the row doesn't move; it arms on a pointer move over it, so a row sliding under a still pointer isn't done by it.
+/// None on a struck item, a read's preview or a row whose card is open (the card has its Done).
+private struct RouterItemDoneSwap: ViewModifier {
+    let model: RouterModel
+    let thread: String
+    let item: RouterItem
+    let rowHot: Bool
+
+    func body(content: Content) -> some View {
+        let can = item.live && !item.preview
+        let hit = RouterHit.itemDone(RouterModel.itemKey(thread, item.id))
+        let shown = can && (rowHot || model.flags(hit).hot)
+        content
+            .opacity(shown ? 0 : 1)
+            .overlay(alignment: .trailing) {
+                if can {
+                    RouterButton(model: model, hit: hit, removes: true, action: { model.itemDone(thread, item.id) }) { hot, pressed in
+                        Text(Router.Items.Copy.done).font(CDS.sans(12)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.muted)
+                            .lineLimit(1).fixedSize()
+                            .padding(.horizontal, 6)
+                            .frame(height: 20)
+                            .background(RoundedRectangle(cornerRadius: Router.Surface.token, style: .continuous)
+                                .fill(hot ? Router.Surface.chosen : .clear))
+                            .opacity(pressed ? 0.7 : 1)
+                            .hoverMotion(hot)
+                    }
+                    // Its word's end on the age's.
+                    .offset(x: 6)
+                    .opacity(shown ? 1 : 0)
+                    .allowsHitTesting(shown)
+                    .accessibilityLabel("Mark done")
+                }
+            }
+            .motion(.fade, value: shown)
+    }
+}
+
+extension View {
+    /// An item row's age, giving way to Done under the pointer (`RouterItemDoneSwap`).
+    func itemDone(_ model: RouterModel, thread: String, item: RouterItem, rowHot: Bool) -> some View {
+        modifier(RouterItemDoneSwap(model: model, thread: thread, item: item, rowHot: rowHot))
     }
 }
 

@@ -239,6 +239,22 @@ enum RouterShots {
         }, pointer: { model in
             model.hoverRow = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.smaller)
         }),
+        // The pointer on an item's row: its age gives way to a quiet Done (here under the pointer, lit), and on a line
+        // that is its one item the same; neither moves the row.
+        State(name: "v2-item-hover-done", make: { model in
+            model.select(nil)
+            RouterDemo.itemsLook(model)
+        }, pointer: { model in
+            let key = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.smaller)
+            model.hoverRow = key
+            model.hoverControl = .itemDone(key)
+        }),
+        State(name: "v2-item-hover-done-line", make: { model in
+            model.select(nil)
+            RouterDemo.itemsLook(model)
+        }, pointer: { model in
+            model.hoverRow = ID.transcriptGap
+        }),
         State(name: "v2-item-card") { model in
             RouterDemo.itemsLook(model)
             model.select(.line(ID.transcriptGap))

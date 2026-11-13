@@ -500,6 +500,8 @@ enum RouterHit: Hashable {
     case prBadge(String, Int)
     /// A link found in an item's quote (its card's quiet buttons): the item's key, the link's place.
     case link(String, Int)
+    /// The quiet Done at an item row's end, on hover: the item's key.
+    case itemDone(String)
 }
 
 enum RouterFooterAct: Hashable {

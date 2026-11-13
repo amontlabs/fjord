@@ -623,6 +623,12 @@ checking, closing with how, new).
   options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
   T3 ⌘O`. Done strikes the item "done by you", folds it after 1.6 s, and the toast offers Revert. The open card's ground
   is under its own row only.
+- **Done on hover** (2026-11-13). The pointer on an item's row (a block's row, or a line that is its one item) swaps its
+  age for a quiet `Done` (footnote 12 `Text.muted`, its last letter where the age ends; under the pointer
+  `Text.primary` on the `chosen` ground, radius 4), `Motion.fade`, drawn over the age so nothing moves. The card's
+  own act: struck "done by you", Revert in the toast. It arms on a pointer move over it (a row sliding under a still
+  pointer isn't done by it). None on a struck item, a read's preview, or a row whose card is open. Shots
+  `v2-item-hover-done` (a block's row, the pointer on Done) and `v2-item-hover-done-line`.
 - **Your words to a block** (Return): in the same frame `↑ "…" · sent` (13, the arrow in the accent) under the items,
   every open item sheens (`Text.muted` + the sheen), and Fjord's mark sits at the end of the header's words, where the
   activity glyphs are, so nothing moves. Nothing reads settled until the read lands.
