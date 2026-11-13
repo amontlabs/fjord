@@ -9,10 +9,11 @@ import SwiftUI
 // - b, list and pane: the list as it is in a 600 column, the selected row's card in a pane beside it.
 // - c, board: Needs you in the column, Done and Working in a slimmer column beside it.
 // - d, ledger by project: a's rows grouped by project, the project in a rail, no section headers.
+// - e, ledger and pane: d's ledger in a narrower column, the selected row's card in b's pane beside it.
 
 enum RouterLab {
     enum Option: String, CaseIterable {
-        case a, b, c, d
+        case a, b, c, d, e
     }
 
     /// `FJORD_WIDE`: the option every page of this run starts with.
@@ -72,6 +73,16 @@ enum RouterLab {
             guard room >= margin.lowerBound else { return nil }
             let m = min(room, ledgerMargin)
             return Frame(start: max((page - ledger) / 2, g + rail + m + lead), column: ledger, margin: m, rail: rail)
+        case .e:
+            let gap: CGFloat = 40
+            let column: CGFloat = 520
+            let m: CGFloat = 140
+            let room = page - 2 * g - rail - m - lead - column - gap
+            guard room >= 380 else { return nil }
+            let side = min(room, pane.upperBound)
+            let total = rail + m + lead + column + gap + side
+            return Frame(start: max((page - total) / 2, g) + rail + m + lead, column: column, margin: m, rail: rail,
+                         side: side, gap: gap)
         }
     }
 }
@@ -87,11 +98,13 @@ struct RouterLabPage: View {
     private typealias M = Router.Margin
 
     var body: some View {
-        if option == .b {
+        if option == .b || option == .e {
             // The list and its composer on the left; the selected row's card beside them, not under its row.
             let split = frame.start + frame.column + frame.gap / 2
             HStack(alignment: .top, spacing: 0) {
-                scroll(width: split) { classic(cards: false).padding(.leading, frame.start - L.nameLeading) }
+                scroll(width: split) {
+                    if option == .e { ledger(cards: false) } else { classic(cards: false).padding(.leading, frame.start - L.nameLeading) }
+                }
                     .frame(width: split)
                 ZStack(alignment: .topLeading) {
                     if case .line(let id)? = model.selection, model.thread(id) != nil {
@@ -101,7 +114,7 @@ struct RouterLabPage: View {
                 .frame(width: frame.side, alignment: .topLeading)
                 .padding(.leading, frame.gap / 2)
                 // Its line on the list's first line.
-                .padding(.top, Router.Bar.control + 2 * Router.Bar.padY + Router.Header.firstTop + Router.Header.height)
+                .padding(.top, Router.Bar.control + 2 * Router.Bar.padY + Router.Header.firstTop + (option == .e ? 0 : Router.Header.height))
                 .padding(.bottom, Router.Dock.bottom)
                 Spacer(minLength: 0)
             }
@@ -110,8 +123,8 @@ struct RouterLabPage: View {
                 switch option {
                 case .a: margins
                 case .c: board
-                case .d: ledger
-                case .b: EmptyView()
+                case .d: ledger(cards: true)
+                case .b, .e: EmptyView()
                 }
             }
         }
@@ -262,7 +275,7 @@ struct RouterLabPage: View {
         return groups.filter { !$0.id.isEmpty } + groups.filter { $0.id.isEmpty }
     }
 
-    private var ledger: some View {
+    private func ledger(cards: Bool) -> some View {
         let slots = model.layout.filter { !isLine($0) }
         return VStack(alignment: .leading, spacing: 0) {
             // With no thread: the sentence that says so.
@@ -275,7 +288,7 @@ struct RouterLabPage: View {
                     rail(group).frame(width: frame.rail, alignment: .leading)
                     VStack(alignment: .leading, spacing: M.threadGap) {
                         ForEach(group.lines, id: \.self) { id in
-                            RouterLabMarginThread(model: model, box: model.box(id), margin: frame.margin, project: false)
+                            RouterLabMarginThread(model: model, box: model.box(id), margin: frame.margin, project: false, cards: cards)
                         }
                     }
                 }

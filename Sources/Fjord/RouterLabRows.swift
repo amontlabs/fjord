@@ -40,6 +40,8 @@ struct RouterLabMarginThread: View {
     let margin: CGFloat
     /// The project beside the name (the ledger's rail says it instead).
     var project = true
+    /// The open row's card under it (false: it is in a pane beside the list).
+    var cards = true
 
     private typealias M = Router.Margin
     private typealias I = Router.Items
@@ -101,7 +103,7 @@ struct RouterLabMarginThread: View {
                     own(thread)
                 }
                 .background { ground(focused: focused, hot: flags.hot, pressed: flags.pressed) }
-                if focused { RouterLabCard(model: model, box: box) }
+                if focused && cards { RouterLabCard(model: model, box: box) }
             }
             .background { selected(focused) }
         case .item(let item):
@@ -114,7 +116,7 @@ struct RouterLabMarginThread: View {
                 }
                 .disabled(!item.live)
                 .background { ground(focused: focused, hot: flags.hot, pressed: flags.pressed) }
-                if focused { RouterLabCard(model: model, box: box) }
+                if focused && cards { RouterLabCard(model: model, box: box) }
             }
             .background { selected(focused) }
         case .sent(let words):
