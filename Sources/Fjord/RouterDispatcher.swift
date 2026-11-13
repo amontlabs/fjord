@@ -64,7 +64,8 @@ struct RouterContext: Equatable {
 /// model, effort and modes the row showed.
 struct RouterLaunchPlan: Equatable, Sendable {
     var thread: String
-    var settings: ThreadLaunchSettings
+    /// Nil: T3's own defaults (its config hasn't been read, so the page offered no settings).
+    var settings: ThreadLaunchSettings?
 }
 
 // MARK: - The ask-back

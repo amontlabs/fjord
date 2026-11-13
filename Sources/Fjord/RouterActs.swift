@@ -230,7 +230,8 @@ extension RouterActsRecords {
         records?.began(send: send)
         guard let id = env.projectID(project) else { return refuse(send, "That project isn't in T3 anymore: nothing was started") }
         var context = RouterContext(target: RouterAskBack.newThread + id)
-        context.launch = RouterLaunchPlan(thread: thread, settings: settings(launch))
+        // No settings until T3's config is read: the page showed none, and T3 starts it with its own defaults.
+        context.launch = RouterLaunchPlan(thread: thread, settings: models.isEmpty ? nil : settings(launch))
         context.decided = read.flatMap { decision($0.draft) }
         guard let entry = env.submit(words, context) else { return refuse(send, "The Router is off: nothing was started") }
         entries[entry] = send

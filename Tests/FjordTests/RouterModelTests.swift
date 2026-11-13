@@ -385,7 +385,7 @@ import Testing
         let codex = RouterLaunchModel(id: "gpt-6.1-sol", name: "GPT-6.1 Sol", provider: "Codex", instance: "codex",
                                         efforts: [.init(rawValue: "minimal"), .low, .high], defaultEffort: .low,
                                         access: [.supervised, .full])
-        model.apply(.launch(defaults: RouterLaunch.t3Default, models: RouterLaunch.demoModels + [codex]))
+        model.apply(.launch(defaults: RouterLaunch.demoDefault, models: RouterLaunch.demoModels + [codex]))
         #expect(trace.curves == [.fade])
         model.select(nil)
         model.setDraft("silo: write the changelog")

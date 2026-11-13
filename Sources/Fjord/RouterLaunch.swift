@@ -99,9 +99,9 @@ struct RouterLaunch: Equatable {
     /// T3's interaction mode: plan (it writes a plan and waits for your go) or build.
     var plan = false
 
-    /// T3's defaults as this install's `server.getConfig` gives them (FEASIBILITY.md): Opus 5.5, its default effort,
-    /// runtime `auto`, interaction mode `default`. What the demo starts from; the real page reads them from T3.
-    static let t3Default = RouterLaunch(model: "claude-opus-5-5", effort: .high, access: .auto)
+    /// The demo's defaults (this install's `server.getConfig` when they were written: Opus 5.5, high, `auto`). The real page
+    /// has none of its own: it reads T3's, and offers no settings before.
+    static let demoDefault = RouterLaunch(model: "claude-opus-5-5", effort: .high, access: .auto)
 
     /// The demo's models: this install's.
     static let demoModels: [RouterLaunchModel] = [
@@ -190,8 +190,9 @@ extension RouterModel {
     private var launchEfforts: [RouterLaunch.Effort] { launchModel(launch.model)?.efforts ?? [] }
     private var launchAccess: [RouterLaunch.Access] { launchModel(launch.model)?.access ?? [] }
 
-    /// The row shows a new thread: its settings are there to see and to change.
+    /// The row shows a new thread: its settings are there to see and to change (once T3 has said what it offers).
     var launchShown: Bool {
+        guard !launchModels.isEmpty else { return false }
         switch destination {
         case .place(.newThread, _): return true
         case .unsure(let places, let lit, let mine, _):

@@ -394,6 +394,14 @@ import Testing
             model: "claude-opus-5-5", effort: "medium", runtimeMode: .autoAcceptEdits, interactionMode: .plan)))
     }
 
+    @Test func beforeT3sConfigANewThreadStartsOnT3sOwnDefaults() {
+        // FINAL-REVIEW #12: no hardcoded model, effort or access goes out before T3 said what it offers.
+        let f = Fake()
+        let acts = f.acts()
+        acts.start("n1", words: "add dark mode", project: "Garden", launch: .demoDefault, read: nil)
+        #expect(f.submitted.first?.context.launch == RouterLaunchPlan(thread: "n1", settings: nil))
+    }
+
     @Test func aModelThatTakesNoEffortIsStartedWithoutOne() {
         let f = Fake()
         let acts = f.acts()
@@ -406,7 +414,7 @@ import Testing
     @Test func aProjectT3DoesntHaveStartsNothing() {
         let f = Fake()
         let acts = f.acts()
-        acts.start("new-1", words: "x", project: "Elsewhere", launch: .t3Default, read: nil)
+        acts.start("new-1", words: "x", project: "Elsewhere", launch: .demoDefault, read: nil)
         #expect(f.submitted.isEmpty && f.ended.count == 1 && f.emitted.count == 1)
     }
 
@@ -463,6 +471,8 @@ import Testing
 
     @Test func aNewThreadFromThePageLaunchesWithItsMintedIdAndSettingsAndIsTaken() async {
         let (_, f, acts, sent) = liveStore()
+        // T3's config was read: the row offered these settings.
+        acts.models = RouterLaunch.demoModels
         var launch = RouterLaunch(model: "claude-sonnet-5-5", effort: .low, access: .supervised)
         launch.plan = true
         let id = acts.mintThread()
@@ -477,7 +487,7 @@ import Testing
     @Test func aLaunchT3RefusesEndsThePendingSendWithItsWords() async {
         let (s, f, acts, _) = liveStore()
         s.requestSender = { _, _ in throw ThreadLaunchFailure("Base ref does not resolve") }
-        acts.start("n1", words: "x", project: "Garden", launch: .t3Default, read: nil)
+        acts.start("n1", words: "x", project: "Garden", launch: .demoDefault, read: nil)
         await waitUntil { !f.emitted.isEmpty }
         #expect(f.ended.map(\.thread) == ["n1"] && f.took.isEmpty)
         #expect(f.emitted == [.refused("n1", reason: "Base ref does not resolve", offline: false)])

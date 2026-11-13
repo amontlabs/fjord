@@ -169,8 +169,9 @@ final class RouterModel {
 
     // A new thread's settings (RouterLaunch.swift): T3's default and models, what you set by hand, where the keyboard
     // is in the row, the chip whose menu is open.
-    var launchDefault = RouterLaunch.t3Default
-    var launchModels = RouterLaunch.demoModels
+    /// Only T3's (`.launch`): until its config is read there are no models, and the row offers no settings.
+    var launchDefault = RouterLaunch.demoDefault
+    var launchModels: [RouterLaunchModel] = []
     var launchMine = RouterLaunchAsk()
     /// What the settings pills in the draft name (`RouterSetting`): they win over what you set by hand before, and a chip you
     /// change by hand afterwards wins over them.

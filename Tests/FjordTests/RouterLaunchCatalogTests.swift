@@ -71,7 +71,7 @@ import Testing
         #expect(models.map(\.id) == ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])
         // Nothing to offer: no models, T3's known default.
         let none = RouterLaunchCatalog.make(config: Self.config(providers: [off]))
-        #expect(none.models.isEmpty && none.defaults == .t3Default)
+        #expect(none.models.isEmpty && none.defaults == .demoDefault)
     }
 
     @Test func aModelCarriesT3sOtherNamesForTheAtList() {

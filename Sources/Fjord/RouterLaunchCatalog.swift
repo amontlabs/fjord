@@ -10,7 +10,7 @@ struct RouterLaunchOffer: Equatable, Sendable {
     var defaults: RouterLaunch
     var models: [RouterLaunchModel]
 
-    static let empty = RouterLaunchOffer(defaults: .t3Default, models: [])
+    static let empty = RouterLaunchOffer(defaults: .demoDefault, models: [])
 
     func model(_ slug: String) -> RouterLaunchModel? { models.first { $0.id == slug } }
 }
@@ -53,7 +53,7 @@ enum RouterLaunchCatalog {
         // The default effort: the selection's own, else the model's default, else its first.
         let said = (selection?["options"]?.array ?? []).first { $0.str("id") == "effort" }?["value"]?.string
         var effort = said.map { RouterLaunch.Effort(rawValue: $0) }.flatMap { chosen.efforts.contains($0) ? $0 : nil }
-            ?? chosen.defaultEffort ?? chosen.efforts.first ?? RouterLaunch.t3Default.effort
+            ?? chosen.defaultEffort ?? chosen.efforts.first ?? RouterLaunch.Effort.high
         if !chosen.efforts.isEmpty, !chosen.efforts.contains(effort) { effort = chosen.efforts[0] }
         // T3's `resolveCompatibleRuntimeMode`: its default when the provider supports it, else the provider's first.
         let wanted = settings?.str("defaultRuntimeMode").map { RouterLaunch.Access(rawValue: $0) } ?? .full

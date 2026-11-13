@@ -385,7 +385,7 @@ import Testing
         #expect(model.launch.model == "claude-haiku-5-5")
         // Taking the pill out puts the chip back.
         model.edit(mark + " write the changelog now", marks: [silo])
-        #expect(model.launch.model == RouterLaunch.t3Default.model)
+        #expect(model.launch.model == RouterLaunch.demoDefault.model)
     }
 
     @Test func theAtListOffersTheSettingsByNameAndAliasAndNeverByLooseLetters() {

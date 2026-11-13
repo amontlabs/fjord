@@ -125,6 +125,8 @@ enum RouterDemo {
     static func records(still: Bool = false) -> RouterModel {
         let model = RouterModel()
         model.still = still
+        // The demo's own T3 config.
+        model.launchModels = RouterLaunch.demoModels
         let start = model.clockStart
         func ago(_ minutes: Double) -> Date { start.addingTimeInterval(-minutes * 60 - 25) }
         typealias T = RouterThread

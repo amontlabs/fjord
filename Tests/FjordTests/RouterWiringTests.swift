@@ -173,4 +173,22 @@ import Testing
         #expect(none.key != open.key)
         #expect(open.blocks.joined() != none.blocks.joined())
     }
+
+    // MARK: The real page's settings are T3's only (FINAL-REVIEW #12)
+
+    @Test func theRealPageOffersNoModelsOrSettingsUntilT3sConfigLands() {
+        let s = store([F.shell("t1", title: "Fix the fence")])
+        let page = s.routerPage
+        #expect(page.launchModels.isEmpty)
+        page.select(nil)
+        page.setDraft("garden: plant tomatoes")
+        page.apply(.read(RouterRead(draft: page.draft, places: [.newThread(project: "Garden")], sure: true)))
+        #expect(!page.launchShown)
+        let opus = RouterLaunchModel(id: "claude-opus-5-5", name: "Opus 5.5", provider: "Claude", instance: "claudeAgent",
+                                       efforts: [.low, .high], defaultEffort: .low, access: [.full])
+        let mine = RouterLaunch(model: "claude-opus-5-5", effort: .low, access: .full)
+        page.apply(.launch(defaults: mine, models: [opus]))
+        #expect(page.launchShown)
+        #expect(page.launch == mine)
+    }
 }
