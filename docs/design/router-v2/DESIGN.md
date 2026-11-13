@@ -591,11 +591,11 @@ checking, closing with how, new).
 - **One block per thread**, in the section of its most urgent open item (a real stop stays Stopped). One item and nothing
   else to show: the line is the item (its mark and tint on the name's ground, its sentence, its age); its card is the
   item's.
-- **Two or more** (or one with a read under way): the line becomes a quiet header: no ground, name in `Text.primary`
-  medium, the working dots in the mark's box and the newest summary in `Text.muted` while it runs, project pill, age (how
-  long it has run). Under it, one 28 pt row per item, indented under the name: the kind's mark and word (13 medium) on
-  the kind's 12 % ground in a fixed column, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of
-  air under it.
+- **Two or more**: the line becomes the block's header, its name drawn as a one-item line's: the most urgent item's
+  mark and tint on the name's ground (so a block reads as one thing, its colour on its name, consistent with one-item
+  lines); while it runs, the working dots lead the newest summary (`Text.muted`); project pill, age. Under it, one 28 pt
+  row per item: the kind's mark alone in its tint (no ground, no word; the accessibility label says the kind) under the
+  name's words, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of air under it.
 - **Working counts it faintly**: "Working 3 +1", the `+1` in `Text.disabled`, for running threads shown in another section.
 - **↑↓** walk the header, then each item. The header's card is the thread's (the working timeline); an item's card is its
   options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
@@ -613,7 +613,12 @@ checking, closing with how, new).
 - **The engine** (`RouterItemLedgers`, `RouterItemsPrompt`, EVAL-items.md, REVIEW-items.md). One read per input, in
   order, one at a time per thread: every turn the agent ends (Done or Stopped; a run that is no longer the latest is read
   too, so a turn woken at once by a background task's end is never lost, and a run starting again never cancels a read;
-  turns that ended while the thread was off the page are read in order after it) and every message of yours (sent here:
+  turns that ended while the thread was off the page are read in order after it, and those between the last one read and
+  it, which ended while Fjord was closed, before it; a turn that ends while its subagents or background work go on is
+  ended: T3 shows the thread working, but its reply is read as it ends), every whole message the agent posts while its
+  run goes on (`said:<T3 id>`: a question asked mid-run is a Decide as it is asked; read with its own prompt, which finds
+  items and writes no line; one read in flight per thread, at most one a minute, the newest waiting one read at the
+  gap's end or as soon as anything is queued behind it; it doesn't sheen the items) and every message of yours (sent here:
   shown at once, read once T3 takes it, never if T3 refuses it; from T3's composer or the phone: each message T3 stamped
   since the last one seen, listed from a projection read made after the stamp, by T3's id; read before the turn that
   ended after it; not read when nothing is open, nor when the turn after it is the one it started). Each input is a
@@ -630,9 +635,11 @@ checking, closing with how, new).
   as soon as their field is whole, found items land, the line streams. The ledger is kept per thread in the verdict file
   (version 3; a version 2 file keeps its names, told banners and summaries). Settle keeps what was open, and the read
   under way, until a new run starts: its Revert puts them back. Done keeps the item in the file too: its Revert works
-  after a relaunch, and a read under way that restates it doesn't bring it back. A thread first seen reads its latest
-  turn only when it ended in the last ten minutes, six at most per launch. A new Stuck, Decide or Do item is told once as
-  a banner, only while fresh and unseen. A one-item thread stays one line through a read (its sheen, your words after it,
+  after a relaunch, and a read under way that restates it doesn't bring it back. A thread first seen (a first launch)
+  reads its latest input, however old, paced by the queues (four projection reads and four model calls at once). A new
+  Stuck, Decide or Do item is told once as a banner, only for an input this run of Fjord saw happen (not one that ended
+  before the launch, nor one left pending by the last run), while fresh and unseen (a mid-run question: as it lands);
+  a banner names the thread by its page name, never T3's title. A one-item thread stays one line through a read (its sheen, your words after it,
   Fjord's mark). No legacy: a finished turn has no verdict of its own.
 - **Motion.** Inside a block, rows are placed at once and come and go with a short fade (0.12 s out, 0.2 s in); the
   block's height changes, and the lines under it glide, on Core Animation (`RouterGlides`). A SwiftUI glide inside the
