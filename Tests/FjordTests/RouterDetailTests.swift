@@ -137,6 +137,37 @@ import Testing
         #expect(d.working != nil)
     }
 
+    /// T3 queues a finished delegated task's report into its parent as a user-role message it wrote itself
+    /// (`createdBy: "agent"`, `creationSource: "server"`, `delegatedCompletion`), shaped as read from a real projection.
+    @Test func onlyYourOwnQueuedWordsShow() {
+        func queued(_ id: String, message: String, position: Int) -> T3JSON {
+            var r = F.run(id, status: "queued", queuePosition: position)
+            if case .object(var o) = r { o["userMessageId"] = .string(message); r = .object(o) }
+            return r
+        }
+        var report = F.message("um-task", text: "Delegated task node:delegated-task:command%3Amcp%3A2ec7cca6%3Adelegate-task%3A7591 (Probe) [completed]:\nDone.")
+        if case .object(var o) = report {
+            o["createdBy"] = "agent"; o["creationSource"] = "server"
+            o["delegatedCompletion"] = ["parentRunId": "r1"]
+            report = .object(o)
+        }
+        var compact = F.message("um-compact", text: "/compact")
+        if case .object(var o) = compact { o["createdBy"] = "agent"; o["creationSource"] = "server"; o["idleCompaction"] = "beforeCacheExpires"; compact = .object(o) }
+        var phone = F.message("um-phone", text: "and from the phone")
+        if case .object(var o) = phone { o["creationSource"] = "mobile"; phone = .object(o) }
+        let p = projection(runs: [F.run("r1", status: "running"), queued("r-task", message: "um-task", position: 1),
+                                  queued("r-mine", message: "um2", position: 2), queued("r-compact", message: "um-compact", position: 3),
+                                  queued("r-phone", message: "um-phone", position: 4)],
+                           messages: [F.message("um1", text: "First"), report, F.message("um2", text: "Then this"), compact, phone])
+        #expect(RouterDetail.make(p, now: now).queued == [.init(id: "r-mine", words: "Then this"), .init(id: "r-phone", words: "and from the phone")])
+        // Cancel's "your newest queued run" never lands on T3's own.
+        #expect(p.ownQueuedRuns.map(\.id) == ["r-mine", "r-phone"])
+        let onlyTask = projection(runs: [F.run("r1", status: "running"), queued("r-task", message: "um-task", position: 1)],
+                                  messages: [F.message("um1", text: "First"), report])
+        #expect(RouterDetail.make(onlyTask, now: now).queued.isEmpty)
+        #expect(onlyTask.ownQueuedRuns.isEmpty)
+    }
+
     @Test func aFailedRunNamesItsLastToolItem() {
         let items = [command("c1", "make build", ordinal: 1, status: "completed"), command("c2", "make test", ordinal: 2, status: "failed"),
                      F.item("r", type: "reasoning", ordinal: 3, ["text": "hmm", "streaming": false])]

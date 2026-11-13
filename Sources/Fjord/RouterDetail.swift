@@ -76,7 +76,8 @@ struct RouterDetail: Equatable {
         d.request = ThreadRequest(p)
         d.youSaid = p.messages.last(where: { $0.role == "user" && !$0.text.isEmpty })?.text
 
-        d.queued = p.queuedRuns.compactMap { run in
+        // Only your own words: T3's own queued messages (a delegated task's completion) aren't yours to see or cancel.
+        d.queued = p.ownQueuedRuns.compactMap { run in
             guard let id = run.userMessageId, let words = p.messages.first(where: { $0.id == id })?.text, !words.isEmpty else { return nil }
             return Queued(id: run.id, words: words)
         }

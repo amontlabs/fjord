@@ -173,13 +173,14 @@ extension Store {
     }
 
     /// The newest message queued behind a thread's run (the one a Cancel on its queued row takes back).
-    func newestQueuedRun(_ id: String) -> String? { t3.store.projections[id]?.queuedRuns.last?.id }
+    func newestQueuedRun(_ id: String) -> String? { t3.store.projections[id]?.ownQueuedRuns.last?.id }
 
-    /// The queued run whose message is these words (the newest such); "" for any words: the newest queued run.
+    /// The queued run of yours whose message is these words (the newest such); "" for any words: your newest queued run.
+    /// Never one T3 queued itself (a delegated task's completion).
     func queuedRun(_ id: String, carrying words: String) -> String? {
         guard let p = t3.store.projections[id] else { return nil }
-        if words.isEmpty { return p.queuedRuns.last?.id }
-        return p.queuedRuns.last { run in run.userMessageId.flatMap { m in p.messages.first { $0.id == m } }?.text == words }?.id
+        if words.isEmpty { return p.ownQueuedRuns.last?.id }
+        return p.ownQueuedRuns.last { run in run.userMessageId.flatMap { m in p.messages.first { $0.id == m } }?.text == words }?.id
     }
 
     /// Where a delivered message stands now.

@@ -704,6 +704,12 @@ struct T3Projection: T3Decodable, Equatable, Sendable {
     var pullRequests: [T3PullRequest] { thread.pullRequests }
     var pendingRequests: [T3RuntimeRequest] { runtimeRequests.filter(\.isPending) }
     var queuedRuns: [T3Run] { runs.filter(\.isQueued).sorted { ($0.queuePosition ?? 0) < ($1.queuePosition ?? 0) } }
+    /// The queued runs that carry your own words: the run's message is `createdBy: "user"` (sent from T3's composer, the
+    /// phone, or Fjord). T3's own queued messages are `createdBy: "agent"` (a delegated task's completion, with
+    /// `delegatedCompletion`; a provider's notification; an idle `/compact`), as T3's `latestUserAuthoredMessageAt` reads it.
+    var ownQueuedRuns: [T3Run] {
+        queuedRuns.filter { run in run.userMessageId.flatMap { m in messages.first { $0.id == m } }?.createdBy == "user" }
+    }
     var activeRun: T3Run? { runs.last(where: { $0.status.isLive && !$0.isQueued }) }
     /// Capabilities of the newest attached session; nil until a first run attaches one (S1 #3).
     var capabilities: T3ProviderSession.Capabilities? { providerSessions.last?.capabilities }
