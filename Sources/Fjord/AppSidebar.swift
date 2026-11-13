@@ -272,7 +272,7 @@ struct AppSidebar: View {
     }
 }
 
-/// The Router's row, with how many of the brief's entries need you: the count read here, so the brief changing redraws
+/// The Router's row, with how many of the Router's lines need you: the count read here, so the page changing redraws
 /// this row and not the whole sidebar.
 private struct RouterSidebarRow: View {
     let store: Store

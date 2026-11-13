@@ -10,7 +10,7 @@ struct RouterCapabilitiesTests {
     @Test func theRunHasNoCardOrSessionTools() {
         let tools = RouterCapability.toolNames(.changeFjord, triage: true)
         for gone in ["mark_seen", "archive_cards", "reopen_card", "mute_project", "stop_session"] { #expect(!tools.contains(gone), "\(gone)") }
-        // The Brief (the role says it is read through `board`) is readable in a change run too, as in a question run.
+        // The Router page (the role says it is read through `board`) is readable in a change run too, as in a question run.
         #expect(tools.contains("board"))
         let specs = Set(RouterTools.specs.compactMap { $0["name"] as? String })
         for gone in ["mark_seen", "archive_cards", "reopen_card", "mute_project", "stop_session"] { #expect(!specs.contains(gone), "\(gone)") }
@@ -29,7 +29,7 @@ struct RouterCapabilitiesTests {
             }
             #expect(change.contains("Triage's inbox categories") == triage)
             let question = RouterRun.role(.question, triage: triage)
-            #expect(question.contains("the brief's entries, working sessions, the Brief, settings") && question.contains("the inbox, categories") == triage)
+            #expect(question.contains("the Router page's lines, working sessions, settings") && question.contains("the inbox, categories") == triage)
         }
         #expect(FjordTools.triageNames == RouterCapability.triageToolNames && FjordTools.triageNames.contains("mark_entries"))
     }
@@ -59,7 +59,7 @@ struct RouterCapabilitiesTests {
     @Test func roleNamesWhatTheRouterCanDo() {
         for intent in RouterRun.Intent.allCases {
             let on = RouterRun.role(intent, triage: true), off = RouterRun.role(intent, triage: false)
-            #expect(on.contains("The Brief is the short written summary") && off.contains("The Brief is the short written summary"))
+            #expect(on.contains("The Router page lists every thread") && off.contains("The Router page lists every thread"))
             #expect(on.contains("`mark_entries`") && !off.contains("`mark_entries`"))
         }
     }

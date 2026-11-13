@@ -185,7 +185,7 @@ final class PaletteModel {
     var navigationSelection: AppDestination { navigator.selection }
 
     /// What the sources are made of, as numbers that move when it does: the store's revisions (the inbox and its categories,
-    /// the brief's entries, Claude's sessions and agents, the actions' runs, the snippets, the project folders), the Router's
+    /// the Router's lines, Claude's sessions and agents, the actions' runs, the snippets, the project folders), the Router's
     /// and the tools' switches, whether the Router can send. Cheap, so the view can watch it.
     struct Stamp: Equatable {
         var inbox: Int, display: Int, router: Int, corpus: Int

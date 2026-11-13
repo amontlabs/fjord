@@ -12,7 +12,7 @@ enum RouterAgent {
 
 // MARK: - What a run is told
 
-/// The state a run starts from, as plain lines: what needs you (the brief's entries), what works now, the last decisions,
+/// The state a run starts from, as plain lines: what needs you (the Router page's Needs-you lines), what works now, the last decisions,
 /// then the message. Pure, so the context is tested as text.
 struct RouterRunContext: Equatable {
     struct Entry: Equatable {
@@ -44,7 +44,7 @@ struct RouterRunContext: Equatable {
     /// bounded; only the user's message, after the block, asks for anything.
     func text() -> String {
         func clean(_ text: String, _ limit: Int) -> String { UntrustedText.clean(text, limit: limit) }
-        var lines: [String] = ["What needs the user (the brief's entries):"]
+        var lines: [String] = ["What needs the user (the Router page's Needs-you lines):"]
         lines += entries.isEmpty ? ["- none"] : entries.map {
             "- [\($0.kind)] “\(clean($0.title, 120))” (\(clean($0.project, 80))): \(clean($0.question, 160)) "
                 + "(thread \(clean($0.thread, 120)))"

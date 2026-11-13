@@ -36,16 +36,16 @@ extension RouterCapability {
               roleSentence: "Triage's inbox things are GitHub PRs, issues and workflows: you mark those with `mark_entries` (`archived` archives "
                   + "them; also seen, unread, restore).",
               needsTriage: true, scope: "Triage's inbox (what is archived or seen)"),
-        // The brief and its entries are read before a change too ("the docs thread" is named by what the board shows).
+        // The page and its lines are read before a change too ("the docs thread" is named by what the board shows).
         .init(id: "change-board", intent: .changeFjord, tools: ["board"], roleSentence: nil),
         .init(id: "change-threads", intent: .changeFjord, tools: ["search_threads", "read_thread"], roleSentence: nil),
         .init(id: "answer-entry", intent: .changeFjord, tools: ["answer"],
               roleSentence: "What waits on the user is the board's entries: when the user's message gives the answer to one, you "
-                  + "answer it with `answer` (one of its options, or the user's words), as the brief's own buttons do.",
-              scope: "the answers to the brief's entries"),
+                  + "answer it with `answer` (one of its options, or the user's words), as the Router page's own options do.",
+              scope: "the answers to the Router page's Needs-you lines"),
         .init(id: "question-board", intent: .question, tools: ["board", "get_settings"],
-              roleSentence: "The Brief is the short written summary of what needs the user, per project: you can read it through `board`.",
-              reads: "the brief's entries, working sessions, the Brief, settings"),
+              roleSentence: "The Router page lists every thread in one line, by state (Needs you, Done, Working): you can read it through `board`.",
+              reads: "the Router page's lines, working sessions, settings"),
         .init(id: "question-threads", intent: .question, tools: ["search_threads", "read_thread"],
               roleSentence: "What the agents did is in T3's threads, whatever their provider: `search_threads` finds them by what was said "
                   + "and `read_thread` reads a thread's latest messages. Both only read.",

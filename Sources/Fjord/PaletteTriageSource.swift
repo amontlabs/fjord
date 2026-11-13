@@ -11,7 +11,7 @@ import SwiftUI
 /// action runs, as it is then).
 @MainActor
 enum PaletteTriageSource {
-    /// How many Triage items the empty palette's "Needs you" lists, after the brief's entries.
+    /// How many Triage items the empty palette's "Needs you" lists, after the Router's lines.
     static let needsYouLimit = 5
 
     static func make(_ context: PaletteContext) -> PaletteSourceOutput {

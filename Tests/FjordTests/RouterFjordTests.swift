@@ -1063,8 +1063,8 @@ import Testing
     @Test func theRolesNameWhatTheRouterCanMarkAndDropTriageWhenItIsOff() {
         for intent in RouterRun.Intent.allCases {
             let on = RouterRun.role(intent), off = RouterRun.role(intent, triage: false)
-            #expect(!on.contains("mark_seen") && on.contains("mark_entries") && on.contains("Brief"), "\(intent)")
-            #expect(!off.contains("mark_seen") && off.contains("Brief") && !off.contains("mark_entries") && !off.contains("Triage"), "\(intent)")
+            #expect(!on.contains("mark_seen") && on.contains("mark_entries") && on.contains("Router page"), "\(intent)")
+            #expect(!off.contains("mark_seen") && off.contains("Router page") && !off.contains("mark_entries") && !off.contains("Triage"), "\(intent)")
             #expect(on.contains("<session-content>") && on.contains("<github-content>"), "\(intent)")
         }
     }
