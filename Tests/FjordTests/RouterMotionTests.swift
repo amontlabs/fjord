@@ -26,6 +26,10 @@ import Testing
          "the rail badge's timing: an opacity only, in after the labels have gone"),
         ("Playground.swift", ".animation(.easeOut(duration: 0.2), value: hub.toast)",
          "the playground's own toast, a development tool"),
+        ("RouterHostedLine.swift", "RouterGlides.animation(glide.curve",
+         "a Core Animation glide on a curve already resolved for Reduce Motion (`RouterCurve.curve(reduce:)`)"),
+        ("RouterModel.swift", "withAnimation(curve.animation)",
+         "the line move's curve, resolved for Reduce Motion the line before (`RouterCurve.lineMove.curve(reduce:)`)"),
     ]
 
     /// Unresolved for Reduce Motion: the call neither resolves its animation there, nor checks the flag, nor passes one
@@ -65,7 +69,7 @@ import Testing
 
     @Test func everyAnimationHonoursReduceMotion() throws {
         let files = try Self.swiftFiles()
-        #expect(files.contains("RouterBriefView.swift") && files.contains("Motion.swift"))
+        #expect(files.contains("RouterPage.swift") && files.contains("Motion.swift"))
         var found: [String] = []
         var used = Set<Int>()
         for file in files {
