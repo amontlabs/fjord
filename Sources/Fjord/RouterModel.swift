@@ -74,6 +74,9 @@ enum RouterDestination: Equatable {
     var laid: [RouterHit: CGRect] = [:]
     var rows: [RouterHit: String] = [:]
     var origins: [String: CGPoint] = [:]
+    /// A block's rows under its card are laid out in a hosting view of their own (`RouterBlockTail`): its row, its line
+    /// and how far down the line it starts.
+    var tails: [String: (line: String, top: CGFloat)] = [:]
     var off: Set<RouterHit> = []
     /// The view that holds each hit now (`RouterTargetModifier`).
     var owners: [RouterHit: UUID] = [:]
@@ -85,8 +88,11 @@ enum RouterDestination: Equatable {
         out.reserveCapacity(laid.count)
         for (hit, frame) in laid where !off.contains(hit) {
             if let row = rows[hit] {
-                guard let origin = origins[row] else { continue }
-                out[hit] = frame.offsetBy(dx: origin.x, dy: origin.y)
+                if let origin = origins[row] {
+                    out[hit] = frame.offsetBy(dx: origin.x, dy: origin.y)
+                } else if let tail = tails[row], let origin = origins[tail.line] {
+                    out[hit] = frame.offsetBy(dx: origin.x, dy: origin.y + tail.top)
+                }
             } else {
                 out[hit] = frame
             }
@@ -1179,8 +1185,14 @@ final class RouterModel {
 
     private func selectionChanged(from old: RouterSelection?) {
         if focus != nil { focus = nil }
-        if case .line(let id)? = old { boxes[id]?.selected = false; boxes[id]?.item = nil }
+        // A block's card keeps its row while it rolls shut, and after: the block's rows stay split where they were
+        // (`RouterBlockLayout.cut`), so none hops between the line's two hosting views as the card goes.
+        if case .line(let id)? = old, let box = boxes[id] {
+            box.selected = false
+            if !box.block { box.item = nil }
+        }
         if case .line(let id)? = selection, let box = boxes[id] {
+            box.item = focus
             box.selected = true
             box.built = true
         }

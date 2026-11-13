@@ -35,7 +35,8 @@ struct RouterHostedLine: View {
         let card = box.cardHeight
         let rest = box.rowHeight + box.queuedHeight + box.tailHeight
         let height: CGFloat? = box.rowHeight > 0 ? rest + (open ? card : 0) : nil
-        RouterLineHost(model: model, box: box, slot: slot, setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival))
+        RouterLineHost(model: model, box: box, slot: slot, block: box.block,
+                       setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival))
             .frame(height: height, alignment: .top)
             .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Router.space)).origin } action: { [model, id = box.id] in
                 model.targets.origins[id] = $0
@@ -98,6 +99,14 @@ final class RouterGlides {
             rect.origin.y -= shift
             guard visible.contains(rect) else { continue }
             out[id] = CGRect(x: rect.minX, y: content.bounds.height - rect.maxY, width: rect.width, height: rect.height)
+            // A block's rows under its card, drawn on a layer of their own: a row of the frames too.
+            if let slot = view as? RouterLineSlotView, let tail = slot.tailDrawn {
+                var t = view.convert(tail, to: nil)
+                t.origin.y -= shift
+                if visible.contains(t) {
+                    out[RouterBlockLayout.tailRow(id)] = CGRect(x: t.minX, y: content.bounds.height - t.maxY, width: t.width, height: t.height)
+                }
+            }
         }
         return out
     }
@@ -242,7 +251,7 @@ class RouterGlideView: NSView {
     }
 
     /// Runs its work when the animation it is the delegate of stops (ended, or taken off with its layer).
-    private final class Landing: NSObject, CAAnimationDelegate {
+    final class Landing: NSObject, CAAnimationDelegate {
         let land: () -> Void
         init(_ land: @escaping () -> Void) { self.land = land }
         func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
@@ -290,7 +299,8 @@ struct RouterLineRoot: View {
 typealias RouterLineHosting = NSHostingView<RouterLineRoot>
 
 /// What the list places: the line's hosting view at its top, as tall as the slot, or taller while the line's card rolls
-/// shut (the card is still drawn below the slot's new bottom until its roll has ended: `box.built`). Nothing clips it.
+/// shut (the card is still drawn below the slot's new bottom until its roll has ended: `box.built`). A block's rows under
+/// its card are in a second hosting view (`tail`), on a layer of their own.
 final class RouterLineSlotView: RouterGlideView {
     let hosting: RouterLineHosting
     let box: RouterLineBox
@@ -298,13 +308,30 @@ final class RouterLineSlotView: RouterGlideView {
     private var held: CGFloat = 0
     /// The hosting view's height: room for the line and any card under it (`fit`).
     private var room = RouterLineSlotView.roomStep
-    /// What the hosting view shows: down to the slot's bottom (`clip`).
+    /// What the hosting view shows: down to the slot's bottom (`clip`), or in a block down to the rows under the card.
     private let mask = CALayer()
     /// The mask's height as last set, for the roll from it.
     private var clipped: CGFloat?
     static let roomStep: CGFloat = 2400
     /// The room the hosting view has above and below the slot: the veil of a line in flight fades out past its row.
     static let overflow = Router.Surface.veilOut
+
+    /// A block's rows under its card (`RouterBlockTail`), in their own hosting view, inside `tailBox`, which shows them
+    /// down to the slot's bottom (`tailMask`).
+    private var tail: NSHostingView<RouterBlockTailRoot>?
+    private var tailBox: NSView?
+    private let tailMask = CALayer()
+    private var tailClipped: CGFloat?
+    /// The tail mask's last roll, with the slot (`fitTail`) or with the tail (`placeTail`, "roll-tail-"): its glide's
+    /// generation and key.
+    private var tailRoll: (generation: Int, key: String)?
+    /// Where the card's place is in the line, as last laid out (`placeTail`): the rows under it start at `place.top`.
+    private var cardPlace: RouterCardPlace?
+    /// The first row under the card as last placed: the same row, the tail glides from where it was; another (the card
+    /// moved to another row), from where the card's bottom was.
+    private var under: String?
+    /// The block's card's last shut roll: when it lands and the line is still unselected, the card's body goes.
+    private var shut = 0
 
     init(hosting: RouterLineHosting, box: RouterLineBox) {
         self.hosting = hosting
@@ -313,12 +340,13 @@ final class RouterLineSlotView: RouterGlideView {
         wantsLayer = true
         addSubview(hosting)
         line = box.id
+        box.slot = self
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    // Its hosting view follows its size at once: nothing else lays it out (`RouterGlideView`).
+    // Its hosting views follow its size at once: nothing else lays them out (`RouterGlideView`).
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         fit()
@@ -344,6 +372,7 @@ final class RouterLineSlotView: RouterGlideView {
         if hosting.frame != frame {
             hosting.frame = frame
         }
+        fitTail()
         clip()
     }
 
@@ -351,7 +380,7 @@ final class RouterLineSlotView: RouterGlideView {
     /// three frames behind the rows' glides on Core Animation, and as a card shut the line rising under it covered its
     /// last lines. The slot's bottom moves on Core Animation instead, on the glides' own curve, so what shows of a card
     /// shutting (or opening, or growing) is always what the rows around it leave. A line in flight isn't masked (its veil
-    /// reaches past its row).
+    /// reaches past its row). In a block, the mask ends where the rows under the card start (`placeTail` rolls it).
     private func clip() {
         guard let host = hosting.layer else { return }
         guard !box.moving else {
@@ -369,7 +398,8 @@ final class RouterLineSlotView: RouterGlideView {
         // above the slot is the veil's.
         let down = hosting.isFlipped
         let o = Self.overflow
-        let height = bounds.height + o
+        let blockTop = tail != nil ? cardPlace?.top : nil
+        let height = (blockTop ?? bounds.height) + o
         let width = bounds.width
         mask.anchorPoint = CGPoint(x: 0, y: down ? 0 : 1)
         mask.position = CGPoint(x: 0, y: down ? 0 : host.bounds.height)
@@ -377,11 +407,159 @@ final class RouterLineSlotView: RouterGlideView {
         // Its bottom corners the selected ground's, so the ground keeps its shape through the roll.
         mask.cornerRadius = box.selected || box.built ? Router.Line.selectedRadius : 0
         mask.maskedCorners = down ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        if let was = clipped, was != height, let glide = glides?.current,
+        // In a block the roll is `placeTail`'s, from where the rows under the card were drawn.
+        if blockTop == nil, let was = clipped, was != height, let glide = glides?.current,
            let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height) {
             mask.add(animation, forKey: "roll-\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))")
         }
         clipped = height
+    }
+
+    /// The block's rows under the card start at `top` in the line, the card's place at `head` (the rows above it end
+    /// there). Called from the line's own layout, in the update that moved them. The tail is placed there at once and
+    /// glides from where it was drawn, on the change's curve, and the line's mask ends where the tail is drawn, on the
+    /// same curve: the card shutting, opening or moving to another row is cut where the rows under it are, and those
+    /// rows and the lines under the block (`RouterGlides`) move together. The same first row under the card: it glides
+    /// from its last place. Another (the card moved to another row): from where the last card's bottom was, so the
+    /// rows under the card keep their distance to the rows above it as the card changes size.
+    func placeTail(head: CGFloat, top: CGFloat) {
+        let made = makeTail()
+        let first = RouterBlockLayout.firstUnder(box)
+        let card = top - head
+        var from: CGFloat = 0
+        if !made, let was = cardPlace {
+            from = first == under ? was.top - top : (was.top - was.head) - card
+        }
+        cardPlace = RouterCardPlace(head: head, top: top)
+        under = first
+        fitTail()
+        clip()
+        var rolled = false
+        if from != 0, let glide = glides?.current, let tail, let layer = tail.layer {
+            let key = "\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))"
+            if let animation = RouterGlides.animation(glide.curve, keyPath: "transform.translation.y", from: from * Self.down(of: tail)) {
+                layer.add(animation, forKey: "glide-" + key)
+            }
+            // The slot's height changed before this change's glide began (an item's card shut by a second click): its
+            // mask had no roll, and the tail gliding up from below was cut at the slot's new bottom, the row under the
+            // card missing for the glide. The mask then rolls with the tail, unless it rolled with the slot already
+            // (`fitTail`, whose roll replaces this one when the slot changes after it).
+            if tailRoll?.generation != glide.generation, tailBox?.layer?.mask === tailMask,
+               let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from) {
+                tailMask.add(animation, forKey: "roll-tail-" + key)
+                tailRoll = (glide.generation, "roll-tail-" + key)
+            }
+            if hosting.layer?.mask === mask,
+               let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from) {
+                mask.add(animation, forKey: "roll-" + key)
+                rolled = true
+                if card == 0, box.built, !box.selected {
+                    // Shut: the card's body goes once the roll has landed, if the line wasn't opened again meanwhile.
+                    shut &+= 1
+                    let mine = shut
+                    let landing = CABasicAnimation(keyPath: "opacity")
+                    landing.fromValue = 0
+                    landing.toValue = 0
+                    landing.isAdditive = true
+                    landing.duration = RouterGlides.landing(glide.curve)
+                    landing.delegate = Landing { [weak self] in self?.shutLanded(mine) }
+                    mask.add(landing, forKey: "shut-" + key)
+                }
+            }
+        }
+        if !rolled, card == 0, box.built, !box.selected {
+            shut &+= 1
+            let mine = shut
+            DispatchQueue.main.async { [weak self] in self?.shutLanded(mine) }
+        }
+    }
+
+    private func shutLanded(_ roll: Int) {
+        guard roll == shut, !box.selected, box.built else { return }
+        box.built = false
+    }
+
+    /// The tail's hosting view, made the first time the line is a block. True when it was made now.
+    @discardableResult func makeTail() -> Bool {
+        guard tail == nil else { return false }
+        let root = hosting.rootView
+        let tail = NSHostingView(rootView: RouterBlockTailRoot(model: root.model, box: box, setup: root.setup))
+        tail.sizingOptions = []
+        tail.safeAreaRegions = []
+        let holder = FlippedView()
+        holder.wantsLayer = true
+        holder.addSubview(tail)
+        addSubview(holder)
+        tailMask.backgroundColor = CGColor(gray: 0, alpha: 1)
+        tailMask.actions = ["bounds": NSNull(), "position": NSNull(), "anchorPoint": NSNull()]
+        holder.layer?.mask = tailMask
+        tailClipped = nil
+        self.tail = tail
+        tailBox = holder
+        fitTail()
+        return true
+    }
+
+    /// The line is no longer a block: the tail goes.
+    func dropTail() {
+        guard let tailBox else { return }
+        tailBox.removeFromSuperview()
+        tail = nil
+        self.tailBox = nil
+        cardPlace = nil
+        under = nil
+        box.tailHeight = 0
+        hosting.rootView.model.targets.tails[RouterBlockLayout.tailRow(box.id)] = nil
+        clipped = nil
+        clip()
+    }
+
+    /// The line's environment changed: the tail's root takes it too.
+    func setTail(_ setup: RouterLineSetup, model: RouterModel) {
+        guard let tail, tail.rootView.setup != setup || tail.rootView.model !== model else { return }
+        tail.rootView = RouterBlockTailRoot(model: model, box: box, setup: setup)
+    }
+
+    /// The tail at the card's bottom, as wide as the slot; its box down to the slot's bottom, which rolls on the glides'
+    /// curve as the line's mask did before (the lines under the block glide on it).
+    private func fitTail() {
+        guard let tail, let tailBox, let layer = tailBox.layer else { return }
+        let width = bounds.width
+        let top = cardPlace?.top ?? box.rowHeight
+        let boxFrame = CGRect(x: 0, y: 0, width: width, height: room)
+        if tailBox.frame != boxFrame { tailBox.frame = boxFrame }
+        let frame = CGRect(x: 0, y: top, width: width, height: max(0, room - top))
+        if tail.frame != frame { tail.frame = frame }
+        if box.moving {
+            if layer.mask != nil { layer.mask = nil }
+            tailClipped = nil
+            return
+        }
+        if layer.mask !== tailMask { layer.mask = tailMask; tailClipped = nil }
+        let height = bounds.height
+        let down = tailBox.isFlipped
+        tailMask.anchorPoint = CGPoint(x: 0, y: down ? 0 : 1)
+        tailMask.position = CGPoint(x: 0, y: down ? 0 : layer.bounds.height)
+        tailMask.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        if let was = tailClipped, was != height, let glide = glides?.current,
+           let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height) {
+            let key = "roll-\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))"
+            if let roll = tailRoll, roll.generation == glide.generation, roll.key.hasPrefix("roll-tail-") {
+                tailMask.removeAnimation(forKey: roll.key)
+            }
+            tailMask.add(animation, forKey: key)
+            tailRoll = (glide.generation, key)
+        }
+        tailClipped = height
+        // Its rows are pointed at by the line's origin, moved down to the tail's top.
+        hosting.rootView.model.targets.tails[RouterBlockLayout.tailRow(box.id)] = (box.id, top)
+    }
+
+    /// Where the tail is drawn now (its glide included), in this view's space, for the frames (`RouterGlides.drawn`).
+    var tailDrawn: CGRect? {
+        guard let tail, box.tailHeight > 0 else { return nil }
+        let shift = (tail.layer?.presentation()?.transform.m42 ?? 0) * Self.down(of: tail)
+        return CGRect(x: 0, y: tail.frame.minY + shift, width: bounds.width, height: box.tailHeight)
     }
 
     // The overflow is drawn, never hit: only the slot can be pointed at.
@@ -389,12 +567,23 @@ final class RouterLineSlotView: RouterGlideView {
         guard frame.contains(point) else { return nil }
         return super.hitTest(point)
     }
+
+    private final class FlippedView: NSView {
+        override var isFlipped: Bool { true }
+        // Only its tail's rows are hit, not the room under them.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let hit = super.hitTest(point)
+            return hit === self ? nil : hit
+        }
+    }
 }
 
 private struct RouterLineHost: NSViewRepresentable {
     let model: RouterModel
     let box: RouterLineBox
     let slot: String
+    /// The line is a block: its rows under the card have a hosting view of their own.
+    let block: Bool
     let setup: RouterLineSetup
 
     final class Coordinator {
@@ -422,6 +611,12 @@ private struct RouterLineHost: NSViewRepresentable {
         let root = view.hosting.rootView
         if root.box !== box || root.model !== model || root.setup != setup {
             view.hosting.rootView = RouterLineRoot(model: model, box: box, setup: setup)
+        }
+        if !block {
+            view.dropTail()
+        } else {
+            view.makeTail()
+            view.setTail(setup, model: model)
         }
         view.fit()
     }

@@ -189,8 +189,8 @@ from the end once.
 Each finding has a test that reproduces it (`RouterItemLedgersTests`, `RouterItemsTests`, `RouterVerdictsTests`,
 `RouterReviewFixesTests`). Fixed: 1.1 and 2.2 (one change: messages by T3's id, each listed), 1.2, 1.3, 1.4, 1.5, 1.6,
 1.7, 1.8 and 1.9 (one change: Done kept in the file), 1.10, 2.1, 3.1, 3.2, 3.3, 5.1, 5.2, and every leftover in 6.
-Not done: the empty band under a block for the glide's length after a send shuts its card. Letting the card's place and
-the rows under it roll on SwiftUI's spatial curve took the band away but drew the shutting card over its own rows (the
-roll is two or three frames behind the slot's Core Animation mask); the rows under a block's card need their own layer on
-Core Animation to glide with the slot. Held-out eval after the fixes: precision 0.96, recall 0.99, no duplicates
+Also fixed since: the empty band under a block for the glide's length after a send shuts its card. The rows under a
+block's card are in a hosting view of their own (`RouterBlockTail.swift`) that glides on Core Animation with the line's
+mask and the lines under the block (`RouterLineSlotView.placeTail`); `scripts/router-bands-check.py` finds bare bands in
+`--frames`. Held-out eval after the fixes: precision 0.96, recall 0.99, no duplicates
 (EVAL-items.md).

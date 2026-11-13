@@ -32,8 +32,14 @@ final class RouterLineBox {
     var marked = false
     /// Its card has a body: from its opening until its closing roll has ended.
     var built = false
-    /// In a block: the item whose card is open (nil: the header's).
+    /// In a block: the item whose card is open (nil: the header's). Kept once the card shuts, so the rows split where they
+    /// were while it rolls shut and after (`RouterBlockLayout.cut`); the next selection sets it again.
     var item: String?
+    /// Two or more open items: a header and a row per item (`RouterLedger.block`). Stored, so what only needs to know reads
+    /// this and not the record.
+    private(set) var block: Bool
+    /// The line's slot view, for the block's rows under its card, on a layer of their own (`RouterLineSlotView.placeTail`).
+    @ObservationIgnored weak var slot: RouterLineSlotView?
     /// A block's rows under the open card, as laid out (0 when it isn't a block).
     var tailHeight: CGFloat = 0
     /// What the line's height follows besides those flags, for the list's slot (`RouterHostedLine`): words queued
@@ -57,6 +63,7 @@ final class RouterLineBox {
         writing = thread.writing
         talking = !thread.lastLines.isEmpty || thread.writing
         queued = thread.queued != nil
+        block = thread.ledger.block
     }
 
     private static let blank = RouterThread.Sentence(text: "")
@@ -95,6 +102,7 @@ final class RouterLineBox {
         let talks = !t.lastLines.isEmpty || t.writing
         if talks != talking { talking = talks }
         if (t.queued != nil) != queued { queued = t.queued != nil }
+        if t.ledger.block != block { block = t.ledger.block }
         return RouterModel.OrderKey(old) != RouterModel.OrderKey(t)
     }
 }
