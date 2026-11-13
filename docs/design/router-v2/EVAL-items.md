@@ -42,6 +42,8 @@ Held-out set (n = 45, 234 reads each):
 | Sonnet, v1 | 135 | 0.90 | 2 | 0.98 | 14 | 0 | 37 | 49 | 0 | 14 | 1 | 4.6 / 6.5 s |
 | **Sonnet, v2** | 160 | **0.93** | 1 | **0.99** | 11 | 0 | 37 | 57 | 1 | 12 | 2 | 4.6 / 7.0 s |
 
+| Sonnet, v2, after REVIEW-items fixes (2026-11-13, the app's inputs re-dumped: identical) | 156 | **0.96** | 1 | 0.99 | 6 | 0 | 37 | 60 | 2 | 13 | 1 | 4.0 / 5.9 s |
+
 (The machine was busy with other agents; p50s are pessimistic, and two configs running at once share it.)
 
 - **Model: Sonnet.** Haiku finds items as well (precision 0.93, recall 0.95) but misses twice the closes (14 against 7:

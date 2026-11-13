@@ -183,3 +183,14 @@ from the end once.
 - `ThreadNotices.step` and the `step:` key prefix, and `RouterNotifier`'s header, still say "the verdict found a step".
 - Items reads open signposts named "Verdict state" and "Verdict done" (`RouterVerdicts.swift:274-277`), which mixes
   them into the verdict gates' timings.
+
+## Status (2026-11-13, after the fixes)
+
+Each finding has a test that reproduces it (`RouterItemLedgersTests`, `RouterItemsTests`, `RouterVerdictsTests`,
+`RouterReviewFixesTests`). Fixed: 1.1 and 2.2 (one change: messages by T3's id, each listed), 1.2, 1.3, 1.4, 1.5, 1.6,
+1.7, 1.8 and 1.9 (one change: Done kept in the file), 1.10, 2.1, 3.1, 3.2, 3.3, 5.1, 5.2, and every leftover in 6.
+Not done: the empty band under a block for the glide's length after a send shuts its card. Letting the card's place and
+the rows under it roll on SwiftUI's spatial curve took the band away but drew the shutting card over its own rows (the
+roll is two or three frames behind the slot's Core Animation mask); the rows under a block's card need their own layer on
+Core Animation to glide with the slot. Held-out eval after the fixes: precision 0.96, recall 0.99, no duplicates
+(EVAL-items.md).
