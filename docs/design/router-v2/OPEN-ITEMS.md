@@ -34,3 +34,7 @@ Real-app shots + a short recorded beat (send → sheen → resolve) for the owne
 Demo store only (`RouterDemoItems.swift`), not wired to real threads. Shots `v2-items`, `v2-items-card`,
 `v2-items-checking`, `v2-items-resolved` (light and `-dark`); storyboard beat 45 (`--router-v2-demo --beats 45`). The
 look is written down in DESIGN.md 1.15.
+
+## Wired (2026-11-13)
+Real threads now: `RouterItemLedgers` (the engine) through `RouterRecords`, Sonnet reads (`RouterItemsPrompt`), measured on
+real sequences in [EVAL-items.md](EVAL-items.md). The per-turn needs-you verdict is gone. DESIGN.md 1.15 "The engine".

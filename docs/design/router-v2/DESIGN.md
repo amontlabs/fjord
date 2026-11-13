@@ -576,8 +576,10 @@ Needs-you count and disappears at 0.
 
 ### 1.15 Open items (R7)
 
-**R7** (2026-11-13, owner-approved, [OPEN-ITEMS.md](OPEN-ITEMS.md); `RouterItems.swift`, `RouterDemoItems.swift`, shots
-`v2-items`, `v2-items-card`, `v2-items-checking`, `v2-items-resolved`, beat 45). A thread keeps a ledger of what is open with
+**R7** (2026-11-13, owner-approved, [OPEN-ITEMS.md](OPEN-ITEMS.md); `RouterItems.swift`, `RouterItemLedgers.swift`,
+`RouterDemoItems.swift`, shots `v2-items`, `v2-items-card`, `v2-items-checking`, `v2-items-resolved`, `v2-items-hover`,
+beat 45). A running block's working peek hangs under the whole block (over it in the page's lower half), never over its
+items. A thread keeps a ledger of what is open with
 you (`RouterThread.ledger`): items of four kinds, each with an id, a sentence, an age, options if any, and a state (open,
 checking, closing with how, new).
 
@@ -610,10 +612,23 @@ checking, closing with how, new).
   `Text.secondary`: "answered by your message", "done by the agent", "no longer open"), its kind faded, for 1.6 s, then
   goes; a new item comes in on its kind's 12 % ground, which fades; a merged item stays and its age resets; the rest
   stop sheening.
+- **The engine** (`RouterItemLedgers`, `RouterItemsPrompt`, EVAL-items.md). One read per input, in order, one at a time
+  per thread: every turn the agent ends (Done or Stopped; a run that is no longer the latest is read too, so a turn woken
+  at once by a background task's end is never lost, and a run starting again never cancels a read) and every message of
+  yours (sent here: read at once with its words; from T3's composer or the phone: read when T3 stamps it; not read when
+  nothing is open, nor when a turn after it is waiting to be read). Each input is read once, keyed by its id (`turn:<run>`,
+  `msg:<ms>`); its facts come from one projection read (or the one held). The read sees the open items with their ids and
+  ages and the input (the turn's reply, what started or woke it, the PRs; or your words and the reply they answer), and
+  says per item keep or close with how (answered, done, obsolete), then what is found: new, or the same as an open item
+  (merged: its words and age new, no duplicate), then the turn's line (Done's sentence). Sonnet, effort low, streamed:
+  closes strike as soon as their field is whole, found items land, the line streams. The ledger is kept per thread in the
+  verdict file (version 3), cleared when T3 says the thread is settled. A new Stuck, Decide or Do item is told once as a
+  banner. No legacy: a finished turn has no verdict of its own.
 - **Motion.** Inside a block, rows are placed at once and come and go with a short fade (0.12 s out, 0.2 s in); the
   block's height changes, and the lines under it glide, on Core Animation (`RouterGlides`). A SwiftUI glide inside the
   block drew rows outside the slot's mask, and an item's kind apart from its words, for a few frames. A shutting card
-  between a block's rows goes at once.
+  between a block's rows goes at once, with its ground. Your words to a block leave it where it is (no flight), so the
+  next card opens at once.
 
 ## 2. Thread state model
 
@@ -625,17 +640,15 @@ id, PR states, your last message to it).
 | State | Set by | When | Leaves when |
 |---|---|---|---|
 | Needs you (question, form, plan, permission) | code, same frame | T3 request or plan appears | you answer, the request is withdrawn, Settle, Snooze |
-| Needs you (left you a step) | model | verdict on a finished turn says `needs_you` | new turn, your message, Doesn't need me, Settle, Snooze |
+| Needs you (an open Stuck, Decide or Do item) | model | **R7.** a read of a turn or of your words leaves one open (1.15) | the read that closes it, its Done, Settle, Snooze |
 | Stopped | code | **R3.** a run T3 failed (a provider or transport error, a usage limit with no resume). A failed test or build is a finished turn: Done, and the verdict may then flag it as "left you a step". An interrupt you asked for is Done ("stopped by you") | Continue, your message, Settle, Snooze |
 | Sent | code, at Return | you send or answer | T3 shows the run started → Working; failure → previous state |
 | Working | code | a run is active (also: paused at a limit with auto-resume) | the run and its background work end |
 | Done | code | last run ended with no request | new turn, Settle, Snooze, 24 h (then housekeeping) |
 | new dot | code | T3 `unseen` | its card opens here, or it is opened in T3. Never moves the thread, never changes a colour. **R3.** A card you open clears it at once; a card your own act advanced to clears it at your next key or pointer move |
 
-What the model writes, and nothing else: the short **name** (once, at the first verdict; later only if T3's title
-changes), the **line**, for a finished turn `needs_you` or `done`, for Done `look` or `quiet`, and for an ask it found,
-the **ask** and optional **options**. **R3.** The verdict keeps a result line beside an ask: "Doesn't need me" swaps the
-line to it. Icon, colour, section, counts, age, PR state words, options of T3 requests and
+What the model writes, and nothing else: the short **name** (once per T3 title), a T3 ask's **line**, and (**R7**) a
+thread's **open items** with a finished turn's **line** (1.15). A thread with an open Know is worth a look. Icon, colour, section, counts, age, PR state words, options of T3 requests and
 every state above marked "code" are never the model's.
 
 Order inside a section (stable, so nothing above your eyes moves):
