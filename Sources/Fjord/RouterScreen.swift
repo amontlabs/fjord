@@ -74,7 +74,7 @@ struct RouterScreen: View {
         VStack(spacing: 0) {
             topBar
             // The Router off, or Claude Code missing: one line under the title, with its button.
-            if let store, let text { RouterSetupNotice(store: store, model: text) }
+            if let store, let text { RouterSetupNotice(store: store, model: text, edges: edges) }
             RouterList(model: model, edges: edges)
             if let store, drawerOpen, !side {
                 RouterDrawer(store: store)

@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// What stands in the way of using the Router, in one line, and the fix. Nothing when all is well.
+/// What stands in the way of using the Router, in one line, and the fix, in the page's column. Nothing when all is well.
 struct RouterSetupNotice: View {
     let store: Store
     let model: RouterComposerModel
+    /// The page's column: the line starts and ends with the title, the headers and the names.
+    let edges: RouterEdges
     /// The view the notice is in, to know whether its window is on screen.
     @State private var place = ShownProbe.Place()
 
@@ -27,10 +29,11 @@ struct RouterSetupNotice: View {
                 Spacer(minLength: 0)
                 if let action { ActionButton(action, action: perform) }
             }
-            .padding(.horizontal, Theme.Space.xl)
             .padding(.vertical, Theme.Space.md)
             Hairline()
         }
+        .padding(.leading, edges.leading)
+        .padding(.trailing, edges.trailing)
         .background(ShownProbe(place: place))
         // Said once its window is on screen, a moment after: not while the window's content is prepared out of sight, nor
         // once it has left the window again (the task is cancelled then).
