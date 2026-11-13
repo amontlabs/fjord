@@ -77,6 +77,28 @@ import Testing
         #expect(model.focus == Item.smaller)
     }
 
+    /// Owner, 2026-11-13: a second click on an open item opened the block's header card. A click opens the row clicked,
+    /// and a second click on it closes it.
+    @Test func aClickOpensTheRowClickedAndASecondClickClosesIt() {
+        let model = model()
+        model.select(nil)
+        model.click(item: Item.keep, of: ID.checkpoint)
+        #expect(model.selection == .line(ID.checkpoint))
+        #expect(model.focus == Item.keep)
+        model.click(item: Item.keep, of: ID.checkpoint)
+        #expect(model.selection == nil)
+        #expect(model.focus == nil)
+        // Another item, then the header: each opens its own card.
+        model.click(item: Item.keep, of: ID.checkpoint)
+        model.click(item: Item.stuck, of: ID.checkpoint)
+        #expect(model.focus == Item.stuck)
+        model.click(row: ID.checkpoint)
+        #expect(model.selection == .line(ID.checkpoint))
+        #expect(model.focus == nil)
+        model.click(row: ID.checkpoint)
+        #expect(model.selection == nil)
+    }
+
     @Test func aPickOnAnItemsCardIsWhatReturnSends() {
         let model = model()
         model.select(.line(ID.checkpoint))

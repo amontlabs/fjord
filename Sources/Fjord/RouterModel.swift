@@ -611,8 +611,15 @@ final class RouterModel {
         revealer?(row)
     }
 
-    /// A click on a line's row: its card, or none if it was the open one.
-    func click(row id: String) { select(selection == .line(id) ? nil : .line(id)) }
+    /// A click on a line's row: its card, or none if it was the open one. A block's header while one of its items' cards
+    /// is open: the header's card, so a click always opens the row clicked.
+    func click(row id: String) {
+        if selection == .line(id), focus != nil {
+            focusItem(nil)
+        } else {
+            select(selection == .line(id) ? nil : .line(id))
+        }
+    }
 
     func step(down: Bool) {
         let rows = walkItems
@@ -638,10 +645,11 @@ final class RouterModel {
         animate(.spatial) { focus = item }
     }
 
-    /// A click on an item's line: its card, or the block's header card if it was the open one.
+    /// A click on an item's line: its card, or none if it was the open one (not the header's: a click never opens a row
+    /// other than the one clicked).
     func click(item: String, of id: String) {
         if selection == .line(id), focus == item {
-            focusItem(nil)
+            select(nil)
         } else {
             if selection != .line(id) { select(.line(id)) }
             focusItem(item)
