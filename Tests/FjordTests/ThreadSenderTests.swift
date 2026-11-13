@@ -78,7 +78,13 @@ import Testing
     }
 
     @Test func theNewestQueuedRunIsTheOneACancelTakesBack() {
-        let (s, _) = store(projection: projection(runs: [run("r2", status: "queued", message: "m2", position: 1), run("r3", status: "queued", message: "m3", position: 2)]))
+        // Your own queued runs only: r4's message is T3's (an agent's), queued last, and not yours to take back.
+        var agents = F.message("m4", text: "the background task finished")
+        if case .object(var o) = agents { o["createdBy"] = "agent"; agents = .object(o) }
+        let runs = [run("r2", status: "queued", message: "m2", position: 1), run("r3", status: "queued", message: "m3", position: 2),
+                    run("r4", status: "queued", message: "m4", position: 3)]
+        let messages = [F.message("m2", text: "and the tests"), F.message("m3", text: "then the changelog"), agents]
+        let (s, _) = store(projection: projection(runs: runs, messages: messages))
         #expect(s.newestQueuedRun("t1") == "r3" && s.newestQueuedRun("nope") == nil)
     }
 
