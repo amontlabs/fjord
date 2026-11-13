@@ -441,7 +441,7 @@ extension RouterModel {
         let next: RouterSelection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
         // A thread with open items stays where its most urgent one puts it: your words show in its block, nothing moves,
         // and the next card opens at once (a line marked in flight held the card's words back for a flight that wasn't).
-        let stays = !t.ledger.live.isEmpty && t.state != .stopped
+        let stays = t.ledger.found.contains(where: \.live) && t.state != .stopped
         let change = {
             self.update(id) {
                 $0.state = .sent

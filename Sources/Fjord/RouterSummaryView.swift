@@ -72,10 +72,17 @@ struct RouterLayers {
     var facts: [RouterSummary.Fact] = []
 
     init(_ thread: RouterThread, _ item: RouterItem?) {
-        if let item {
+        // T3's request or the stop says what the thread's line said: the thread's own words and detail.
+        if let item, item.request == nil {
             sentence = item.sentence
             detail = item.extra.map(Detail.words)
             facts = item.summary.facts
+            return
+        }
+        // The header over a request: the thread's own words; the request's item says the rest.
+        if item == nil, thread.ledger.request != nil {
+            sentence = RouterBlockHeader.words(thread)
+            facts = thread.summary?.facts ?? []
             return
         }
         sentence = thread.sentence.text
@@ -278,11 +285,16 @@ private struct RouterSummaryCard: View {
             if !inBlock, RouterTimeline.has(thread) { RouterTimeline(model: model, thread: thread) }
             footer
         }
-        .padding(.leading, inBlock ? Router.Items.indent + M.hang : M.leading)
+        // Wide, every card of a block or line keeps to the right column (`Router.Wide`).
+        .padding(.leading, model.wide ? Router.Wide.start + (item != nil ? M.hang : 0) : inBlock ? Router.Items.indent + M.hang : M.leading)
         .padding(.trailing, M.trailing).padding(.bottom, M.bottom)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    /// The card answers T3's request or the stop: the request's item's card (the line's, for a thread whose record has
+    /// none, as in a test). The header's card over a request is the thread's: its words and history, not the request.
+    private var asks: Bool { item.map { $0.request != nil } ?? (thread.ledger.request == nil) }
 
     /// A working thread the Router's model has summed up: its history is what it says; the last turn's words aren't news.
     private var summarized: Bool { thread.state == .working && thread.work.current }
@@ -290,7 +302,7 @@ private struct RouterSummaryCard: View {
     // MARK: Source: the agent's own words, or what the ask is about
 
     @ViewBuilder private var source: some View {
-        if let item {
+        if let item, item.request == nil {
             // The agent's words behind the item; with nothing else of its own, its thread's last lines.
             let quote = item.quote ?? (item.extra == nil && item.options.isEmpty && !box.lastLines.isEmpty ? box.lastLines : nil)
             if let quote {
@@ -316,7 +328,7 @@ private struct RouterSummaryCard: View {
             .prose()
             .transition(.opacity)
         } else {
-            switch thread.state {
+            switch asks ? thread.state : .done {
             case .needsYou(.plan):
                 RouterPlan(model: model, thread: thread).prose()
             case .needsYou(.permission):
@@ -331,7 +343,7 @@ private struct RouterSummaryCard: View {
                     RouterLastLines(model: model, box: box).prose().padding(.leading, -M.railInset).transition(.opacity)
                 }
             }
-            if thread.state == .stopped, let step = thread.stop?.lastStep, !step.isEmpty {
+            if asks, thread.state == .stopped, let step = thread.stop?.lastStep, !step.isEmpty {
                 (Text("Last step: ") + Text(RouterInline.text(step, size: d.footnote.0)))
                     .cdsText(d.footnote, .regular, CDS.Text.muted)
             }
@@ -391,7 +403,7 @@ private struct RouterSummaryCard: View {
     // MARK: Controls: options, then the footer
 
     @ViewBuilder private var controls: some View {
-        if item == nil, thread.state == .stopped {
+        if asks, thread.state == .stopped {
             // T3 has no rerun: Continue sends its words for it, and the destination row shows them. It answers the
             // stop, so it sits with the controls, before the history.
             RouterPushButton(model: model, hit: .footer(thread.id, .rerun), title: Router.Copy.continueTitle, keys: ["enter"]) {
@@ -400,11 +412,11 @@ private struct RouterSummaryCard: View {
             // Its title on the column, its ground around it.
             .padding(.leading, -8)
         }
-        if let item {
+        if let item, item.request == nil {
             if !item.options.isEmpty {
                 RouterOptions(model: model, key: RouterModel.itemKey(thread.id, item.id), labels: item.options, from: 0)
             }
-        } else if case .needsYou(let request) = thread.state {
+        } else if asks, case .needsYou(let request) = thread.state {
             if !thread.live {
                 // A request T3 can no longer answer (IMPLEMENTATION.md 1.3): no options, Open in T3 in their place.
                 HStack(spacing: 10) {
@@ -460,15 +472,24 @@ private struct RouterSummaryCard: View {
     private var footer: some View {
         let id = thread.id
         return HStack(spacing: M.footerGap) {
-            if item == nil, thread.state == .needsYou(.form) {
+            if asks, thread.state == .needsYou(.form) {
                 Text(verbatim: "\(model.answeredCount(thread)) of \(thread.form.count) answered")
                     .cdsText(d.footnote, .regular, CDS.Text.muted).contentTransition(.numericText())
             }
             Spacer(minLength: 0)
-            if let item {
+            if let item, item.request == nil {
                 RouterTextButton(model: model, hit: .footer(RouterModel.itemKey(id, item.id), .settle), title: Router.Items.Copy.done,
                                  keys: ["cmd", "backspace"], removes: true) { model.itemDone(id, item.id) }
                 openButton
+            } else if let item {
+                // T3's request or the stop: its Done is the thread's Settle, off while T3 holds the thread.
+                if let why = model.holdReason(thread) {
+                    RouterHeldActs(why: why, acts: [Router.Items.Copy.done])
+                } else {
+                    RouterTextButton(model: model, hit: .footer(RouterModel.itemKey(id, item.id), .settle), title: Router.Items.Copy.done,
+                                     keys: ["cmd", "backspace"], removes: true) { model.itemDone(id, item.id) }
+                }
+                if thread.live { openButton }
             } else {
                 switch thread.state {
                 case .working:

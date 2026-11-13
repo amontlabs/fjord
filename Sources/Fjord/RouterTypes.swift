@@ -10,6 +10,35 @@ enum Router {
     /// The page's column, as the brief's.
     static let column: CGFloat = 720
     static let gutter: CGFloat = 32
+
+    /// The two-column layout (DESIGN.md 1.15.1, a look for approval): in a page whose column can be 1000 pt or more, a
+    /// thread's name, project and age take a left column and its own words and items the right one.
+    enum Wide {
+        /// The column's width from which it applies.
+        static let from: CGFloat = 1000
+        /// The column's widest then.
+        static let widest: CGFloat = 1120
+        /// The left column: the name (wrapping), then the project and the age.
+        static let name: CGFloat = 180
+        static let gap: CGFloat = 20
+        /// Where the right column starts, from the row's edge: a block's words, its items' marks, a line's sentence.
+        static let start: CGFloat = Line.nameLeading + name + gap
+        /// The thread's hairline down the right column's edge, in its colour.
+        static let rule: CGFloat = 1.5
+        static let ruleGap: CGFloat = 10
+        static let ruleOpacity: Double = 0.55
+        /// A header with no row of its own: the air over its first item.
+        static let headless: CGFloat = 4
+        /// Between the name and its project and age.
+        static let metaGap: CGFloat = 4
+
+        /// The page's column for a page `page` wide: 720, or as wide as the page allows (to `widest`) once that is
+        /// at least `from`.
+        static func column(page: CGFloat) -> CGFloat {
+            let room = page - 2 * gutter
+            return room >= from ? min(room, widest) : Router.column
+        }
+    }
     /// The page's coordinate space: the targets' frames are read in it (the peek's placement, the demo's pointer).
     static let space = "router-page"
 
@@ -454,11 +483,9 @@ extension RouterThread {
 
     var look: Look {
         switch state {
-        case .needsYou(.question), .needsYou(.form):
-            Look(symbol: "questionmark.circle.fill", tint: CDS.Text.warning, ground: true, label: "Asks you")
-        case .needsYou(.plan): Look(symbol: "list.bullet.clipboard.fill", tint: CDS.Text.warning, ground: true, label: "Plan to approve")
-        case .needsYou(.permission): Look(symbol: "lock.fill", tint: CDS.Text.warning, ground: true, label: "Waits for a permission")
-        case .stopped: Look(symbol: "exclamationmark.triangle.fill", tint: CDS.Text.danger, ground: true, label: "Stopped")
+        // Its request or its stop is its item (`RouterThread.requestItem`): the name takes that kind's mark and tint.
+        case .needsYou: RouterItem.Kind.decide.look
+        case .stopped: RouterItem.Kind.stuck.look
         case .sent: Look(symbol: "arrow.up.circle.fill", tint: CDS.Text.accent, ground: false, label: "Sent")
         case .working: Look(symbol: nil, tint: CDS.Text.muted, ground: false, label: "Working")
         // Being read: no check yet, it isn't known to be done with you.
@@ -614,6 +641,8 @@ struct RouterSend: Equatable {
     var part: String? = nil
 
     var place: RouterPlace { places[min(lit, places.count - 1)] }
+    /// The thread it goes to (nil: a new thread).
+    var threadID: String? { if case .thread(let id) = place { id } else { nil } }
 }
 
 /// What a target on the page will receive before Return: under its row, quiet, not yet sent.

@@ -27,9 +27,35 @@ import Testing
         #expect(t.section == .needsYou)
         #expect(t.ledger.block)
         #expect(t.ledger.top == .stuck)
-        // A real stop stays a stop.
+        // A real stop stays a stop: last in Needs you, its name in Stuck's colour.
         t.state = .stopped
-        #expect(t.look.label == "Stopped")
+        #expect(t.orderClass == .stopped)
+        #expect(t.look.label == "Stuck")
+    }
+
+    @Test func t3sRequestsAndStopsAreItemsOfTheirThread() {
+        let model = model()
+        // A question: the line with nothing of its own, the question its Decide row; selecting the thread opens that row.
+        guard let settings = model.thread(ID.settings), let ask = settings.ledger.request else { Issue.record("no request"); return }
+        #expect(ask.kind == .decide && ask.request == .ask(.question) && ask.sentence == settings.sentence.text)
+        #expect(settings.ledger.block && RouterBlockHeader.words(settings).isEmpty)
+        model.select(.line(ID.settings))
+        #expect(model.focus == RouterItem.requestID)
+        // Its options and Return are the thread's own, as T3 has them: no item of the reads' picks it.
+        #expect(model.selectedItem == nil)
+        // T3 holds a question: its Done is off and changes nothing.
+        model.itemDone(ID.settings, RouterItem.requestID)
+        #expect(model.thread(ID.settings)?.ledger.request != nil)
+        // Answered, it goes with the request.
+        model.update(ID.settings) { $0.state = .working }
+        #expect(model.thread(ID.settings)?.ledger.request == nil)
+        // A real stop is a Stuck row.
+        model.update(ID.settings) { $0.state = .stopped }
+        #expect(model.thread(ID.settings)?.ledger.request?.kind == .stuck)
+        // Your words to a thread whose only item is its request aren't a read of items: no "sent" row.
+        var t = model.thread(ID.settings)!
+        t.ledger.sent("again")
+        #expect(t.ledger.read == nil)
     }
 
     @Test func aReadClosesMergesAndAddsThenSettles() {

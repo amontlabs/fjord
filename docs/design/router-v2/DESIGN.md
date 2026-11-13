@@ -635,6 +635,15 @@ checking, closing with how, new).
   same height (no crossfade), and only the item's row folds in; its last going does the reverse. Under it, one 28 pt
   row per item: the kind's mark alone in its tint (no ground, no word; the accessibility label says the kind) under the
   name's words, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of air under it.
+- **T3's requests and stops are items** (owner, 2026-11-13; `RouterThread.requestItem`, `RouterModel.threads`). A
+  question, a form, a plan or a permission is a Decide row (each is answered by a choice; a permission's allow or deny
+  too), a real stop a Stuck row, first in the thread's block, in the line's words (the code's or the model's, sheening
+  while it is read again) and its age. The thread's line has its own sentence (Done's outcome, the run's summary, or
+  nothing). Its card is the request's: the plan or the command, the options or the form, Continue for a stop, then
+  `Done` · `Open in T3`; its picks, Return and ⌘⌫ are the thread's own. Done (on the card or on hover) is the thread's
+  Settle, off with why while T3 holds the thread (a question, a form, a permission). Selecting the thread opens the
+  request's card; a click on the header opens the header's. The reads never keep, close or add it; it goes when T3's
+  request does. There is no line that is a request any more: a waiting or stopped name takes Decide's or Stuck's mark.
 - **Done's mark is grey** (owner, 2026-11-13): a Done line's check, the Done filter token and section title, and the
   finished-earlier peek's checks are `Text.muted`; blue (`Text.accent`) is only Know's and a line the model marks worth
   a look (with its ground). The history's finished rows were already muted.
@@ -729,6 +738,22 @@ checking, closing with how, new).
   below a folding item too: its place glides with the rows above it); a struck item folds after its 1.6 s. A new item's ground fades over 0.6 s once it is seen. The name taking another kind's colour (its
   most urgent item changed) fades (`Motion.fade`) and its mark rolls over. Your words to a block leave it where it is
   (no flight). Reduce Motion: the folds fade and the rest eases out in 0.12 s.
+
+### 1.15.1 Wide layout (look, for approval)
+
+`Router.Wide`, shots `v2-wide`, `v2-wide-card` (light and dark). A page whose column can be 1000 pt or more gets a column
+that wide (to 1120; 720 below), and lays threads out in two columns, at once with no motion when the width crosses:
+
+- **A block**: left (180, from the name's usual start) its name with its kind's mark and ground, wrapping to two lines,
+  and under it its project pill and age; right (from `Wide.start`, 214) its own sentence (muted for a run), then its items
+  one a row, their ages trailing. The left column sits beside the right column's first rows (the name by the first, the
+  project and age by the second; both by an only one), so nothing pushes the items down. With no words of its own the
+  header has no row (4 pt of air): the name stands beside the first item.
+- **A hairline** (1.5 pt, the most urgent kind's tint at 55 %) 10 pt left of the right column, on each of its rows, so it
+  spans exactly them.
+- **A line without items**: one line, its name in the same left column (cut at 180), its sentence from `Wide.start`,
+  project and age trailing.
+- **Cards** keep to the right column (an item's words column; a line's sentence column).
 
 ## 2. Thread state model
 

@@ -34,7 +34,7 @@ struct RouterScreen: View {
     /// The column's edges from the page's sides: the title, the headers, the names and the composer share them. With
     /// the drawer's toggle on the title line, the column's end stays clear of it.
     private var edges: RouterEdges {
-        let inset = AppPage<EmptyView, EmptyView>.columnInset((Router.column, Router.gutter), pageWidth: width)
+        let inset = AppPage<EmptyView, EmptyView>.columnInset((Router.Wide.column(page: width), Router.gutter), pageWidth: width)
         let toggle = store != nil && !(drawerOpen && side) ? Self.toggleRoom : 0
         return RouterEdges(leading: max(inset, leadingInset + 14), trailing: max(inset, toggle))
     }
@@ -91,6 +91,9 @@ struct RouterScreen: View {
         .onGeometryChange(for: CGSize.self, of: \.size) {
             width = $0.width
             model.targets.viewport = $0
+            // The page wide enough for the two-column blocks: they take it at once, with no motion (DESIGN.md 1.15.1).
+            let wide = Router.Wide.column(page: $0.width) >= Router.Wide.from
+            if model.wide != wide { model.wide = wide }
         }
         .foregroundStyle(Theme.text)
         .modifier(Brand.Scheme())

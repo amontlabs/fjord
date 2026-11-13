@@ -400,9 +400,10 @@ extension RouterModel {
             if selection != .line(t.id) { select(.line(t.id)) }
             focusItem(t.ledger.block ? found.item.id : nil)
             show(t.id)
-        } else if thread(key) != nil {
+        } else if let t = thread(key) {
             if selection != .line(key) { select(.line(key)) }
-            focusItem(nil)
+            // A thread's answer is its request's: that item's card.
+            focusItem(t.ledger.request?.id)
             show(key)
         }
     }

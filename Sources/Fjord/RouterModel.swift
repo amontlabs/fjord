@@ -125,7 +125,19 @@ final class RouterModel {
 
     /// Views don't read the records: each line reads its box (`box(_:)`), the list its layout, the bar its tally. Every
     /// change is mirrored there in the same turn (`threadsChanged`).
-    var threads: [RouterThread] = [] { didSet { threadsChanged() } }
+    var threads: [RouterThread] = [] {
+        didSet {
+            guard !syncing else { return }
+            // T3's requests and stops are their threads' items (`RouterThread.syncRequest`), whoever wrote the record.
+            if threads.contains(where: { $0.requestItem != $0.ledger.request }) {
+                syncing = true
+                threads = threads.map { var t = $0; t.syncRequest(); return t }
+                syncing = false
+            }
+            threadsChanged()
+        }
+    }
+    @ObservationIgnored private var syncing = false
     var older: [RouterOlder] = [] { didSet { if older != oldValue { relayout() } } }
     var failures: [RouterFailure] = []
     var connectionLost = false
@@ -137,6 +149,8 @@ final class RouterModel {
     var focus: String? { didSet { if focus != oldValue { focusChanged() } } }
     /// The filters: one project or all, one state or all.
     var project: String? { didSet { if project != oldValue { relayout() } } }
+    /// The page's column is wide: blocks and lines take two columns (`Router.Wide`).
+    var wide = false
     var section: RouterSection? { didSet { if section != oldValue { for box in boxes.values { box.filter = section }; relayout() } } }
     /// ⌘F: the keyboard is on the filter bar, the ring on `ring`.
     var filterMode = false
@@ -669,6 +683,7 @@ final class RouterModel {
             focusItem(nil)
         } else {
             select(selection == .line(id) ? nil : .line(id))
+            if selection == .line(id) { focusItem(nil) }
         }
     }
 
@@ -712,10 +727,11 @@ final class RouterModel {
     /// Picks and hits of an item's card: its thread and its id.
     static func itemKey(_ thread: String, _ item: String) -> String { thread + "#" + item }
 
-    /// The item whose card is open: the block's focused one.
+    /// The item whose card is open: the block's focused one. A request's isn't: its options, picks, Return and ⌘⌫ are
+    /// the thread's own, as T3 has them.
     var selectedItem: (thread: RouterThread, item: RouterItem)? {
         guard let t = selectedThread else { return nil }
-        if let focus, let item = t.ledger.items.first(where: { $0.id == focus }) { return (t, item) }
+        if let focus, let item = t.ledger.items.first(where: { $0.id == focus }), item.request == nil { return (t, item) }
         return nil
     }
 
@@ -723,6 +739,11 @@ final class RouterModel {
     func itemDone(_ id: String, _ item: String) {
         // A struck item is already closed; a read's preview isn't in the ledger yet: neither has a Done.
         guard let t = thread(id), let was = t.ledger.items.first(where: { $0.id == item }), was.live, !was.preview else { return }
+        // A request's Done is the thread's Settle, off while T3 holds the thread (it waits on your answer).
+        if was.request != nil {
+            if let why = holdReason(t) { hint(t, why) } else { settle(id) }
+            return
+        }
         let next = t.ledger.live.filter { $0.id != item }
         animate(.fade) {
             update(id) { t in
@@ -1240,7 +1261,10 @@ final class RouterModel {
     }
 
     private func selectionChanged(from old: RouterSelection?) {
-        if focus != nil { focus = nil }
+        // A thread waiting on a request opens on it: its card is what answers it (↑↓ and a click on the header still
+        // reach the header's).
+        let request: String? = if case .line(let id)? = selection { thread(id)?.ledger.request?.id } else { nil }
+        if focus != request { focus = request }
         // A block's card keeps its row while it rolls shut, and after: the block's rows stay split where they were
         // (`RouterBlockLayout.cut`), so none hops between the line's two hosting views as the card goes.
         if case .line(let id)? = old, let box = boxes[id] {

@@ -116,7 +116,7 @@ extension RouterModel {
     }
 
     /// A quiet word that the act can't be done here now: no Revert, nothing changed.
-    private func hint(_ t: RouterThread, _ why: String) {
+    func hint(_ t: RouterThread, _ why: String) {
         let note = RouterToast(id: fresh(), before: "Can't settle", name: t.name, after: "· " + why, revertible: false)
         animate(.fade) { toast = note }
         startToastLife(Router.toastLife)

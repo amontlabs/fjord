@@ -23,17 +23,20 @@ struct RouterCard: View {
 /// Snooze and Settle where T3 refuses them (a request waits, a run is live): off, with the reason before them.
 struct RouterHeldActs: View {
     let why: String
+    /// The acts held: the thread's Snooze and Settle, or a request's Done.
+    var acts = ["Snooze", "Settle"]
 
     var body: some View {
         let d = CDS.Density.compact
         HStack(spacing: 10) {
             Text(why).cdsText(d.caption, .regular, CDS.Text.muted).lineLimit(1).fixedSize()
-            Text("Snooze").cdsText(d.footnote, .regular, CDS.Text.muted).opacity(0.45).fixedSize()
-            Text("Settle").cdsText(d.footnote, .regular, CDS.Text.muted).opacity(0.45).fixedSize()
+            ForEach(acts, id: \.self) { act in
+                Text(act).cdsText(d.footnote, .regular, CDS.Text.muted).opacity(0.45).fixedSize()
+            }
         }
         .frame(height: 22)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Snooze and Settle are off: \(why)")
+        .accessibilityLabel("\(acts.joined(separator: " and ")) \(acts.count == 1 ? "is" : "are") off: \(why)")
     }
 }
 
