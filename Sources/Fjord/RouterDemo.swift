@@ -57,6 +57,11 @@ enum RouterDemo {
         }
     }
 
+    /// Only writing frames (`--frames`, `--select-check`), not filming: the window is drawn off every screen.
+    static var offscreen: Bool {
+        (frames != nil || RouterDemoScript.selectCheck != nil) && !WindowRecorder.isRequested
+    }
+
     static var reduceMotion: Bool { CommandLine.arguments.contains("--reduce-motion") }
 
     /// `--frames <dir>`: the script's frames, for checking its motion where nothing can be filmed; `--frames-rate <n>`

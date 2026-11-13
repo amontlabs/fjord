@@ -16,6 +16,11 @@ enum AppWindowDev {
             // window is 1280 × 960 and opens at once (no morph), its frame not remembered.
             RouterDemo.install()
             AppTransition.enabled = false
+            // Writing frames (not filming): offscreen, like the window shots, so nothing shows or takes the focus.
+            if RouterDemo.offscreen {
+                ShotRun.prepare()
+                AppPolicy.offscreen = true
+            }
             controller.prepare()
             if let window = controller.window {
                 window.setFrameAutosaveName("")

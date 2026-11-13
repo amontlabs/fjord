@@ -11,17 +11,21 @@ enum AppPolicy {
     /// The policy the app wants now. A test run keeps it to itself: applied, every test that opens the window would put
     /// its test helper in the Dock and take the focus, and with test runs side by side the Dock fills with them.
     private(set) static var current: NSApplication.ActivationPolicy = .accessory
+    /// A dev run that only writes pictures (`--window --router-v2-demo` with `--frames` or `--select-check`): kept to
+    /// itself as a test run is, its window off every screen (`UnderTest.away`), never activated, no Dock icon.
+    static var offscreen = false
+    private static var quiet: Bool { UnderTest.isRunning || offscreen }
 
     /// Regular while `windowOpen`, else accessory (the bar only).
     static func update(windowOpen: Bool) {
         current = windowOpen ? .regular : .accessory
-        guard !UnderTest.isRunning else { return }
+        guard !quiet else { return }
         if NSApp.activationPolicy() != current { NSApp.setActivationPolicy(current) }
     }
 
     /// Brings Fjord to the front unless this is a test run, which must not take focus from whoever is at the Mac.
     static func activate() {
-        guard !UnderTest.isRunning else { return }
+        guard !quiet else { return }
         watchActivations()
         request.asked(active: NSApp.isActive, at: ProcessInfo.processInfo.systemUptime)
         NSApp.activate(ignoringOtherApps: true)
@@ -336,7 +340,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         let opening = !arriving && (reversing || (!window.isVisible && !AppTransition.isMiniaturized(window)))
             && AppTransition.enabled
         if !window.isVisible && !reversing && !arriving {
-            if UnderTest.isRunning { window.setFrameOrigin(UnderTest.away) } else { moveToBarScreen(window) }
+            if UnderTest.isRunning || AppPolicy.offscreen { window.setFrameOrigin(UnderTest.away) } else { moveToBarScreen(window) }
         }
         // The bar as it is now, before whoever called us hides it.
         let morph = opening && !reversing && !AppTransition.reduceMotion ? bar() : nil
