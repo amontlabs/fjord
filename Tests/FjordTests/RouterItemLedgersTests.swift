@@ -273,6 +273,30 @@ import Testing
         #expect(again.record?.section == .needsYou)
     }
 
+    /// REVIEW-items 1.3: inputs seen are kept with their triggers; a relaunch (or the thread leaving T3's list and coming
+    /// back) before their read lands reads them then.
+    @Test func inputsSeenButNotReadSurviveARelaunchAndADrop() throws {
+        let h = seeded()
+        // r2 ends and r3 starts at once; r2's read is under way when Fjord quits.
+        h.records.put(Self.running("r2"))
+        h.records.put(Self.running("r3"))
+        #expect(h.saved?.run == "r3" && h.saved?.pending == [.turn(run: "r2")])
+        let again = Harness(saved: RouterVerdictFile.decode(try #require(RouterVerdictFile.encode(h.records.saved))))
+        again.records.put(Self.running("r3"))
+        #expect(again.fetched.last?.1 == "turn:r2")
+        again.facts(RouterItemFacts(turns: ["r2": Self.turn("Sign in to Silo, please."), "r3": Self.turn("", live: true)]))
+        #expect(again.reads.last?.fingerprint == "turn:r2")
+        // Archived and back while it reads: the read stops, and is made again.
+        again.records.drop("t1")
+        #expect(again.itemCancels == ["t1"])
+        again.records.put(Self.running("r3"))
+        again.facts(RouterItemFacts(turns: ["r2": Self.turn("Sign in to Silo, please."), "r3": Self.turn("", live: true)]))
+        #expect(again.reads.filter { $0.fingerprint == "turn:r2" }.count == 2)
+        again.answer(RouterItemsAnswer(found: [.init(kind: .do, sentence: "sign in to Silo")]))
+        #expect(again.saved?.pending.isEmpty == true && again.saved?.read.contains("turn:r2") == true)
+        #expect(again.saved?.items.last?.sentence == "sign in to Silo")
+    }
+
     @Test func settlingClearsTheLedgerAndStopsItsRead() {
         let h = seeded()
         h.records.put(Self.ended("r2"))

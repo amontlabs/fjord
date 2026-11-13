@@ -81,10 +81,40 @@ struct RouterItemFacts: Equatable, Sendable {
         var run: String?
         /// Your latest message seen (T3's `latestUserAuthoredMessageAt`).
         var message: Date?
+        /// The inputs seen and not read yet, in order: kept here in the same write that marks their trigger seen, so a
+        /// relaunch, a crash or the thread leaving the page never loses one. The head is the one being read; it leaves
+        /// only when its read is applied.
+        var pending: [Input] = []
+
+        init(items: [RouterItem] = [], next: Int = 1, read: [String] = [], line: String? = nil, lineRun: String? = nil,
+             run: String? = nil, message: Date? = nil, pending: [Input] = []) {
+            self.items = items
+            self.next = next
+            self.read = read
+            self.line = line
+            self.lineRun = lineRun
+            self.run = run
+            self.message = message
+            self.pending = pending
+        }
+
+        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending }
+
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            items = try c.decodeIfPresent([RouterItem].self, forKey: .items) ?? []
+            next = try c.decodeIfPresent(Int.self, forKey: .next) ?? 1
+            read = try c.decodeIfPresent([String].self, forKey: .read) ?? []
+            line = try c.decodeIfPresent(String.self, forKey: .line)
+            lineRun = try c.decodeIfPresent(String.self, forKey: .lineRun)
+            run = try c.decodeIfPresent(String.self, forKey: .run)
+            message = try c.decodeIfPresent(Date.self, forKey: .message)
+            pending = try c.decodeIfPresent([Input].self, forKey: .pending) ?? []
+        }
     }
 
     /// One input, read once.
-    enum Input: Equatable {
+    enum Input: Equatable, Codable {
         case turn(run: String)
         /// `words`: known when you wrote them here (they show in the block at once); else read from T3.
         case message(at: Date, words: String?)
@@ -132,7 +162,7 @@ struct RouterItemFacts: Equatable, Sendable {
     // MARK: State
 
     private final class Live {
-        var queue: [Input] = []
+        /// The pending head whose read is under way.
         var reading: Input?
         var facts: RouterItemFacts?
         var fetching: String?
@@ -175,25 +205,26 @@ struct RouterItemFacts: Equatable, Sendable {
         // Nothing new since it was last seen (the common case: one T3 event of many): only a waiting input may go on.
         if let had, had.run == t.latestRunID, (t.lastAuthoredAt ?? .distantPast) <= (had.message ?? .distantPast),
            ended.map({ had.read.contains($0) }) ?? true {
-            if let l = live[id], l.reading == nil, !l.queue.isEmpty { pump(id, context: context) }
+            if live[id]?.reading == nil, !had.pending.isEmpty { pump(id, context: context) }
             return
         }
         let l = entry(id)
         var s = had ?? Saved(run: t.latestRunID, message: t.lastAuthoredAt)
         let run = t.latestRunID
         // A run that is no longer the latest ended: read it, even when the next one started at once (a wake).
-        if let prev = s.run, prev != run { enqueue(l, s, .turn(run: prev)) }
+        if let prev = s.run, prev != run { enqueue(l, &s, .turn(run: prev)) }
         s.run = run
-        if let run, over { enqueue(l, s, .turn(run: run)) }
+        if let run, over { enqueue(l, &s, .turn(run: run)) }
         if let at = t.lastAuthoredAt, at > (s.message ?? .distantPast) {
             s.message = at
             // Your words sent here are already in (with their words); T3 stamping them is the same message.
             if let sent = l.sentAt, at >= sent.addingTimeInterval(-5) {
                 l.sentAt = nil
             } else {
-                enqueue(l, s, .message(at: at, words: nil))
+                enqueue(l, &s, .message(at: at, words: nil))
             }
         }
+        // The inputs and their triggers seen, in one write.
         if s != had { store(id, s) }
         pump(id, context: context)
     }
@@ -201,17 +232,18 @@ struct RouterItemFacts: Equatable, Sendable {
     /// Your words to the thread, sent here: read at once (its open items sheen, your words show in the block).
     func sent(_ id: String, words: String, at: Date, context: @autoclosure () -> Context) {
         let l = entry(id)
-        let s = load(id) ?? Saved()
+        var s = load(id) ?? Saved()
         guard !s.items.isEmpty else { return }
         l.sentAt = at
-        enqueue(l, s, .message(at: at, words: words))
+        enqueue(l, &s, .message(at: at, words: words))
+        store(id, s)
         changed(id)
         pump(id, context: context)
     }
 
-    private func enqueue(_ l: Live, _ s: Saved, _ input: Input) {
-        guard !s.read.contains(input.key), l.reading?.key != input.key, !l.queue.contains(where: { $0.key == input.key }) else { return }
-        l.queue.append(input)
+    private func enqueue(_ l: Live, _ s: inout Saved, _ input: Input) {
+        guard !s.read.contains(input.key), !s.pending.contains(where: { $0.key == input.key }) else { return }
+        s.pending.append(input)
         // A new turn: the header pulses once.
         if input.isTurn, !s.items.isEmpty { l.pulse &+= 1 }
     }
@@ -224,7 +256,7 @@ struct RouterItemFacts: Equatable, Sendable {
         guard let l = live[id] else { return }
         if l.fetching == key { l.fetching = nil }
         if let f { l.facts = f }
-        if f == nil || l.queue.first?.key == key && !has(l, l.queue[0]) { l.factsFailed = key }
+        if f == nil || load(id)?.pending.first.map({ $0.key == key && !has(l, $0) }) == true { l.factsFailed = key }
         pump(id, context: context)
     }
 
@@ -237,13 +269,13 @@ struct RouterItemFacts: Equatable, Sendable {
 
     /// Starts the next input's read when none is under way: its facts first (one projection read), then the call.
     private func pump(_ id: String, context: () -> Context) {
-        guard let l = live[id], l.reading == nil else { return }
-        while let input = l.queue.first {
-            var s = load(id) ?? Saved()
+        guard load(id)?.pending.isEmpty == false else { return }
+        let l = entry(id)
+        guard l.reading == nil else { return }
+        while var s = load(id), let input = s.pending.first {
             if case .message = input {
                 // Nothing open: your words can't close anything. A turn after them in the queue reads them too.
-                if s.items.isEmpty || l.queue.dropFirst().contains(where: \.isTurn) {
-                    l.queue.removeFirst()
+                if s.items.isEmpty || s.pending.dropFirst().contains(where: \.isTurn) {
                     markRead(&s, input.key)
                     store(id, s)
                     changed(id)
@@ -267,7 +299,6 @@ struct RouterItemFacts: Equatable, Sendable {
             case .turn(let run):
                 guard let turn = l.facts?.turns[run], !turn.reply.isEmpty else {
                     // A turn with no words: nothing to read.
-                    l.queue.removeFirst()
                     markRead(&s, input.key)
                     store(id, s)
                     changed(id)
@@ -278,7 +309,6 @@ struct RouterItemFacts: Equatable, Sendable {
                 let m = l.facts?.message(at: at)
                 x.input = .message(words: words ?? m?.text ?? "", replyBefore: m?.before ?? context.lastReply)
             }
-            l.queue.removeFirst()
             l.reading = input
             // What the last read added is no longer just in: it is checked like the rest.
             l.fresh = []
@@ -378,7 +408,9 @@ struct RouterItemFacts: Equatable, Sendable {
         }
     }
 
+    /// The input's read is applied (or there was nothing to read): it leaves the pending list.
     private func markRead(_ s: inout Saved, _ key: String) {
+        s.pending.removeAll { $0.key == key }
         guard !s.read.contains(key) else { return }
         s.read = Array((s.read + [key]).suffix(Self.readKept))
     }
@@ -456,7 +488,7 @@ struct RouterItemFacts: Equatable, Sendable {
             return RouterLedger()
         }
         let l = live[id]
-        let busy = l.map { $0.reading != nil || !$0.queue.isEmpty } ?? false
+        let busy = l?.reading != nil || !s.pending.isEmpty
         var items = s.items.map { item -> RouterItem in
             var item = item
             if let how = l?.closes[item.id] {
@@ -482,7 +514,7 @@ struct RouterItemFacts: Equatable, Sendable {
         var ledger = RouterLedger(items: items)
         ledger.pulse = l?.pulse ?? 0
         if busy, !s.items.isEmpty, let l {
-            switch l.reading ?? l.queue.first {
+            switch l.reading ?? s.pending.first {
             case .message(let at, let words)?:
                 if let words = words ?? l.facts?.message(at: at)?.text { ledger.read = .message(words) } else { ledger.read = .turn }
             case .turn?: ledger.read = .turn
@@ -500,9 +532,8 @@ struct RouterItemFacts: Equatable, Sendable {
 
     /// `run`'s turn is being read (or waits to be): Done's line isn't in yet.
     func reading(_ id: String, run: String?) -> Bool {
-        guard let run, let l = live[id], l.reading != nil || !l.queue.isEmpty else { return false }
-        let input = Input.turn(run: run)
-        return l.reading == input || l.queue.contains(input)
+        guard let run, let s = load(id), !s.pending.isEmpty else { return false }
+        return s.pending.contains(.turn(run: run))
     }
 
     /// A turn's line streaming now.
