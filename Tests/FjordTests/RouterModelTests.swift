@@ -247,6 +247,7 @@ import Testing
     @Test func aStepsOptionGoesAsWords() {
         let (model, source) = recorded()
         model.select(.line(ID.valCenis))
+        model.focusItem("i1")
         model.pick(1)
         model.send()
         #expect(source.sends.map(\.kind) == [.words])

@@ -131,7 +131,7 @@ final class FjordLoaderView: NSView {
     /// Each part's fade, on the wall clock's phase so every loader on screen moves together; none when it can't be seen.
     private func animate() {
         for l in layers { l.removeAllAnimations(); l.opacity = 1 }
-        if still, posed { layers[0].opacity = Self.trace + 0.15 }
+        if still, posed { layers[0].opacity = Self.trace }
         guard !still, window != nil, !isHiddenOrHasHiddenAncestor else { return }
         // Smoothstep (3x² − 2x³) is exactly this cubic Bézier: control points evenly spaced in time, flat at both ends.
         let smooth = CAMediaTimingFunction(controlPoints: 1 / 3, 0, 2 / 3, 1), linear = CAMediaTimingFunction(name: .linear)

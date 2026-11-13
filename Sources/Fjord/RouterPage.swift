@@ -139,7 +139,8 @@ struct RouterHeaderRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Router.Header.countGap) {
                 Text(section.title).font(CDS.sans(12, .semibold)).foregroundStyle(section.tint)
                     .underline(hot, color: section.tint.opacity(0.6))
-                RouterCount(count: count, size: 12)
+                // A header over only the new-thread ghost has nothing to count yet.
+                if count > 0 { RouterCount(count: count, size: 12) }
                 // Running threads shown above with what they have open: counted here too, faintly, so counts add up.
                 if section == .working, elsewhere > 0 {
                     Text(verbatim: "+\(elsewhere)").font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.disabled)
@@ -155,7 +156,7 @@ struct RouterHeaderRow: View {
         .padding(.leading, Router.Line.nameLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityLabel("\(section.title), \(count)")
+        .accessibilityLabel(count > 0 ? "\(section.title), \(count)" : section.title)
     }
 }
 
