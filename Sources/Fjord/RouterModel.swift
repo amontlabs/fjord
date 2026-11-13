@@ -198,11 +198,13 @@ final class RouterModel {
     /// The card your own act advanced to: its "new" dot goes (and T3 is told) at your next key or pointer move, not as
     /// it opens, so nothing is marked seen that you didn't look at.
     @ObservationIgnored var pendingSeen: String?
+    @ObservationIgnored var keyTurn: KeyTurn?
     /// Asks the composer for the keyboard.
     var focusTick = 0
-    /// The line to bring into view (the selection as it moves).
-    var reveal: String?
-    var revealTick = 0
+    /// Brings a row into view (the selection as it moves), set by the list (`RouterReveal`). A call, not observed state:
+    /// a write SwiftUI observes, made outside the act's own animation, made SwiftUI update the page synchronously
+    /// inside the key's handler before the act could join it.
+    @ObservationIgnored var revealer: ((String) -> Void)?
 
     // MARK: Plumbing
 
@@ -287,8 +289,13 @@ final class RouterModel {
         let off = motionOff
         trace?(curve, !off)
         if !off { glides.began(curve.curve(reduce: reduce)) }
-        withAnimation(off ? nil : curve.resolved(reduce: reduce)) { body() }
+        let animation = off ? nil : curve.resolved(reduce: reduce)
+        keyTurn = KeyTurn(animation: animation)
+        withAnimation(animation) { body() }
     }
+
+    /// The animation of the last change made through `animate` or `move` since the key began (`takeSeen`).
+    struct KeyTurn { let animation: Animation? }
 
     /// A change that takes `id` to another section: it is on top of its neighbours for the length of the move.
     func move(_ id: String, _ body: () -> Void) {
@@ -298,6 +305,7 @@ final class RouterModel {
         // Landed: its ground fades, and its card opens if it landed selected.
         let land: () -> Void = { [weak self] in self?.animate(.spatial) { _ = self?.moving.remove(id) } }
         guard !off else {
+            keyTurn = KeyTurn(animation: nil)
             withAnimation(nil, completionCriteria: .logicallyComplete) {
                 moving.insert(id)
                 body()
@@ -309,6 +317,7 @@ final class RouterModel {
         let curve = RouterCurve.lineMove.curve(reduce: reduce)
         glides.began(curve)
         glides.landing(id, land)
+        keyTurn = KeyTurn(animation: curve.animation)
         withAnimation(curve.animation) {
             moving.insert(id)
             body()
@@ -485,12 +494,29 @@ final class RouterModel {
     }
 
     /// Your next key or pointer move after your own act opened a card: its "new" dot goes, and T3 is told.
-    func ownerActed() {
-        guard let id = pendingSeen else { return }
+    func ownerActed() { markSeen(takeSeen()) }
+
+    /// A key begins: T3 is told of the line your own act opened, and its id comes back for `markSeen`, once the key's
+    /// act is made.
+    func takeSeen() -> String? {
+        keyTurn = nil
+        guard let id = pendingSeen else { return nil }
         pendingSeen = nil
-        guard selection == .line(id), thread(id)?.isNew == true else { return }
-        animate(.fade) { update(id) { $0.isNew = false } }
+        guard selection == .line(id), thread(id)?.isNew == true else { return nil }
         source?.visit(id)
+        return id
+    }
+
+    /// `id`'s "new" dot goes (it fades on its own, `RouterLineView.row`). Written in the transaction of the key's act
+    /// when it made one: in another (the fade, or none), SwiftUI updated that line synchronously before the act's own
+    /// writes could join it.
+    func markSeen(_ id: String?) {
+        guard let id, thread(id)?.isNew == true else { return }
+        if let keyTurn {
+            withAnimation(keyTurn.animation) { update(id) { $0.isNew = false } }
+        } else {
+            animate(.fade) { update(id) { $0.isNew = false } }
+        }
     }
 
     /// The real pointer's; not read while the script holds the pointer.
@@ -566,8 +592,7 @@ final class RouterModel {
     }
 
     func show(_ row: String) {
-        reveal = row
-        revealTick &+= 1
+        revealer?(row)
     }
 
     /// A click on a line's row: its card, or none if it was the open one.

@@ -93,7 +93,8 @@ struct RouterList: View {
     }
 }
 
-/// Brings the selection's line into view as it moves: its own view, so a reveal doesn't run the list's body.
+/// Brings the selection's line into view as it moves: the model calls it (`RouterModel.revealer`), so a reveal neither
+/// runs the list's body nor joins the act's update.
 private struct RouterReveal: View {
     let model: RouterModel
     let proxy: ScrollViewProxy
@@ -102,13 +103,19 @@ private struct RouterReveal: View {
 
     var body: some View {
         Color.clear
-            .onChange(of: model.revealTick) {
-                guard let line = model.reveal,
-                      let row = model.layout.first(where: { $0.id == line || $0.id.hasPrefix(line + "@") }) else { return }
-                // After the card has its place in the layout.
+            .onAppear { install() }
+            .onChange(of: reduce) { install() }
+    }
+
+    private func install() {
+        model.revealer = { [model, proxy, reduce, arrival] line in
+            // After the card has its place in the layout.
+            DispatchQueue.main.async {
+                guard let row = model.layout.first(where: { $0.id == line || $0.id.hasPrefix(line + "@") }) else { return }
                 let follow = arrival?.active == true ? nil : Motion.follow.resolved(reduce: reduce)
-                DispatchQueue.main.async { withAnimation(follow) { proxy.scrollTo(row.id) } }
+                withAnimation(follow) { proxy.scrollTo(row.id) }
             }
+        }
     }
 }
 

@@ -10,19 +10,23 @@ extension RouterModel {
         guard text != draft else { return }
         let wasEmpty = draft.isEmpty
         let grew = text.count > draft.count
-        draft = text
         // Typing again takes the words back from a held Return.
         unhold()
-        if scripted || still { updateScriptedMention() }
         if text.isEmpty {
             mentions = []
+            // The draft empties in the same transaction as the row's reset: written apart (no animation, then the
+            // spring), SwiftUI updated the page synchronously between the two, inside the key's handler.
             animate(.spatial) {
+                draft = text
+                if scripted || still { updateScriptedMention() }
                 read = nil; explicit = nil; waved = false; lit = 0; placesMenu = false
                 reading = false
                 launchMine = RouterLaunchAsk(); launchPills = RouterLaunchAsk(); launchFocus = nil; launchMenu = nil; launchRolls = [:]
             }
             return
         }
+        draft = text
+        if scripted || still { updateScriptedMention() }
         if wasEmpty { animate(.spatial) { read = nil } }
         // More words: a guess waved off is asked again.
         if grew, waved { waved = false }

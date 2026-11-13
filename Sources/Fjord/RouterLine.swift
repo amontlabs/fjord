@@ -239,6 +239,8 @@ struct RouterLineView: View {
         return HStack(spacing: 0) {
             ZStack {
                 Circle().fill(CDS.Fill.accent).opacity(thread.isNew && !marked ? 1 : 0)
+                    // Its own fade, whatever change takes it away (a key's act carries it: `RouterModel.markSeen`).
+                    .motion(.fade, value: thread.isNew)
                 if marked {
                     Image(systemName: "arrow.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.accent)
                         .fixedSize()

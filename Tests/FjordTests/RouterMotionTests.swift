@@ -30,6 +30,8 @@ import Testing
          "a Core Animation glide on a curve already resolved for Reduce Motion (`RouterCurve.curve(reduce:)`)"),
         ("RouterModel.swift", "withAnimation(curve.animation)",
          "the line move's curve, resolved for Reduce Motion the line before (`RouterCurve.lineMove.curve(reduce:)`)"),
+        ("RouterModel.swift", "withAnimation(keyTurn.animation)",
+         "the key's act's own animation, resolved for Reduce Motion where it was made (`animate`, `move`)"),
     ]
 
     /// Unresolved for Reduce Motion: the call neither resolves its animation there, nor checks the flag, nor passes one
