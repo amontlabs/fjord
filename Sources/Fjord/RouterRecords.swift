@@ -116,7 +116,10 @@ final class RouterRecords {
             }
         }
         items.added = { [unowned self] id, new, key in
-            guard let t = self.entries[id]?.thread, let notifier = self.notifier, let first = new.first else { return }
+            // Told like a code change: only while fresh (not a turn that ended long ago, read after a relaunch), only
+            // while you haven't seen the thread, and not on the card you have open.
+            guard let e = self.entries[id], let t = e.thread, let notifier = self.notifier, let first = new.first, t.unseen, e.seen == nil,
+                  self.now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh else { return }
             let told = notifier.step(t, project: self.project(t), fingerprint: key, ask: first.sentence, told: self.saved[id]?.told ?? [])
             if let told { self.tell(id, told) }
         }
@@ -1333,10 +1336,15 @@ final class RouterVerdictFile: @unchecked Sendable {
         var threads: [String: RouterRecords.Saved]
     }
 
-    /// What a file holds; empty for another version, or one that doesn't read.
+    /// What a file holds; empty for another version, or one that doesn't read. Version 2's names, told banners and
+    /// summaries are kept; its per-turn verdicts go (a thread's ledger starts when it is first seen).
     static func decode(_ data: Data) -> [String: RouterRecords.Saved] {
-        guard let c = try? JSONDecoder().decode(Contents.self, from: data), c.version == version else { return [:] }
-        return c.threads
+        guard let c = try? JSONDecoder().decode(Contents.self, from: data) else { return [:] }
+        switch c.version {
+        case version: return c.threads
+        case 2: return c.threads.mapValues { RouterRecords.Saved(name: $0.name, nameKey: $0.nameKey, told: $0.told, summaries: $0.summaries) }
+        default: return [:]
+        }
     }
 
     static func encode(_ threads: [String: RouterRecords.Saved]) -> Data? {

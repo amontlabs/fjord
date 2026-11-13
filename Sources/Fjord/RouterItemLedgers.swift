@@ -296,6 +296,11 @@ struct RouterItemFacts: Equatable, Sendable {
         let l = entry(id)
         var s = had ?? Saved(run: t.latestRunID, message: t.lastAuthoredAt)
         let run = t.latestRunID
+        if had == nil, let run, over, !firstRead(t) {
+            // First seen (a first launch, a thread listed again): a turn that ended long ago, or one past the launch's
+            // cap, is taken as read; its line is the code's words.
+            markRead(&s, Input.turn(run: run).key)
+        }
         // A run that is no longer the latest ended: read it, even when the next one started at once (a wake).
         if let prev = s.run, prev != run { enqueue(l, &s, .turn(run: prev)) }
         s.run = run
@@ -317,6 +322,18 @@ struct RouterItemFacts: Equatable, Sendable {
         // The inputs and their triggers seen, in one write.
         if s != had { store(id, s) }
         pump(id, context: context)
+    }
+
+    /// How many threads first seen in this run of Fjord get their latest turn read: a first launch reads only a few.
+    static let firstReads = 6
+    private var firstReadCount = 0
+
+    /// A thread first seen: its latest turn is read only when it ended in the last few minutes, and only for the first
+    /// few such threads.
+    private func firstRead(_ t: AgentThread) -> Bool {
+        guard now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh, firstReadCount < Self.firstReads else { return false }
+        firstReadCount += 1
+        return true
     }
 
     /// Your words to the thread, sent here: they show in the block at once and its open items sheen; they are read once

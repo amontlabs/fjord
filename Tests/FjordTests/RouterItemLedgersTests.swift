@@ -648,6 +648,56 @@ import Testing
         #expect(again.ledger.items.map(\.id) == ["i1", "i2"])
     }
 
+    /// REVIEW-items 3.1: a thread first seen (a first launch on open items) reads its latest turn only when it ended in
+    /// the last few minutes, and only a few threads at once; older Done lines are the code's words, with no read.
+    @Test func aFirstLaunchReadsOnlyAFewFreshTurns() {
+        let h = Harness()
+        var old = Self.ended("r1", minutes: 120)
+        old.id = "old"
+        h.records.put(old)
+        #expect(h.fetched.isEmpty && h.records.saved["old"]?.ledger?.read == ["turn:r1"])
+        for n in 0..<(RouterItemLedgers.firstReads + 2) {
+            var t = Self.ended("r1", minutes: 1)
+            t.id = "t\(n)"
+            h.records.put(t)
+        }
+        #expect(h.fetched.count == RouterItemLedgers.firstReads)
+    }
+
+    /// REVIEW-items 3.1: an item found is told as a banner only while it is fresh and you haven't seen the thread.
+    @Test func itemBannersAreToldOnlyWhenFreshAndUnseen() {
+        var told: [ThreadNotice] = []
+        func run(unseen: Bool, minutes: Double) {
+            let h = Harness()
+            let notifier = RouterNotifier()
+            notifier.post = { if $0.key.hasPrefix("step:") { told.append($0) } }
+            h.records.notifier = notifier
+            var t = Self.ended("r1", minutes: minutes)
+            t.unseen = unseen
+            h.records.put(t)
+            if minutes > 10 {
+                // A turn left pending before a relaunch, read long after.
+                h.records.items.retried("t1")
+                var s = h.records.saved["t1"]?.ledger
+                s?.read = []
+                s?.pending = [.turn(run: "r1")]
+                let again = Harness(saved: ["t1": RouterRecords.Saved(ledger: s)])
+                again.records.notifier = notifier
+                again.records.put(t)
+                again.facts(RouterItemFacts(turns: ["r1": Self.turn("Merge it?")]))
+                again.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "merge it?")]))
+                return
+            }
+            h.facts(RouterItemFacts(turns: ["r1": Self.turn("Merge it?")]))
+            h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "merge it?")]))
+        }
+        run(unseen: true, minutes: 1)
+        #expect(told.count == 1)
+        run(unseen: false, minutes: 1)
+        run(unseen: true, minutes: 120)
+        #expect(told.count == 1)
+    }
+
     @Test func withTheRouterOffNothingIsRead() {
         let h = Harness()
         h.records.canAsk = { false }

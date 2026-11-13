@@ -132,9 +132,14 @@ import Testing
         // Version 1 was a bare dictionary: verdicts often asked without the reply.
         let v1 = try JSONEncoder().encode(["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .ask, line: "asks"))])
         #expect(RouterVerdictFile.decode(v1).isEmpty)
-        // Version 2 judged each finished turn on its own: thrown away for the open items' ledger.
-        let v2 = #"{"version":2,"threads":{"t1":{"name":"Tab handover","told":[]}}}"#
-        #expect(RouterVerdictFile.decode(Data(v2.utf8)).isEmpty)
+        // Version 2 judged each finished turn on its own (REVIEW-items 3.1): its verdicts go, its names, told banners and
+        // summaries stay, so a first launch on open items doesn't rename every thread or tell old banners again.
+        let written = try #require(RouterVerdictFile.encode(["t1": RouterRecords.Saved(
+            fingerprint: "f", verdict: RouterVerdict(kind: .ask, line: "asks"), name: "Tab handover", nameKey: "Tabs", told: ["k1"])]))
+        let v2 = String(decoding: written, as: UTF8.self)
+            .replacingOccurrences(of: #""version":3"#, with: #""version":2"#)
+        #expect(v2.contains(#""version":2"#))
+        #expect(RouterVerdictFile.decode(Data(v2.utf8)) == ["t1": RouterRecords.Saved(name: "Tab handover", nameKey: "Tabs", told: ["k1"])])
         let saved = ["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .ask, line: "planted"))]
         let v3 = try #require(RouterVerdictFile.encode(saved))
         #expect(RouterVerdictFile.decode(v3) == saved)
