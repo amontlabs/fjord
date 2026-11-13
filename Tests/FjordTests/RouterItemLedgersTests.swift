@@ -839,6 +839,25 @@ import Testing
         #expect(told.count == 1)
     }
 
+    /// T3's title is the start of the thread's first message: a banner names the thread by its page name, the model's.
+    @Test func aBannerNamesTheThreadByItsPageNameNotT3sTitle() {
+        var told: [ThreadNotice] = []
+        let h = Harness(saved: ["t1": RouterRecords.Saved(name: "Brief colours", nameKey: "Did we lose various color highlights we had before?")])
+        let notifier = RouterNotifier()
+        notifier.post = { if $0.key.hasPrefix("item:") { told.append($0) } }
+        h.records.notifier = notifier
+        var t = Self.ended("r1", minutes: 0)
+        t.title = "Did we lose various color highlights we had before?"
+        t.unseen = true
+        var working = Self.running("r1")
+        working.title = t.title
+        h.records.put(working)
+        h.records.put(t)
+        h.facts(RouterItemFacts(turns: ["r1": Self.turn("Do you want me to make that change?")]))
+        h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "keep asks coloured until answered?")]))
+        #expect(told.map(\.title) == ["Brief colours"])
+    }
+
     @Test func withTheRouterOffNothingIsRead() {
         let h = Harness()
         h.records.canAsk = { false }

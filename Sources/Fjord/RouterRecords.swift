@@ -122,9 +122,17 @@ final class RouterRecords {
             let mid = key.hasPrefix("said:")
             guard let e = self.entries[id], let t = e.thread, let notifier = self.notifier, let first = new.first, t.unseen || mid,
                   e.seen == nil, mid || self.now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh else { return }
-            let told = notifier.item(t, project: self.project(t), input: key, sentence: first.sentence, told: self.saved[id]?.told ?? [])
+            let told = notifier.item(self.named(id, t), project: self.project(t), input: key, sentence: first.sentence,
+                                     told: self.saved[id]?.told ?? [])
             if let told { self.tell(id, told) }
         }
+    }
+
+    /// The thread as a banner names it: by its page name (the model's), never T3's title (the start of its first message).
+    private func named(_ id: String, _ t: AgentThread) -> AgentThread {
+        var t = t
+        t.title = saved[id]?.name ?? fallbackName(t.title)
+        return t
     }
 
     /// What the thread's open-items read needs from its record.
@@ -537,7 +545,7 @@ final class RouterRecords {
             askIfNeeded(id, e, t, code)
             summarizeIfNeeded(id, e, t, code, now: now)
             if was != code, e.scope != .out, e.hidden != true, let notifier {
-                let key = notifier.changed(t, project: project(t), from: was, to: code, request: e.detail?.request, now: now,
+                let key = notifier.changed(named(id, t), project: project(t), from: was, to: code, request: e.detail?.request, now: now,
                                            told: saved[id]?.told ?? [])
                 if let key { tell(id, key) }
             }
@@ -1043,7 +1051,7 @@ final class RouterRecords {
     private func housekeeping(_ id: String, _ e: Entry) {
         var o: RouterOlder?
         if e.scope == .older, e.hidden != true, e.send == nil, let code = e.code, let t = e.thread {
-            o = RouterOlder(id: id, name: t.title, project: project(t), since: code.since)
+            o = RouterOlder(id: id, name: saved[id]?.name ?? fallbackName(t.title), project: project(t), since: code.since)
         }
         guard older[id] != o else { return }
         older[id] = o

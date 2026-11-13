@@ -347,8 +347,6 @@ struct RouterItemCard: View {
         let picked = Set((model.picks[key] ?? [:]).values)
         let quiet = !model.draftEmpty
         VStack(alignment: .leading, spacing: Router.Card.gap) {
-            Text(thread.title).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(1)
-                .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
             if !item.options.isEmpty {
                 VStack(spacing: 1) {
                     ForEach(Array(item.options.enumerated()), id: \.offset) { n, label in
