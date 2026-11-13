@@ -40,7 +40,7 @@ import Testing
         func ended(send: RouterActs.Send) { log.append("ended"); ended.append(send) }
         func took(send: RouterActs.Send) { took.append(send) }
         func hide(_ thread: String, on: Bool) { hidden.append((thread, on)) }
-        func notForMe(_ thread: String, on: Bool) { marked.append((thread, on)) }
+        func itemDone(_ thread: String, item: String, on: Bool) { marked.append((thread + "#" + item, on)) }
         func seen(_ thread: String) { seen.append(thread) }
         func cancelledQueue(_ thread: String, run: String?, on: Bool) { cancelled.append((thread, run, on)) }
 
@@ -312,12 +312,12 @@ import Testing
         #expect(f.emitted == [.note("t1", words: Router.Copy.queueKept)])
     }
 
-    @Test func notForMeIsTheRecordsMarkAndItsRevert() {
+    @Test func anItemsDoneIsTheRecordsAndItsRevert() {
         let f = Fake()
         let acts = f.acts()
-        acts.notForMe("t1", on: true)
-        acts.notForMe("t1", on: false)
-        #expect(f.marked.map(\.1) == [true, false] && f.commands.isEmpty)
+        acts.itemDone("t1", item: "i2", on: true)
+        acts.itemDone("t1", item: "i2", on: false)
+        #expect(f.marked.map(\.0) == ["t1#i2", "t1#i2"] && f.marked.map(\.1) == [true, false] && f.commands.isEmpty)
     }
 
     // MARK: Settle and snooze

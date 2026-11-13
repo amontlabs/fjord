@@ -3,7 +3,8 @@ import Testing
 @testable import Fjord
 
 /// Not a test of behaviour: with `FJORD_VERDICT_EVAL_DIR` set to a folder holding `cases.json` (real moments exported by
-/// `evals/router/verdict/export.py`), it writes the exact system prompts and schemas a verdict call sends, and each case's
+/// `evals/router/verdict/export.py`), it writes the exact system prompts and schemas an ask's or a name's verdict call
+/// sends, and each ask case's (finished turns are read against open items now: `ItemsEvalDump`)
 /// input as the app sends it (redacted, fenced) to `inputs/<id>.txt`. With `FJORD_VERDICT_EVAL_RUN=1` it also runs each
 /// case through the real engine (four at once, as the app does) and writes `verdicts/<id>.json`: the verdict and when its
 /// state, its whole line and its end came. Cases already answered are skipped, so a run can be resumed.
@@ -19,7 +20,7 @@ import Testing
         var files: [String]
         var diff: Diff?
 
-        var verdictKind: RouterVerdictRequest.Kind { kind == "ask" ? .ask : .finished }
+        var verdictKind: RouterVerdictRequest.Kind { .ask }
 
         var input: RouterVerdictInput {
             RouterVerdictInput(title: title, project: project, firstAsk: firstAsk, yourWords: yourWords, reply: reply,
@@ -34,8 +35,7 @@ import Testing
         var kind: String
         var verdict: RouterVerdict?
         var failed: Bool
-        /// Seconds from the call's start: the state (a finished turn's), the line whole, the end.
-        var state: Double?
+        /// Seconds from the call's start: the line whole, the end.
         var line: Double?
         var end: Double?
     }
@@ -45,12 +45,13 @@ import Testing
         guard let dir = env["FJORD_VERDICT_EVAL_DIR"] else { return }
         let root = URL(fileURLWithPath: dir)
         let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: root.appendingPathComponent("cases.json")))
+            .filter { $0.kind == "ask" }
         let fm = FileManager.default
         let inputs = root.appendingPathComponent("inputs"), verdicts = root.appendingPathComponent("verdicts")
         try fm.createDirectory(at: inputs, withIntermediateDirectories: true)
         try fm.createDirectory(at: verdicts, withIntermediateDirectories: true)
         func write(_ url: URL, _ s: String) throws { try s.write(to: url, atomically: true, encoding: .utf8) }
-        for kind in [RouterVerdictRequest.Kind.finished, .ask, .name] {
+        for kind in [RouterVerdictRequest.Kind.ask, .name] {
             let name = "\(kind)"
             try write(root.appendingPathComponent("system-\(name).txt"), RouterVerdictPrompt.system(kind))
             try write(root.appendingPathComponent("schema-\(name).json"), RouterVerdictPrompt.schema(kind))
@@ -68,7 +69,6 @@ import Testing
             guard var a = answers[id], let t0 = started[id] else { return }
             let t = Date().timeIntervalSince(t0)
             switch event {
-            case .state: a.state = t
             case .words(_, let done): if done { a.line = t }
             case .done(let v): a.verdict = v; a.end = t
             case .failed: a.failed = true; a.end = t

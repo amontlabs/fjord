@@ -93,142 +93,13 @@ import Testing
         #expect(h.take() == [.reply("t1", text: "I moved the", writing: true)])
     }
 
-    // MARK: Verdicts
+    // MARK: Verdicts (a finished turn's read is the open items': RouterItemLedgersTests)
 
-    @Test func aFinishedTurnAsksOnceAndItsVerdictLandsStateFirstThenWords() {
+    @Test func aFinishedTurnAsksNoVerdictOfItsOwn() {
         let h = Harness()
         h.records.put(F.thread())
-        let ask = h.verdictAsk()
-        #expect(ask?.kind == .finished)
-        #expect(h.records.record("t1")?.sentence.phase == .reassessing)
-        // Until the verdict's state is in, it is being read: not a Done line yet.
-        #expect(h.records.record("t1")?.judging == true)
-        #expect(h.records.record("t1")?.reading == true)
-        _ = h.take()
-        h.records.put(F.thread())
-        #expect(h.asks.filter { $0.kind == .finished }.count == 1)
-
-        let fp = ask!.fingerprint
-        h.records.verdict("t1", fingerprint: fp, .state(needsYou: true, worth: .quiet))
-        let landed = upserts(h.take()).first
-        #expect(landed?.state == .needsYou(.step))
-        #expect(landed?.judging == false)
-        h.records.verdict("t1", fingerprint: fp, .words("reserve for", done: false))
-        h.records.verdict("t1", fingerprint: fp, .words("reserve for five?", done: true))
-        #expect(h.take() == [.words("t1", stream: 1, text: "reserve for", done: false),
-                             .words("t1", stream: 1, text: "reserve for five?", done: true)])
-        let v = RouterVerdict(kind: .finished, needsYou: true, name: "Val Cenis booking", line: "reserve for five?",
-                              ask: "Reserve for five, or keep it at four?", options: ["Five", "Four"], result: "found the chalet")
-        h.records.verdict("t1", fingerprint: fp, .done(v))
-        let r = h.records.record("t1")
-        #expect(r?.state == .needsYou(.step))
-        #expect(r?.question == "Reserve for five, or keep it at four?")
-        #expect(r?.options == ["Five", "Four"])
-        #expect(r?.sentence.text == "reserve for five?")
-        #expect(r?.sentence.stream == 1)
-        #expect(r?.name == "Val Cenis booking")
-        #expect(r?.naming == false)
-        #expect(h.records.needsYou == 1)
-    }
-
-    /// With the Router off no verdict comes: a finished turn is plain Done on the code's words, not "being read"; switched
-    /// on, it is asked for and read.
-    @Test func withTheRouterOffAFinishedTurnIsPlainDoneAndIsReadOnceItIsOn() {
-        let h = Harness()
-        var on = false
-        h.records.canAsk = { on }
-        h.records.put(F.thread())
-        let off = h.records.record("t1")
-        #expect(h.asks.isEmpty)
-        #expect(off?.state == .done && off?.judging == false && off?.reading == false && off?.naming == false)
-        #expect(off?.sentence.phase == .settled)
-        on = true
-        h.records.askingChanged()
-        #expect(h.verdictAsk()?.kind == .finished)
-        #expect(h.records.record("t1")?.reading == true)
-        // Off again before it lands: the call is cancelled and the line is plain Done again.
-        on = false
-        h.records.askingChanged()
-        #expect(h.cancels.contains("t1"))
-        #expect(h.records.record("t1")?.reading == false && h.records.record("t1")?.state == .done)
-    }
-
-    @Test func aVerdictForAnOldFingerprintIsDropped() {
-        let h = Harness()
-        h.records.put(F.thread())
-        let old = h.verdictAsk()!.fingerprint
-        var t = F.thread()
-        t.latestRunID = "r2"
-        h.records.put(t)
-        #expect(h.cancels == ["t1"])
-        let current = h.verdictAsk()!.fingerprint
-        #expect(current != old)
-        _ = h.take()
-        h.records.verdict("t1", fingerprint: old, .done(RouterVerdict(kind: .finished, worth: .look, line: "stale")))
-        #expect(h.take().isEmpty)
-        h.records.verdict("t1", fingerprint: current, .done(RouterVerdict(kind: .finished, worth: .look, line: "merged #41")))
-        #expect(h.records.record("t1")?.sentence.text == "merged #41")
-        #expect(h.records.record("t1")?.worth == .look)
-    }
-
-    @Test func aRunStartingCancelsTheVerdictAndNothingIsWritten() {
-        let h = Harness()
-        h.records.put(F.thread())
-        let fp = h.verdictAsk()!.fingerprint
-        var t = F.thread(status: .running)
-        t.runStartedAt = F.ago(0)
-        h.records.put(t)
-        #expect(h.cancels == ["t1"])
-        h.records.verdict("t1", fingerprint: fp, .done(RouterVerdict(kind: .finished, line: "late")))
-        #expect(h.records.record("t1")?.state == .working)
-        #expect(h.records.saved["t1"]?.verdict == nil)
-    }
-
-    @Test func aFailedCallSettlesOnTheCodesWords() {
-        let h = Harness()
-        h.records.put(F.thread())
-        h.records.verdict("t1", fingerprint: h.verdictAsk()!.fingerprint, .failed)
-        let s = h.records.record("t1")?.sentence
-        #expect(s?.text == Router.Copy.finished)
-        #expect(s?.phase == .settled)
-        h.records.put(F.thread())
-        #expect(h.asks.filter { $0.kind == .finished }.count == 1)
-        // T3's next word on the thread asks again (FINAL-REVIEW #4).
-        var seen = F.thread()
-        seen.lastVisitedAt = F.now
-        h.records.put(seen)
-        #expect(h.asks.filter { $0.kind == .finished }.count == 2)
-    }
-
-    @Test func notForMeSurvivesARestartAndDiesWithTheFingerprint() {
-        let h = Harness()
-        h.records.put(F.thread())
-        let fp = h.verdictAsk()!.fingerprint
-        h.records.verdict("t1", fingerprint: fp, .done(RouterVerdict(kind: .finished, needsYou: true, line: "merge #41?",
-                                                                     ask: "Merge #41?", result: "opened #41")))
-        #expect(h.records.record("t1")?.state == .needsYou(.step))
-        h.records.notForMe("t1", on: true)
-        #expect(h.records.record("t1")?.state == .done)
-        #expect(h.records.record("t1")?.worth == .look)
-        #expect(h.records.record("t1")?.sentence.text == "opened #41")
-
-        // A relaunch: the file's contents, the same row. No call: the verdict and the mark are kept.
-        let again = Harness(saved: h.records.saved)
-        again.records.put(F.thread())
-        #expect(again.asks.filter { $0.kind == .finished }.isEmpty)
-        #expect(again.records.record("t1")?.state == .done)
-        // Known at once: not read again.
-        #expect(again.records.record("t1")?.judging == false)
-        #expect(again.records.record("t1")?.sentence.text == "opened #41")
-
-        // The next turn: the mark is for the old fingerprint.
-        var t = F.thread()
-        t.latestRunID = "r2"
-        again.records.put(t)
-        let next = again.verdictAsk()!.fingerprint
-        again.records.verdict("t1", fingerprint: next, .done(RouterVerdict(kind: .finished, needsYou: true, line: "merge #42?",
-                                                                          ask: "Merge #42?")))
-        #expect(again.records.record("t1")?.state == .needsYou(.step))
+        #expect(h.verdictAsk() == nil)
+        #expect(h.asks.allSatisfy { $0.kind == .name })
     }
 
     @Test func aThreadWithNoNameIsNamedOnceForItsTitle() {
@@ -441,13 +312,13 @@ import Testing
         records.ask = { asks.append($0) }
         records.put(F.thread("t1"))
         records.put(F.thread("t2"))
-        for a in asks where a.kind == .finished {
-            records.verdict(a.thread, fingerprint: a.fingerprint, .done(RouterVerdict(kind: .finished, worth: .look, name: "Garden", line: "planted")))
+        for a in asks where a.kind == .name {
+            records.verdict(a.thread, fingerprint: a.fingerprint, .done(RouterVerdict(kind: .name, name: "Garden")))
         }
         records.flush()
         let loaded = await RouterVerdictFile.load(file.url)
-        #expect(loaded["t1"]?.verdict?.line == "planted")
         #expect(loaded["t1"]?.name == "Garden")
+        #expect(loaded["t1"]?.ledger?.run == "r1")
         // T3 says what it has: t2 is gone, so is what the file kept of it.
         records.rows = { T3Fixture.state([T3Fixture.thread("t1")]) }
         records.drop("t2")
@@ -543,17 +414,20 @@ import Testing
         #expect(posted2().isEmpty)
     }
 
-    @Test func aVerdictThatFindsAStepIsToldOncePerFingerprint() {
+    @Test func aReadThatFindsAStepIsToldOncePerInput() {
         let (h, posted) = harness()
         var t = F.thread(minutes: 0)
         t.unseen = true
         h.records.put(t)
         _ = posted()
-        let fp = h.verdictAsk()!.fingerprint
-        h.records.verdict("t1", fingerprint: fp, .done(RouterVerdict(kind: .finished, needsYou: true, line: "merge #41?", ask: "Merge #41?")))
+        h.records.itemFacts("t1", key: "turn:r1", RouterItemFacts(turns: ["r1": .init(reply: "PR #41 is open. Merge it?", status: "completed", live: false)]))
+        let read = h.asks.last { $0.kind == .items }!
+        h.records.items("t1", key: read.fingerprint, .done(RouterItemsAnswer(found: [.init(kind: .do, sentence: "merge PR #41")], line: "opened #41")))
         let told = posted()
         #expect(told.map(\.kind) == [.step])
-        #expect(told.first?.body == "Merge #41?")
+        #expect(told.first?.body == "merge PR #41")
+        h.records.put(t)
+        #expect(posted().isEmpty)
     }
 
     @Test func manyAtOnceAreOneBanner() {

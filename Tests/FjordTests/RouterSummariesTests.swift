@@ -188,8 +188,8 @@ import Testing
         done.lastRunEndedAt = h.clock
         h.records.put(done)
         #expect(h.summaryCancels == ["t1"])
-        // The verdict's calls aren't the summary's: the finished turn's verdict is still asked.
-        #expect(h.asks.contains { $0.kind == .finished })
+        // The verdict's calls aren't the summary's: nothing else was cancelled.
+        #expect(h.cancels.isEmpty)
         h.records.summary("t1", fingerprint: ask.fingerprint, .done(RouterVerdict(kind: .summary, line: "Moving the draft copy earlier")))
         #expect(h.records.saved["t1"]?.summaries == nil)
         #expect(h.records.record("t1")?.sentence.text != "Moving the draft copy earlier")
@@ -395,12 +395,12 @@ import Testing
     @Test func summariesWaitForVerdictsAndGoBeforePurposes() async {
         let fake = FakeClaude()
         let e = RouterVerdicts(binary: { "/bin/claude" }, runner: fake.runner, log: nil, cap: 1)
-        e.ask(request("busy", .finished))
+        e.ask(request("busy", .ask))
         await until(fake.calls.count == 1)
         e.purpose(.init(project: "p", system: "s", schema: "{}", input: { "Thread: purpose" }, done: { _ in }))
         e.ask(request("summed", .summary))
         e.ask(request("named", .name))
-        e.ask(request("finished", .finished))
+        e.ask(request("finished", .ask))
         var order: [String] = []
         for _ in 0..<4 {
             let n = fake.calls.count

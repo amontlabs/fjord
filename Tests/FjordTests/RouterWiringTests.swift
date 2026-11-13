@@ -88,29 +88,37 @@ import Testing
         s.persists = true
         let verdicts = RouterVerdicts(binary: { "/bin/claude" }, runner: fake.runner)
         verdicts.onEvent = { [weak s] thread, fingerprint, event in s?.routerRecords.verdict(thread, fingerprint: fingerprint, event) }
+        verdicts.onItems = { [weak s] thread, key, event in s?.routerRecords.items(thread, key: key, event) }
         s.routerVerdicts = verdicts
         return s
     }
 
-    @Test func aTurnEndAsksOneVerdictAndItsWordsReachTheLine() async throws {
+    @Test func aTurnEndIsReadOnceAgainstItsOpenItemsAndItsWordsReachTheLine() async throws {
         let fake = FakeClaude()
         let s = asking([F.shell("t1", title: "Install guide", minutes: 1, extra: ["latestRunId": "r1"])], fake)
         defer { s.persists = false; if let f = s.stateFile { try? FileManager.default.removeItem(at: f) } }
         let page = s.routerPage
-        // Asked once its reply is in (T3's projection of the thread).
+        // T3's projection of the thread: its reply for the card.
         var detail = RouterDetail()
         detail.reply = "Rewrote the install guide for the Chrome setup and opened PR #41."
         s.routerRecords.detail("t1", detail)
-        #expect(page.thread("t1")?.reading == true, "a finished turn is being read until its verdict lands")
-        await waitUntil { !fake.calls.isEmpty }
+        #expect(page.thread("t1")?.reading == true, "a finished turn is being read until its read lands")
+        // Its projection's facts (here given as T3 would answer the read).
+        s.routerRecords.itemFacts("t1", key: "turn:r1", RouterItemFacts(turns: ["r1": .init(
+            reply: "Rewrote the install guide for the Chrome setup and opened PR #41. Merge it when you're happy.",
+            status: "completed", live: false)]))
+        await waitUntil { fake.calls.contains { $0.arguments.contains { $0.contains(#""found""#) } } }
         for i in fake.calls.indices {
-            fake.send(i, FakeClaude.answer(FakeClaude.quiet))
+            let items = fake.calls[i].arguments.contains { $0.contains(#""found""#) }
+            fake.send(i, FakeClaude.answer(items ? ["open": [Any](), "found": [["kind": "do", "same_as": "", "sentence": "merge PR #41", "options": [String]()]],
+                                                    "line": "install guide written; PR #41"] : ["name": "Install guide"]))
             fake.close(i)
         }
-        await waitUntil { page.thread("t1")?.sentence.text == "install guide written; PR #41" }
+        await waitUntil { s.routerRecords.saved["t1"]?.ledger?.lineRun == "r1" && page.thread("t1")?.ledger.items.isEmpty == false }
         let line = try #require(page.thread("t1"))
-        #expect(line.sentence.text == "install guide written; PR #41" && line.state == .done && !line.reading)
-        #expect(fake.calls.count <= 2, "one verdict (and at most one name) for the turn")
+        #expect(line.ledger.items.map(\.sentence) == ["merge PR #41"] && line.section == .needsYou && !line.reading)
+        #expect(s.routerRecords.saved["t1"]?.ledger?.lineRun == "r1")
+        #expect(fake.calls.filter { $0.arguments.contains { $0.contains(#""found""#) } }.count == 1, "one read for the turn")
     }
 
     @Test func returnOnAPickedOptionAnswersTheRequestAndTheLineIsSentAtOnce() async throws {

@@ -46,10 +46,10 @@ import Testing
         return (h, { defer { fetched = [] }; return fetched })
     }
 
-    @Test func aFinishedTurnIsReadBeforeItsVerdictIsAsked() throws {
+    @Test func aFinishedTurnIsReadForItsCardAndNoVerdictIsAsked() throws {
         let (h, fetched) = reading()
         h.records.put(F.thread())
-        // No reply in the shell: no verdict yet, the turn is read, and the line is being read meanwhile.
+        // No reply in the shell: the turn is read, and the line is being read meanwhile (its open-items read waits).
         #expect(h.verdictAsk() == nil)
         let read = try #require(fetched().first)
         #expect(read.0 == "t1")
@@ -59,11 +59,8 @@ import Testing
         d.youSaid = "open the PR"
         d.diff = .init(files: 4, added: 96, removed: 212)
         h.records.read("t1", key: read.1, d)
-        let ask = try #require(h.verdictAsk())
-        #expect(ask.kind == .finished)
-        #expect(ask.input.reply == "PR #12 is open. Want me to merge it?")
-        #expect(ask.input.yourWords == "open the PR")
-        #expect(ask.input.diff?.files == 4)
+        // A finished turn has no verdict of its own: it is read against the open items (RouterItemLedgersTests).
+        #expect(h.verdictAsk() == nil)
         // The card shows what was read.
         #expect(last(h.take())?.lastLines == "PR #12 is open. Want me to merge it?")
         // Read once per turn.
@@ -77,8 +74,6 @@ import Testing
         let read = try #require(fetched().first)
         h.records.read("t1", key: read.1, nil)
         #expect(h.verdictAsk() == nil)
-        // Plain Done on the code's words, not being read forever.
-        #expect(h.records.record("t1")?.judging == false)
         h.records.put(F.thread())
         #expect(fetched().isEmpty)
         var seen = F.thread()
@@ -99,10 +94,9 @@ import Testing
         var d = RouterDetail()
         d.reply = "old reply"
         h.records.read("t1", key: old.1, d)
-        #expect(h.verdictAsk() == nil)
         d.reply = "new reply"
         h.records.read("t1", key: current.1, d)
-        #expect(h.verdictAsk()?.input.reply == "new reply")
+        #expect(h.records.record("t1")?.lastLines == "new reply")
     }
 
     @Test func aStoppedTurnIsReadForItsCard() throws {
@@ -136,11 +130,14 @@ import Testing
 
     @Test func theVerdictsSavedBeforeTheReadAreThrownAway() throws {
         // Version 1 was a bare dictionary: verdicts often asked without the reply.
-        let v1 = try JSONEncoder().encode(["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .finished, line: "finished"))])
+        let v1 = try JSONEncoder().encode(["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .ask, line: "asks"))])
         #expect(RouterVerdictFile.decode(v1).isEmpty)
-        let saved = ["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .finished, line: "planted"))]
-        let v2 = try #require(RouterVerdictFile.encode(saved))
-        #expect(RouterVerdictFile.decode(v2) == saved)
+        // Version 2 judged each finished turn on its own: thrown away for the open items' ledger.
+        let v2 = #"{"version":2,"threads":{"t1":{"name":"Tab handover","told":[]}}}"#
+        #expect(RouterVerdictFile.decode(Data(v2.utf8)).isEmpty)
+        let saved = ["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .ask, line: "planted"))]
+        let v3 = try #require(RouterVerdictFile.encode(saved))
+        #expect(RouterVerdictFile.decode(v3) == saved)
     }
 
     @Test func turnReadsRunAFewAtOnceAndTheNewestAskForAThreadWins() async {
