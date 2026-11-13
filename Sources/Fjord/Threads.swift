@@ -355,7 +355,7 @@ extension Store {
     /// The T3 link's store calls back here on every shell change and connection state.
     func wireThreads() {
         // The Router page's records hear each event first: its change is committed before the rest of the app's work.
-        wireRouterV2()
+        wireRouter()
         t3.store.onShell = { [weak self] item in
             self?.routerShellChanged(item)
             self?.shellChanged(item)

@@ -8,7 +8,7 @@ import Foundation
 // MARK: - The prompt
 
 /// A "Send to the Router" prompt: your words with a `MentionText.mark` for each pill in `text`, and what the pills point to
-/// in `pointers`, in order (as `RouterModel.draft` and `pointers` have a draft). `RouterPointer.thisItem` stands for the thing
+/// in `pointers`, in order (as `RouterComposerModel.draft` and `pointers` have a draft). `RouterPointer.thisItem` stands for the thing
 /// the action runs for.
 struct ActionPrompt: Hashable, ExpressibleByStringLiteral {
     var text: String

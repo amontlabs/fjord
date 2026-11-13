@@ -140,7 +140,7 @@ extension Store {
     }
 
     /// The message built from `parts`, as the composer sends a draft: each pill as "@name" where it stands, and where
-    /// each is (`RouterModel.sentDraft`).
+    /// each is (`RouterComposerModel.sentDraft`).
     func composeForRouter(_ parts: [RouterMessagePart]) -> (text: String, mentions: [RouterMention]) {
         var draft = ""
         var pointers: [RouterPointer] = []
@@ -211,7 +211,7 @@ enum RouterPointers {
     static let maxBlocks = 6
 
     /// The message as it will be sent from a draft (a mark for each pill, `pointers` in order): each pill written as
-    /// "@name", only blank lines before it and whitespace after its end left out (`RouterModel.sendableCut`), and where
+    /// "@name", only blank lines before it and whitespace after its end left out (`RouterComposerModel.sendableCut`), and where
     /// each pill is in it.
     static func message(draft: String, pointers: [RouterPointer], name: (RouterPointer) -> String)
         -> (text: String, mentions: [RouterMention]) {
@@ -228,7 +228,7 @@ enum RouterPointers {
                 out.append(c)
             }
         }
-        let (text, lead) = RouterModel.sendableCut(String(out))
+        let (text, lead) = RouterComposerModel.sendableCut(String(out))
         let count = text.count
         return (text, mentions.compactMap { m in
             let range = (m.range.lowerBound - lead)..<(m.range.upperBound - lead)
@@ -630,8 +630,8 @@ enum MentionPill {
             if look.setting {
                 // The Surfaces system's quiet ground at a token's radius, no outline (Router v2 DESIGN 1.0): a setting
                 // reads apart from a thread's pill by its lighter ground and its glyph.
-                NSColor(RouterV2.Surface.quiet).setFill()
-                NSBezierPath(roundedRect: rect, xRadius: RouterV2.Surface.token, yRadius: RouterV2.Surface.token).fill()
+                NSColor(Router.Surface.quiet).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: Router.Surface.token, yRadius: Router.Surface.token).fill()
             } else {
                 NSColor(CDS.Fill.secondary).setFill()
                 NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6).fill()

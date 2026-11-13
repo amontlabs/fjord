@@ -72,7 +72,7 @@ enum PaletteDot {
 struct PaletteContext {
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     let hub: HubState
     /// Goes to a place, resolved against the tools that are on and the categories shown (the window's `openApp`).
     let go: (AppDestination) -> Void

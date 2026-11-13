@@ -14,7 +14,7 @@ import Foundation
 /// - Turn items: a `command_execution` started in the background answers with its task id in its output (Claude's Bash:
 ///   "…in background with ID: bkfz9x4ct"), which gives the command and its `startedAt`; live `dynamic_tool` items give
 ///   the waits (`t3_thread_wait`, `t3_background_wait`, Claude's `Monitor`).
-struct RouterV2Activity: Equatable {
+struct RouterActivity: Equatable {
     struct Agent: Equatable, Identifiable {
         var id: String
         var name: String
@@ -60,10 +60,10 @@ struct RouterV2Activity: Equatable {
     }
 }
 
-extension RouterV2Activity {
+extension RouterActivity {
     /// Reads a projection: one pass over its turn items, the subagents and the roster. Nothing in it moves unless the
     /// work does, so the record stays equal across the projection's other events.
-    static func make(_ p: T3Projection) -> RouterV2Activity {
+    static func make(_ p: T3Projection) -> RouterActivity {
         func live(_ status: String?) -> Bool { status == "pending" || status == "running" || status == "waiting" }
         func date(_ j: T3JSON, _ key: String) -> Date? { j.ts(key).flatMap(AgentThread.date) }
 
@@ -93,7 +93,7 @@ extension RouterV2Activity {
             }
         }
 
-        var a = RouterV2Activity()
+        var a = RouterActivity()
 
         // Subagents: T3's records (title, model, start), then a live item or a roster entry no record covers.
         var agentIds = Set<String>()
@@ -162,7 +162,7 @@ extension RouterV2Activity {
     }
 
     /// What is new gets a start time when T3 gives none: the one it had before, else `now` (the moment Fjord first saw it).
-    func stamped(after previous: RouterV2Activity?, now: Date) -> RouterV2Activity {
+    func stamped(after previous: RouterActivity?, now: Date) -> RouterActivity {
         guard !isEmpty else { return self }
         var a = self
         let old = previous ?? .init()

@@ -24,7 +24,7 @@ import UserNotifications
     }
 
     /// The composer's text view holding `text`, the caret at `caret` (the end by default), as the keys see it.
-    private func editor(_ model: RouterModel, _ text: String, caret: Int? = nil) -> NSTextView {
+    private func editor(_ model: RouterComposerModel, _ text: String, caret: Int? = nil) -> NSTextView {
         model.draft = text
         let view = NSTextView()
         view.string = text
@@ -43,7 +43,7 @@ import UserNotifications
         let store = writing(nil)
         store.routerStatus.lookup = { FileManager.default.isExecutableFile(atPath: bin.path) ? bin.path : nil }
         defer { store.persists = false; try? FileManager.default.removeItem(at: dir) }
-        let model = RouterModel()
+        let model = RouterComposerModel()
         #expect(model.claudeCodeMissing == nil && model.canSend(store))
         await model.checkClaudeCode(store)
         #expect(model.claudeCodeMissing == true && !model.canSend(store))
@@ -64,8 +64,8 @@ import UserNotifications
     /// The composer in a window: typing through its own text view, then moving the caret, drives the suggestions.
     @Test(.hostsWindows) func aMountedComposerFollowsTheCaret() async throws {
         let store = demo()
-        let model = RouterModel()
-        let hosting = NSHostingView(rootView: RouterV2Screen(model: store.routerPage, store: store, text: model)
+        let model = RouterComposerModel()
+        let hosting = NSHostingView(rootView: RouterScreen(model: store.routerPage, store: store, text: model)
             .frame(width: 1100, height: 720))
         let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 720), styleMask: .titled, backing: .buffered,
                                 defer: false)
@@ -141,12 +141,12 @@ import UserNotifications
     @Test(.hostsWindows) func openInRouterBeforeThePageShowsLandsInTheComposer() async throws {
         let store = demo()
         let entry = try #require(store.entries.first { !$0.isDone })
-        let model = RouterModel()
+        let model = RouterComposerModel()
         let navigator = AppNavigator(start: .settings, defaults: nil)
         model.open(thing: entry.id, in: navigator)
         #expect(navigator.selection == .router && model.pointers == [.notification(entry.id)])
         #expect(model.draft == MentionText.markString + " " && model.caretRequest == 2 && model.focusRequest == 1)
-        let hosting = NSHostingView(rootView: RouterV2Screen(model: store.routerPage, store: store, text: model)
+        let hosting = NSHostingView(rootView: RouterScreen(model: store.routerPage, store: store, text: model)
             .frame(width: 1100, height: 720))
         let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 720), styleMask: .titled, backing: .buffered,
                                 defer: false)

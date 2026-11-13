@@ -36,13 +36,13 @@ struct RouterVerdictInput: Equatable, Sendable {
     /// The files the turn changed, when known by name.
     var files: [String] = []
     /// What the turn changed, summed.
-    var diff: RouterV2Thread.Diff?
+    var diff: RouterThread.Diff?
 }
 
 extension RouterVerdictInput {
     /// From the shell row: the title, your last words and the PRs; the rest from the thread's detail.
     init(thread t: AgentThread, project: String?, firstAsk: String? = nil, reply: String? = nil, request: Request? = nil,
-         files: [String] = [], diff: RouterV2Thread.Diff? = nil) {
+         files: [String] = [], diff: RouterThread.Diff? = nil) {
         self.init(title: t.title, project: project, firstAsk: firstAsk, yourWords: t.lastUserText, reply: reply ?? t.latestMessage,
                   request: request,
                   pullRequests: t.pullRequests.map { PullRequest(url: $0.url, number: $0.number, state: $0.state) }, files: files,

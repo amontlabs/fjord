@@ -40,8 +40,8 @@ struct RouterSetting: Hashable, Codable {
     }
 
     /// The settings the pills of a draft name, the last of each kind winning.
-    static func ask(_ pointers: [RouterPointer]) -> RouterV2LaunchAsk {
-        var ask = RouterV2LaunchAsk()
+    static func ask(_ pointers: [RouterPointer]) -> RouterLaunchAsk {
+        var ask = RouterLaunchAsk()
         for case .setting(let s) in pointers {
             switch s.kind {
             case .model: ask.model = s.value

@@ -88,7 +88,7 @@ extension View {
 struct InsetWindowLayout: View {
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     let hub: HubState
     let search: InboxSearch
     let checksClaudeCode: Bool

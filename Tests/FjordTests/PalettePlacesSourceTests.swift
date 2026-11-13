@@ -10,7 +10,7 @@ import Testing
     @MainActor private final class Rig {
         let store = Store()
         let navigator = AppNavigator(start: .router, defaults: nil)
-        let routerModel = RouterModel()
+        let routerModel = RouterComposerModel()
         let hub = HubState()
         var went: [AppDestination] = []
 

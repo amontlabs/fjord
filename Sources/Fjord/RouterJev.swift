@@ -21,7 +21,7 @@ extension JevClient {
     }
 }
 
-extension RouterModel {
+extension RouterComposerModel {
     /// What the draft goes with: the reply and the pills.
     func context(_ store: Store) -> RouterContext { context(store, sent: sentDraft(store)) }
 

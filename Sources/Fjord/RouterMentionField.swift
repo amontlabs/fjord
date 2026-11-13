@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 /// The composer's text with its @ pills inline (a project, a session, a notification, a category: `RouterPointer`): each is
-/// an atomic pill (one `MentionAttachment` character) where it was typed. `RouterModel.draft` holds the text with one `mark`
-/// per pill, `RouterModel.pointers` what the pills point to in the same order; what goes to the Router has each mark written
+/// an atomic pill (one `MentionAttachment` character) where it was typed. `RouterComposerModel.draft` holds the text with one `mark`
+/// per pill, `RouterComposerModel.pointers` what the pills point to in the same order; what goes to the Router has each mark written
 /// back as "@name".
 enum MentionText {
     /// The character an attachment is in a text storage.
@@ -159,7 +159,7 @@ final class MentionTextView: NSTextView {
 /// The composer's field: a growing text view (up to `maxHeight`, then it scrolls) with the pills inline.
 struct MentionField: NSViewRepresentable {
     let store: Store
-    let model: RouterModel
+    let model: RouterComposerModel
     let maxHeight: CGFloat
     let editable: Bool
     /// Bumped to ask for the keyboard.
@@ -297,7 +297,7 @@ struct MentionField: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         weak var view: MentionTextView?
-        var model: RouterModel?
+        var model: RouterComposerModel?
         var store: Store?
         var focusTick = 0
         var syncing = false
@@ -317,7 +317,7 @@ struct MentionField: NSViewRepresentable {
 
         /// Shows the model's text when the view isn't already showing it (a pick, a send, a draft set from outside). While an
         /// input method composes, the text is the input method's: the change waits for the composition to end.
-        func follow(_ model: RouterModel) {
+        func follow(_ model: RouterComposerModel) {
             guard let view else { return }
             // What the view last told the model, or showed of it, is what it shows (every change of its text tells the
             // model): the model holding just that, nothing is read back from the text.
@@ -350,7 +350,7 @@ struct MentionField: NSViewRepresentable {
         /// The composition ended: the model's change after what was composed, shown; a caret asked for meanwhile (a
         /// prefill's) at the end.
         private func endComposing(_ base: (draft: String, pointers: [RouterPointer]), shown: (draft: String, pointers: [RouterPointer]),
-                                  model: RouterModel, view: MentionTextView) {
+                                  model: RouterComposerModel, view: MentionTextView) {
             composing = nil
             let merged = Self.merge(view: shown, base: base, model: (model.draft, model.pointers))
             if model.pointers != merged.pointers { model.pointers = merged.pointers }
@@ -366,7 +366,7 @@ struct MentionField: NSViewRepresentable {
         /// The view's text made the model's, its pills drawn anew; the caret kept where it was. A mark with no pointer (or no
         /// pill) is left out, and a pointer with no mark: the model then takes the text as shown, so the view and the draft
         /// keep the same offsets (the @ word, a pick's range, a caret asked for).
-        private func show(_ model: RouterModel, in view: MentionTextView) {
+        private func show(_ model: RouterComposerModel, in view: MentionTextView) {
             told = (model.draft, model.pointers)
             let shown = MentionText.serialize(view.textStorage ?? view.attributedString())
             guard shown.draft != model.draft || shown.pointers != model.pointers else { return }

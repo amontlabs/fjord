@@ -222,7 +222,7 @@ private final class Count: @unchecked Sendable {
         let projects = RouterMentions.candidates(s).compactMap(\.folder)
         #expect(projects == s.projectFolders && Set(projects) == ["/code/app", "/code/tool", "/x/lookout"])
         // Typed, picked: a project's pill like any other.
-        let model = RouterModel()
+        let model = RouterComposerModel()
         model.draft = "in @too"
         let found = model.suggestions(s)
         #expect(found.first?.folder == "/code/tool")

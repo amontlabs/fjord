@@ -79,7 +79,7 @@ final class PaletteModel {
 
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let navigator: AppNavigator
-    @ObservationIgnored private let routerModel: RouterModel
+    @ObservationIgnored private let routerModel: RouterComposerModel
     @ObservationIgnored private let hub: HubState
     @ObservationIgnored private let usage: PaletteUsage?
     @ObservationIgnored private let sources: PaletteSources
@@ -120,7 +120,7 @@ final class PaletteModel {
     static let pointerSlop: CGFloat = 3
 
     /// `usage`: the picks remembered (the window's), nil keeps none (shots and tests).
-    init(store: Store, navigator: AppNavigator, routerModel: RouterModel, hub: HubState, usage: PaletteUsage? = nil,
+    init(store: Store, navigator: AppNavigator, routerModel: RouterComposerModel, hub: HubState, usage: PaletteUsage? = nil,
          sources: PaletteSources? = nil) {
         self.store = store
         self.navigator = navigator

@@ -1,6 +1,6 @@
 import Foundation
 
-// The Router v2 page's acts on T3 (docs/design/router-v2/IMPLEMENTATION.md 1.6): the real `RouterV2Source`.
+// The Router v2 page's acts on T3 (docs/design/router-v2/IMPLEMENTATION.md 1.6): the real `RouterSource`.
 //
 // The page has already changed its own copy when it calls these. Each act first tells the records what it did (a pending
 // send, a hidden thread, a mark), in the same main-loop turn, and only then starts the work: nothing awaits before the
@@ -27,7 +27,7 @@ extension RouterActsRecords {
     func took(send: RouterActs.Send) {}
 }
 
-@MainActor final class RouterActs: RouterV2Source {
+@MainActor final class RouterActs: RouterSource {
     /// A send in flight, as the records hold it.
     struct Send: Equatable {
         enum Kind: Equatable {
@@ -42,7 +42,7 @@ extension RouterActsRecords {
             /// Continue on a Stopped card.
             case continuing
             /// A new thread, started with these settings; `name`: the read's first name for it, when it had one.
-            case start(project: String, launch: RouterV2Launch, name: String?)
+            case start(project: String, launch: RouterLaunch, name: String?)
         }
 
         var thread: String
@@ -85,9 +85,9 @@ extension RouterActsRecords {
     var env: Environment
     weak var records: RouterActsRecords?
     /// What the page hears back: `.refused` for a send that didn't go.
-    var emit: (RouterV2Change) -> Void
-    /// T3's models, for the efforts a model takes (set from `RouterV2Change.launch`); a model not in it is sent as chosen.
-    var models: [RouterV2LaunchModel] = []
+    var emit: (RouterChange) -> Void
+    /// T3's models, for the efforts a model takes (set from `RouterChange.launch`); a model not in it is sent as chosen.
+    var models: [RouterLaunchModel] = []
     /// Reads where a draft goes (the reader, track 5), and the decision it came to for those words, for the decision log.
     var reader: ((_ draft: String, _ selected: String?, _ mentions: [RouterMention]) -> Void)?
     var decision: (_ draft: String) -> RouterProjectDecision? = { _ in nil }
@@ -97,7 +97,7 @@ extension RouterActsRecords {
     /// The changes logged for History, per thread and act, newest last: what a Revert marks reverted.
     private var changes: [String: [BriefAction: [UUID]]] = [:]
 
-    init(env: Environment, records: RouterActsRecords? = nil, emit: @escaping (RouterV2Change) -> Void = { _ in }) {
+    init(env: Environment, records: RouterActsRecords? = nil, emit: @escaping (RouterChange) -> Void = { _ in }) {
         self.env = env
         self.records = records
         self.emit = emit
@@ -111,7 +111,7 @@ extension RouterActsRecords {
 
     // MARK: Sending
 
-    func send(_ out: RouterV2Outgoing) {
+    func send(_ out: RouterOutgoing) {
         let kind: Send.Kind
         switch out.kind {
         case .continuing: kind = .continuing
@@ -127,7 +127,7 @@ extension RouterActsRecords {
         }
     }
 
-    private func words(_ out: RouterV2Outgoing, _ send: Send) {
+    private func words(_ out: RouterOutgoing, _ send: Send) {
         var context = RouterContext(target: RouteTarget.thread(out.thread).targetID)
         context.queue = out.queue
         context.decided = out.read.flatMap { decision($0.draft) }
@@ -137,7 +137,7 @@ extension RouterActsRecords {
         entries[entry] = send
     }
 
-    private func answer(_ out: RouterV2Outgoing, _ send: Send, picks: [Int: Int], typed: [Int: String]) {
+    private func answer(_ out: RouterOutgoing, _ send: Send, picks: [Int: Int], typed: [Int: String]) {
         // What the thread holds now is what the picks are read against, in this turn.
         guard let request = env.request(out.thread) else { return refuse(send, "That isn't waiting anymore") }
         let resolved: ThreadAnswers.Answer
@@ -195,7 +195,7 @@ extension RouterActsRecords {
 
     func mintThread() -> String { UUID().uuidString.lowercased() }
 
-    func start(_ thread: String, words: String, project: String, launch: RouterV2Launch, read: RouterV2Read?) {
+    func start(_ thread: String, words: String, project: String, launch: RouterLaunch, read: RouterRead?) {
         let send = Send(thread: thread, words: words, kind: .start(project: project, launch: launch, name: read?.name), at: env.now())
         records?.began(send: send)
         guard let id = env.projectID(project) else { return refuse(send, "That project isn't in T3 anymore: nothing was started") }
@@ -207,7 +207,7 @@ extension RouterActsRecords {
     }
 
     /// The row's chips as T3's launch settings: its own lists' names, and no effort for a model that takes none.
-    func settings(_ launch: RouterV2Launch) -> ThreadLaunchSettings {
+    func settings(_ launch: RouterLaunch) -> ThreadLaunchSettings {
         let model = models.first { $0.id == launch.model }
         let takesEffort = model.map { !$0.efforts.isEmpty } ?? true
         return ThreadLaunchSettings(model: launch.model, effort: takesEffort ? launch.effort.rawValue : nil,
@@ -273,7 +273,7 @@ extension RouterActsRecords {
 
 extension RouterActs {
     /// The real acts on `store`: the dispatcher's sends are reported back here, and the records hear every act.
-    static func live(store: Store, records: RouterActsRecords? = nil, emit: @escaping (RouterV2Change) -> Void = { _ in }) -> RouterActs {
+    static func live(store: Store, records: RouterActsRecords? = nil, emit: @escaping (RouterChange) -> Void = { _ in }) -> RouterActs {
         func target(_ id: String) -> BriefTarget { BriefTarget(project: store.threads[id]?.projectID ?? "", thread: id) }
         let env = Environment(
             submit: { [weak store] text, context in store?.routerDispatcher.submit(text, context: context) },

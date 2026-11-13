@@ -108,7 +108,7 @@ enum RecordFixture {
         t.runStartedAt = F.ago(3)
         let bare = make(t)
         #expect(bare.state == .working)
-        #expect(bare.line == RouterV2.Copy.starting)
+        #expect(bare.line == Router.Copy.starting)
         #expect(bare.since == F.ago(3))
         #expect(bare.wants == .nothing)
         let command = make(t, F.working("swift build", mono: true, minutes: 4))
@@ -147,7 +147,7 @@ enum RecordFixture {
         #expect(make(t).wants == .nothing)
         let interrupted = make(F.thread(status: .interrupted))
         #expect(interrupted.state == .stopped)
-        #expect(interrupted.line == RouterV2.Copy.interrupted)
+        #expect(interrupted.line == Router.Copy.interrupted)
     }
 
     @Test func aRunYouStoppedIsDoneQuietWithNoVerdict() {
@@ -155,14 +155,14 @@ enum RecordFixture {
         t.stopRequested = true
         let s = make(t)
         #expect(s.state == .done)
-        #expect(s.line == RouterV2.Copy.stoppedByYou)
+        #expect(s.line == Router.Copy.stoppedByYou)
         #expect(s.wants == .nothing)
     }
 
     @Test func anyOtherEndIsDoneAndAsksForAVerdict() {
         let s = make(F.thread(minutes: 7))
         #expect(s.state == .done)
-        #expect(s.line == RouterV2.Copy.finished)
+        #expect(s.line == Router.Copy.finished)
         #expect(s.since == F.ago(7))
         #expect(s.wants == .finished)
     }

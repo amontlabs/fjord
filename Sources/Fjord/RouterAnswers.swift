@@ -37,7 +37,7 @@ extension Store {
     /// instead of a real process. Whether it went: an ask-back's target named that is gone since sends nothing.
     @discardableResult
     func sendToRouter(_ text: String, context: RouterContext = RouterContext(), now: Date = Date()) -> Bool {
-        let text = RouterModel.sendable(text)
+        let text = RouterComposerModel.sendable(text)
         guard !text.isEmpty else { return false }
         if routerIsPretend {
             var entry = RouterDecision(at: now, trigger: .you(text), decision: .init(intent: "message"), outcome: .done,

@@ -62,7 +62,7 @@ struct RouterRunContext: Equatable {
     }
 }
 
-extension RouterV2Thread {
+extension RouterThread {
     /// What it waits on you for, as the Router's board names it: `question`, `form`, `plan`, `permission`, `step` or `stopped`.
     var askKey: String {
         switch state {

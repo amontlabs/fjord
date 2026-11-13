@@ -654,7 +654,7 @@ final class RouterMCPServer: @unchecked Sendable {
     /// The Router page as the board shows it: each section's lines (name and sentence), bounded as a whole and fenced.
     static func briefText(_ store: Store) -> String {
         var parts: [String] = []
-        for section in [RouterV2Section.needsYou, .done, .working] {
+        for section in [RouterSection.needsYou, .done, .working] {
             let lines = store.routerRecords.lines(in: section)
             guard !lines.isEmpty else { continue }
             parts.append(section.title + ": " + lines.map { "\($0.name) — \($0.sentence.text)" }.joined(separator: "; "))
@@ -749,7 +749,7 @@ final class RouterMCPServer: @unchecked Sendable {
     // MARK: actions
 
     /// The board's line a call names (`thread`: the T3 thread's id).
-    func entry(_ store: Store, _ key: String) throws -> RouterV2Thread {
+    func entry(_ store: Store, _ key: String) throws -> RouterThread {
         guard let r = store.routerRecords.record(key), r.section == .needsYou else {
             throw Failure("No entry \(key) waits on the user; call board")
         }

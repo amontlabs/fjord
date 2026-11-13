@@ -17,7 +17,7 @@ struct RouterCodeState: Equatable {
         case ask
     }
 
-    var state: RouterV2Thread.State
+    var state: RouterThread.State
     var line: String
     /// The line is a command (a permission's).
     var mono = false
@@ -45,7 +45,7 @@ struct RouterCodeState: Equatable {
         let since = t.pendingRequest?.createdAt.flatMap(AgentThread.date) ?? ended
         if let r = request, !r.isPlan, t.pendingRequest != nil { return ask(r, since: since) }
         if let pending = t.pendingRequest, pending.blocking {
-            let kind: RouterV2Thread.Ask = pending.isUserInput ? .question : .permission
+            let kind: RouterThread.Ask = pending.isUserInput ? .question : .permission
             return RouterCodeState(state: .needsYou(kind), line: pending.isUserInput ? Copy.asks : Copy.permission,
                                    since: since, loading: true, wants: .ask)
         }
@@ -55,7 +55,7 @@ struct RouterCodeState: Equatable {
         }
         if t.running {
             let since = detail?.working?.since ?? t.runStartedAt ?? ended
-            let line = detail?.working?.text ?? t.backgroundStep ?? RouterV2.Copy.starting
+            let line = detail?.working?.text ?? t.backgroundStep ?? Router.Copy.starting
             return RouterCodeState(state: .working, line: line, mono: detail?.working?.mono ?? false, since: since, wants: .nothing)
         }
         if t.usageLimit, !t.limitStopped {
@@ -66,13 +66,13 @@ struct RouterCodeState: Equatable {
             return RouterCodeState(state: .stopped, line: Copy.usageLimit, since: ended, wants: .nothing)
         }
         if t.status == .failed || t.status == .interrupted && !t.stopRequested {
-            let line = t.status == .failed ? Copy.failed + (firstLine(t.lastError) ?? Copy.unknownError) : RouterV2.Copy.interrupted
+            let line = t.status == .failed ? Copy.failed + (firstLine(t.lastError) ?? Copy.unknownError) : Router.Copy.interrupted
             return RouterCodeState(state: .stopped, line: line, since: ended, wants: .nothing)
         }
         if t.status == .interrupted {
-            return RouterCodeState(state: .done, line: RouterV2.Copy.stoppedByYou, since: ended, wants: .nothing)
+            return RouterCodeState(state: .done, line: Router.Copy.stoppedByYou, since: ended, wants: .nothing)
         }
-        return RouterCodeState(state: .done, line: RouterV2.Copy.finished, since: ended, wants: .finished)
+        return RouterCodeState(state: .done, line: Router.Copy.finished, since: ended, wants: .finished)
     }
 
     /// A request T3 holds, in its kind, with T3's words: a question verbatim, a form's count and first question, a plan's

@@ -34,21 +34,21 @@ import Testing
     @Test func thisInstallsConfigIsFourModelsWithTheirOwnEffortsAndOpusHighAutoByDefault() throws {
         let (defaults, models) = RouterLaunchCatalog.make(config: Self.config())
         #expect(models.map(\.name) == ["Fable 5.2", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"])
-        #expect(defaults == RouterV2Launch(model: "claude-opus-5-5", effort: .high, access: .auto))
+        #expect(defaults == RouterLaunch(model: "claude-opus-5-5", effort: .high, access: .auto))
         #expect(models[1].efforts == [.low, .medium, .high, .xhigh, .max] && models[1].defaultEffort == .high)
         #expect(models[2].efforts == [.low, .medium, .high, .max] && models[2].defaultEffort == .medium)
         #expect(models[3].efforts.isEmpty && models[3].defaultEffort == nil)
-        #expect(models.allSatisfy { $0.provider == "Claude" && $0.instance == "claudeAgent" && $0.access == RouterV2Launch.Access.all })
+        #expect(models.allSatisfy { $0.provider == "Claude" && $0.instance == "claudeAgent" && $0.access == RouterLaunch.Access.all })
     }
 
     @Test func aSettingsEffortAndAProjectsModelOverrideTheDefaults() {
         let settings = #"{"defaultModelSelection":{"instanceId":"claudeAgent","model":"claude-opus-5-5","options":[{"id":"effort","value":"max"}]},"defaultRuntimeMode":"full-access"}"#
         #expect(RouterLaunchCatalog.make(config: Self.config(settings: settings)).defaults
-            == RouterV2Launch(model: "claude-opus-5-5", effort: .max, access: .full))
+            == RouterLaunch(model: "claude-opus-5-5", effort: .max, access: .full))
         // An effort the model doesn't take falls back to the model's default; the project's model wins over the server's.
         let project = T3JSON.parse(#"{"defaultModelSelection":{"instanceId":"claudeAgent","model":"claude-sonnet-5-5","options":[{"id":"effort","value":"xhigh"}]}}"#)
         #expect(RouterLaunchCatalog.make(config: Self.config(), project: project).defaults
-            == RouterV2Launch(model: "claude-sonnet-5-5", effort: .medium, access: .auto))
+            == RouterLaunch(model: "claude-sonnet-5-5", effort: .medium, access: .auto))
     }
 
     @Test func aProviderThatLacksARuntimeModeDoesNotOfferIt() {
@@ -83,7 +83,7 @@ import Testing
     @Test func theFeedReadsTheConfigWhenConnectedAndTellsThePageOnlyWhatChanged() async {
         let counter = Counter()
         let feed = RouterLaunchFeed(config: { counter.config })
-        var changes: [RouterV2Change] = []
+        var changes: [RouterChange] = []
         feed.emit = { changes.append($0) }
         feed.connected()
         await waitUntil { !changes.isEmpty }

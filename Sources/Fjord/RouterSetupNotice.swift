@@ -4,7 +4,7 @@ import SwiftUI
 /// What stands in the way of using the Router, in one line, and the fix. Nothing when all is well.
 struct RouterSetupNotice: View {
     let store: Store
-    let model: RouterModel
+    let model: RouterComposerModel
     /// The view the notice is in, to know whether its window is on screen.
     @State private var place = ShownProbe.Place()
 

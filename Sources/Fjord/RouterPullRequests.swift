@@ -38,7 +38,7 @@ final class RouterPullRequests {
     }
 
     /// The pull requests of `thread`, linked in T3 and named in `reply` (its last message), with their states.
-    func states(for thread: AgentThread, reply: String?) -> [RouterV2Thread.PR] {
+    func states(for thread: AgentThread, reply: String?) -> [RouterThread.PR] {
         var refs: [(ref: PullRequestRef, t3: PRState?)] = []
         var seen = Set<PullRequestRef>()
         for pr in thread.pullRequests {
@@ -50,7 +50,7 @@ final class RouterPullRequests {
             if sameRepository(ref, thread.repo) { linkOnce(Key(thread: thread.id, ref: ref)) }
         }
 
-        var out: [RouterV2Thread.PR] = []
+        var out: [RouterThread.PR] = []
         var numbers = Set<Int>()
         for (ref, fromT3) in refs {
             threads[ref, default: []].insert(thread.id)
@@ -59,7 +59,7 @@ final class RouterPullRequests {
                 if !linking.contains(Key(thread: thread.id, ref: ref)) { ask(ref) }
                 state = fetched[ref].flatMap { $0 == .unknown ? nil : $0 }
             }
-            guard let state, let shown = RouterV2Thread.PR.State(rawValue: state.rawValue),
+            guard let state, let shown = RouterThread.PR.State(rawValue: state.rawValue),
                   numbers.insert(ref.number).inserted else { continue }
             out.append(.init(number: ref.number, state: shown))
         }

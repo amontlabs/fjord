@@ -138,8 +138,8 @@ final class DeciderLog: @unchecked Sendable {
         append(record)
     }
 
-    /// One step of a draft's read while typing (`RouterV2Reader`): a pause that ended, a model call started or skipped, a read
-    /// cancelled by the next key. `sinceKeyMs` counts from the key that began the read; the constants in `RouterV2` are tuned
+    /// One step of a draft's read while typing (`RouterReader`): a pause that ended, a model call started or skipped, a read
+    /// cancelled by the next key. `sinceKeyMs` counts from the key that began the read; the constants in `Router` are tuned
     /// from these lines, not from a simulation.
     func typing(event: String, phase: String, characters: Int, sinceKeyMs: Int, extra: [String: Any] = [:], now: Date = Date()) {
         var record = extra

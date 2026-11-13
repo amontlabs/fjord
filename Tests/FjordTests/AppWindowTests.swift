@@ -347,7 +347,7 @@ extension WindowSeams {
                 let store = Store()
                 store.persists = false
                 Demo.populate(store, .router)
-                let model = RouterModel()
+                let model = RouterComposerModel()
                 model.claudeCodeMissing = true
                 let window = AppWindowController(store: store, routerModel: model, remembers: false, checksClaudeCode: false)
                 var closed = 0

@@ -234,7 +234,7 @@ struct ActionPromptField: View {
     @Binding var prompt: ActionPrompt
     let store: Store
     /// The field's own draft, pills and @ word: the composer's model, never the Router's.
-    @State private var model = RouterModel()
+    @State private var model = RouterComposerModel()
     @State private var editor = EditorBox()
     @State private var focused = false
     @State private var focusTick = 0
@@ -341,7 +341,7 @@ struct ActionPromptField: View {
 
     /// What the @ word matches: "this notification" first (while the prompt doesn't have it), then what the composer offers
     /// but a notification (the thing it runs for is "this notification").
-    static func suggestions(_ model: RouterModel, store: Store) -> [MentionSuggestion] {
+    static func suggestions(_ model: RouterComposerModel, store: Store) -> [MentionSuggestion] {
         guard let query = model.mention else { return [] }
         let others = model.suggestions(store).filter { $0.section != .notifications }
         guard !model.pointers.contains(.thisItem), RouterMentions.score(ActionPrompt.thisItemName, query: query) != nil else {
@@ -354,12 +354,12 @@ struct ActionPromptField: View {
     }
 
     /// The prompt in the field, unless the field has it already (what it writes back, an undo).
-    static func load(_ prompt: ActionPrompt, into model: RouterModel) {
+    static func load(_ prompt: ActionPrompt, into model: RouterComposerModel) {
         guard prompt != Self.prompt(of: model) else { return }
         model.pointers = prompt.pointers
         model.draft = prompt.text
     }
 
     /// The prompt the field holds.
-    static func prompt(of model: RouterModel) -> ActionPrompt { ActionPrompt(text: model.draft, pointers: model.pointers) }
+    static func prompt(of model: RouterComposerModel) -> ActionPrompt { ActionPrompt(text: model.draft, pointers: model.pointers) }
 }

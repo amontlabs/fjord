@@ -6,7 +6,7 @@ import Observation
 // T3's threads: a reply armed on a thread goes to that thread; a thread you tagged goes there with no model; anything else is
 // for the decider (`RouterProjectDecider`: Jev's sure send, else Sonnet on the full context), whose decision is acted on as it
 // is: a thread gets the words (a waiting request is answered by its own rules first), a new thread starts with them, or the
-// Router answers here. Your own messages are read in the composer before they go (`RouterV2Reader`): what reaches here
+// Router answers here. Your own messages are read in the composer before they go (`RouterReader`): what reaches here
 // carries that decision, or the place you picked among its guesses. Only an unattended action, a wrong send asked again, or a
 // sure place that went away meanwhile asks "Where should this go?". Nothing is sent when it isn't sure.
 
@@ -222,8 +222,8 @@ struct RouterAskBack: Identifiable, Equatable {
         guard let store, store.routerOn else { return nil }
         // An action's message: only while Triage and the Router are both on.
         if context.action != nil, !store.toolsLinked { return nil }
-        // Sent as written (`RouterModel.sendable`): code keeps the indentation of its first line. Trimmed only to see it isn't empty.
-        let text = RouterModel.sendable(text)
+        // Sent as written (`RouterComposerModel.sendable`): code keeps the indentation of its first line. Trimmed only to see it isn't empty.
+        let text = RouterComposerModel.sendable(text)
         guard !text.isEmpty else { return nil }
         var seen = Set<String>()
         var context = context

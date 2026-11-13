@@ -22,7 +22,7 @@ struct RouterDetail: Equatable {
     /// The working line; nil when no run is live.
     var working: Working?
     /// The to-do list's steps, from the live run's list, else the latest run's; empty without one (T3's to-do setting).
-    var steps: [RouterV2Thread.Step] = []
+    var steps: [RouterThread.Step] = []
     /// The agent's last message, whole.
     var reply = ""
     /// That message is still being written.
@@ -31,13 +31,13 @@ struct RouterDetail: Equatable {
     var request: ThreadRequest?
     var queued: [Queued] = []
     /// The latest turn's changes: its checkpoints summed. Nil when it changed no file.
-    var diff: RouterV2Thread.Diff?
+    var diff: RouterThread.Diff?
     /// The last thing a run that did not finish was doing (its last tool item); nil for any other run.
     var lastStep: String?
     /// Its agent takes words mid-turn.
     var steers = true
     /// Its subagents, background commands and waits.
-    var activity = RouterV2Activity()
+    var activity = RouterActivity()
 
     /// Reads a projection. `now` stands in for a missing run start.
     static func make(_ p: T3Projection, now: Date) -> RouterDetail {
@@ -57,7 +57,7 @@ struct RouterDetail: Equatable {
             let since = (active.startedAt ?? active.requestedAt).flatMap(AgentThread.date) ?? now
             d.working = working(items, steps: d.steps, messages: p.messages, since: since)
         } else if p.thread.status.isLive, !(p.thread.status == .queued) {
-            d.working = Working(text: RouterV2.Copy.starting, mono: false,
+            d.working = Working(text: Router.Copy.starting, mono: false,
                                 since: p.thread.activityRunStartedAt.flatMap(AgentThread.date) ?? now)
         }
 
@@ -94,13 +94,13 @@ struct RouterDetail: Equatable {
         }
 
         d.steers = ThreadSender.steers(session: p.capabilities, driver: p.thread.providerInstanceId)
-        d.activity = RouterV2Activity.make(p)
+        d.activity = RouterActivity.make(p)
         return d
     }
 
     // MARK: Pieces
 
-    private static func steps(of items: some Sequence<T3TurnItem>) -> [RouterV2Thread.Step] {
+    private static func steps(of items: some Sequence<T3TurnItem>) -> [RouterThread.Step] {
         var last: [T3TodoStep] = []
         for i in items { if case .todoList(_, let s) = i.detail, !s.isEmpty { last = s } }
         return last.enumerated().map { n, s in
@@ -111,7 +111,7 @@ struct RouterDetail: Equatable {
     /// What the line says, first match wins: the running to-do step; the running tool's own description (T3's `title`, or a
     /// `description` the item carries); the first sentence of the agent's latest words in this run; a plain label from the
     /// tool kind and its main object; a command in mono, first line only, as the last resort. "starting" before any item.
-    private static func working(_ items: [T3TurnItem], steps: [RouterV2Thread.Step], messages: [T3Message], since: Date) -> Working {
+    private static func working(_ items: [T3TurnItem], steps: [RouterThread.Step], messages: [T3Message], since: Date) -> Working {
         func plain(_ t: String) -> Working { Working(text: t, mono: false, since: since) }
         if let step = steps.first(where: { $0.state == .running }) { return plain(sentence(step.text)) }
         func live(_ i: T3TurnItem) -> Bool { i.status == "running" || i.status == "waiting" }
@@ -132,7 +132,7 @@ struct RouterDetail: Equatable {
             return plain(plainLabel(tool))
         }
         if let thinking = items.last(where: isThinking) { return plain(ThreadWork.describe(thinking)) }
-        return plain(RouterV2.Copy.starting)
+        return plain(Router.Copy.starting)
     }
 
     /// The words a tool call carries about itself: T3's title (a read, a search, a skill), else a `description` on the item

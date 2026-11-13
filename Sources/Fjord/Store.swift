@@ -400,11 +400,11 @@ final class Store {
     /// (RouterRecords.swift). Not observed by views.
     @ObservationIgnored lazy var routerRecords: RouterRecords = makeRouterRecords()
     /// The Router v2 page's model: made once per app run and kept across window opens; the demo's when one is set.
-    @ObservationIgnored lazy var routerPage: RouterV2Model = RouterV2Demo.model ?? makeRouterPage()
+    @ObservationIgnored lazy var routerPage: RouterModel = RouterDemo.model ?? makeRouterPage()
     /// One streamed Haiku call per thread per fingerprint, four at once (RouterVerdicts.swift).
     @ObservationIgnored lazy var routerVerdicts: RouterVerdicts = makeRouterVerdicts()
-    /// Where the page's draft goes: Jev, then Sonnet (RouterV2Reader.swift).
-    @ObservationIgnored lazy var routerReader: RouterV2Reader = makeRouterReader()
+    /// Where the page's draft goes: Jev, then Sonnet (RouterReader.swift).
+    @ObservationIgnored lazy var routerReader: RouterReader = makeRouterReader()
     /// The page's acts on T3 (RouterActs.swift): the real page's source.
     @ObservationIgnored lazy var routerActs: RouterActs = RouterActs.live(store: self, records: routerRecords) { [weak self] change in
         self?.routerPage.post(change)

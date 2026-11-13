@@ -482,7 +482,7 @@ enum PlaygroundShots {
         let page = store.routerPage
         if shot.opensCard, let first = store.routerRecords.lines(in: .needsYou).first { page.select(.line(first.id)) }
         let size = RouterWindowShot.size
-        let root = RouterV2Screen(model: page, store: store, text: RouterModel())
+        let root = RouterScreen(model: page, store: store, text: RouterComposerModel())
             .environment(Chrome(mode: .opaque))
             .shotEnvironment(environment)
             .frame(width: size.width, height: size.height)

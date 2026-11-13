@@ -7,7 +7,7 @@ import SwiftUI
 /// What the window remembers while it is closed (the draft and its pills), and what the keys act on.
 @Observable
 @MainActor
-final class RouterModel {
+final class RouterComposerModel {
     var draft = "" {
         didSet { if draft != oldValue { mentionChanged() } }
     }

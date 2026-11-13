@@ -39,7 +39,7 @@ enum PaletteRouterSource {
 // MARK: - Entries and threads
 
 extension PaletteRouterSource {
-    private static func kindWord(_ r: RouterV2Thread) -> String {
+    private static func kindWord(_ r: RouterThread) -> String {
         switch r.state {
         case .needsYou(.plan): "proposes a plan"
         case .needsYou(.permission): "waits for a permission"
@@ -51,7 +51,7 @@ extension PaletteRouterSource {
         }
     }
 
-    private static func kindSymbol(_ r: RouterV2Thread) -> String {
+    private static func kindSymbol(_ r: RouterThread) -> String {
         switch r.state {
         case .needsYou(.plan): "list.bullet.clipboard"
         case .needsYou(.permission): "lock.fill"
@@ -62,7 +62,7 @@ extension PaletteRouterSource {
 
     /// A line of the Router page: what needs you first (the kind of ask in its keywords), then the lines that are done or
     /// working. Show selects its line on the page.
-    private static func lineItem(_ r: RouterV2Thread, context: PaletteContext) -> PaletteItem {
+    private static func lineItem(_ r: RouterThread, context: PaletteContext) -> PaletteItem {
         let store = context.store
         let needsYou = r.section == .needsYou
         let label = needsYou ? kindWord(r) : r.section.title

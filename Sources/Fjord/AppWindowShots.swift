@@ -11,10 +11,10 @@ enum AppWindowDev {
         Demo.populate(store, .router)
         let controller = AppWindowController(store: store, remembers: false)
         controller.onClose = { NSApp.terminate(nil) }
-        if RouterV2Demo.isRequested {
-            // `--router-v2-demo`: the Router v2 page on its fake records, the storyboard playing (RouterV2Demo.swift). Its
+        if RouterDemo.isRequested {
+            // `--router-v2-demo`: the Router v2 page on its fake records, the storyboard playing (RouterDemo.swift). Its
             // window is 1280 × 960 and opens at once (no morph), its frame not remembered.
-            RouterV2Demo.install()
+            RouterDemo.install()
             AppTransition.enabled = false
             controller.prepare()
             if let window = controller.window {
@@ -115,7 +115,7 @@ enum AppWindowShots {
         var sidebarHidden = false
         var size = CGSize(width: 1280, height: 800)
         /// Sets the Router's composer up (a draft with a pill in it).
-        var compose: ((RouterModel, Store) -> Void)?
+        var compose: ((RouterComposerModel, Store) -> Void)?
         /// Prepares a tool page or stateful overlay for this shot.
         var prepare: ((Store) -> Void)? = nil
         /// The window's look; nil follows the Mac.
@@ -123,13 +123,13 @@ enum AppWindowShots {
         /// Opens the ⌘K palette over the window.
         var palette: PaletteShot?
         /// A view drawn on its own in the window instead of the app (for what the app's pages don't show by themselves).
-        var standalone: ((Store, RouterModel) -> AnyView)?
+        var standalone: ((Store, RouterComposerModel) -> AnyView)?
         /// A tooltip shown at once: the one whose title starts with this.
         var tip: String?
-        /// The Router v2 page (RouterV2Page.swift) on its demo records, in the Router's place: the state to draw.
-        var v2: (() -> RouterV2Model)?
+        /// The Router v2 page (RouterPage.swift) on its demo records, in the Router's place: the state to draw.
+        var v2: (() -> RouterModel)?
         /// What the pointer is on in a v2 shot, set once the page is laid out (a peek hangs from its name's frame).
-        var v2Pointer: ((RouterV2Model) -> Void)?
+        var v2Pointer: ((RouterModel) -> Void)?
     }
 
     /// How a shot opens the palette: with a query typed, on the first row's actions page, on fixture items rather than the
@@ -181,7 +181,7 @@ enum AppWindowShots {
         Shot(name: "router-760", destination: { _ in .router }, size: CGSize(width: 760, height: 1000)),
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
-    ] + RouterV2Shots.catalog + RouterV2MentionShot.catalog
+    ] + RouterShots.catalog + RouterMentionShot.catalog
 
     /// `--window-shots <dir> [substring...]`.
     static func run(to dir: String) {
@@ -209,15 +209,15 @@ enum AppWindowShots {
 
     private static func open(_ shot: Shot) -> NSWindow {
         // The last shot's page model goes first: the new store's page is its own, not the last shot's.
-        RouterV2Demo.model = nil
+        RouterDemo.model = nil
         let store = Store()
         Demo.populate(store, .router)
         shot.prepare?(store)
         let v2 = shot.v2?()
-        RouterV2Demo.model = v2
+        RouterDemo.model = v2
         if let v2, let point = shot.v2Pointer { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { point(v2) } }
         let navigator = AppNavigator(start: shot.destination(store), defaults: nil)
-        let routerModel = RouterModel()
+        let routerModel = RouterComposerModel()
         shot.compose?(routerModel, store)
         let hub = HubState()
         let palette = PaletteModel(store: store, navigator: navigator, routerModel: routerModel, hub: hub,

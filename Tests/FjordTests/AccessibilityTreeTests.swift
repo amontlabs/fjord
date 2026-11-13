@@ -155,7 +155,7 @@ enum AccessibilityTree {
             Demo.populate(store, .router)
             // The categories ask GitHub for suggestions: a GitHub of its own, with nothing to suggest.
             store.gh.session = StubbedGitHub.session { _ in .init(200, "[]") }
-            let model = RouterModel()
+            let model = RouterComposerModel()
             // The brief with its question entry focused, its options' controls counted too.
             if name == "Router", let line = store.routerRecords.lines(in: .needsYou).first { store.routerFocus(line.id) }
             let root = AppRootView(store: store, navigator: AppNavigator(start: destination(store), defaults: nil),

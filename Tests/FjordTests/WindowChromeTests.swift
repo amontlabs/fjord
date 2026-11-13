@@ -66,7 +66,7 @@ import Testing
         let category = try #require(store.shownCategories.max { store.count($0.id) < store.count($1.id) })
         let sidebar = SidebarState(defaults: nil, collapsed: false)
         let root = AppRootView(store: store, navigator: AppNavigator(start: .category(category.id), defaults: nil),
-                               routerModel: RouterModel(), hub: HubState(), checksClaudeCode: false, sidebar: sidebar,
+                               routerModel: RouterComposerModel(), hub: HubState(), checksClaudeCode: false, sidebar: sidebar,
                                chrome: Chrome(mode: mode))
         let size = NSSize(width: 1200, height: 800)
         let hosting = NSHostingView(rootView: root.frame(width: size.width, height: size.height))

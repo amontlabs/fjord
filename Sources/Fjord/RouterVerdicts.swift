@@ -34,7 +34,7 @@ struct RouterVerdictRequest: Equatable, Sendable {
 struct RouterVerdict: Equatable, Sendable, Codable {
     var kind: RouterVerdictRequest.Kind
     var needsYou = false
-    var worth: RouterV2Thread.Worth = .quiet
+    var worth: RouterThread.Worth = .quiet
     /// The page's short name (28 characters at most).
     var name = ""
     var line = ""
@@ -47,7 +47,7 @@ struct RouterVerdict: Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey { case kind, needsYou, look, name, line, ask, options, result }
 
-    init(kind: RouterVerdictRequest.Kind, needsYou: Bool = false, worth: RouterV2Thread.Worth = .quiet, name: String = "",
+    init(kind: RouterVerdictRequest.Kind, needsYou: Bool = false, worth: RouterThread.Worth = .quiet, name: String = "",
          line: String = "", ask: String = "", options: [String] = [], result: String = "") {
         self.kind = kind; self.needsYou = needsYou; self.worth = worth; self.name = name; self.line = line
         self.ask = ask; self.options = options; self.result = result
@@ -82,7 +82,7 @@ struct RouterVerdict: Equatable, Sendable, Codable {
 /// grows (`done` once it is whole), `done` with the whole verdict. Or `failed`, once, at any point. A cancelled call
 /// tells nothing.
 enum RouterVerdictEvent: Equatable, Sendable {
-    case state(needsYou: Bool, worth: RouterV2Thread.Worth)
+    case state(needsYou: Bool, worth: RouterThread.Worth)
     case words(String, done: Bool)
     case done(RouterVerdict)
     case failed
@@ -94,7 +94,7 @@ enum RouterVerdictEvent: Equatable, Sendable {
 struct RouterVerdictReading {
     let kind: RouterVerdictRequest.Kind
     private var needsYou: Bool?
-    private var worth: RouterV2Thread.Worth?
+    private var worth: RouterThread.Worth?
     private(set) var stateTold = false
     private(set) var lineDone = false
     private var shown = ""
@@ -172,12 +172,12 @@ struct RouterVerdictReading {
     }
 
     private static func needsYou(_ s: String) -> Bool? { s == "needs_you" ? true : s == "done" ? false : nil }
-    private static func worth(_ s: String) -> RouterV2Thread.Worth? { s == "look" ? .look : s == "quiet" ? .quiet : nil }
+    private static func worth(_ s: String) -> RouterThread.Worth? { s == "look" ? .look : s == "quiet" ? .quiet : nil }
 
     /// One line, spaces collapsed.
     static func flat(_ s: String) -> String { s.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
 
-    static func clipName(_ s: String) -> String { s.isEmpty ? s : RouterV2.firstWords(s) }
+    static func clipName(_ s: String) -> String { s.isEmpty ? s : Router.firstWords(s) }
 }
 
 // MARK: - The engine

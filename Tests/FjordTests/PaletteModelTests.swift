@@ -26,7 +26,7 @@ import Testing
                       navigator: AppNavigator? = nil) -> PaletteModel {
         let store = store ?? InboxFixture.store([])
         let model = PaletteModel(store: store, navigator: navigator ?? AppNavigator(fallback: .done, defaults: nil),
-                                 routerModel: RouterModel(), hub: HubState(), usage: usage, sources: sources)
+                                 routerModel: RouterComposerModel(), hub: HubState(), usage: usage, sources: sources)
         model.later = { $0() }
         return model
     }

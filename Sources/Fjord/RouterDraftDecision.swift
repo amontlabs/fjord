@@ -1,6 +1,6 @@
 import Foundation
 
-// Where a draft goes, decided on the board as it is now: the reader's Jev and Sonnet calls (`RouterV2Reader`) and the
+// Where a draft goes, decided on the board as it is now: the reader's Jev and Sonnet calls (`RouterReader`) and the
 // dispatcher's decisions run through these.
 
 

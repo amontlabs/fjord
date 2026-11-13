@@ -19,7 +19,7 @@ enum ThreadAnswers {
     }
 
     /// The answer for what was picked and typed. `picks`: per question (0 for a single question or a permission or a plan)
-    /// the option's number, 1-based through the card (`RouterV2Thread.numbered`: a form's questions one after the other).
+    /// the option's number, 1-based through the card (`RouterThread.numbered`: a form's questions one after the other).
     /// `typed`: per question, words in place of an option. Throws why it can't be read (`RequestFailure`).
     static func resolve(_ request: ThreadRequest, picks: [Int: Int], typed: [Int: String]) throws -> Answer {
         let typed = typed.compactMapValues { text -> String? in

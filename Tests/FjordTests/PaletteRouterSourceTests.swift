@@ -12,7 +12,7 @@ import Testing
 
     @MainActor private struct Fixture {
         let store: Store
-        let model: RouterModel
+        let model: RouterComposerModel
         let hub: HubState
         let went = Went()
 
@@ -27,7 +27,7 @@ import Testing
         let store = Store()
         Demo.populate(store, .router)
         store.interceptOpen = { _ in }
-        return Fixture(store: store, model: RouterModel(), hub: HubState())
+        return Fixture(store: store, model: RouterComposerModel(), hub: HubState())
     }
 
     private func action(_ id: String, of item: PaletteItem) throws -> PaletteAction {

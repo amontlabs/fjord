@@ -1,7 +1,7 @@
 import SwiftUI
 
 // The history: a panel in the left sidebar's material, at the window's right beside the page when the window is wide, and
-// across its bottom under the composer when it is narrow (RouterV2Screen places it). One line per event, newest first under
+// across its bottom under the composer when it is narrow (RouterScreen places it). One line per event, newest first under
 // its day: your message, the thread or project it went to (in its line's state colours), whether it got there, and when;
 // an answer you gave; a change the Router or you made to Fjord, with Revert, opened to its card on a click. What didn't go is
 // pinned on top, with Send again and Elsewhere, until it goes. Filters over it: Sent, Answers, Changes (only those it has).

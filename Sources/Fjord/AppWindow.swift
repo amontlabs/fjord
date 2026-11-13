@@ -165,7 +165,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
 
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     /// Called once the window has closed (by the user or `close()`): the place to put the bar back on its edge.
     var onClose: (() -> Void)?
     /// The screen the bar is docked on: the window opens there. Nil (or no answer) is the main screen.
@@ -214,9 +214,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
 
     /// `routerModel`: the Router's chat state, shared with whatever else shows the Router. `remembers`: open on the place left
     /// last (off for shots and tests).
-    init(store: Store, routerModel: RouterModel? = nil, remembers: Bool = true, checksClaudeCode: Bool = true) {
+    init(store: Store, routerModel: RouterComposerModel? = nil, remembers: Bool = true, checksClaudeCode: Bool = true) {
         self.store = store
-        self.routerModel = routerModel ?? RouterModel()
+        self.routerModel = routerModel ?? RouterComposerModel()
         self.checksClaudeCode = checksClaudeCode
         self.remembers = remembers
         navigator = AppNavigator(fallback: store.firstPlace, defaults: remembers ? .standard : nil)
@@ -1017,7 +1017,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         TrafficLights.place(window)
     }
 
-    /// The Router's keys (see `RouterV2Keys`) while the window is key and shows the Router; Esc dismisses a tooltip first.
+    /// The Router's keys (see `RouterKeys`) while the window is key and shows the Router; Esc dismisses a tooltip first.
     private func watchKeys() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -1035,9 +1035,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
                 if self.palette.isOpen { return self.palette.takes(event) }
                 // The Router page's own key map; while the demo's script plays, the keyboard is the script's.
                 if self.navigator.selection == .router {
-                    let v2 = RouterV2Demo.model ?? self.store.routerPage
+                    let v2 = RouterDemo.model ?? self.store.routerPage
                     if v2.scripted { return !event.modifierFlags.contains(.command) }
-                    return RouterV2Keys.key(event, model: v2, composer: (self.store, self.routerModel))
+                    return RouterKeys.key(event, model: v2, composer: (self.store, self.routerModel))
                 }
                 return self.inboxKeys.key(event)
             }
@@ -1175,7 +1175,7 @@ private extension InboxTab {
     }
 }
 
-extension RouterModel {
+extension RouterComposerModel {
     /// "Open in Router" on an inbox thing: its pill in the composer (after what the draft holds), and `navigator` on the
     /// Router. The composer takes the keyboard, its caret after the pill, also when the page is made only now.
     func open(thing: String, in navigator: AppNavigator) {
@@ -1199,7 +1199,7 @@ final class WindowCorner {
 struct AppRootView: View {
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     let hub: HubState
     let search: InboxSearch
     /// The ⌘K palette drawn over the window.
@@ -1220,7 +1220,7 @@ struct AppRootView: View {
     private let actions: AppRootActions
 
     @MainActor
-    init(store: Store, navigator: AppNavigator, routerModel: RouterModel, hub: HubState, search: InboxSearch? = nil,
+    init(store: Store, navigator: AppNavigator, routerModel: RouterComposerModel, hub: HubState, search: InboxSearch? = nil,
          palette: PaletteModel? = nil, checksClaudeCode: Bool = true, sidebar: SidebarState = .shared, chrome: Chrome = .shared,
          corner: WindowCorner? = nil, capture: GlassCapture? = nil) {
         self.store = store
@@ -1280,7 +1280,7 @@ final class AppRootActions {
     let openChange: (FjordChange) -> Void
     let openPalette: () -> Void
 
-    init(store: Store, navigator: AppNavigator, routerModel: RouterModel, hub: HubState, palette: PaletteModel) {
+    init(store: Store, navigator: AppNavigator, routerModel: RouterComposerModel, hub: HubState, palette: PaletteModel) {
         openPalette = { palette.open(pointer: true) }
         openRouter = { entry in
             if let entry { store.routerFocus(entry.thread) }
@@ -1333,7 +1333,7 @@ private struct AppRootRouterOffer: ViewModifier {
 private struct AppRootFollow: ViewModifier {
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     let hub: HubState
     let search: InboxSearch
 
@@ -1355,7 +1355,7 @@ private struct AppRootFollow: ViewModifier {
 private struct AppRootPage: View {
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     let hub: HubState
     let search: InboxSearch
     let checksClaudeCode: Bool

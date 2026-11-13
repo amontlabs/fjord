@@ -1068,7 +1068,7 @@ struct CountedRouterCell: View {
 
 /// One Needs-you record in the bar's Router panel: its short name, the sentence it waits on, how long it has waited.
 struct RouterRecordLine: View {
-    let record: RouterV2Thread
+    let record: RouterThread
     let open: () -> Void
     @State private var hover = false
 

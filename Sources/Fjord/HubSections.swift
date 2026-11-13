@@ -222,7 +222,7 @@ extension FjordHub {
     }
 
     /// An entry clicked on the bar: the Router opens on it, focused. Its thread isn't opened.
-    func openRouterRecord(_ record: RouterV2Thread) {
+    func openRouterRecord(_ record: RouterThread) {
         // The environment closure still takes a `BriefTarget` (HubView, HubController and the window are 9a's); its thread is the record's id.
         pickBriefEntry(BriefTarget(project: record.project ?? "", thread: record.id))
         openApp(.router)

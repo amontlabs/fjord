@@ -34,7 +34,7 @@ import Testing
     private func context(_ store: Store, hub: HubState? = nil, visits: Visits? = nil) -> PaletteContext {
         let hub = hub ?? HubState()
         let visits = visits ?? Visits()
-        return PaletteContext(store: store, navigator: AppNavigator(start: .router, defaults: nil), routerModel: RouterModel(), hub: hub,
+        return PaletteContext(store: store, navigator: AppNavigator(start: .router, defaults: nil), routerModel: RouterComposerModel(), hub: hub,
                        go: { [hub] in visits.calls.append(($0, hub.selection)) })
     }
 

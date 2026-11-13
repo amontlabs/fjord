@@ -77,7 +77,7 @@ import Testing
     }
 
     @Test func pickingAMentionPutsAPillWhereTheWordWasAndASpaceAfterIt() {
-        let model = RouterModel()
+        let model = RouterComposerModel()
         model.pointers = [.project("/code/lcu")]
         model.draft = "\(MentionText.markString) then @lo"
         model.caret = nil
@@ -111,7 +111,7 @@ import Testing
 
 
     @Test func aTextSuggestionTakesTheWordsPlaceAsText() {
-        let model = RouterModel()
+        let model = RouterComposerModel()
         model.pointers = [.project("/code/lcu")]
         model.draft = "\(MentionText.markString) ok @reb then"
         model.caret = 9
@@ -124,7 +124,7 @@ import Testing
 
 
     @Test func anAtWordRunsAcrossSpacesWhileItStillNamesSomething() {
-        func query(_ text: String, caret: Int? = nil) -> String? { RouterModel.mentionQuery(in: text, caret: caret) }
+        func query(_ text: String, caret: Int? = nil) -> String? { RouterComposerModel.mentionQuery(in: text, caret: caret) }
         #expect(query("ask @claude code") == "claude code")
         #expect(query("ask @claude ") == "claude ")
         // Not two spaces in a row, a new line, a space right after the @, a pill, an @ in a word (an email).
@@ -138,9 +138,9 @@ import Testing
         #expect(query("@" + String(repeating: "x", count: 36) + " yyyy") == nil)
         // The caret after a space: the word past it isn't the @ word's.
         let text = "@claude code"
-        let found = RouterModel.mention(in: text, caret: 8)
+        let found = RouterComposerModel.mention(in: text, caret: 8)
         #expect(found?.query == "claude " && found.map { String(text[$0.range]) } == "@claude ")
-        #expect(RouterModel.mention(in: text, caret: nil).map { String(text[$0.range]) } == "@claude code")
+        #expect(RouterComposerModel.mention(in: text, caret: nil).map { String(text[$0.range]) } == "@claude code")
 
         // Words across spaces each start a word of the name; nothing looser.
         #expect(RouterMentions.score("Claude Code", query: "claude code") == 0)
@@ -157,7 +157,7 @@ import Testing
     /// The composer's text view in a window (whose undo it uses, as in the app), told to the model as `MentionField` tells it.
     @Test(.hostsWindows) func aSnippetPickedInTheComposerIsOneStepOfItsUndo() throws {
         let v = view()
-        let model = RouterModel()
+        let model = RouterComposerModel()
         let field = MentionField.Coordinator()
         field.view = v
         field.model = model
@@ -228,7 +228,7 @@ import Testing
     /// commits, the caret after the pill.
     @Test func aPrefillWhileAnInputMethodComposesComesAfterWhatItCommits() {
         let v = view()
-        let model = RouterModel()
+        let model = RouterComposerModel()
         let field = MentionField.Coordinator()
         field.view = v
         field.model = model
@@ -257,7 +257,7 @@ import Testing
     @Test func prefillAddsPillsAndTheSendCarriesThem() {
         let (store, pr, _) = triage()
         let m = MentionText.markString
-        let model = RouterModel()
+        let model = RouterComposerModel()
         model.prefill([.notification(pr.id)])
         #expect(model.pointers == [.notification(pr.id)] && model.draft == m + " " && model.caretRequest == 2)
         // More, after what is there; what it tags already isn't tagged again.
@@ -299,7 +299,7 @@ import Testing
 
     @Test func aPickedThreadIsAnAddressPillThatSendsTheMessageThere() {
         let (store, _, _) = t3()
-        let model = RouterModel()
+        let model = RouterComposerModel()
         model.draft = "@login"
         let found = model.suggestions(store)
         #expect(found.first?.pick == .pointer(.t3("t3-thread:t1")))
@@ -330,11 +330,11 @@ import Testing
     private let mark = MentionText.markString
 
     @Test func aThreadPillBecomesTheExplicitPlaceAndTakesItAwayWithItself() {
-        let model = RouterV2Demo.records()
-        let pill = RouterMention(range: 0..<1, pointer: .t3("t3-thread:\(RouterV2Demo.ID.bar)"), name: "Bar count")
+        let model = RouterDemo.records()
+        let pill = RouterMention(range: 0..<1, pointer: .t3("t3-thread:\(RouterDemo.ID.bar)"), name: "Bar count")
         model.edit(mark + " push it", marks: [pill])
-        #expect(model.explicit == .thread(RouterV2Demo.ID.bar))
-        #expect(model.destination == .place(.thread(RouterV2Demo.ID.bar), mode: "starts a new turn"))
+        #expect(model.explicit == .thread(RouterDemo.ID.bar))
+        #expect(model.destination == .place(.thread(RouterDemo.ID.bar), mode: "starts a new turn"))
         // Nothing is read for it, and the words go without the address.
         #expect(!model.reading)
         #expect(model.plainDraft == "push it")
@@ -344,16 +344,16 @@ import Testing
     }
 
     @Test func aProjectPillStaysInTheWordsAsItsNameAndIsReadWithTheMention() {
-        let model = RouterV2Demo.records()
+        let model = RouterDemo.records()
         let pill = RouterMention(range: 3..<4, pointer: .project("/code/lcu"), name: "lcu")
         model.edit("in \(mark) add a flag", marks: [pill])
         #expect(model.explicit == nil && model.plainDraft == "in @lcu add a flag")
-        #expect(RouterV2Mentions.plain(model.draft, marks: model.mentions).mentions
+        #expect(RouterMentions.plain(model.draft, marks: model.mentions).mentions
             == [RouterMention(range: 3..<7, pointer: .project("/code/lcu"), name: "lcu")])
     }
 
     @Test func aNewThreadPillIsAnExplicitNewThreadInThatProject() {
-        let model = RouterV2Demo.records()
+        let model = RouterDemo.records()
         let pill = RouterMention(range: 0..<1, pointer: .t3("new_thread:p1"), name: "New thread in silo")
         model.edit(mark + " write the changelog", marks: [pill], projectName: { $0 == "p1" ? "silo" : $0 })
         #expect(model.explicit == .newThread(project: "silo"))
@@ -375,7 +375,7 @@ import Testing
     }
 
     @Test func aSettingsPillIsNotTheMessageAndTheOtherPillsKeepTheirPlace() {
-        let model = RouterV2Demo.records()
+        let model = RouterDemo.records()
         model.select(nil)
         let silo = RouterMention(range: 0..<1, pointer: .project("/code/silo"), name: "silo")
         let opus = RouterMention(range: 0..<1, pointer: .setting(RouterSetting(kind: .model, value: "claude-haiku-5-5", label: "Haiku 5.5")), name: "Haiku 5.5")
@@ -385,11 +385,11 @@ import Testing
         #expect(model.launch.model == "claude-haiku-5-5")
         // Taking the pill out puts the chip back.
         model.edit(mark + " write the changelog now", marks: [silo])
-        #expect(model.launch.model == RouterV2Launch.t3Default.model)
+        #expect(model.launch.model == RouterLaunch.t3Default.model)
     }
 
     @Test func theAtListOffersTheSettingsByNameAndAliasAndNeverByLooseLetters() {
-        let model = RouterV2Demo.records()
+        let model = RouterDemo.records()
         func names(_ q: String) -> [String] { RouterMentions.suggest(model.settingRows(q), query: q).map(\.name) }
         #expect(names("op") == ["Opus 5.5"])
         #expect(names("med") == ["Medium"])
@@ -401,7 +401,7 @@ import Testing
     }
 
     @Test func aSettingsPillSetsItsChipAndBeatsAHandPickUntilTheHandPicksAgain() {
-        let model = RouterV2Demo.records()
+        let model = RouterDemo.records()
         model.select(nil)
         model.choose(.newThread(project: "silo"))
         model.setLaunch(.effort, 0)

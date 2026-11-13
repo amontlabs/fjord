@@ -969,13 +969,13 @@ final class DiskCheckingPerformer: ActionPerformer {
 
     @Test func thePromptsFieldOffersThisNotificationFirstAndKeepsItsPills() throws {
         let (store, _) = store([InboxFixture.pr(1, title: "Open thing")], actions: [session])
-        let model = RouterModel()
+        let model = RouterComposerModel()
         let saved = ActionPrompt([.text("Review "), .pointer(.thisItem), .text(" in "), .pointer(.project("/code/r"))])
         ActionPromptField.load(saved, into: model)
         #expect(model.draft == saved.text && model.pointers == saved.pointers)
         #expect(ActionPromptField.prompt(of: model) == saved)
         // Typing @: "this notification" first while the prompt hasn't it; never another notification.
-        let fresh = RouterModel()
+        let fresh = RouterComposerModel()
         fresh.draft = "Fix @"
         let rows = ActionPromptField.suggestions(fresh, store: store)
         #expect(rows.first?.pick == .pointer(.thisItem) && rows.first?.name == "this notification")

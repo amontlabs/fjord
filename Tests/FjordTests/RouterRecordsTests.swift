@@ -9,7 +9,7 @@ import Testing
     @MainActor final class Harness {
         let gate = MotionGate.Gate(longest: 600)
         let records: RouterRecords
-        var changes: [RouterV2Change] = []
+        var changes: [RouterChange] = []
         var asks: [RouterVerdictRequest] = []
         var cancels: [String] = []
         var clock = RecordFixture.now
@@ -23,7 +23,7 @@ import Testing
         }
 
         /// The changes so far, taken.
-        func take() -> [RouterV2Change] {
+        func take() -> [RouterChange] {
             defer { changes = [] }
             return changes
         }
@@ -40,8 +40,8 @@ import Testing
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { c.resume() } }
     }
 
-    private func upserts(_ changes: [RouterV2Change]) -> [RouterV2Thread] {
-        changes.flatMap { c -> [RouterV2Thread] in
+    private func upserts(_ changes: [RouterChange]) -> [RouterThread] {
+        changes.flatMap { c -> [RouterThread] in
             switch c {
             case .upsert(let t): [t]
             case .batch(let all): upserts(all)
@@ -76,7 +76,7 @@ import Testing
         #expect(changes.count == 1)
         guard case .batch(let all)? = changes.first else { Issue.record("one batch"); return }
         #expect(Set(upserts(all).map(\.id)) == ["a", "b"])
-        #expect(all.contains(.older([RouterV2Older(id: "c", name: "Tidy the garden notes", project: "app", since: F.ago(2 * 24 * 60))])))
+        #expect(all.contains(.older([RouterOlder(id: "c", name: "Tidy the garden notes", project: "app", since: F.ago(2 * 24 * 60))])))
     }
 
     @Test func theCardsLastLinesAloneTakeTheHotPath() {
@@ -167,7 +167,7 @@ import Testing
         h.records.put(F.thread())
         h.records.verdict("t1", fingerprint: h.verdictAsk()!.fingerprint, .failed)
         let s = h.records.record("t1")?.sentence
-        #expect(s?.text == RouterV2.Copy.finished)
+        #expect(s?.text == Router.Copy.finished)
         #expect(s?.phase == .settled)
         h.records.put(F.thread())
         #expect(h.asks.filter { $0.kind == .finished }.count == 1)
@@ -288,13 +288,13 @@ import Testing
 
     @Test func aNewThreadStartedHereIsSentBeforeT3ListsIt() {
         let h = Harness()
-        let launch = RouterV2Launch.t3Default
+        let launch = RouterLaunch.t3Default
         h.records.began(send: send(.start(project: "app", launch: launch, name: nil), words: "Add a dark mode to the settings page", thread: "n1"))
         let r = h.records.record("n1")
         #expect(r?.state == .sent)
         #expect(r?.naming == true)
         #expect(r?.launch == launch)
-        #expect(r?.name == RouterV2.firstWords("Add a dark mode to the settings page"))
+        #expect(r?.name == Router.firstWords("Add a dark mode to the settings page"))
         // T3 lists it before its run: still Sent. The run: Working, its settings kept through it.
         var t = F.thread("n1", status: .idle)
         t.lastRunEndedAt = nil
@@ -567,7 +567,7 @@ import Testing
     }
 
     @Test func compactKeepsTheLastRecordPerThreadAndWordsAfterIt() {
-        let a = RouterV2Thread(id: "a", name: "A", title: "A", state: .done, sentence: .init(text: "x"), since: F.now)
+        let a = RouterThread(id: "a", name: "A", title: "A", state: .done, sentence: .init(text: "x"), since: F.now)
         var a2 = a
         a2.state = .working
         let folded = RouterRecords.compact([.upsert(a), .words("a", stream: 1, text: "x y", done: false), .upsert(a2),
@@ -580,14 +580,14 @@ import Testing
     @Test func aLongT3TitleIsTheNameWholeUntilTheModelNamesIt() {
         let title = "Did we lose various colour highlights in the brief after the rewrite?"
         #expect(RouterRecords.cut(title) == title)
-        #expect(RouterRecords.cut(title + " " + String(repeating: "word ", count: 40)).count <= RouterV2.Line.titleCharacters)
+        #expect(RouterRecords.cut(title + " " + String(repeating: "word ", count: 40)).count <= Router.Line.titleCharacters)
     }
 
     @Test func theFastNameCutIsFirstWords() {
         for title in ["Tidy the garden notes", "Thread number 123 with a longer title", "  spaced\tout   words\nhere ",
                       "Averyveryveryverylongsinglewordthatgoesonandon", "exactly twenty-eight chars!!", "", "café au lait with a croissant please",
                       "one two three four five six seven", "a b"] {
-            #expect(RouterRecords.cut(title) == RouterV2.firstWords(title, limit: RouterV2.Line.titleCharacters), "\(title)")
+            #expect(RouterRecords.cut(title) == Router.firstWords(title, limit: Router.Line.titleCharacters), "\(title)")
         }
     }
 

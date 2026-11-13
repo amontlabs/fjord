@@ -2,7 +2,7 @@ import Foundation
 
 // The Router v2 page's record store (docs/design/router-v2/IMPLEMENTATION.md 1.3): one record per T3 thread, composed from
 // its code state (`RouterCodeState`), its verdict when the verdict's fingerprint is the current one, and this app's own
-// acts T3 hasn't confirmed yet. It hands the page only what changed (`RouterV2Change`), one record at a time; while the
+// acts T3 hasn't confirmed yet. It hands the page only what changed (`RouterChange`), one record at a time; while the
 // window's morph plays it keeps the changes and lets them go as one batch when still. Not observed by views: the page
 // model is, and it takes these changes through `apply`.
 
@@ -11,7 +11,7 @@ final class RouterRecords {
     // MARK: Wiring
 
     /// Every change for the page (the model's `apply`).
-    var emit: (RouterV2Change) -> Void = { _ in }
+    var emit: (RouterChange) -> Void = { _ in }
     /// A verdict to ask for (`RouterVerdicts.ask`).
     var ask: (RouterVerdictRequest) -> Void = { _ in }
     /// The engine's calls for this thread are no longer wanted: a run started, another fingerprint, the thread left.
@@ -25,7 +25,7 @@ final class RouterRecords {
         didSet { projectNames = [:] }
     }
     /// A thread's pull requests with their states; `reply` is its last reply, where the unlinked ones are named.
-    var pullRequests: (AgentThread, String?) -> [RouterV2Thread.PR] = { t, _ in RouterRecords.linked(t) }
+    var pullRequests: (AgentThread, String?) -> [RouterThread.PR] = { t, _ in RouterRecords.linked(t) }
     var notifier: RouterNotifier?
     var now: () -> Date = Date.init
 
@@ -36,8 +36,8 @@ final class RouterRecords {
 
     private var entries: [String: Entry] = [:]
     /// What the page holds: the last record handed to it per thread (the diff's other side).
-    private var shown: [String: RouterV2Thread] = [:]
-    private var older: [String: RouterV2Older] = [:]
+    private var shown: [String: RouterThread] = [:]
+    private var older: [String: RouterOlder] = [:]
     /// Project names by folder, and fallback names by title: worked out once each (a whole shell reads hundreds of rows).
     private var projectNames: [String: String?] = [:]
     private var titleNames: [String: String] = [:]
@@ -48,10 +48,10 @@ final class RouterRecords {
     private(set) var saved: [String: Saved]
     private var savedChanged = false
     /// Changes made in the operation under way, handed on as one at its end.
-    private var out: [RouterV2Change] = []
+    private var out: [RouterChange] = []
     private var depth = 0
     /// Changes kept while the window's morph plays.
-    private var held: [RouterV2Change] = []
+    private var held: [RouterChange] = []
     private var holding = false
     private var lost = false
     private var boundaryTimer: Timer?
@@ -69,19 +69,19 @@ final class RouterRecords {
 
     // MARK: Reads
 
-    func record(_ id: String) -> RouterV2Thread? { shown[id] }
+    func record(_ id: String) -> RouterThread? { shown[id] }
 
     /// A section's lines, longest there first.
-    func lines(in section: RouterV2Section) -> [RouterV2Thread] {
+    func lines(in section: RouterSection) -> [RouterThread] {
         shown.values.filter { $0.section == section }.sorted { ($0.since, $0.id) < ($1.since, $1.id) }
     }
 
     /// The housekeeping line's threads, newest first.
-    var olderLines: [RouterV2Older] { older.values.sorted { ($0.since, $0.id) > ($1.since, $1.id) } }
+    var olderLines: [RouterOlder] { older.values.sorted { ($0.since, $0.id) > ($1.since, $1.id) } }
 
     /// Everything the page should hold now, as one batch (a page model made after the store).
-    func snapshot() -> RouterV2Change {
-        var all: [RouterV2Change] = shown.values.sorted { $0.id < $1.id }.map { .upsert($0) }
+    func snapshot() -> RouterChange {
+        var all: [RouterChange] = shown.values.sorted { $0.id < $1.id }.map { .upsert($0) }
         all.append(.older(olderLines))
         if lost { all.append(.connection(lost: true)) }
         return .batch(all)
@@ -255,7 +255,7 @@ final class RouterRecords {
             if case .start(let project, let launch, let name) = s.kind {
                 let e = entry(s.thread)
                 e.send = Send(words: s.words, status: .sending, steering: false, run: nil, runStarted: nil, request: nil,
-                              plan: false, at: s.at, start: Start(project: project, launch: launch, name: name ?? RouterV2.firstWords(s.words)))
+                              plan: false, at: s.at, start: Start(project: project, launch: launch, name: name ?? Router.firstWords(s.words)))
                 e.launch = launch
                 refresh(s.thread)
                 return
@@ -497,12 +497,12 @@ final class RouterRecords {
     }
 
     /// The record the page should show for a thread now; nil: no line.
-    private func compose(_ id: String, _ e: Entry) -> RouterV2Thread? {
+    private func compose(_ id: String, _ e: Entry) -> RouterThread? {
         guard e.hidden != true else { return nil }
         guard let code = e.code else {
             // Started here, not listed by T3 yet.
             guard let s = e.send, let start = s.start else { return nil }
-            var r = RouterV2Thread(id: id, name: start.name, naming: true, title: s.words, project: start.project, state: .sent,
+            var r = RouterThread(id: id, name: start.name, naming: true, title: s.words, project: start.project, state: .sent,
                                    sentence: .init(text: ""), since: s.at)
             r.sent = .init(words: s.words, status: s.status)
             r.launch = start.launch
@@ -511,7 +511,7 @@ final class RouterRecords {
         guard e.scope == .line || e.send != nil, let t = e.thread else { return nil }
         let keep = saved[id]
         let name = keep?.name ?? e.send?.start?.name ?? fallbackName(t.title)
-        var r = RouterV2Thread(id: id, name: name, naming: keep?.nameKey != t.title && (e.naming || e.asked), title: t.title,
+        var r = RouterThread(id: id, name: name, naming: keep?.nameKey != t.title && (e.naming || e.asked), title: t.title,
                                project: project(t), state: code.state,
                                sentence: .init(text: code.line, mono: code.mono, stream: e.stream), since: code.since)
         r.isNew = RouterCodeState.isNew(t) && e.seen == nil
@@ -566,7 +566,7 @@ final class RouterRecords {
 
     /// What a finished turn's verdict makes of it: it left you a step (Needs you, its ask, its options, the result line it
     /// keeps), unless you said it doesn't need you (Done, worth a look, the result line); or Done, worth a look or quiet.
-    private func judged(_ r: inout RouterV2Thread, needsYou: Bool, worth: RouterV2Thread.Worth, notForMe: Bool, v: RouterVerdict?) {
+    private func judged(_ r: inout RouterThread, needsYou: Bool, worth: RouterThread.Worth, notForMe: Bool, v: RouterVerdict?) {
         let result = v.flatMap { $0.result.isEmpty ? nil : $0.result }
         if needsYou, !notForMe {
             r.state = .needsYou(.step)
@@ -583,7 +583,7 @@ final class RouterRecords {
     }
 
     /// A T3 request's card: its options are T3's (a plan's are Fjord's two yeses), numbered as `ThreadAnswers` reads them.
-    private func card(_ r: inout RouterV2Thread, _ request: ThreadRequest) {
+    private func card(_ r: inout RouterThread, _ request: ThreadRequest) {
         switch request.body {
         case .question(let questions):
             if questions.count > 1 {
@@ -665,14 +665,14 @@ final class RouterRecords {
         return name
     }
 
-    /// `RouterV2.firstWords` at `Line.titleCharacters`, read in one pass over the bytes for a title in ASCII (most are):
+    /// `Router.firstWords` at `Line.titleCharacters`, read in one pass over the bytes for a title in ASCII (most are):
     /// the words on one line, cut at a word only past that (the row truncates the rest at its own width).
     static func cut(_ title: String) -> String {
-        let limit = RouterV2.Line.titleCharacters
+        let limit = Router.Line.titleCharacters
         var words: [Range<Int>] = []
         var start = -1, flat = 0, i = 0
         for b in title.utf8 {
-            if b >= 0x80 { return RouterV2.firstWords(title, limit: limit) }
+            if b >= 0x80 { return Router.firstWords(title, limit: limit) }
             let space = b == 0x20 || (b >= 0x09 && b <= 0x0D)
             if space {
                 if start >= 0 { words.append(start..<i); flat += i - start + (words.count > 1 ? 1 : 0); start = -1 }
@@ -706,7 +706,7 @@ final class RouterRecords {
         return text(words[..<taken]) + "…"
     }
 
-    private func count(_ old: RouterV2Thread?, _ new: RouterV2Thread?) {
+    private func count(_ old: RouterThread?, _ new: RouterThread?) {
         let was = old?.section == .needsYou, now = new?.section == .needsYou
         guard was != now else { return }
         needsYou += now ? 1 : -1
@@ -715,9 +715,9 @@ final class RouterRecords {
 
     /// The housekeeping line's threads: finished a day to a week ago and not settled.
     private func housekeeping(_ id: String, _ e: Entry) {
-        var o: RouterV2Older?
+        var o: RouterOlder?
         if e.scope == .older, e.hidden != true, e.send == nil, let code = e.code, let t = e.thread {
-            o = RouterV2Older(id: id, name: t.title, project: project(t), since: code.since)
+            o = RouterOlder(id: id, name: t.title, project: project(t), since: code.since)
         }
         guard older[id] != o else { return }
         older[id] = o
@@ -769,18 +769,18 @@ final class RouterRecords {
 
     /// What was kept, folded: the last record per thread (an upsert or a remove), then the housekeeping line, the names,
     /// the words and the last lines as they ended, the connection, then refusals, reads and launches in their order.
-    static func compact(_ changes: [RouterV2Change]) -> [RouterV2Change] {
-        var records: [String: RouterV2Change] = [:], recordOrder: [String] = []
-        var words: [String: RouterV2Change] = [:], wordOrder: [String] = []
-        var replies: [String: RouterV2Change] = [:], replyOrder: [String] = []
-        var names: [String: RouterV2Change] = [:], nameOrder: [String] = []
-        var olderList: RouterV2Change?, connection: RouterV2Change?
-        var rest: [RouterV2Change] = []
-        func keep(_ d: inout [String: RouterV2Change], _ o: inout [String], _ id: String, _ c: RouterV2Change) {
+    static func compact(_ changes: [RouterChange]) -> [RouterChange] {
+        var records: [String: RouterChange] = [:], recordOrder: [String] = []
+        var words: [String: RouterChange] = [:], wordOrder: [String] = []
+        var replies: [String: RouterChange] = [:], replyOrder: [String] = []
+        var names: [String: RouterChange] = [:], nameOrder: [String] = []
+        var olderList: RouterChange?, connection: RouterChange?
+        var rest: [RouterChange] = []
+        func keep(_ d: inout [String: RouterChange], _ o: inout [String], _ id: String, _ c: RouterChange) {
             if d[id] == nil, !o.contains(id) { o.append(id) }
             d[id] = c
         }
-        func fold(_ c: RouterV2Change) {
+        func fold(_ c: RouterChange) {
             switch c {
             case .upsert(let t):
                 keep(&records, &recordOrder, t.id, c)
@@ -874,7 +874,7 @@ extension RouterRecords {
     /// A send T3 hasn't confirmed.
     struct Send: Equatable {
         var words: String
-        var status: RouterV2Thread.Sent.Status
+        var status: RouterThread.Sent.Status
         var steering: Bool
         /// The run, its start, the request and the plan as they were at the send: a move of any is T3's word.
         var run: String?
@@ -888,13 +888,13 @@ extension RouterRecords {
     /// A new thread started here.
     struct Start: Equatable {
         var project: String
-        var launch: RouterV2Launch
+        var launch: RouterLaunch
         var name: String
     }
 
     struct Landed: Equatable {
         var needsYou: Bool
-        var worth: RouterV2Thread.Worth
+        var worth: RouterThread.Worth
     }
 
     struct Seen: Equatable {
@@ -934,14 +934,14 @@ extension RouterRecords {
         /// Settle or snooze (true), or its Revert (false), until T3's row agrees.
         var hidden: Bool?
         var seen: Seen?
-        var launch: RouterV2Launch?
+        var launch: RouterLaunch?
     }
 
     /// The pull requests T3 links, with T3's state for each.
-    static func linked(_ t: AgentThread) -> [RouterV2Thread.PR] {
+    static func linked(_ t: AgentThread) -> [RouterThread.PR] {
         t.pullRequests.compactMap { pr in
             guard let n = pr.number else { return nil }
-            return .init(number: n, state: RouterV2Thread.PR.State(rawValue: pr.state?.lowercased() ?? "") ?? .open)
+            return .init(number: n, state: RouterThread.PR.State(rawValue: pr.state?.lowercased() ?? "") ?? .open)
         }
     }
 }

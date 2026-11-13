@@ -260,7 +260,7 @@ struct HeaderInsets: Layout {
 struct AppContent: View {
     let store: Store
     let navigator: AppNavigator
-    let routerModel: RouterModel
+    let routerModel: RouterComposerModel
     let hub: HubState
     var search = InboxSearch()
     var checksClaudeCode = true
@@ -273,12 +273,12 @@ struct AppContent: View {
             case .category(let id): InboxListView(store: store, tab: .category(id), hub: hub, search: search, leadingInset: leadingInset).id(id)
             case .done: InboxListView(store: store, tab: .done, hub: hub, search: search, leadingInset: leadingInset).id("done")
             case .router:
-                if let v2 = RouterV2Demo.model {
+                if let v2 = RouterDemo.model {
                     // The Router v2 page on its demo records (`--router-v2-demo`, the `v2-` shots).
-                    RouterV2Screen(model: v2, store: store, text: routerModel, stage: RouterV2Demo.stage, leadingInset: leadingInset)
-                        .transformEnvironment(\._accessibilityReduceMotion) { if RouterV2Demo.reduceMotion { $0 = true } }
+                    RouterScreen(model: v2, store: store, text: routerModel, stage: RouterDemo.stage, leadingInset: leadingInset)
+                        .transformEnvironment(\._accessibilityReduceMotion) { if RouterDemo.reduceMotion { $0 = true } }
                 } else {
-                    RouterV2Screen(model: store.routerPage, store: store, text: routerModel, leadingInset: leadingInset)
+                    RouterScreen(model: store.routerPage, store: store, text: routerModel, leadingInset: leadingInset)
                         .task { if checksClaudeCode { await routerModel.checkClaudeCode(store) } }
                 }
             case .settings:

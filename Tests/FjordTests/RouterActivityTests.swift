@@ -39,7 +39,7 @@ import Testing
                                        subagent("s2", title: nil, model: nil),
                                        subagent("s3", title: "Done already", model: "claude-haiku-5-5", status: "completed")],
                            roster: [task("s1-task", "subagent", "Check the seams")])
-        let a = RouterV2Activity.make(p)
+        let a = RouterActivity.make(p)
         #expect(a.agents.map(\.name) == ["Check the seams", "Review the diff and report."])
         #expect(a.agents[0].model == "claude-opus-5-5")
         #expect(a.agents[0].since == AgentThread.date(T3Timestamp("2026-01-02T03:00:00.000Z")))
@@ -49,7 +49,7 @@ import Testing
     @Test func aRosterSubagentItsRecordCoversIsNotListedTwice() {
         var t = task("x", "subagent", "Check the seams")
         if case .object(var o) = t { o["childThreadId"] = "child-s1"; t = .object(o) }
-        let a = RouterV2Activity.make(projection(subagents: [subagent("s1", title: "Check the seams", model: "claude-opus-5-5")], roster: [t]))
+        let a = RouterActivity.make(projection(subagents: [subagent("s1", title: "Check the seams", model: "claude-opus-5-5")], roster: [t]))
         #expect(a.agents.count == 1)
     }
 
@@ -57,13 +57,13 @@ import Testing
         let bash = F.item("c1", type: "command_execution", ordinal: 3, status: "completed",
                           ["input": "gh run watch 432\n--exit-status", "startedAt": "2026-01-02T03:01:00.000Z",
                            "output": "Command running in background with ID: bmas1r4fq. Output is being written to: /tmp/x"])
-        let a = RouterV2Activity.make(projection(items: [bash], roster: [task("bmas1r4fq", "command", "Watch CI")]))
+        let a = RouterActivity.make(projection(items: [bash], roster: [task("bmas1r4fq", "command", "Watch CI")]))
         #expect(a.processes == [.init(id: "bmas1r4fq", command: "gh run watch 432", mono: true,
                                       since: AgentThread.date(T3Timestamp("2026-01-02T03:01:00.000Z")))])
         #expect(a.waits.isEmpty)
 
         // Not in the projection: T3's description, in sans.
-        let bare = RouterV2Activity.make(projection(roster: [task("zz", "command", "Start the dev server")]))
+        let bare = RouterActivity.make(projection(roster: [task("zz", "command", "Start the dev server")]))
         #expect(bare.processes.first?.command == "Start the dev server")
         #expect(bare.processes.first?.mono == false)
     }
@@ -71,7 +71,7 @@ import Testing
     @Test func workTheAgentAwaitsIsAWait() {
         let wait = F.item("w", type: "dynamic_tool", ordinal: 4, status: "running",
                           ["toolName": "mcp__t3-code__t3_background_wait", "input": ["taskIds": ["b2"]]])
-        let a = RouterV2Activity.make(projection(items: [wait], roster: [task("b1", "command", "Build", awaited: true),
+        let a = RouterActivity.make(projection(items: [wait], roster: [task("b1", "command", "Build", awaited: true),
                                                                          task("b2", "command", "Test")]))
         #expect(a.processes.isEmpty)
         #expect(a.waits.map(\.kind) == [.command, .command])
@@ -86,7 +86,7 @@ import Testing
                              ["toolName": "Monitor", "input": ["description": "the release build", "command": "until …"]])
         let doneWait = F.item("tw2", type: "dynamic_tool", ordinal: 7, status: "completed",
                               ["toolName": "mcp__t3-code__t3_thread_wait", "input": ["threadId": "older"]])
-        let a = RouterV2Activity.make(projection(items: [threadWait, monitor, doneWait],
+        let a = RouterActivity.make(projection(items: [threadWait, monitor, doneWait],
                                                  shell: [task("pull-request-watch:github.com/a/b#41", "monitor", "Watching pull request #41")]))
         #expect(a.waits.map(\.kind) == [.thread, .monitor])
         #expect(a.waits.first?.thread == "other")
@@ -95,13 +95,13 @@ import Testing
 
     @Test func aForegroundCommandIsNotBackgroundWork() {
         let running = F.item("c", type: "command_execution", ordinal: 2, status: "running", ["input": "swift build", "output": ""])
-        #expect(RouterV2Activity.make(projection(items: [running])).isEmpty)
+        #expect(RouterActivity.make(projection(items: [running])).isEmpty)
     }
 
     @Test func workWithNoStartKeepsTheTimeFjordFirstSawIt() {
-        let first = RouterV2Activity.make(projection(roster: [task("zz", "command", "Serve")])).stamped(after: nil, now: now)
+        let first = RouterActivity.make(projection(roster: [task("zz", "command", "Serve")])).stamped(after: nil, now: now)
         #expect(first.processes.first?.since == now)
-        let later = RouterV2Activity.make(projection(roster: [task("zz", "command", "Serve"), task("yy", "monitor", "Logs")]))
+        let later = RouterActivity.make(projection(roster: [task("zz", "command", "Serve"), task("yy", "monitor", "Logs")]))
             .stamped(after: first, now: now + 60)
         #expect(later.processes.first?.since == now)
         #expect(later.waits.first?.since == now + 60)
@@ -110,10 +110,10 @@ import Testing
     }
 
     @Test func modelNames() {
-        #expect(RouterV2Activity.modelName("claude-opus-5-5") == "Opus 5.5")
-        #expect(RouterV2Activity.modelName("claude-haiku-5-5") == "Haiku 5.5")
-        #expect(RouterV2Activity.modelName("gpt-6.1-sol") == "gpt-6.1-sol")
-        #expect(RouterV2Activity.modelName("judge") == "judge")
+        #expect(RouterActivity.modelName("claude-opus-5-5") == "Opus 5.5")
+        #expect(RouterActivity.modelName("claude-haiku-5-5") == "Haiku 5.5")
+        #expect(RouterActivity.modelName("gpt-6.1-sol") == "gpt-6.1-sol")
+        #expect(RouterActivity.modelName("judge") == "judge")
     }
 
     @Test func theDetailCarriesIt() {

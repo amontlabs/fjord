@@ -30,7 +30,7 @@ import Testing
         var changeID: UUID? = UUID()
         var reverted: [UUID] = []
         var opened: [String] = []
-        var emitted: [RouterV2Change] = []
+        var emitted: [RouterChange] = []
         var away = false
 
         func began(send: RouterActs.Send) { log.append("began"); began.append(send) }
@@ -77,9 +77,9 @@ import Testing
         }
     }
 
-    private func out(_ thread: String = "t1", _ words: String = "use postgres", kind: RouterV2Outgoing.Kind = .words,
-                     steering: Bool = false, queue: Bool = false, read: RouterV2Read? = nil) -> RouterV2Outgoing {
-        RouterV2Outgoing(thread: thread, words: words, kind: kind, steering: steering, queue: queue, read: read)
+    private func out(_ thread: String = "t1", _ words: String = "use postgres", kind: RouterOutgoing.Kind = .words,
+                     steering: Bool = false, queue: Bool = false, read: RouterRead? = nil) -> RouterOutgoing {
+        RouterOutgoing(thread: thread, words: words, kind: kind, steering: steering, queue: queue, read: read)
     }
 
     private func question(_ options: [String], id: String = "q1", custom: Bool = false, multi: Bool = false) -> T3Question {
@@ -145,8 +145,8 @@ import Testing
         let acts = f.acts()
         let decision = RouterProjectDecision(kind: .thread("t1"), confidence: 0.95, decider: .jev)
         acts.decision = { $0 == "use postgres" ? decision : nil }
-        acts.send(out(read: RouterV2Read(draft: "use postgres", places: [], sure: true)))
-        acts.send(out(read: RouterV2Read(draft: "other words", places: [], sure: true)))
+        acts.send(out(read: RouterRead(draft: "use postgres", places: [], sure: true)))
+        acts.send(out(read: RouterRead(draft: "other words", places: [], sure: true)))
         #expect(f.submitted.map(\.context.decided) == [decision, nil])
     }
 
@@ -341,11 +341,11 @@ import Testing
     @Test func aNewThreadIsRecordedThenStartedWithTheMintedIdAndTheRowsSettings() {
         let f = Fake()
         let acts = f.acts()
-        acts.models = [RouterV2LaunchModel(id: "claude-opus-5-5", name: "Opus", provider: "Claude", instance: "claudeAgent",
-                                           efforts: RouterV2Launch.Effort.claude, defaultEffort: .high, access: RouterV2Launch.Access.all)]
+        acts.models = [RouterLaunchModel(id: "claude-opus-5-5", name: "Opus", provider: "Claude", instance: "claudeAgent",
+                                           efforts: RouterLaunch.Effort.claude, defaultEffort: .high, access: RouterLaunch.Access.all)]
         let id = acts.mintThread()
         #expect(id == id.lowercased() && UUID(uuidString: id) != nil && acts.mintThread() != id)
-        var launch = RouterV2Launch(model: "claude-opus-5-5", effort: .medium, access: .autoEdits)
+        var launch = RouterLaunch(model: "claude-opus-5-5", effort: .medium, access: .autoEdits)
         launch.plan = true
         acts.start(id, words: "add dark mode", project: "Garden", launch: launch, read: nil)
         #expect(f.log == ["began", "submit"])
@@ -359,10 +359,10 @@ import Testing
     @Test func aModelThatTakesNoEffortIsStartedWithoutOne() {
         let f = Fake()
         let acts = f.acts()
-        acts.models = [RouterV2LaunchModel(id: "gpt-6", name: "GPT", provider: "Codex", instance: "codex", efforts: [], defaultEffort: nil,
-                                           access: RouterV2Launch.Access.all)]
-        #expect(acts.settings(RouterV2Launch(model: "gpt-6", effort: .high, access: .auto)).effort == nil)
-        #expect(acts.settings(RouterV2Launch(model: "unknown", effort: .high, access: .auto)).effort == "high")
+        acts.models = [RouterLaunchModel(id: "gpt-6", name: "GPT", provider: "Codex", instance: "codex", efforts: [], defaultEffort: nil,
+                                           access: RouterLaunch.Access.all)]
+        #expect(acts.settings(RouterLaunch(model: "gpt-6", effort: .high, access: .auto)).effort == nil)
+        #expect(acts.settings(RouterLaunch(model: "unknown", effort: .high, access: .auto)).effort == "high")
     }
 
     @Test func aProjectT3DoesntHaveStartsNothing() {
@@ -425,7 +425,7 @@ import Testing
 
     @Test func aNewThreadFromThePageLaunchesWithItsMintedIdAndSettingsAndIsTaken() async {
         let (_, f, acts, sent) = liveStore()
-        var launch = RouterV2Launch(model: "claude-sonnet-5-5", effort: .low, access: .supervised)
+        var launch = RouterLaunch(model: "claude-sonnet-5-5", effort: .low, access: .supervised)
         launch.plan = true
         let id = acts.mintThread()
         acts.start(id, words: "add dark mode", project: "Garden", launch: launch, read: nil)
