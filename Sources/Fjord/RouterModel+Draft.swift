@@ -415,27 +415,33 @@ extension RouterModel {
         backups[id] = (t, picks[id], kind)
         lastSends[id] = (words, kind)
         let next: RouterSelection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
-        move(id) {
-            update(id) {
+        // A thread with open items stays where its most urgent one puts it: your words show in its block, nothing moves,
+        // and the next card opens at once (a line marked in flight held the card's words back for a flight that wasn't).
+        let stays = !t.ledger.live.isEmpty && t.state != .stopped
+        let change = {
+            self.update(id) {
                 $0.state = .sent
                 $0.sent = .init(words: words, status: steering ? .steering : .sending)
                 // A block's header keeps how long it has run: your words show in the block, with their own place.
-                if $0.ledger.live.isEmpty { $0.since = now }
-                $0.order = fresh()
+                if !stays {
+                    $0.since = self.now
+                    $0.order = self.fresh()
+                }
                 $0.isNew = false
                 $0.paused = false
                 // Its open items are checked against your words: they show in the block at once, the items sheen.
                 $0.ledger.sent(words)
             }
-            picks[id] = nil
-            typed[id] = nil
-            formAt[id] = nil
-            expanded.remove(id)
+            self.picks[id] = nil
+            self.typed[id] = nil
+            self.formAt[id] = nil
+            self.expanded.remove(id)
             if let next {
-                selection = next
-                snoozeMenu = nil
+                self.selection = next
+                self.snoozeMenu = nil
             }
         }
+        if stays { animate(.spatial, change) } else { move(id, change) }
         if let next { advanced(to: next) }
         source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: steering, queue: false, read: shown))
     }

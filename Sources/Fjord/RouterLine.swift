@@ -252,7 +252,9 @@ struct RouterLineView: View {
                     .padding(.top, max(0, box.rowHeight - focusRowHeight))
                     .opacity(open ? shown : 0)
                     .motion(.spatial, value: cardHeight)
-                    .transaction { if moving { $0.animation = nil } }
+                    // Shutting, it goes with the card's words, at once: an empty ground was left over the place folding
+                    // away while the next card opened.
+                    .transaction { if moving || !open { $0.animation = nil } }
             }
         }
         .background {
