@@ -19,6 +19,10 @@ final class RouterRecords {
     /// Whether a verdict or a name may be asked now (the Router on, not a demo). Not: a finished turn is plain Done on the
     /// code's words, and no line waits ("being read") on a call that won't come.
     var canAsk: () -> Bool = { true }
+    /// Reads a finished or stopped turn's projection once (`T3Store.readSnapshot`), answering with `read(_:key:_:)`: the
+    /// shell carries no reply (T3 0.1.7 sends `latestVisibleMessage: null`), and a subscription closes with the run. Nil:
+    /// no reader (tests, the demo), and what the records hold is all there is.
+    var fetch: ((_ thread: String, _ key: String) -> Void)?
     /// The Needs-you count changed (the sidebar badge, the bar).
     var onNeedsYou: ((Int) -> Void)?
     /// The shell as T3's store holds it now (`shell(_:)` reads its rows and projects from it).
@@ -128,6 +132,8 @@ final class RouterRecords {
         operation {
             let e = entry(t.id)
             e.thread = t
+            // A new T3 event: a read that failed is tried again.
+            e.readFailed = nil
             refresh(t.id)
         }
     }
@@ -161,6 +167,25 @@ final class RouterRecords {
             if let a = d?.activity { d?.activity = a.stamped(after: e.detail?.activity, now: now()) }
             guard e.detail != d else { return }
             e.detail = d
+            refresh(id)
+        }
+    }
+
+    /// A turn's projection read once (`fetch`) for `key` (`turnKey`); nil: the read failed (what a subscription held is
+    /// taken when it has a reply), tried again at the next T3 event. A read for a turn that is no longer the thread's is dropped, and the current one is read.
+    func read(_ id: String, key: String, _ d: RouterDetail?) {
+        operation {
+            guard let e = entries[id] else { return }
+            if e.reading == key { e.reading = nil }
+            if let d {
+                if e.detail != d { e.detail = d }
+                e.read = key
+            } else if e.detail?.reply.isEmpty == false {
+                // No read, but a subscription held the reply: that is what there is.
+                e.read = key
+            } else {
+                e.readFailed = key
+            }
             refresh(id)
         }
     }
@@ -414,6 +439,7 @@ final class RouterRecords {
             // A thread started here keeps its settings through its first run.
             if e.launch != nil, e.send == nil, code.state != .working { e.launch = nil }
             if !e.cancelled.isEmpty { e.cancelled.formIntersection((e.detail?.queued ?? []).map(\.id)) }
+            readIfNeeded(id, e, t, code)
             askIfNeeded(id, e, t, code)
             if was != code, e.scope != .out, e.hidden != true, let notifier {
                 let key = notifier.changed(t, project: project(t), from: was, to: code, request: e.detail?.request, now: now,
@@ -473,18 +499,52 @@ final class RouterRecords {
         cancel(id)
     }
 
-    /// The verdict this state needs, asked once per fingerprint; a name once per T3 title.
+    /// The turn a read is for: the verdict's fingerprint and the run's end (a stop keeps the fingerprint the run had).
+    private func turnKey(_ e: Entry, _ t: AgentThread) -> String {
+        e.fingerprint + "|" + (t.lastRunEndedAt.map { String(Int64($0.timeIntervalSince1970 * 1000)) } ?? "-")
+    }
+
+    /// A finished or stopped turn on the page is read once: its reply, its diff, its last step (the card's, and the
+    /// verdict's input). What a closed subscription held last is stale by then.
+    private func readIfNeeded(_ id: String, _ e: Entry, _ t: AgentThread, _ code: RouterCodeState) {
+        guard let fetch, e.scope == .line, e.hidden != true, e.send == nil else { return }
+        switch code.state {
+        case .done, .stopped: break
+        default: return
+        }
+        let key = turnKey(e, t)
+        guard e.read != key, e.readFailed != key, e.reading != key else { return }
+        e.reading = key
+        fetch(id, key)
+    }
+
+    /// The facts a verdict reads are in: a finished turn's reply (read once for this turn), a T3 ask's request.
+    private func ready(_ e: Entry, _ t: AgentThread, _ code: RouterCodeState) -> Bool {
+        switch code.wants {
+        case .ask: return !code.loading
+        case .finished: return fetch == nil || e.read == turnKey(e, t)
+        case .nothing: return false
+        }
+    }
+
+    /// The verdict this state needs, asked once per fingerprint once its facts are in; a name once per T3 title.
     private func askIfNeeded(_ id: String, _ e: Entry, _ t: AgentThread, _ code: RouterCodeState) {
-        guard canAsk() else { return stopCalls(e, id) }
+        guard canAsk() else { e.awaiting = false; return stopCalls(e, id) }
         let onPage = e.scope == .line && e.hidden != true
         let have = saved[id]?.fingerprint == e.fingerprint && saved[id]?.verdict != nil
+        e.awaiting = false
         if code.wants == .nothing || !onPage || e.send != nil {
             // A run started, the thread left, or your words are on their way: no verdict now.
             if e.asked { stopCalls(e, id) }
         } else if !have, !e.asked, !e.failed {
-            e.asked = true
-            let kind: RouterVerdictRequest.Kind = code.wants == .ask ? .ask : .finished
-            ask(RouterVerdictRequest(thread: id, fingerprint: e.fingerprint, kind: kind, input: input(t, e), at: code.since))
+            if ready(e, t, code) {
+                e.asked = true
+                let kind: RouterVerdictRequest.Kind = code.wants == .ask ? .ask : .finished
+                ask(RouterVerdictRequest(thread: id, fingerprint: e.fingerprint, kind: kind, input: input(t, e), at: code.since))
+            } else if code.wants == .finished, e.readFailed != turnKey(e, t) {
+                // Its reply is being read: the line is being read too, not Done yet.
+                e.awaiting = true
+            }
         }
         if saved[id]?.nameKey != t.title, e.nameFailed != t.title, onPage, !e.asked, !e.naming {
             e.naming = true
@@ -494,8 +554,10 @@ final class RouterRecords {
     }
 
     private func input(_ t: AgentThread, _ e: Entry) -> RouterVerdictInput {
-        RouterVerdictInput(thread: t, project: project(t), reply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 },
-                           request: e.detail?.request.map(RouterVerdictInput.Request.init))
+        var input = RouterVerdictInput(thread: t, project: project(t), reply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 },
+                                       request: e.detail?.request.map(RouterVerdictInput.Request.init), diff: e.detail?.diff)
+        if input.yourWords == nil { input.yourWords = e.detail?.youSaid }
+        return input
     }
 
     /// The thread's entry, made if it has none.
@@ -548,7 +610,7 @@ final class RouterRecords {
             if let v {
                 if !v.line.isEmpty { r.sentence = .init(text: v.line, stream: e.stream) }
                 if code.wants == .finished { judged(&r, needsYou: v.needsYou, worth: v.worth, notForMe: notForMe, v: v) }
-            } else if e.asked {
+            } else if e.asked || e.awaiting {
                 if let l = e.landed, code.wants == .finished {
                     judged(&r, needsYou: l.needsYou, worth: l.worth, notForMe: notForMe, v: nil)
                 } else if code.wants == .finished {
@@ -923,6 +985,12 @@ extension RouterRecords {
         var boundary: Date?
         /// A verdict call for this fingerprint is queued or running.
         var asked = false
+        /// A verdict will be asked once the turn's read lands.
+        var awaiting = false
+        /// The turn (`turnKey`) whose projection was read, is being read, or failed to read.
+        var read: String?
+        var reading: String?
+        var readFailed: String?
         /// The call for this fingerprint failed: the code's words stay, settled, until the next fingerprint.
         var failed = false
         /// A name call is queued or running.
@@ -976,11 +1044,30 @@ final class RouterVerdictFile: @unchecked Sendable {
         RouterVerdictFile(url: support.appendingPathComponent("router-verdicts.json"))
     }
 
+    /// The file's shape. Version 2: verdicts asked only once the turn's reply was read (FINAL-REVIEW #2); what version 1
+    /// (a bare dictionary) saved was often asked without it, and is thrown away.
+    static let version = 2
+
+    private struct Contents: Codable {
+        var version: Int
+        var threads: [String: RouterRecords.Saved]
+    }
+
+    /// What a file holds; empty for another version, or one that doesn't read.
+    static func decode(_ data: Data) -> [String: RouterRecords.Saved] {
+        guard let c = try? JSONDecoder().decode(Contents.self, from: data), c.version == version else { return [:] }
+        return c.threads
+    }
+
+    static func encode(_ threads: [String: RouterRecords.Saved]) -> Data? {
+        try? JSONEncoder().encode(Contents(version: version, threads: threads))
+    }
+
     /// The file's contents, read on a background thread; empty when there is none or it doesn't read.
     static func load(_ url: URL) async -> [String: RouterRecords.Saved] {
         await Task.detached(priority: .userInitiated) {
             guard let data = try? Data(contentsOf: url) else { return [:] }
-            return (try? JSONDecoder().decode([String: RouterRecords.Saved].self, from: data)) ?? [:]
+            return decode(data)
         }.value
     }
 
@@ -1002,7 +1089,7 @@ final class RouterVerdictFile: @unchecked Sendable {
         next = nil
         scheduled = false
         lock.unlock()
-        guard let contents, let data = try? JSONEncoder().encode(contents) else { return }
+        guard let contents, let data = Self.encode(contents) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: [.atomic])
     }

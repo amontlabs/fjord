@@ -27,6 +27,8 @@ struct RouterDetail: Equatable {
     var reply = ""
     /// That message is still being written.
     var writing = false
+    /// Your last words there (the verdict reads them; the shell carries none).
+    var youSaid: String?
     /// The question, permission or plan it waits on.
     var request: ThreadRequest?
     var queued: [Queued] = []
@@ -72,6 +74,7 @@ struct RouterDetail: Equatable {
         }
 
         d.request = ThreadRequest(p)
+        d.youSaid = p.messages.last(where: { $0.role == "user" && !$0.text.isEmpty })?.text
 
         d.queued = p.queuedRuns.compactMap { run in
             guard let id = run.userMessageId, let words = p.messages.first(where: { $0.id == id })?.text, !words.isEmpty else { return nil }

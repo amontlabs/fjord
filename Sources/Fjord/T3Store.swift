@@ -292,6 +292,27 @@ final class T3Store {
         return nil
     }
 
+    /// A thread's projection as T3 has it now, through a bounded snapshot held only until it arrives (the one held for the
+    /// screen may lag a run that just ended); with no link, the one held. Given up after `timeout` seconds.
+    func readSnapshot(_ id: String, timeout: TimeInterval = 8) async -> T3Projection? {
+        guard let client else { return projections[id] }
+        return await withTaskGroup(of: T3Projection?.self) { group in
+            group.addTask {
+                for await item in await client.subscribeThread(id, bounded: true) {
+                    if case .snapshot(_, let p) = item { return p }
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
     func closeThread(_ id: String) {
         threadTasks.removeValue(forKey: id)?.cancel()
         projections[id] = nil

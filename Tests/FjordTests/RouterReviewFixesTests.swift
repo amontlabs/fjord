@@ -35,4 +35,131 @@ import Testing
         h.records.put(t)
         #expect(last(h.take())?.askID == nil)
     }
+
+    // MARK: #2: a verdict reads the turn's reply first
+
+    /// A harness whose records read a turn through `fetch`, as the app's do.
+    private func reading() -> (Harness, () -> [(String, String)]) {
+        let h = Harness()
+        var fetched: [(String, String)] = []
+        h.records.fetch = { fetched.append(($0, $1)) }
+        return (h, { defer { fetched = [] }; return fetched })
+    }
+
+    @Test func aFinishedTurnIsReadBeforeItsVerdictIsAsked() throws {
+        let (h, fetched) = reading()
+        h.records.put(F.thread())
+        // No reply in the shell: no verdict yet, the turn is read, and the line is being read meanwhile.
+        #expect(h.verdictAsk() == nil)
+        let read = try #require(fetched().first)
+        #expect(read.0 == "t1")
+        #expect(last(h.take())?.judging == true)
+        var d = RouterDetail()
+        d.reply = "PR #12 is open. Want me to merge it?"
+        d.youSaid = "open the PR"
+        d.diff = .init(files: 4, added: 96, removed: 212)
+        h.records.read("t1", key: read.1, d)
+        let ask = try #require(h.verdictAsk())
+        #expect(ask.kind == .finished)
+        #expect(ask.input.reply == "PR #12 is open. Want me to merge it?")
+        #expect(ask.input.yourWords == "open the PR")
+        #expect(ask.input.diff?.files == 4)
+        // The card shows what was read.
+        #expect(last(h.take())?.lastLines == "PR #12 is open. Want me to merge it?")
+        // Read once per turn.
+        h.records.put(F.thread())
+        #expect(fetched().isEmpty)
+    }
+
+    @Test func aReadThatFailsAsksNothingAndIsTriedAtTheNextT3Event() throws {
+        let (h, fetched) = reading()
+        h.records.put(F.thread())
+        let read = try #require(fetched().first)
+        h.records.read("t1", key: read.1, nil)
+        #expect(h.verdictAsk() == nil)
+        // Plain Done on the code's words, not being read forever.
+        #expect(h.records.record("t1")?.judging == false)
+        h.records.put(F.thread())
+        #expect(fetched().count == 1)
+    }
+
+    @Test func aReadForAnEarlierTurnIsDropped() throws {
+        let (h, fetched) = reading()
+        h.records.put(F.thread())
+        let old = try #require(fetched().first)
+        var next = F.thread(minutes: 1)
+        next.latestRunID = "r2"
+        h.records.put(next)
+        let current = try #require(fetched().first)
+        #expect(current.1 != old.1)
+        var d = RouterDetail()
+        d.reply = "old reply"
+        h.records.read("t1", key: old.1, d)
+        #expect(h.verdictAsk() == nil)
+        d.reply = "new reply"
+        h.records.read("t1", key: current.1, d)
+        #expect(h.verdictAsk()?.input.reply == "new reply")
+    }
+
+    @Test func aStoppedTurnIsReadForItsCard() throws {
+        let (h, fetched) = reading()
+        var t = F.thread(status: .failed)
+        t.lastError = "exit 1"
+        h.records.put(t)
+        let read = try #require(fetched().first)
+        var d = RouterDetail()
+        d.lastStep = "Running swift build"
+        d.reply = "The build failed."
+        h.records.read("t1", key: read.1, d)
+        let r = try #require(h.records.record("t1"))
+        #expect(r.stop?.lastStep == "Running swift build")
+        #expect(r.lastLines == "The build failed.")
+    }
+
+    @Test func anAskWaitsForTheRequestItsLineIsAbout() throws {
+        let h = Harness()
+        var t = F.thread(status: .waiting)
+        t.pendingRequest = F.pending("q1")
+        h.records.put(t)
+        #expect(h.verdictAsk() == nil)
+        var d = RouterDetail()
+        d.request = F.question("Sidebar or tabs?", id: "q1")
+        h.records.detail("t1", d)
+        let ask = try #require(h.verdictAsk())
+        #expect(ask.kind == .ask)
+        #expect(ask.input.request?.words == "Sidebar or tabs?")
+    }
+
+    @Test func theVerdictsSavedBeforeTheReadAreThrownAway() throws {
+        // Version 1 was a bare dictionary: verdicts often asked without the reply.
+        let v1 = try JSONEncoder().encode(["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .finished, line: "finished"))])
+        #expect(RouterVerdictFile.decode(v1).isEmpty)
+        let saved = ["t1": RouterRecords.Saved(fingerprint: "f", verdict: RouterVerdict(kind: .finished, line: "planted"))]
+        let v2 = try #require(RouterVerdictFile.encode(saved))
+        #expect(RouterVerdictFile.decode(v2) == saved)
+    }
+
+    @Test func turnReadsRunAFewAtOnceAndTheNewestAskForAThreadWins() async {
+        var gates: [String: CheckedContinuation<Void, Never>] = [:]
+        var answered: [(String, String)] = []
+        let reads = RouterTurnReads(read: { id in
+            await withCheckedContinuation { gates[id] = $0 }
+            return nil
+        }, cap: 2)
+        reads.done = { id, key, _ in answered.append((id, key)) }
+        reads.read("a", key: "1")
+        reads.read("b", key: "1")
+        reads.read("c", key: "1")
+        reads.read("c", key: "2")
+        await waitUntil { gates.count == 2 }
+        #expect(reads.runningCount == 2)
+        #expect(reads.waitingCount == 1)
+        gates.removeValue(forKey: "a")?.resume()
+        await waitUntil { gates["c"] != nil }
+        gates.removeValue(forKey: "b")?.resume()
+        gates.removeValue(forKey: "c")?.resume()
+        await waitUntil { answered.count == 3 }
+        #expect(answered.map(\.0).sorted() == ["a", "b", "c"])
+        #expect(answered.first { $0.0 == "c" }?.1 == "2")
+    }
 }

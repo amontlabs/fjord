@@ -14,8 +14,7 @@ extension Store {
         routerRecordsMade = true
         let file = routerPageFiles.map { RouterVerdictFile.live($0.support) }
         // A small file, read once before the first record is composed.
-        let saved = file.flatMap { try? Data(contentsOf: $0.url) }
-            .flatMap { try? JSONDecoder().decode([String: RouterRecords.Saved].self, from: $0) } ?? [:]
+        let saved = file.flatMap { try? Data(contentsOf: $0.url) }.map(RouterVerdictFile.decode) ?? [:]
         let records = RouterRecords(saved: saved, file: file, gate: motionGate)
         records.rows = { [weak self] in self?.t3.store.shell ?? T3ShellState() }
         records.projectName = { [weak self] t in
@@ -30,6 +29,7 @@ extension Store {
             self.routerVerdicts.ask(request)
         }
         records.cancel = { [weak self] thread in self?.routerVerdicts.cancel(thread) }
+        records.fetch = { [weak self] thread, key in self?.routerTurnReads.read(thread, key: key) }
         records.onNeedsYou = { [weak self] n in if self?.routerNeedsYou != n { self?.routerNeedsYou = n } }
         records.emit = { [weak self] change in self?.routerPage.post(change) }
         let notifier = RouterNotifier()
@@ -53,6 +53,14 @@ extension Store {
         page.source = routerActs
         page.apply(routerRecords.snapshot())
         return page
+    }
+
+    func makeRouterTurnReads() -> RouterTurnReads {
+        let reads = RouterTurnReads(read: { [weak self] id in await self?.t3.store.readSnapshot(id) })
+        reads.done = { [weak self] id, key, projection in
+            self?.routerRecords.read(id, key: key, projection.map { RouterDetail.make($0, now: Date()) })
+        }
+        return reads
     }
 
     func makeRouterVerdicts() -> RouterVerdicts {
