@@ -219,7 +219,10 @@ enum RouterItemsEvent: Equatable, Sendable {
     case found([RouterItemsAnswer.Found])
     case words(String, done: Bool)
     case done(RouterItemsAnswer)
+    /// The call failed (offline, a usage limit, Claude Code missing): the input is read again later.
     case failed
+    /// The model answered, twice, with something that doesn't read: the input is passed, with a note.
+    case unreadable
 }
 
 /// One read's answer as it comes (pure): the pieces of `PartialJSON` into events, and the whole answer checked.

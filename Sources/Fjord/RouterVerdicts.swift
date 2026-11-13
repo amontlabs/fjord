@@ -424,7 +424,7 @@ struct RouterVerdictReading {
     private func tellItems(_ key: String, _ token: Int, _ events: [RouterItemsEvent]) {
         guard let job = running[key], job.token == token, case .verdict(let r) = job.work else { return }
         for e in events {
-            if case .failed = e {
+            if e == .failed || e == .unreadable {
                 running[key]?.close()
             } else if let state = running[key]?.state {
                 RouterSignposts.end(state, afterCommit: true)
@@ -467,16 +467,21 @@ struct RouterVerdictReading {
         case .verdict where items != nil:
             var items = items!
             let events = end.flatMap { $0.error == nil ? $0.json : nil }.map { items.end($0) } ?? [.failed]
-            if events.last == .failed, job.attempt + 1 < attempts {
+            // An answer that came but doesn't read is the model's, not the line's: asked once more at most.
+            let bad = end != nil && end?.error == nil
+            if events.last == .failed, bad, job.attempt >= 1 {
+                tellItems(key, token, [.unreadable])
+            } else if events.last == .failed, job.attempt + 1 < (bad ? 2 : attempts) {
                 running[key] = nil
                 var job = job
                 job.close()
                 let attempt = job.attempt + 1
                 enqueue(key, job.work, attempt: attempt, notBefore: now().addingTimeInterval(backoff(attempt)))
                 return
+            } else {
+                if events.last != .failed { limits = 0 }
+                tellItems(key, token, events.last == .failed ? [.failed] : events)
             }
-            if events.last != .failed { limits = 0 }
-            tellItems(key, token, events.last == .failed ? [.failed] : events)
         case .verdict:
             var reading = reading ?? RouterVerdictReading(kind: .ask)
             let events = end.flatMap { $0.error == nil ? $0.json : nil }.map { reading.end($0) } ?? [.failed]

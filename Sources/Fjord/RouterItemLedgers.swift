@@ -480,12 +480,8 @@ struct RouterItemFacts: Equatable, Sendable {
                     }
                     inputs.append(.message(id: m.id, at: m.at, words: m.text, before: m.before))
                 }
-                if !f.messages.contains(where: { $0.at >= upTo.addingTimeInterval(-2) }),
-                   s.items.allSatisfy({ $0.sentence != Router.Items.Copy.unreadMessage }) {
-                    // T3 never listed it: a note, so an answer of yours isn't silently unread.
-                    s.items.append(RouterItem(id: "i\(s.next)", kind: .know, sentence: Router.Items.Copy.unreadMessage, since: now()))
-                    s.next += 1
-                }
+                // T3 never listed it: a note, so an answer of yours isn't silently unread.
+                if !f.messages.contains(where: { $0.at >= upTo.addingTimeInterval(-2) }) { note(&s, Router.Items.Copy.unreadMessage) }
                 markRead(&s, input.key)
                 let fresh = inputs.filter { x in !s.read.contains(x.key) && !s.pending.contains { $0.key == x.key } }
                 s.pending.insert(contentsOf: fresh, at: 0)
@@ -511,10 +507,7 @@ struct RouterItemFacts: Equatable, Sendable {
                 }
                 guard let turn = l.facts?.turns[run], !turn.reply.isEmpty else {
                     // A turn with no words, or older than the facts keep: nothing to read. One T3 never listed: a note.
-                    if l.facts?.order.contains(run) != true, s.items.allSatisfy({ $0.sentence != Router.Items.Copy.unread }) {
-                        s.items.append(RouterItem(id: "i\(s.next)", kind: .know, sentence: Router.Items.Copy.unread, since: now()))
-                        s.next += 1
-                    }
+                    if l.facts?.order.contains(run) != true { note(&s, Router.Items.Copy.unread) }
                     markRead(&s, input.key)
                     store(id, s)
                     changed(id)
@@ -562,6 +555,18 @@ struct RouterItemFacts: Equatable, Sendable {
             words(id, run, text, done)
         case .done(let answer):
             commit(id, l, input, answer)
+            pump(id, context: context)
+        case .unreadable:
+            // The model's answer doesn't read, twice: the input is passed with a note, and the next one is read.
+            l.reading = nil
+            l.closes = [:]
+            l.found = []
+            l.words = nil
+            var s = load(id) ?? Saved()
+            note(&s, input.isTurn ? Router.Items.Copy.unread : Router.Items.Copy.unreadMessage)
+            markRead(&s, key)
+            store(id, s)
+            changed(id)
             pump(id, context: context)
         case .failed:
             // Offline, a usage limit, Claude Code missing: the input stays pending, at the head, and is read again after
@@ -637,6 +642,13 @@ struct RouterItemFacts: Equatable, Sendable {
         case .done: Router.Items.Copy.doneByAgent
         case .obsolete: Router.Items.Copy.obsolete
         }
+    }
+
+    /// An input that couldn't be read leaves a Know saying so (once while it is open), so nothing goes silently.
+    private func note(_ s: inout Saved, _ sentence: String) {
+        guard !s.items.contains(where: { $0.sentence == sentence }) else { return }
+        s.items.append(RouterItem(id: "i\(s.next)", kind: .know, sentence: sentence, since: now()))
+        s.next += 1
     }
 
     /// The input's read is applied (or there was nothing to read): it leaves the pending list.

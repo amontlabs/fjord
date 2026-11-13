@@ -505,6 +505,16 @@ import Testing
         #expect(h.saved?.items.last?.sentence == "sign in to Silo")
     }
 
+    /// REVIEW-items 3.3: an input whose answer doesn't read is passed with a note; the next input is read.
+    @Test func anUnreadableAnswerPassesTheInputWithANote() throws {
+        let h = seeded()
+        h.records.put(Self.ended("r2"))
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Sign in to Silo.")]))
+        h.records.items("t1", key: "turn:r2", .unreadable)
+        #expect(h.saved?.read.contains("turn:r2") == true && h.saved?.pending.isEmpty == true)
+        #expect(h.saved?.items.last?.sentence == Router.Items.Copy.unread)
+    }
+
     @Test func aLateAnswerForAnotherReadIsDropped() {
         let h = seeded()
         h.records.items("t1", key: "turn:old", .done(RouterItemsAnswer(close: ["i1": .done])))

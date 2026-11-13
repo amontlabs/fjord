@@ -441,6 +441,26 @@ final class FakeClaude: @unchecked Sendable {
         #expect(told.last == .done(RouterItemsAnswer(close: ["i1": .answered])))
     }
 
+    /// REVIEW-items 3.3: an answer that doesn't read is the model's: asked once more, then told unreadable, not six
+    /// Sonnet calls.
+    @Test func anItemsAnswerThatDoesntReadIsAskedOnceMoreOnly() async {
+        let fake = FakeClaude()
+        let (e, _) = engine(fake)
+        e.backoff = { _ in 0.02 }
+        var told: [RouterItemsEvent] = []
+        e.onItems = { _, _, ev in told.append(ev) }
+        e.ask(items("t", open: Self.open))
+        await until(fake.calls.count == 1)
+        fake.send(0, FakeClaude.answer(["nothing": "useful"]))
+        fake.close(0)
+        await waitUntil { fake.calls.count == 2 }
+        fake.send(1, FakeClaude.answer(["nothing": "useful"]))
+        fake.close(1)
+        await waitUntil { !told.isEmpty }
+        #expect(told == [.unreadable])
+        #expect(fake.calls.count == 2)
+    }
+
     @Test func itemsUsageIsLoggedApart() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("items-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
