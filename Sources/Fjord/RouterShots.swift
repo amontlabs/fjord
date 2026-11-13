@@ -121,7 +121,7 @@ enum RouterShots {
                 model.apply(.upsert(settings))
             }
         },
-        State(name: "v2-card-step") { $0.select(.line(ID.valCenis)) },
+        State(name: "v2-card-decide") { $0.select(.line(ID.valCenis)) },
         State(name: "v2-card-done") { $0.select(.line(ID.guide)) },
         State(name: "v2-card-loading") { model in
             if var guide = model.thread(ID.guide) {

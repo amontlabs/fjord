@@ -131,7 +131,6 @@ What floats keeps CDS Menu's 10, the composer CDS's 14.
 | Needs you: question, form | `CDS.Text.warning` | `questionmark.circle.fill` | tint 12 % |
 | Needs you: plan | `CDS.Text.warning` | `list.bullet.clipboard.fill` | tint 12 % |
 | Needs you: permission | `CDS.Text.warning` | `lock.fill` | tint 12 % |
-| Needs you: left you a step (model) | `CDS.Text.warning` | `checklist` | tint 12 % |
 | Stopped | `CDS.Text.danger` | `exclamationmark.triangle.fill` | tint 12 % |
 | Sent | mark `CDS.Text.accent`, name `CDS.Text.primary` | `arrow.up.circle.fill` | none |
 | Working | mark `CDS.Text.muted`, name `CDS.Text.primary` | CDS working dots (`Transcript.markDots`, Core Animation); `ellipsis` under Reduce Motion | none |
@@ -282,7 +281,6 @@ Kind blocks:
 | **Form** | each question: title prose medium, its option rows; numbers run through the form (1, 2 then 3, 4). The current question has a 2 pt `CDS.Text.accent` rail on its left (**R3.** one rail that slides between questions); an answered one shows `checkmark` 10 pt `Text.muted` after its title. A typed answer shows as a row "Your answer: …" | digits pick anywhere; Tab / ⇧Tab move the current question; typing answers the current question | left: "1 of 2 answered" (footnote muted); then the same three |
 | **Plan** | the plan's markdown (transcript prose), first 8 lines with a bottom fade; under it a footnote button "Show all · 23 lines" (`→`), "Show less" (`←`). **R3.** The button rides the edge of the text as it rolls and its label swaps | **R3.** Two options, Fjord's own (T3 gives a plan none): "Yes, and auto-accept edits" · "Yes, and manually approve edits". "No" is typing what to change | same three |
 | **Permission** | **R3.** No reason block (T3 sends none). The command: `CDS.mono(12)` on `Transcript.codeFill`, radius 6, padding 8 × 6, selectable; an option's warning in footnote `Text.warning` | **R3.** T3's four options as rows: Allow once · Allow for this thread · Deny · Cancel. Typed words deny the request with your words. After a T3 restart a request can't be answered: the options give way to Open in T3 (not in the demo) | same three |
-| **Left you a step** (model) | the ask in prose `Text.primary`; PR badges (below) | the model's options as rows when it gave some; they send their text | **R3.** Doesn't need me · Snooze · Settle · Open in T3 |
 | **Done** | PR badges; "4 files" + `+96` in `Git.added`, `−212` in `Git.removed` (footnote, mono digits) | none | same three |
 | **Stopped** | reason banner: fill `Text.danger` 12 % (`RouterV2.dangerFill`), no ring (**R4**), radius 8, padding 10; the error in `CDS.mono(12)` `Text.primary`, max 6 lines; under it "Last step: " + step, footnote muted | none | **R3.** left: `Continue` + the key `⏎` (the page's button, **R4**: 24 tall, radius 6, the chosen fill); then the same three. T3 has no rerun: Continue sends T3's own words, "Continue where you left off.", and the destination row shows them (1.9). The Sent line reads those words |
 | **Working** | **R3.** T3's to-do steps only when the thread has a list (Claude sends one only with T3's to-do setting), footnote: done `checkmark` muted, running in `Text.primary` with the working dots, pending muted; at most 5, then "+3 more". A thread started here shows what it runs on as the card's first footnote through its first run | none | Stop · Open in T3 ⌘O. **R3.** Stop is the page's one act with no way back: a button, no key |
@@ -298,7 +296,7 @@ Kind blocks:
   radio shows at half strength (digits are words now).
 - **PR badge.** CDS Badge tinted, height 18: `#41 open` success, `#41 merged` violet, `#41 closed` danger. Click opens
   the PR.
-- **Buttons that remove a line** (Settle, Snooze, Doesn't need me, Settle all) are disarmed when they arrive under a pointer
+- **Buttons that remove a line** (Settle, Snooze, an item's Done, Settle all) are disarmed when they arrive under a pointer
   that has not moved since: they arm on the first pointer move over them. Their chords ignore key repeats. This is the
   2026-10-12 rule (no carry-over from a doubled press), kept without a timer.
 
@@ -346,7 +344,7 @@ the strip, the preview chip and the after-send card), and the placeholder names 
 | Selection | Placeholder |
 |---|---|
 | none | Message your threads |
-| question, left you a step | Answer Settings layout |
+| question | Answer Settings layout |
 | form | Answer “Which channel?” |
 | plan | Or say what to change in the plan |
 | permission | Or tell it what to do instead |
@@ -387,7 +385,7 @@ It shows only when Return would send something: a draft, or a picked option. It 
 
 - `→` is `arrow.right` 10 pt `CDS.Text.accent`. A form with questions left adds, after the words, "· 1 more to
   answer", and the send button is dim (**R3**). With T3 away the words read "T3 Code isn't reachable" and Return keeps
-  the words in the composer (**R3**). The mode words by state: a question or a step "answers its question" or "answers
+  the words in the composer (**R3**). The mode words by state: a question "answers its question" or "answers
   it"; a form "answers “<its current question>”"; a plan "asks for changes to the plan"; a permission "denies it, with
   your words"; Stopped and Done "starts a new turn". A place is the thread's mark, its page name (body medium
   `Text.primary`) and its project pill: the same three things as on its line, so it is recognised at once. The mode
@@ -641,7 +639,7 @@ id, PR states, your last message to it).
 |---|---|---|---|
 | Needs you (question, form, plan, permission) | code, same frame | T3 request or plan appears | you answer, the request is withdrawn, Settle, Snooze |
 | Needs you (an open Stuck, Decide or Do item) | model | **R7.** a read of a turn or of your words leaves one open (1.15) | the read that closes it, its Done, Settle, Snooze |
-| Stopped | code | **R3.** a run T3 failed (a provider or transport error, a usage limit with no resume). A failed test or build is a finished turn: Done, and the verdict may then flag it as "left you a step". An interrupt you asked for is Done ("stopped by you") | Continue, your message, Settle, Snooze |
+| Stopped | code | **R3.** a run T3 failed (a provider or transport error, a usage limit with no resume). A failed test or build is a finished turn: Done, and its read may then leave an open item (1.15). An interrupt you asked for is Done ("stopped by you") | Continue, your message, Settle, Snooze |
 | Sent | code, at Return | you send or answer | T3 shows the run started → Working; failure → previous state |
 | Working | code | a run is active (also: paused at a limit with auto-resume) | the run and its background work end |
 | Done | code | last run ended with no request | new turn, Settle, Snooze, 24 h (then housekeeping) |
@@ -661,7 +659,7 @@ Selection:
 
 - On page open: the first Needs-you line, card open. None if there is none.
 - After your answer or send from a card: the next Needs-you line; none left → no selection.
-- After Settle, Snooze, Doesn't need me: the next line of the same section; none left → no selection.
+- After Settle, Snooze, an item's Done: the next line of the same section; none left → no selection.
 - T3 events never move the selection and never open a card. If the selected thread leaves because of T3, the selection
   goes to the next line of its section.
 - The page scrolls to keep the selected line and its card in view (`Motion.follow`).
@@ -860,8 +858,8 @@ has that many options (POLISH-interaction 21, kept).
 | any character | no field focused | goes to the composer |
 
 With a draft, ↑ ↓ ← → and ⌘⌫ are the text's (the arrows are the settings' while the keyboard is in them: Tab in, Esc
-or any character out). In the mention list Tab picks, as before: the list comes first. Stop and Doesn't need me have no
-key: buttons only.
+or any character out). In the mention list Tab picks, as before: the list comes first. Stop has no
+key: a button only.
 
 ### 5.2 What Return does, in one rule
 
@@ -907,7 +905,7 @@ It never closes the window and never clears a draft.
   clean top-left corner, which the cut lays over the sharing badge (not verified here: no Screen Recording
   permission).
 - Stills for review in both themes: add `v2-` shots to `AppWindowShots` (`v2-home`, `v2-card-question`, `v2-card-form`,
-  `v2-card-plan`, `v2-card-permission`, `v2-card-step`, `v2-card-done`, `v2-card-stopped`, `v2-card-working`, `v2-peek`,
+  `v2-card-plan`, `v2-card-permission`, `v2-card-decide`, `v2-card-done`, `v2-card-stopped`, `v2-card-working`, `v2-peek`,
   `v2-reassessing`, `v2-filter`, `v2-destination-unsure`, `v2-queued`, `v2-failure`, `v2-toast`, `v2-empty`).
   R2: `v2-reading` (the mark in the arrow's slot), `v2-new-thread` (T3's defaults), `v2-new-thread-keys` (the ring, a
   changed effort, the mode's chip), `v2-new-thread-menu`, `v2-new-thread-access-menu`, `v2-new-thread-pills` (the
@@ -1038,7 +1036,7 @@ shows a thread's subagents, background work and waits.
 | 37 | 240.7 | ⌘Z | ⌘Z brings it back | The line grows back where it was, selected; the toast leaves |
 | 38 | 243.9 | ⌘⌫. 1.8 s later, ⌘⌫ | ⌘⌫ twice: two lines, one toast | Two settles, two presses; the toast is replaced, not stacked; Val Cenis is selected |
 | 39 | 249.5 | ⌥⌘⌫. ↓ ↓ Return | Snooze | The snooze menu at the card (For 1 hour · For 3 hours · Until tomorrow, 9:00); the second ↓ lights the last; "Snoozed Val Cenis booking until tomorrow, 9:00 · Revert ⌘Z"; Done's header leaves; no selection |
-| 40 | 254.9 | ↓ (Upstream issue, the first line). Click Doesn't need me | Doesn't need me: it goes to Done | The step card: the ask, `#2049 open`; the line turns blue, shows its result line, and moves to Done; toast "Moved Upstream issue to Done · Revert ⌘Z" |
+| 40 | 254.9 | ↓ (Upstream issue, the first line). Click its item's Done | Done on an open item: it strikes, then folds, and the thread goes to Done | The item's card: the Do, `#2049 open`; the item strikes "done by you" and folds; the thread moves to Done; toast "Done: … · Revert ⌘Z" |
 | 41 | 261.7 | Pointer rests on "5 finished earlier, not settled", then clicks Settle all | Finished earlier: one line, one act | The peek lists the five; the row folds away; "Settled 5 older threads · Revert ⌘Z" |
 | 42 | 268.1 | PR #2049 merges (Upstream issue goes quiet). 0.6 s on, nine turns end, 0.4 s apart. After 5.4 s: ⌥↓, then ⌘⌫ every 0.6 s while a line is selected | Clearing the rest | Lines go Done as they end; four verdicts run at once, so the fifth line on sheens until a call is free; each ⌘⌫ takes exactly one line down the Done list; pills leave the bar one by one |
 | 43 | 288.5 | Hold. After 2.2 s the last toast is dismissed | Nothing left | "Nothing needs you. Nothing is running." No bar (its 48 pt stay), no badge; the composer says "Message your threads" |
@@ -1097,7 +1095,7 @@ For the real page later:
   support a runtime mode shows only the ones it does (T3's `resolveCompatibleRuntimeMode`). `launchThread` gets them as
   `modelSelection`, `runtimeMode`, `interactionMode`.
 - **Fjord's mark:** `FjordLoader` as it is; the row shows it for every decider call, a line for every verdict call.
-- **Undo:** Settle, Snooze, Doesn't need me and Settle all registered with the window's `UndoManager` and in History.
+- **Undo:** Settle, Snooze, an item's Done and Settle all registered with the window's `UndoManager` and in History.
 - **Banners:** keyed on the request id, not on `unseen` (state review, item 2).
 - **Evals:** score verdicts (needs_you / look / quiet, line faithfulness) on real boards before turning it on.
 
@@ -1115,7 +1113,7 @@ Where this goes past the reviews, or picks between them:
 6. **The hover peek is read-only and only on the name.** That removes the grace timer and the pointer corridor.
 7. **T3 events never open a card or move the selection**; only your own acts advance it.
 8. **Quiet Done lines have no ground**; the blue ground is the model saying "worth a look".
-9. **⌘R and Rewrite Briefs go.** A wrong verdict is fixed with Doesn't need me, not a rerun.
+9. **⌘R and Rewrite Briefs go.** A wrong item is closed with its Done, not a rerun.
 10. **(R2, R4) Settings are explicit tokens, never read from words.** `@` lists T3's models, efforts, access and plan
     beside threads and projects; a pick is a pill that sets the chip and is not sent. "use opus for subagents" and
     "don't edit anything" are instructions for the agent and stay in the message untouched (owner, 2026-11-12; the
