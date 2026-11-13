@@ -367,3 +367,35 @@ import Testing
     }
     return last
 }
+
+/// The bar's Router panel: the lines that need you, from the Router's records, each a button named by its line's name.
+@MainActor
+@Suite struct HubRouterPanel {
+    @Test func thePanelListsTheNeedsYouLinesByName() async throws {
+        var lines: [RouterThread] = []
+        let tree = try await AccessibilityTree.render(scenario: .router, ready: { tree in
+            tree.all.contains { $0.label == "Router" } && !lines.isEmpty && tree.all.contains { $0.label == lines[0].name }
+        }, configure: { store, hub in
+            lines = store.routerRecords.lines(in: .needsYou)
+            hub.section = .router
+        })
+        try #require(!lines.isEmpty, "the router demo has lines that need you")
+        for line in lines.prefix(FjordHub.routerEntryLimit) {
+            let node = tree.all.first { $0.label == line.name && AXNode.controls.contains($0.role) }
+            #expect(node != nil, "\(line.name) is a button in the panel")
+        }
+        // Only the lines that need you: no Done line is listed (the working list under them names what still runs).
+        let demo = store(.router)
+        let running = Set(demo.routerWorkingRows.map(\.session.title))
+        let elsewhere = demo.routerRecords.lines(in: .done)
+        for line in elsewhere where !lines.contains(where: { $0.name == line.name }) && !running.contains(line.name) {
+            #expect(!tree.all.contains { $0.label == line.name && AXNode.controls.contains($0.role) }, "\(line.name) isn't listed")
+        }
+    }
+
+    private func store(_ scenario: Demo.Scenario) -> Store {
+        let store = Store()
+        Demo.populate(store, scenario)
+        return store
+    }
+}
