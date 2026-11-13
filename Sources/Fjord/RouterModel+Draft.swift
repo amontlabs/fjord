@@ -397,12 +397,14 @@ extension RouterModel {
     /// that needs you when the words went from its card.
     func dispatch(_ words: String, to t: RouterThread, kind: RouterOutgoing.Kind, read shown: RouterRead? = nil) {
         let id = t.id
+        // Into a run only when one is under way: a line still Sent has no run yet, and the words go as a message.
+        let steering = t.state == .working
         backups[id] = (t, picks[id], kind)
         let next: RouterSelection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
         move(id) {
             update(id) {
                 $0.state = .sent
-                $0.sent = .init(words: words, status: t.isRunning ? .steering : .sending)
+                $0.sent = .init(words: words, status: steering ? .steering : .sending)
                 $0.since = now
                 $0.order = fresh()
                 $0.isNew = false
@@ -418,7 +420,7 @@ extension RouterModel {
             }
         }
         if let next { advanced(to: next) }
-        source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: t.isRunning, queue: false, read: shown))
+        source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: steering, queue: false, read: shown))
     }
 
     /// Your act moved the selection on: the card is shown; its "new" dot waits for your next key or pointer move.

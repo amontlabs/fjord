@@ -525,4 +525,21 @@ import Testing
         #expect(source.calls == [.settle([ID.guide], on: true)])
         #expect(model.thread(ID.guide) == nil)
     }
+
+    // MARK: Words to a line still Sent are a message, not a steer (FINAL-REVIEW #14)
+
+    @Test func aSecondMessageToAThreadJustSentToIsNoSteer() throws {
+        let (model, source) = recorded()
+        let guide = try #require(model.thread(ID.guide))
+        model.dispatch("first", to: guide, kind: .words)
+        let sent = try #require(model.thread(ID.guide))
+        #expect(sent.state == .sent)
+        model.dispatch("second", to: sent, kind: .words)
+        #expect(source.sends.map(\.steering) == [false, false])
+        #expect(model.thread(ID.guide)?.sent?.status == .sending)
+        // Into a run under way, a steer.
+        let working = try #require(model.threads.first { $0.state == .working })
+        model.dispatch("faster", to: working, kind: .words)
+        #expect(source.sends.last?.steering == true)
+    }
 }
