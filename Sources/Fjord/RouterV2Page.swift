@@ -465,3 +465,23 @@ struct RouterV2Floating: View {
             .offset(x: frame.minX, y: frame.minY)
     }
 }
+
+/// A highlight's panel, placed at its ideal size under the highlight (or above it), moved `dx` sideways; it takes the
+/// highlight's own size, so it never changes the line's layout.
+struct BriefPanelPlacement: Layout {
+    var dx: CGFloat
+    var gap: CGFloat
+    var below: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: .zero)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            let y = below ? bounds.maxY + gap : bounds.minY - gap - size.height
+            view.place(at: CGPoint(x: bounds.minX + dx, y: y), proposal: ProposedViewSize(size))
+        }
+    }
+}

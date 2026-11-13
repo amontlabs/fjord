@@ -831,25 +831,6 @@ struct BriefSentLine: View {
     }
 }
 
-enum BriefAge {
-    /// "now", "4m", "2h", "3d": a line's time where room is short.
-    static func short(_ seconds: Double) -> String {
-        let s = max(0, seconds)
-        if s < 60 { return "now" }
-        if s < 3600 { return "\(Int(s / 60))m" }
-        if s < 86_400 { return "\(Int(s / 3600))h" }
-        return "\(Int(s / 86_400))d"
-    }
-
-    static func text(_ seconds: Double) -> String {
-        let s = max(0, seconds)
-        if s < 60 { return "just now" }
-        if s < 3600 { return "\(Int(s / 60))m ago" }
-        if s < 86_400 { return "\(Int(s / 3600))h ago" }
-        return "\(Int(s / 86_400))d ago"
-    }
-}
-
 /// Beside the Router's title as the other pages' subtitles: "Rewriting… 3/8" while a rewrite runs, otherwise when the facts
 /// were last checked (a call skipped because nothing changed counts), kept current on the minute.
 struct BriefUpdated: View {
@@ -874,26 +855,6 @@ struct BriefUpdated: View {
 extension EnvironmentValues {
     /// Puts the keyboard in the composer to write to the mentioned thread (`RouterModel.reply`).
     @Entry var briefReply: () -> Void = {}
-}
-
-/// A highlight's panel, placed at its ideal size under the highlight (or above it), moved `dx` sideways; it takes the
-/// highlight's own size, so it never changes the line's layout.
-struct BriefPanelPlacement: Layout {
-    var dx: CGFloat
-    var gap: CGFloat
-    var below: Bool
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        proposal.replacingUnspecifiedDimensions(by: .zero)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            let y = below ? bounds.maxY + gap : bounds.minY - gap - size.height
-            view.place(at: CGPoint(x: bounds.minX + dx, y: y), proposal: ProposedViewSize(size))
-        }
-    }
 }
 
 // MARK: - Finished, not settled

@@ -160,10 +160,6 @@ struct RouterMain: View {
     }
 }
 
-/// Where the Router page's column starts and ends, from the page's sides (`RouterMain.edges`).
-struct RouterEdges: Equatable {
-    var leading: CGFloat
-    var trailing: CGFloat
-
+extension RouterEdges {
     static let standalone = RouterEdges(leading: RouterBriefView.gutter, trailing: RouterBriefView.gutter)
 }

@@ -32,7 +32,7 @@ final class DeciderLog: @unchecked Sendable {
     /// A decision: the entry it belongs to (`id`), the message, the board, and what the decider did. `fused`: E5's Jev-led
     /// path's answer ; `preview`: what the composer showed while you typed. The fields are E5's "Live logging".
     func decision(id: UUID, message: String, decision d: RouterProjectDecision, board: String, candidates: [(id: String, key: String)],
-                  sent: String, fused: JevPath.Result? = nil, preview: RouterPreview.Shown? = nil,
+                  sent: String, fused: JevPath.Result? = nil, preview: RouterShown? = nil,
                   focus: Focus? = nil, now: Date = Date()) {
         var kind: String
         var target = ""
@@ -117,7 +117,7 @@ final class DeciderLog: @unchecked Sendable {
     }
 
     /// A message that went where you fixed it from the preview's menu (no decision ran): what was shown and what you picked.
-    func previewPick(id: UUID, shown: RouterPreview.Shown?, picked: String, now: Date = Date()) {
+    func previewPick(id: UUID, shown: RouterShown?, picked: String, now: Date = Date()) {
         var record: [String: Any] = ["type": "preview", "id": id.uuidString, "at": ISO8601DateFormatter().string(from: now),
                                      "picked": picked]
         if let shown {

@@ -10,6 +10,15 @@ import Observation
 // carries that decision, or the place you picked among its guesses. Only an unattended action, a wrong send asked again, or a
 // sure place that went away meanwhile asks "Where should this go?". Nothing is sent when it isn't sure.
 
+/// What a send carries of what the composer showed for its words, for the decision log.
+struct RouterShown: Equatable, Sendable {
+    var text: String
+    var target: String
+    var p: Double
+    var decider: String
+    var sure: Bool
+}
+
 /// What a message of yours comes with besides its text: the thread you're replying to (it is the target), the T3
 /// place a Retry goes to again or one waved off, and its pills.
 struct RouterContext: Equatable {
@@ -34,8 +43,8 @@ struct RouterContext: Equatable {
     var action: RouterActionSource?
     /// Your words wait for the turn under way instead of steering it (⌥Return). An action's message never steers.
     var queue = false
-    /// What the composer showed for the draft (`RouterPreview`): logged with the decision, and a send elsewhere is a miss.
-    var preview: RouterPreview.Shown?
+    /// What the composer showed for the draft: logged with the decision, and a send elsewhere is a miss.
+    var preview: RouterShown?
     /// The composer's decision for these words on this board: acted on (or, with `target`, logged with your pick) instead of
     /// deciding again.
     var decided: RouterProjectDecision?

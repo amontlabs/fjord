@@ -305,7 +305,7 @@ final class RouterV2DemoScript {
         _ = RouterV2Keys.handle(RouterV2Key(code: code, flags: flags, characters: characters), model: model, inField: false)
     }
 
-    private func digit(_ n: Int) { key(["shift", "\(n)"], code: BriefKeys.digits[n - 1], flags: .shift, characters: "\(n)") }
+    private func digit(_ n: Int) { key(["shift", "\(n)"], code: RouterV2Keys.digits[n - 1], flags: .shift, characters: "\(n)") }
     private func enter() { key(["enter"], code: kVK_Return) }
     private func escape() { key(["esc"], code: kVK_Escape) }
     private func down(option: Bool = false) { key(option ? ["alt", "down"] : ["down"], code: kVK_DownArrow, flags: option ? .option : []) }
@@ -314,7 +314,7 @@ final class RouterV2DemoScript {
     /// Types into the composer, 22 characters a second, each key through the page's map.
     private func type(_ text: String) async {
         for ch in text {
-            let code = ch == " " ? kVK_Space : ch.wholeNumberValue.flatMap { $0 >= 1 ? BriefKeys.digits[$0 - 1] : nil } ?? -1
+            let code = ch == " " ? kVK_Space : ch.wholeNumberValue.flatMap { $0 >= 1 ? RouterV2Keys.digits[$0 - 1] : nil } ?? -1
             _ = RouterV2Keys.handle(RouterV2Key(code: code, characters: String(ch)), model: model, inField: false)
             await pause(1.0 / 22)
         }

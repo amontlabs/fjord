@@ -23,6 +23,8 @@ typealias RouterV2ComposerHost = (store: Store, text: RouterModel)
 
 @MainActor
 enum RouterV2Keys {
+    /// `kVK_ANSI_1` … `kVK_ANSI_9`: the top row's keys by position (the same keys on AZERTY, where the characters differ).
+    nonisolated static let digits: [Int] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
     /// Whether the key was handled. `composer`: set when the composer's field is the @ field.
     static func key(_ event: NSEvent, model: RouterV2Model, composer: RouterV2ComposerHost? = nil) -> Bool {
         let responder = event.window?.firstResponder
@@ -127,7 +129,7 @@ enum RouterV2Keys {
             // ⌘1–3 with a draft light a place: one the row shows, or (pressed while the places are still being read)
             // the one the read is about to show. With a draft they are never the Go menu's: the same chord doesn't
             // leave the page mid-draft because a model was slow.
-            if let index = RouterKeys.pickKeys.firstIndex(of: code), index < 3, model.cmdDigit(index) { return true }
+            if let index = Self.digits.firstIndex(of: code), index < 3, model.cmdDigit(index) { return true }
         }
 
         // The places menu (the row's chevron, or Tab when the row asks for a place): ↑↓ Return, Tab or Esc closes.
@@ -191,7 +193,7 @@ enum RouterV2Keys {
         if model.snoozeMenu != nil {
             if flags.isEmpty, code == kVK_UpArrow || code == kVK_DownArrow { model.moveSnooze(down: code == kVK_DownArrow); return true }
             if flags.isEmpty, isReturn { model.chooseSnooze(); return true }
-            if flags == .shift, let n = BriefKeys.digits.firstIndex(of: code), n < RouterV2.Copy.snoozeChoices.count { model.chooseSnooze(n); return true }
+            if flags == .shift, let n = Self.digits.firstIndex(of: code), n < RouterV2.Copy.snoozeChoices.count { model.chooseSnooze(n); return true }
         }
 
         if isReturn {
@@ -236,7 +238,7 @@ enum RouterV2Keys {
                 }
                 // ⇧1…⇧9 pick an option of the open card, by key position, so a bare digit-row key (é, &, ") always
                 // types; they are words again once a draft is started.
-                if flags == .shift, let n = BriefKeys.digits.firstIndex(of: code), n < t.numbered.count {
+                if flags == .shift, let n = Self.digits.firstIndex(of: code), n < t.numbered.count {
                     model.pick(n + 1)
                     return true
                 }

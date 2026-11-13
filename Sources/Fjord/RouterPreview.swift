@@ -24,14 +24,7 @@ final class RouterPreview {
         var answer: Bool { if case .answer = decision.kind { true } else { false } }
     }
 
-    /// What a send carries of what the composer showed, for the decision log.
-    struct Shown: Equatable, Sendable {
-        var text: String
-        var target: String
-        var p: Double
-        var decider: String
-        var sure: Bool
-    }
+    typealias Shown = RouterShown
 
     /// The decision shown for the draft (its words may be a few keystrokes old until the next one lands).
     private(set) var destination: Destination?
