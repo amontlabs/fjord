@@ -131,9 +131,12 @@ final class RouterRecords {
     func put(_ t: AgentThread) {
         operation {
             let e = entry(t.id)
+            // T3 says something new of it: a read or a verdict that failed is tried again.
+            if e.thread != t {
+                e.readFailed = nil
+                e.failed = false
+            }
             e.thread = t
-            // A new T3 event: a read that failed is tried again.
-            e.readFailed = nil
             refresh(t.id)
         }
     }
@@ -991,7 +994,7 @@ extension RouterRecords {
         var read: String?
         var reading: String?
         var readFailed: String?
-        /// The call for this fingerprint failed: the code's words stay, settled, until the next fingerprint.
+        /// The call for this fingerprint failed after its retries: the code's words stay, settled, until T3's next event.
         var failed = false
         /// A name call is queued or running.
         var naming = false

@@ -203,6 +203,8 @@ final class FakeClaude: @unchecked Sendable {
     @Test func aFailureIsToldOnce() async {
         let fake = FakeClaude()
         let (e, told) = engine(fake)
+        // Told after its last attempt: here the first.
+        e.attempts = 1
         // The process fails.
         e.ask(request("a"))
         await until(fake.calls.count == 1)
@@ -277,21 +279,58 @@ final class FakeClaude: @unchecked Sendable {
         #expect(entries.first?.usage.costUSD == 0.0004)
     }
 
-    @Test func aRateLimitHoldsTheQueueUntilTheNextAsk() async {
+    @Test func aRateLimitHoldsTheQueueForItsTimeAndPutsItsCallBack() async {
         let fake = FakeClaude()
         let (e, told) = engine(fake, cap: 1)
+        e.backoff = { _ in 30 }
         e.ask(request("a"))
         e.ask(request("b"))
         await until(fake.calls.count == 1)
-        fake.send(0, [#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"error":"rate_limit"}"#])
-        await until(fake.calls[0].terminated && !told.of("a").isEmpty)
-        #expect(told.of("a") == [.failed])
-        #expect(e.held)
-        try? await Task.sleep(for: .milliseconds(20))
-        #expect(fake.calls.count == 1)
+        // Claude Code names the wait: 150 ms.
+        fake.send(0, [#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":150,"error":"rate_limit"}"#])
+        await until(fake.calls[0].terminated && e.held)
+        // Not failed: back in the queue, the line still being read.
+        #expect(told.of("a").isEmpty)
+        #expect(e.queuedCount == 2)
+        // A new ask doesn't end the hold before its time.
         e.ask(request("c"))
-        await until(fake.calls.count == 2)
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(fake.calls.count == 1)
+        #expect(e.held)
+        // At its time the queue moves again; the call that hit the limit still waits its turn in it.
+        await waitUntil { fake.calls.count == 2 }
         #expect(!e.held)
+        #expect(e.queuedCount == 2)
+    }
+
+    @Test func aFailedCallIsAskedAgainAfterItsBackoffAndToldOnlyAfterTheLast() async {
+        let fake = FakeClaude()
+        let (e, told) = engine(fake)
+        var waits: [Int] = []
+        e.attempts = 3
+        e.backoff = { n in waits.append(n); return 0.02 }
+        e.ask(request("a"))
+        await until(fake.calls.count == 1)
+        fake.fail(0)
+        // Asked again, once, after its wait; nothing told meanwhile.
+        await waitUntil { fake.calls.count == 2 }
+        #expect(told.of("a").isEmpty)
+        #expect(waits == [1])
+        fake.fail(1)
+        await waitUntil { fake.calls.count == 3 }
+        #expect(waits == [1, 2])
+        fake.fail(2)
+        await waitUntil { !told.of("a").isEmpty }
+        #expect(told.of("a") == [.failed])
+        #expect(fake.calls.count == 3)
+        // A retry that answers is told as any call.
+        e.ask(request("b"))
+        await until(fake.calls.count == 4)
+        fake.fail(3)
+        await waitUntil { fake.calls.count == 5 }
+        fake.send(4, FakeClaude.answer(FakeClaude.quiet))
+        fake.close(4)
+        await waitUntil { told.of("b").last.map { if case .done = $0 { true } else { false } } ?? false }
     }
 
     @Test func anAskReadsItsLineAndANameItsName() async {

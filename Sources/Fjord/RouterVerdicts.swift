@@ -4,8 +4,10 @@ import OSLog
 // The verdict engine (docs/design/router-v2/IMPLEMENTATION.md 1.4): one streamed Haiku call per thread per fingerprint,
 // started in the turn the store asks, at most four at once, queued by need (asks, then finished turns newest first, then
 // names, then project purposes), cancelled with its process when the thread moves on. What it reads comes back to the
-// store as events: the state first, then the line's words as they grow, then the whole verdict; or `failed`, once. A
-// cancelled call says nothing, and an answer is only told while its call is still the current one.
+// store as events: the state first, then the line's words as they grow, then the whole verdict; or `failed`, once, after
+// its retries. A call that fails is asked again after a backoff (2^n s, capped), one wake scheduled for the earliest; a rate
+// limit holds the queue for the time it named (else the backoff) and puts its call back. A cancelled call says nothing,
+// and an answer is only told while its call is still the current one.
 
 /// What the store asks for one thread.
 struct RouterVerdictRequest: Equatable, Sendable {
@@ -196,6 +198,13 @@ struct RouterVerdictReading {
     let cap: Int
     /// How long a call may run.
     var timeout = RouterVerdicts.timeout
+    /// How many times a call is made before its failure is told (a rate limit doesn't count).
+    var attempts = 6
+    /// The wait before attempt `n` (1: the first retry), and after the `n`th rate limit in a row that named no time.
+    var backoff: (Int) -> TimeInterval = { min(pow(2, Double($0)), RouterVerdicts.maxBackoff) }
+    var now: () -> Date = Date.init
+    nonisolated static let maxBackoff: TimeInterval = 600
+    nonisolated static let maxHold: TimeInterval = 3600
 
     init(binary: @escaping () -> String?, runner: @escaping ClaudeStream.Runner = ClaudeStream.liveRunner,
          log: ModelUsageLog? = ModelUsageLog.shared, cap: Int = RouterVerdicts.cap) {
@@ -235,6 +244,10 @@ struct RouterVerdictReading {
         let key: String
         let work: Work
         let token: Int
+        /// Calls made before this one (its retries).
+        var attempt = 0
+        /// Not started before then (a retry's backoff).
+        var notBefore: Date?
         /// "Verdict state" (to the state, or an ask's first words) and "Verdict done", from the ask; nil for a purpose.
         var state: RouterSignposts.Interval?
         let done: RouterSignposts.Interval?
@@ -251,19 +264,23 @@ struct RouterVerdictReading {
     private var queued: [Job] = []
     private var running: [String: Job] = [:]
     private var tokens = 0
-    /// A rate limit stopped the queue: until the next ask, or the time the API named.
+    /// A rate limit stopped the queue: until the time the API named, or the backoff.
     private(set) var held = false
-    private var release: Task<Void, Never>?
+    private var heldUntil: Date?
+    /// Rate limits in a row: each one that names no time waits longer.
+    private var limits = 0
+    /// The one wake scheduled: the hold's end or the earliest retry.
+    private var wake: Task<Void, Never>?
+    private var wakeAt: Date?
 
     // MARK: Asking
 
     /// Asks for a verdict. The same thread, kind and fingerprint already queued or running: nothing. Another fingerprint: the old call
-    /// is cancelled (it tells nothing) and this one takes its place. A rate-limit hold ends here (a new T3 event).
+    /// is cancelled (it tells nothing) and this one takes its place. A rate-limit hold keeps its time.
     func ask(_ r: RouterVerdictRequest) {
         let key = Self.key(r.thread, r.kind)
         if case .verdict(let old)? = (running[key] ?? queued.first { $0.key == key })?.work, old.fingerprint == r.fingerprint { return }
         drop(key)
-        if held { held = false; release?.cancel(); release = nil }
         enqueue(key, .verdict(r))
     }
 
@@ -294,10 +311,11 @@ struct RouterVerdictReading {
         kind == .name ? "\u{1}name:" + thread : thread
     }
 
-    private func enqueue(_ key: String, _ work: Work) {
+    private func enqueue(_ key: String, _ work: Work, attempt: Int = 0, notBefore: Date? = nil) {
         tokens += 1
         let timed = if case .verdict = work { true } else { false }
-        queued.append(Job(key: key, work: work, token: tokens, state: timed ? RouterSignposts.begin("Verdict state") : nil,
+        queued.append(Job(key: key, work: work, token: tokens, attempt: attempt, notBefore: notBefore,
+                          state: timed ? RouterSignposts.begin("Verdict state") : nil,
                           done: timed ? RouterSignposts.begin("Verdict done") : nil))
         pump()
     }
@@ -314,15 +332,38 @@ struct RouterVerdictReading {
         }
     }
 
-    /// Starts what the cap allows, by need: asks, finished turns newest first, names, purposes.
+    /// Starts what the cap allows, by need: asks, finished turns newest first, names, purposes; a retry not before its
+    /// time, nothing while a rate limit holds. Then one wake for the earliest of what waits on the clock.
     private func pump() {
-        while !held, running.count < cap, !queued.isEmpty {
-            var best = 0
-            for i in queued.indices.dropFirst() {
-                let a = queued[i].work, b = queued[best].work
-                if a.need < b.need || a.need == b.need && a.at > b.at { best = i }
+        let now = now()
+        if held, (heldUntil ?? .distantFuture) <= now { held = false; heldUntil = nil }
+        while !held, running.count < cap {
+            var best: Int?
+            for i in queued.indices where (queued[i].notBefore ?? .distantPast) <= now {
+                guard let b = best else { best = i; continue }
+                let a = queued[i].work, w = queued[b].work
+                if a.need < w.need || a.need == w.need && a.at > w.at { best = i }
             }
+            guard let best else { break }
             start(queued.remove(at: best))
+        }
+        let next = held ? heldUntil : queued.lazy.compactMap(\.notBefore).filter { $0 > now }.min()
+        schedule(next)
+    }
+
+    /// One one-shot for the next time the queue may move; none when nothing waits on the clock.
+    private func schedule(_ at: Date?) {
+        guard at != wakeAt else { return }
+        wake?.cancel()
+        wakeAt = at
+        guard let at else { wake = nil; return }
+        let delay = max(0, at.timeIntervalSince(now()))
+        wake = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            self.wakeAt = nil
+            self.wake = nil
+            self.pump()
         }
     }
 
@@ -405,11 +446,30 @@ struct RouterVerdictReading {
             let model = reading.map { RouterVerdictPrompt.model($0.kind) } ?? RouterVerdictPrompt.model
             log?.record(role: reading == nil ? .purpose : .verdict, model: model, end.usage)
         }
-        if limit.hit { hold(limit.after) }
+        if limit.hit {
+            // The call goes back in the queue, and the queue waits for the limit's time.
+            limits += 1
+            running[key] = nil
+            var job = job
+            job.close()
+            hold(limit.after ?? backoff(limits))
+            enqueue(key, job.work, attempt: job.attempt)
+            return
+        }
         switch job.work {
         case .verdict:
             var reading = reading ?? RouterVerdictReading(kind: .finished)
             let events = end.flatMap { $0.error == nil ? $0.json : nil }.map { reading.end($0) } ?? [.failed]
+            if events.last == .failed, job.attempt + 1 < attempts {
+                // Asked again after its backoff; the line stays being read meanwhile.
+                running[key] = nil
+                var job = job
+                job.close()
+                let attempt = job.attempt + 1
+                enqueue(key, job.work, attempt: attempt, notBefore: now().addingTimeInterval(backoff(attempt)))
+                return
+            }
+            if events.last != .failed { limits = 0 }
             tell(key, token, events.last == .failed ? [.failed] : events)
         case .purpose(let call):
             let purpose = end?.json.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?["purpose"] as? String
@@ -419,17 +479,9 @@ struct RouterVerdictReading {
         pump()
     }
 
-    /// Stops the queue after a rate limit until the next ask, or the time it named (one one-shot).
-    private func hold(_ after: TimeInterval?) {
+    /// Stops the queue after a rate limit for `after` seconds (capped); `pump` schedules its end.
+    private func hold(_ after: TimeInterval) {
         held = true
-        release?.cancel()
-        guard let after, after > 0 else { release = nil; return }
-        release = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(min(after, 3600)))
-            guard !Task.isCancelled, let self else { return }
-            self.held = false
-            self.release = nil
-            self.pump()
-        }
+        heldUntil = now().addingTimeInterval(min(max(after, 0), Self.maxHold))
     }
 }

@@ -193,6 +193,11 @@ import Testing
         #expect(s?.phase == .settled)
         h.records.put(F.thread())
         #expect(h.asks.filter { $0.kind == .finished }.count == 1)
+        // T3's next word on the thread asks again (FINAL-REVIEW #4).
+        var seen = F.thread()
+        seen.lastVisitedAt = F.now
+        h.records.put(seen)
+        #expect(h.asks.filter { $0.kind == .finished }.count == 2)
     }
 
     @Test func notForMeSurvivesARestartAndDiesWithTheFingerprint() {

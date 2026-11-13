@@ -80,6 +80,10 @@ import Testing
         // Plain Done on the code's words, not being read forever.
         #expect(h.records.record("t1")?.judging == false)
         h.records.put(F.thread())
+        #expect(fetched().isEmpty)
+        var seen = F.thread()
+        seen.lastVisitedAt = F.now
+        h.records.put(seen)
         #expect(fetched().count == 1)
     }
 
