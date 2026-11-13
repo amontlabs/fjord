@@ -168,6 +168,7 @@ import Testing
             case stop(String), visit(String), open(String)
             case settle([String], on: Bool)
             case snooze(String, until: Date?)
+            case logSplit(String, sends: [RouterSend])
         }
 
         var calls: [Call] = []
@@ -178,6 +179,7 @@ import Testing
         }
         func send(_ out: RouterOutgoing) { calls.append(.send(out)) }
         func cancelQueued(_ thread: String) { calls.append(.cancelQueued(thread)) }
+        func logSplit(_ draft: String, sends: [RouterSend]) { calls.append(.logSplit(draft, sends: sends)) }
         func mintThread() -> String {
             calls.append(.mint)
             return "minted-1"

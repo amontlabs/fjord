@@ -109,7 +109,7 @@ import Testing
     @Test func theSchemaIsN4bsInItsOrder() throws {
         let schema = DeciderContext.schema
         let keys = ["message_deliverable", "fits", "owned_by", "referent_unique", "action", "project", "session", "reason", "alternatives",
-                    "confidence", "project_confidence", "p_new"]
+                    "confidence", "project_confidence", "p_new", "sends"]
         let json = try #require(try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any])
         #expect(json["required"] as? [String] == keys && json["additionalProperties"] as? Bool == false)
         let at = keys.map { (schema.range(of: "\"\($0)\": {")?.lowerBound).map { schema.distance(from: schema.startIndex, to: $0) } ?? -1 }
@@ -303,4 +303,60 @@ final class PrintSeen: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var binary = "", args: [String] = [], input = "", timeout: TimeInterval = 0
     func set(_ b: String, _ a: [String], _ i: String, _ t: TimeInterval) { lock.withLock { binary = b; args = a; input = i; timeout = t } }
+
+}
+
+/// The decider's parts of a split message (SPLIT.md): each its place by the whole message's bars, never rephrased.
+@MainActor
+@Suite struct RouterSplitDecideTests {
+    // MARK: A split (SPLIT.md)
+
+    func split(_ message: String, _ sends: [RouterContextAnswer.Send], action: RouterActionSource? = nil) -> [RouterProjectDecision.Part] {
+        var ctx = RouterProjectDecideTests.ctx
+        ctx.message = message
+        var a = RouterProjectDecideTests.follow("t-s1", 0.95)
+        a.sends = sends
+        return RouterProjectDecider(jev: nil, sonnet: nil).contextDecision(a, context: ctx, board: RouterProjectDecideTests.board(), action: action).sends
+    }
+
+    private let both = "quota: raise it to 40 GB. and new thread for fjord, add a dark mode toggle"
+
+    @Test func eachPartGoesToItsPlaceByTheBarsAWholeMessageGoesAt() {
+        let parts = split(both, [.init(to: "t-s1", words: "raise it to 40 GB", confidence: 0.95),
+                                 .init(to: "fjord", words: "add a dark mode toggle", confidence: 0.8)])
+        #expect(parts == [.init(places: [.thread("t3-silo-1")], sure: true, words: "raise it to 40 GB", confidence: 0.95),
+                          .init(places: [.newThread(project: "P-fjord")], sure: true, words: "add a dark mode toggle", confidence: 0.8)])
+        // Below its bar: its guess first, then its alternatives that are places, each once.
+        let unsure = split(both, [.init(to: "t-s1", words: "raise it to 40 GB", confidence: 0.95),
+                                  .init(to: "t-f1", words: "add a dark mode toggle", confidence: 0.5,
+                                        alternatives: ["fjord", "t-f1", "nowhere", "t-f2"])])
+        #expect(unsure[1].places == [.thread("t3-fjord-1"), .newThread(project: "P-fjord"), .thread("t3-fjord-2")] && !unsure[1].sure)
+    }
+
+    @Test func wordsThatArentTheOwnersOrOnePlaceTwiceAreNoSplit() {
+        // A word the message doesn't have: rephrased, never sent.
+        #expect(split(both, [.init(to: "t-s1", words: "please raise it to 40 GB", confidence: 0.95),
+                             .init(to: "fjord", words: "add a dark mode toggle", confidence: 0.8)]).isEmpty)
+        // Two parts for one thread: one message about two things.
+        #expect(split(both, [.init(to: "t-s1", words: "raise it to 40 GB", confidence: 0.95),
+                             .init(to: "t-s1", words: "add a dark mode toggle", confidence: 0.9)]).isEmpty)
+        // One part, a place the board doesn't have, an empty part: none.
+        #expect(split(both, [.init(to: "t-s1", words: "raise it to 40 GB", confidence: 0.95)]).isEmpty)
+        #expect(split(both, [.init(to: "t-s1", words: "raise it to 40 GB", confidence: 0.95),
+                             .init(to: "t-gone", words: "add a dark mode toggle", confidence: 0.9)]).isEmpty)
+        #expect(split(both, [.init(to: "t-s1", words: " ", confidence: 0.95),
+                             .init(to: "fjord", words: "add a dark mode toggle", confidence: 0.9)]).isEmpty)
+        // An unattended action never splits.
+        #expect(split(both, [.init(to: "t-s1", words: "raise it to 40 GB", confidence: 0.95),
+                             .init(to: "fjord", words: "add a dark mode toggle", confidence: 0.8)], action: RouterProjectDecideTests.action()).isEmpty)
+    }
+
+    @Test func theSendsDecodeAndTheSchemaAsksForThem() throws {
+        let json = #"{"action": "follow_up", "project": "silo", "session": "t-s1", "confidence": 0.9, "sends": [{"to": "t-s1", "words": "raise it", "confidence": 0.9, "alternatives": ["fjord"]}]}"#
+        let a = try JSONDecoder().decode(RouterContextAnswer.self, from: Data(json.utf8))
+        #expect(a.sends == [.init(to: "t-s1", words: "raise it", confidence: 0.9, alternatives: ["fjord"])])
+        let schema = try #require(JSONSerialization.jsonObject(with: Data(DeciderContext.schema.utf8)) as? [String: Any])
+        #expect((schema["required"] as? [String])?.last == "sends")
+        #expect(DeciderContext.role.contains("Never rephrase"))
+    }
 }
