@@ -109,17 +109,12 @@ enum Router {
         static let olderWidth: CGFloat = 400
     }
 
-    /// A split message's rows (SPLIT.md): each destination's tint, on its words in the composer and on its quote in its row.
+    /// A message split across threads (SPLIT.md): what each target on the page will receive, under its row.
     enum Split {
-        static let tints: [Color] = [Theme.purple, Theme.green, Brand.map(Color(red: 0.24, green: 0.75, blue: 0.88))]
-        static func tint(_ n: Int) -> Color { tints[n % tints.count] }
-        /// The words' ground: the tint at the strength of something that came from you.
-        static let ground: Double = 0.22
-        static let quote: CGFloat = 18
-        static let quotePadX: CGFloat = 4
-        static let quoteWidth: CGFloat = 340
-        /// The rows sit closer than the dock's things: they read as one list.
-        static let rowGap: CGFloat = 0
+        /// The pending words' ink: quieter than the queued row's, nothing has gone yet.
+        static let pendingInk = 0.75
+        /// Pending words wrap to this many lines at most: they are shown whole, unless the Router wrote a lot.
+        static let pendingLines = 3
     }
 
     enum Dock {
@@ -550,9 +545,9 @@ enum RouterHit: Hashable {
     case row(String), name(String), pill(String)
     /// The line's activity glyphs: the pointer on them shows their peek.
     case activity(String)
-    case project(String?), state(RouterSection), clear
     /// A history row of a card, cut on its line: the pointer on it shows its words whole. `threadID` + US + event id.
     case history(String)
+    case project(String?), state(RouterSection), clear
     case header(RouterSection)
     case option(String, Int)
     case footer(String, RouterFooterAct)
@@ -595,11 +590,11 @@ struct RouterRead: Equatable {
     /// A new thread's first name, when the read strips an address off the words.
     var name: String?
     /// The message split across threads (SPLIT.md): one send a destination, in the order its words come in the
-    /// message. Empty: the whole message goes to `places`, as before.
+    /// message, each with the message it receives. Empty: the whole message goes to `places`, as before.
     var sends: [RouterSend] = []
 }
 
-/// One destination of a split message: where it goes, the owner's words for it and the answer pills it carries.
+/// One destination of a split message: where it goes and the message it receives.
 struct RouterSend: Equatable {
     /// The guess first and up to two alternatives; one place when the Router is sure.
     var places: [RouterPlace]
@@ -607,12 +602,22 @@ struct RouterSend: Equatable {
     /// The lit place of an unsure send, and whether you lit it yourself (⌘1–3 or a click).
     var lit = 0
     var mine = false
-    /// The parts of the message for it: verbatim spans of the owner's words, never rewritten. One part can go to
-    /// several destinations.
-    var parts: [String] = []
-    /// The answer pills it carries, by their order among the draft's pills: code routes them, so they are known before
-    /// the read.
-    var answers: [Int] = []
+    /// What this place receives: the Router writes it from the owner's words, keeping their wording and trimming only
+    /// what belongs elsewhere (never rephrased, nothing added).
+    var words: String
+    /// The open item of the thread it answers (nil: the thread itself).
+    var item: String? = nil
+    /// The part in a few of the owner's words, naming it in the places choice when the Router is unsure of it.
+    var part: String? = nil
 
     var place: RouterPlace { places[min(lit, places.count - 1)] }
+}
+
+/// What a target on the page will receive before Return: under its row, quiet, not yet sent.
+struct RouterPending: Equatable {
+    var words: String
+    /// An answer to an item: said as the answer, not quoted.
+    var answer = false
+    /// The Router's guess for a part it isn't sure of.
+    var guess = false
 }

@@ -33,7 +33,7 @@ struct RouterHostedLine: View {
         // until it has been laid out once.
         let open = box.selected && !box.moving
         let card = box.cardHeight
-        let rest = box.rowHeight + box.queuedHeight + box.tailHeight
+        let rest = box.rowHeight + box.queuedHeight + box.pendingHeight + box.tailHeight
         let height: CGFloat? = box.rowHeight > 0 ? rest + (open ? card : 0) : nil
         RouterLineHost(model: model, box: box, slot: slot, block: box.block,
                        setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival))

@@ -67,6 +67,8 @@ struct RouterRowRoot: View, Equatable {
         case .reading(let count):
             RouterReadingRow(count: count, first: first)
                 .transition(.routerSwap)
+        case .ghost(let ghost):
+            RouterGhostLine(ghost: ghost)
         case .housekeeping(let count):
             RouterHousekeepingRow(model: model, count: count)
         case .line:

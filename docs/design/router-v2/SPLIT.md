@@ -1,42 +1,60 @@
 # A message split across threads (1.9.2, look only, 2026-11-13)
 
-Owner-approved behaviour; the demo shows the look, the decider doesn't split yet.
+Owner-approved behaviour; the demo shows the look, the decider doesn't split yet. This replaces the first look
+(tinted parts in the composer, one row a destination over it), which the owner found confusing.
 
-- **Only pills:** code routes each pill at once (an answer to its thread), no read.
-- **Any free text:** the Router reads the whole message, with the pills as context, and returns a list of sends
-  (`RouterRead.sends`): each a place (a thread or a new thread) and the exact parts of the owner's message for it,
-  verbatim, never rewritten. A part can go to several places. Answer pills attach to their threads' sends.
+- **The composer stays plain:** the owner's words and pills, no tints, no fragments.
+- **The Router writes each destination's message** from the owner's words (`RouterRead.sends`, each a place and its
+  `words`): it keeps their wording and only trims what belongs elsewhere; it never rephrases and never adds intent or
+  initiative. No code splits on punctuation.
 - **Return sends all.**
 
-## The rows
-
-The destination row becomes one compact row a destination, in the order their words come in the message, 24 tall,
-no gap between them (they read as one list), no ground, the arrow on the composer's text edge as before:
+## On the page, on the targets
 
 ```
-→ [? Settings layout fjord]  ▒keep the sidebar icons in the page headers▒  + 1 answer
-→ [? Val Cenis booking]  answers “Reserve for five (+€62)”
-→ [··· Tab handover fjord]  ▒tab handover: skip the fade for now▒
+→ [? Settings layout]  sidebar, one page, or tabs?                    fjord  25m
+    → “keep the sidebar icons in the page headers”
+  [? Val Cenis booking]  found a chalet for five; nothing reserved yet        12m
+→       ? reserve for five? about €62 more than for four                      12m
+          → yes, reserve for five
+  Working 4
+→ ┆New thread┆                                                        fjord
+    → “trim the onboarding copy to two screens”
 ```
 
-- **Tint.** Each destination has a tint, in row order: violet, green, cyan (`Router.Split.tints`), chosen away from the
-  state colours (amber, red, blue) and the working clay. A part's words sit on that tint at 22 % in the composer and,
-  the same, as the row's quote (radius 4, 18 tall, no quote marks, no outline: the ground is the link). Words two sends
-  share keep the first one's tint. An answer pill's glyph takes its send's tint.
-- **Answers.** After words, `+ 1 answer` muted. Alone, the row says the answer as a picked option's row does:
-  `answers “…”`.
-- **Unsure part.** Its row shows the usual places (up to three, the guess lit with the `chosen` fill, a place you lit
-  yourself with the accent's tint, the light sliding on `Motion.glass`), then its words. The first unsure part is the
-  focused one: only its places show `⌘1`–`⌘3`, and ⌘1–3 (by key position, AZERTY-safe) light its places.
-- **Reading.** Pills are placed by code at once, so their rows show while the free text is read; one more row holds
-  Fjord's mark in the arrow's slot and the skeleton bar with its sheen where the place will be.
-- No mode words in a split row (steer / queue, "answers its question"): the row stays one line. A place you pick
-  yourself for the whole message (a thread pill, the places menu) ends the split.
+- **The target's arrow** sits in its dot's slot (`arrow.right` 9 pt semibold, `Text.accent`), lines and items alike, so
+  the targets read down one edge of the page.
+- **The pending line**, under the row: a muted `arrow.right` in the mark's box (under the name's mark; an item's under
+  its mark), then exactly what the target will receive, footnote `Text.secondary` at 75 % (not yet sent), up to three
+  lines. Words to a thread are quoted; an answer to an item is said as the answer. A part the Router guessed at ends
+  with `· a guess` muted.
+- **A new thread** is a ghost line first in Working: the arrow, `New thread` on a dashed outline where a name's ground
+  sits, its project pill in the pills' column, no age, and its pending line.
+- Pending lines and ghosts fade in and out (`Motion.fade`) as the read changes; the rows under them glide.
 
-Shots: `v2-split-two`, `v2-split-pills`, `v2-split-unsure`, `v2-split-reading` (light and `-dark`). Suite:
+## Over the composer
+
+One line, the destination row's place and metrics:
+
+```
+→ 3 threads · Return sends                                          sure, several places
+→ [? Settings layout fjord] · Return sends                          sure, one place
+◐ 3 threads · Return sends   (sheen over the words)                 reading again after more typing
+→ “the spacing”  [Tab handover fjord ⌘1]  Snapshot API ⌘2  new thread in fjord ⌘3  · Return sends   a part it isn't sure of
+```
+
+- While the Router reads, Fjord's mark takes the arrow's slot and the sheen passes over the words; the page keeps what
+  the last read showed. The first read of a draft shows the usual mark and skeleton row (1.9).
+- **Unsure part.** The line names it in a few of the owner's words (`RouterSend.part`) and shows its usual places
+  (the guess lit with the `chosen` fill, a place you lit yourself with the accent's tint, the light sliding on
+  `Motion.glass`); ⌘1–3 (by key position, AZERTY-safe) or a click light one, and its pending line moves to that
+  target.
+- A place you pick yourself for the whole message (a thread pill, the places menu) ends the split.
+
+Shots: `v2-split-page`, `v2-split-reading`, `v2-split-unsure`, `v2-split-one` (light and `-dark`). Suite:
 `RouterSplitTests`.
 
 ## Not done (look only)
 
-The decider's schema and prompt (sends with verbatim parts), the live `MentionField` tint (the stills draw the composer
-themselves), Return sending each part, Tab between unsure parts, and the failure line for one send of several.
+The decider's schema and prompt (sends with their words), Return sending each message, Tab between unsure parts, a
+click on a pending line, and the failure line for one send of several.

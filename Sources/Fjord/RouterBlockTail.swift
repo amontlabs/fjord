@@ -76,23 +76,41 @@ struct RouterBlockRowView: View {
         let id = thread.id
         switch row {
         case .header:
-            RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                RouterBlockHeader(model: model, thread: thread, hot: hot, sentence: box.sentence)
-            }
-            .background {
-                RoundedRectangle(cornerRadius: M.radius, style: .continuous)
-                    .fill(open && box.item == nil ? .clear : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
-                    .transaction { $0.animation = nil }
+            VStack(alignment: .leading, spacing: 0) {
+                RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
+                    RouterBlockHeader(model: model, thread: thread, hot: hot, sentence: box.sentence)
+                }
+                .background {
+                    RoundedRectangle(cornerRadius: M.radius, style: .continuous)
+                        .fill(open && box.item == nil ? .clear : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
+                        .transaction { $0.animation = nil }
+                }
+                .overlay(alignment: .topLeading) { arrow(box.pending != nil, top: (M.minHeight - CDS.Dot.size) / 2, leading: M.dotLeading) }
+                // A split message: what the thread will receive (SPLIT.md).
+                if let pending = box.pending {
+                    RouterPendingLine(pending: pending, leading: M.nameLeading + M.namePadX).transition(.opacity)
+                }
             }
             .modifier(FocusHeight(height: focusHeight))
         case .item(let item):
             let key = RouterModel.itemKey(id, item.id)
             let flags = model.flags(.row(key))
             let focused = open && box.item == item.id
-            RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
-                RouterItemRow(model: model, thread: id, item: item, selected: focused, hot: flags.hot, pressed: flags.pressed)
+            let pending = box.pendingItems[item.id]
+            VStack(alignment: .leading, spacing: 0) {
+                RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
+                    RouterItemRow(model: model, thread: id, item: item, selected: focused, hot: flags.hot, pressed: flags.pressed)
+                }
+                .disabled(!item.live)
+                // A split message: the item's arrow, and the answer it will receive (SPLIT.md).
+                .overlay(alignment: .topLeading) {
+                    // In the lines' dot column: the page's targets read down one edge.
+                    arrow(pending != nil, top: (Router.Items.rowHeight - CDS.Dot.size) / 2, leading: M.dotLeading)
+                }
+                if let pending {
+                    RouterPendingLine(pending: pending, leading: Router.Items.markLeading).transition(.opacity)
+                }
             }
-            .disabled(!item.live)
             .modifier(FocusHeight(height: focusHeight))
             .geometryGroup()
             .transition(.routerFold(reduce: reduce))
@@ -101,6 +119,14 @@ struct RouterBlockRowView: View {
         case .reading:
             RouterItemPlaceholder().transition(.routerFold(reduce: reduce))
         }
+    }
+
+    /// A split message's target: the arrow in the row's dot slot.
+    private func arrow(_ on: Bool, top: CGFloat, leading: CGFloat) -> some View {
+        ZStack { if on { RouterTargetArrow().transition(.opacity) } }
+            .frame(width: CDS.Dot.size, height: CDS.Dot.size)
+            .padding(.top, top).padding(.leading, leading)
+            .allowsHitTesting(false)
     }
 
     /// Always the same view, focused or not: a modifier that came and went with the focus made the row a new view each

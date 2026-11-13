@@ -280,6 +280,9 @@ final class RouterModel {
     @ObservationIgnored private var hot: Set<RouterHit> = []
     /// The line marked as the draft's destination, as last set on the boxes.
     @ObservationIgnored private var markedShown: String?
+    /// A split message's targets and new threads, as last set on the boxes and the layout (SPLIT.md).
+    @ObservationIgnored private var pendingShown: [String: RouterPending] = [:]
+    @ObservationIgnored private var ghostsShown: [RouterGhost] = []
     /// Streamed changes kept for the turn's end, by thread, in arrival order (`post`).
     @ObservationIgnored private var kept: [(id: String, change: RouterChange)] = []
     /// Threads whose words of the current stream are still coming (`.words(done: false)`).
@@ -288,6 +291,7 @@ final class RouterModel {
 
     init() {
         trackMarked()
+        syncPending()
     }
 
     static func today(_ hour: Int, _ minute: Int) -> Date {
@@ -412,6 +416,7 @@ final class RouterModel {
             case .sentence(let words, let clear): RouterRow(id: slot.id, kind: .sentence(words, clear: clear))
             case .reading(let n): RouterRow(id: slot.id, kind: .reading(n))
             case .line(let id): boxes[id].map { RouterRow(id: slot.id, kind: .line($0.shown)) }
+            case .ghost: nil
             case .housekeeping(let n): RouterRow(id: slot.id, kind: .housekeeping(n))
             }
         }
@@ -445,6 +450,11 @@ final class RouterModel {
         }
         for s in RouterSection.allCases {
             let list = shown[s] ?? []
+            if list.isEmpty, s == .working, !ghostSlots().isEmpty {
+                out.append(RouterSlot(id: "header-\(s.rawValue)", kind: .header(s, 0)))
+                out += ghostSlots()
+                continue
+            }
             if list.isEmpty {
                 if s == .needsYou, !reading.isEmpty {
                     // Never "Nothing needs you" while a verdict that may say otherwise is pending.
@@ -457,6 +467,7 @@ final class RouterModel {
                 continue
             }
             out.append(RouterSlot(id: "header-\(s.rawValue)", kind: .header(s, list.count)))
+            if s == .working { out += ghostSlots() }
             out += lines(list, "\(s.rawValue)")
             if s == .needsYou, !reading.isEmpty {
                 out.append(RouterSlot(id: Self.readingRow, kind: .reading(reading.count)))
@@ -465,6 +476,15 @@ final class RouterModel {
         }
         if !older.isEmpty { out.append(RouterSlot(id: "housekeeping", kind: .housekeeping(older.count))) }
         return out
+    }
+
+    /// The new threads a split message starts, first in Working (SPLIT.md): none under another state, or for another
+    /// project.
+    private func ghostSlots() -> [RouterSlot] {
+        guard section == nil || section == .working else { return [] }
+        return ghostsShown.enumerated().compactMap { n, ghost in
+            project == nil || project == ghost.project ? RouterSlot(id: "ghost-\(n)", kind: .ghost(ghost)) : nil
+        }
     }
 
     /// The projects with at least one line (or a finished thread under the housekeeping line), alphabetical: the bar's
@@ -1106,6 +1126,7 @@ final class RouterModel {
     func endTurn() {
         flush()
         syncMarked()
+        syncPending()
     }
 
     /// Runs the turn's end now (tests; a still).
@@ -1161,6 +1182,7 @@ final class RouterModel {
                 box.built = box.selected
                 box.moving = moving.contains(t.id)
                 box.marked = markedShown == t.id
+                box.pending = pendingShown[t.id]
                 boxes[t.id] = box
                 moved = true
             }
@@ -1268,6 +1290,39 @@ final class RouterModel {
         if let old = markedShown { boxes[old]?.marked = false }
         if let now { boxes[now]?.marked = true }
         markedShown = now
+    }
+
+    /// A split message's pending words, set at the turn's end on the lines and items they go to, and its new threads'
+    /// ghost lines in the layout; the rows under them glide.
+    private func syncPending() {
+        let seen: (targets: [String: RouterPending], ghosts: [RouterGhost]) = withObservationTracking {
+            (self.pendingTargets, self.ghosts)
+        } onChange: { [weak self] in
+            MainActor.assumeIsolated { self?.turn.schedule() }
+        }
+        let now = seen.targets
+        let shownGhosts = seen.ghosts
+        guard now != pendingShown || shownGhosts != ghostsShown else { return }
+        if glides.current == nil { glides.began(Motion.spatial.curve(reduce: reduce)) }
+        let touched = Set((Array(now.keys) + Array(pendingShown.keys)).map { $0.split(separator: "#").first.map(String.init) ?? $0 })
+        for id in touched {
+            guard let box = boxes[id] else { continue }
+            var items: [String: RouterPending] = [:]
+            for (key, pending) in now where key.hasPrefix(id + "#") { items[String(key.dropFirst(id.count + 1))] = pending }
+            // A line that is its one item takes the item's words.
+            let line = now[id] ?? (box.block ? nil : items.values.first)
+            let shown = box.block ? items : [:]
+            guard box.pending != line || box.pendingItems != shown else { continue }
+            animate(.fade) {
+                box.pending = line
+                box.pendingItems = shown
+            }
+        }
+        pendingShown = now
+        if shownGhosts != ghostsShown {
+            ghostsShown = shownGhosts
+            relayout()
+        }
     }
 }
 

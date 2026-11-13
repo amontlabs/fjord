@@ -30,6 +30,9 @@ final class RouterLineBox {
     var selected = false
     var moving = false
     var marked = false
+    /// A split message (SPLIT.md): what the line will receive, and what its block's items will (by item id).
+    var pending: RouterPending?
+    var pendingItems: [String: RouterPending] = [:]
     /// Its card has a body: from its opening until its closing roll has ended.
     var built = false
     /// In a block: the item whose card is open (nil: the header's). Kept once the card shuts, so the rows split where they
@@ -73,6 +76,8 @@ final class RouterLineBox {
     /// Its row's and its queued words' heights as laid out (0 before the line is first laid out, or with none queued).
     var rowHeight: CGFloat = 0
     var queuedHeight: CGFloat = 0
+    /// Its pending words' height as laid out (a split message, SPLIT.md; 0 with none).
+    var pendingHeight: CGFloat = 0
 
     /// The state choice the page is under: `shown` is the record cut to it (`RouterFilter`).
     var filter: RouterSection? { didSet { if filter != oldValue { revision &+= 1; refreshShown() } } }
@@ -167,6 +172,8 @@ struct RouterSlot: Identifiable, Equatable {
         case sentence(String, clear: Bool)
         case reading(Int)
         case line(String)
+        /// A new thread a split message starts, before Return (SPLIT.md).
+        case ghost(RouterGhost)
         case housekeeping(Int)
     }
     var id: String

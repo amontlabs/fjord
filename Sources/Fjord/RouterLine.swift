@@ -225,6 +225,13 @@ struct RouterLineView: View {
                     .opacity(moving ? 1 : 0)
                     .animation(moving ? nil : Motion.fade.resolved(reduce: reduce), value: moving)
             }
+            // A split message: what this line will receive (SPLIT.md).
+            if let pending = box.pending {
+                RouterPendingLine(pending: pending, leading: M.nameLeading + M.namePadX)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { box.pendingHeight = $0 }
+                    .onDisappear { box.pendingHeight = 0 }
+                    .transition(.opacity)
+            }
             if let queued = thread.queued {
                 RouterQueuedRow(model: model, thread: id, words: queued)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { box.queuedHeight = $0 }
@@ -384,7 +391,8 @@ struct RouterLineView: View {
 
     private func row(_ thread: RouterThread, hot: Bool) -> some View {
         // The line the draft goes to, when it isn't the selected one: the destination row's arrow, in the dot's slot.
-        let marked = box.marked
+        // A split message's target has it too (SPLIT.md).
+        let marked = box.marked || box.pending != nil
         // The sentence is never cut: it flows as text from after the name and wraps under it; the rest keeps to its first
         // line. (A Sent line keeps to one: your words in quotes, then their status.)
         let flows = thread.sent == nil

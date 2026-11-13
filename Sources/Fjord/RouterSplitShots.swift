@@ -2,63 +2,49 @@ import AppKit
 import SwiftUI
 
 // A message split across threads (docs/design/router-v2/SPLIT.md; `--window-shots <dir> v2-split`), light and dark
-// (`-dark`): two threads with their words tinted, answer pills with free text, one part unsure, and the read under way.
+// (`-dark`): three targets on the page (a thread, an item it answers, a new thread's ghost line), the Router reading
+// again, a part it isn't sure of, and one target. The composer is plain; each target shows what it will receive.
 // Look only: the demo's reads carry the sends.
 
 @MainActor
 enum RouterSplitShots {
     private typealias ID = RouterDemo.ID
 
+    /// The owner's words, and what the Router wrote for each place from them: trimmed, never rephrased.
+    private static let three = "keep the sidebar icons in the page headers. val cenis: yes, reserve for five. "
+        + "new thread: trim the onboarding copy to two screens"
+    private static var threeSends: [RouterSend] {
+        [RouterSend(places: [.thread(ID.settings)], words: "keep the sidebar icons in the page headers"),
+         RouterSend(places: [.thread(ID.valCenis)], words: "yes, reserve for five", item: "i1"),
+         RouterSend(places: [.newThread(project: "fjord")], words: "trim the onboarding copy to two screens")]
+    }
+
     private static let states: [(name: String, make: (RouterModel) -> Void)] = [
-        ("v2-split-two", { model in
-            draft(model, "bar count: push it and open the PR. for the updater, install silently on the stable channel",
-                  sends: [RouterSend(places: [.thread(ID.bar)], parts: ["bar count: push it and open the PR"]),
-                          RouterSend(places: [.thread(ID.updater)],
-                                     parts: ["for the updater, install silently on the stable channel"])])
-        }),
-        ("v2-split-pills", { model in
-            draft(model, pills + "keep the sidebar icons in the page headers, and tab handover: skip the fade for now",
-                  answers: answers,
-                  sends: [RouterSend(places: [.thread(ID.settings)], parts: ["keep the sidebar icons in the page headers"],
-                                     answers: [0]),
-                          RouterSend(places: [.thread(ID.valCenis)], answers: [1]),
-                          RouterSend(places: [.thread(ID.tab)], parts: ["tab handover: skip the fade for now"])])
+        ("v2-split-page", { model in draft(model, three, sends: threeSends) }),
+        // More typed after the last read: its targets stay as they were while the Router reads again.
+        ("v2-split-reading", { model in
+            draft(model, three, sends: threeSends)
+            model.setDraft(three + ", and")
+            model.reading = true
         }),
         ("v2-split-unsure", { model in
-            draft(model, "bar count: push it and open the PR, and the spacing is off again",
-                  sends: [RouterSend(places: [.thread(ID.bar)], parts: ["bar count: push it and open the PR"]),
-                          RouterSend(places: [.thread(ID.settings), .thread(ID.tab), .newThread(project: "fjord")], sure: false,
-                                     parts: ["the spacing is off again"])])
+            draft(model, "keep the sidebar icons in the page headers, and the spacing is off again",
+                  sends: [RouterSend(places: [.thread(ID.settings)], words: "keep the sidebar icons in the page headers"),
+                          RouterSend(places: [.thread(ID.tab), .thread(ID.snapshot), .newThread(project: "fjord")], sure: false,
+                                     words: "the spacing is off again", part: "“the spacing”")])
         }),
-        // The pills are placed by code at once; the free text waits for the read, Fjord's mark in its row.
-        ("v2-split-reading", { model in
-            draft(model, pills + "keep the sidebar icons in the page headers, and tab handover: skip the fade for now",
-                  answers: answers,
-                  sends: [RouterSend(places: [.thread(ID.settings)], answers: [0]),
-                          RouterSend(places: [.thread(ID.valCenis)], answers: [1])])
-            model.reading = true
+        ("v2-split-one", { model in
+            draft(model, "settings: keep the sidebar icons in the page headers",
+                  sends: [RouterSend(places: [.thread(ID.settings)], words: "keep the sidebar icons in the page headers")])
         }),
     ]
 
-    /// Two answer pills at the start of the draft: Settings layout's and Val Cenis booking's picked options, by whose they are.
-    private static let pills = MentionText.markString + " " + MentionText.markString + " "
-    private static let answers = [ID.settings, ID.valCenis]
-
     /// A draft with nothing selected, and the read that split it.
-    private static func draft(_ model: RouterModel, _ text: String, answers: [String] = [], sends: [RouterSend]) {
+    private static func draft(_ model: RouterModel, _ text: String, sends: [RouterSend]) {
         model.select(nil)
-        if answers.isEmpty {
-            model.setDraft(text)
-        } else {
-            // The cards' own answer pills (`RouterAnswerPills`): picked on Settings layout's ask and Val Cenis's Decide,
-            // they lead the draft as `? Settings layout → one scrolling page`; the free words follow.
-            model.picks[ID.settings] = [0: 2]
-            model.picks[RouterModel.itemKey(ID.valCenis, "i1")] = [0: 1]
-            let words = text.replacingOccurrences(of: pills, with: "")
-            model.edit(model.draft + words, marks: model.mentions)
-        }
-        model.apply(.read(RouterRead(draft: model.plainDraft, places: sends.first.map { [$0.place] } ?? [], sure: false,
-                                     sends: sends)))
+        model.setDraft(text)
+        model.apply(.read(RouterRead(draft: model.plainDraft, places: [sends[0].place], sure: sends[0].sure, sends: sends)))
+        model.finishTurn()
     }
 
     static var catalog: [AppWindowShots.Shot] {
