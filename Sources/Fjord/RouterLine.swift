@@ -164,6 +164,8 @@ struct RouterLineView: View {
     @State private var shown: Double = 1
     /// The row's width: a name takes up to its share of it (`M.nameShare`).
     @State private var rowWidth: CGFloat = 0
+    /// The name's width, as laid out: a line that is its one item's leaves it blank at its sentence's start.
+    @State private var nameWidth: CGFloat = 0
     /// In a block: the height of the row whose card is open (its ground starts at that row's top).
     @State private var focusRowHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -384,15 +386,30 @@ struct RouterLineView: View {
             .padding(.leading, M.dotLeading).padding(.trailing, M.dotGap)
             .motion(.fade, value: marked)
             .accessibilityLabel(marked ? "Your words go here" : thread.isNew ? "New" : "")
-            RouterName(model: model, thread: thread, rowHot: hot)
-                .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
-                .layoutPriority(2)
-            RouterSentenceView(model: model, box: box)
-                // Its subagents, background commands and waits, at the end of its place, before the pill (RouterActivityViews.swift).
-                .routerActivity(model, thread)
-                .padding(.leading, M.sentenceGap)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .alignmentGuide(.routerFirstLine) { d in single ? min(d.height, Router.Items.lineHeight) / 2 : d[VerticalAlignment.center] }
+            if single {
+                // The line is its one item: the sentence flows as text, the name its highlight at the start, and a line
+                // it wraps to starts under the name's ground and runs to the pill (its first line leaves the name's
+                // width blank, `RouterFlow`).
+                ZStack(alignment: .topLeading) {
+                    RouterSentenceView(model: model, box: box, lead: nameWidth > 0 ? nameWidth + M.sentenceGap : 0)
+                        .routerActivity(model, thread)
+                        .padding(.top, M.namePadY)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    RouterName(model: model, thread: thread, rowHot: hot)
+                        .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { nameWidth = $0 }
+                }
+                .alignmentGuide(.routerFirstLine) { _ in M.namePadY + Router.Items.lineHeight / 2 }
+            } else {
+                RouterName(model: model, thread: thread, rowHot: hot)
+                    .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
+                    .layoutPriority(2)
+                RouterSentenceView(model: model, box: box)
+                    // Its subagents, background commands and waits, at the end of its place, before the pill (RouterActivityViews.swift).
+                    .routerActivity(model, thread)
+                    .padding(.leading, M.sentenceGap)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if let project = thread.project {
                 RouterProjectPill(model: model, thread: thread.id, project: project)
                     .padding(.leading, M.pillGap)
@@ -517,6 +534,8 @@ struct RouterSentenceView: View {
     let model: RouterModel
     /// Its line's box: streamed words redraw this view only.
     let box: RouterLineBox
+    /// A line that is its one item: the blank its sentence starts with, where the name sits over it.
+    var lead: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
@@ -544,13 +563,13 @@ struct RouterSentenceView: View {
             } else if let item = thread.ledger.single {
                 // The line is its one open item: its sentence, sheening while a read may close it; your words sent
                 // against it follow it on the line (`↑ "…" · sent`), and a new turn being read shows Fjord's mark.
-                // The whole sentence, wrapping under itself when it needs to: never cut mid-fact (the row keeps its name,
-                // pill and age on the first line, `routerFirstLine`).
-                let text = Text(item.sentence).font(CDS.sans(14))
+                // The whole sentence, never cut mid-fact: it wraps as text, a next line starting under the name (the
+                // row keeps its name, pill and age on the first line, `routerFirstLine`).
+                let text = (RouterFlow.lead(lead) + Text(item.sentence).strikethrough(item.closing, color: CDS.Text.muted))
+                    .font(CDS.sans(14))
                 let lines = Router.Items.sentenceLines
                 HStack(alignment: .top, spacing: Router.Thinking.gap) {
                     text.foregroundStyle(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
-                        .strikethrough(item.closing, color: CDS.Text.muted)
                         .lineLimit(lines).fixedSize(horizontal: false, vertical: true)
                         .overlay(alignment: .topLeading) {
                             if item.state == .checking {

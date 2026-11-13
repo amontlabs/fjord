@@ -201,6 +201,24 @@ extension Router {
     }
 }
 
+// MARK: - Words that flow under what starts them
+
+/// A sentence that flows as text under what sits at its start (a line's name, an item's mark): its first line starts
+/// with a blank as wide as that, so a line it wraps to starts at the left edge and takes the whole width.
+@MainActor enum RouterFlow {
+    private static var blanks: [CGFloat: Image] = [:]
+
+    /// A blank `width` wide, to start a text with (an image that draws nothing: `Text` has no first-line indent).
+    static func lead(_ width: CGFloat) -> Text {
+        let width = width.rounded()
+        guard width > 0 else { return Text(verbatim: "") }
+        if let blank = blanks[width] { return Text(blank) }
+        let blank = Image(nsImage: NSImage(size: NSSize(width: width, height: 1), flipped: false) { _ in true })
+        blanks[width] = blank
+        return Text(blank)
+    }
+}
+
 // MARK: - The block's rows
 
 extension VerticalAlignment {
@@ -320,21 +338,19 @@ struct RouterItemRow: View {
     var body: some View {
         let closing = item.closing
         let checking = item.state == .checking
-        // The whole sentence, wrapping under itself when it needs to (never cut mid-fact); the mark and the age keep to
-        // its first line.
+        // The whole sentence, never cut mid-fact: it flows as text after the kind's mark, a line it wraps to starting
+        // under the mark (`RouterFlow`); the mark and the age keep to its first line.
+        let lead = RouterFlow.lead(M.markBox + M.markGap)
         HStack(alignment: .top, spacing: 0) {
-            kind
-                .frame(height: I.lineHeight)
-                .padding(.leading, I.markLeading)
             ZStack(alignment: .topLeading) {
                 if case .closing(let how) = item.state {
-                    (Text(item.sentence).foregroundColor(CDS.Text.muted).strikethrough(true, color: CDS.Text.muted)
+                    (lead + Text(item.sentence).foregroundColor(CDS.Text.muted).strikethrough(true, color: CDS.Text.muted)
                         + Text(verbatim: "  ") + Text(how).font(CDS.sans(12)).foregroundColor(CDS.Text.secondary))
                         .font(CDS.sans(14))
                         .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
                         .transition(.opacity)
                 } else {
-                    let text = Text(item.sentence).font(CDS.sans(14))
+                    let text = (lead + Text(item.sentence)).font(CDS.sans(14))
                     text.foregroundStyle(checking ? CDS.Text.muted : CDS.Text.secondary)
                         .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
                         .overlay(alignment: .topLeading) {
@@ -347,8 +363,9 @@ struct RouterItemRow: View {
                         }
                         .transition(.opacity)
                 }
+                kind.frame(height: I.lineHeight)
             }
-            .padding(.leading, M.markGap)
+            .padding(.leading, I.markLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             RouterAge(model: model, since: item.since)
                 .frame(height: I.lineHeight)

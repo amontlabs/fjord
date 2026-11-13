@@ -603,8 +603,10 @@ checking, closing with how, new).
   row per item: the kind's mark alone in its tint (no ground, no word; the accessibility label says the kind) under the
   name's words, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of air under it.
 - **Working counts it faintly**: "Working 3 +1", the `+1` in `Text.disabled`, for running threads shown in another section.
-- **R8. The whole sentence.** An item's sentence is never cut: it wraps under itself (at most 3 lines, a guard) on the
-  line and in a block, in the sentence column; the mark, the name, the pill and the age stay centred on its first line.
+- **R8. The whole sentence.** An item's sentence is never cut (at most 3 lines, a guard): it flows as text. On the line
+  the name is its highlight at its start, and a line it wraps to starts at the name's ground's left edge and runs to the
+  pill; in a block a line it wraps to starts under the kind's mark (`RouterFlow`: the first line starts with a blank as
+  wide as the name or the mark). The mark, the name, the pill and the age stay centred on its first line.
 - **R8. An item's card**, in order: the detail (prose 14/20 `Text.primary`), the quote (the agent's lines behind the
   item, as the card's last lines: rail, 4 lines, fade, Show all `→`), the links in the quote as quiet buttons (22 tall,
   radius 6, the `quiet` fill, `chosen` under the pointer; `↗` and the address without its scheme, footnote 12
