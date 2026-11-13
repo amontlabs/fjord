@@ -132,17 +132,20 @@ struct RouterV2HeaderRow: View {
     }
 }
 
-/// A count that ticks: `numericText` on `.snappy`, a fade under Reduce Motion.
+/// A count that ticks as `numericText` on `.snappy` did, on Core Animation (`RouterV2Tick`); at once under Reduce Motion.
 struct RouterV2Count: View {
     let count: Int
     var size: CGFloat = 11
     var tint: Color = CDS.Text.muted
-    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        Text(verbatim: "\(count)").font(CDS.sans(size)).monospacedDigit().foregroundStyle(tint)
-            .contentTransition(reduce ? .opacity : .numericText(value: Double(count)))
-            .motion(reduce ? .easeOut(duration: 0.12) : RouterV2.counts, value: count)
+        let font = CDS.nsSans(size).monospacedDigits
+        RouterV2Tick(key: "\(count)", style: .numeric(font: font), look: "\(tint)") {
+            Text(verbatim: "\(count)").font(CDS.sans(size)).monospacedDigit().foregroundStyle(tint)
+        }
+        // Its text's baseline, for the header's row (a hosting view has none of its own to give).
+        .alignmentGuide(.firstTextBaseline) { _ in font.ascender }
+        .alignmentGuide(.lastTextBaseline) { _ in font.ascender }
     }
 }
 

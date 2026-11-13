@@ -191,7 +191,8 @@ class RouterV2GlideView: NSView {
 
     private static var quieted: Set<ObjectIdentifier> = []
 
-    private static func quiet(_ host: AnyClass) {
+    /// `host`'s instances pass an update request on as a plain `NSView` does (see `viewDidMoveToSuperview`).
+    static func quiet(_ host: AnyClass) {
         guard quieted.insert(ObjectIdentifier(host)).inserted, host != NSView.self else { return }
         let selector = NSSelectorFromString("_informContainerThatSubviewsNeedUpdateConstraints")
         guard let plain = class_getInstanceMethod(NSView.self, selector), class_getInstanceMethod(host, selector) != nil else { return }

@@ -350,17 +350,19 @@ struct RouterV2Mark: View {
     var size: CGFloat = RouterV2.Line.mark
 
     var body: some View {
-        ZStack {
-            if let symbol = look.symbol {
-                Image(systemName: symbol).font(.system(size: size, weight: .semibold)).foregroundStyle(look.tint)
-                    // Quick, the old one down as the new one comes up: the slot is never left empty.
-                    .contentTransition(.symbolEffect(.replace.downUp, options: .speed(1.8)))
-                    .transition(.opacity)
-            } else {
-                RouterV2WorkingDots(tint: look.tint, paused: paused).transition(.opacity)
+        // On Core Animation (`RouterV2Tick`): the old mark goes as the new one comes, when the change is animated.
+        RouterV2Tick(key: look.symbol.map { "\($0)|\(look.label)" } ?? "~\(look.label)", style: .replace, always: false, look: "\(paused)") {
+            ZStack {
+                if let symbol = look.symbol {
+                    Image(systemName: symbol).font(.system(size: size, weight: .semibold)).foregroundStyle(look.tint)
+                } else {
+                    RouterV2WorkingDots(tint: look.tint, paused: paused)
+                }
             }
+            // Its box inside: the view keeps its frame as one mark takes another's place (a frame that changes makes
+            // AppKit walk the window's views for their tracking areas).
+            .frame(width: RouterV2.Line.markBox, height: RouterV2.Line.markBox)
         }
-        .frame(width: RouterV2.Line.markBox, height: RouterV2.Line.markBox)
         .accessibilityHidden(true)
     }
 }
@@ -469,18 +471,19 @@ struct RouterV2ProjectBadge: View {
 struct RouterV2Age: View {
     let model: RouterV2Model
     let since: Date
-    @Environment(\.accessibilityReduceMotion) private var reduce
+    private static let font = CDS.nsSans(12).monospacedDigits
 
     var body: some View {
         let _ = model.clock.minute
         let age = BriefAge.short(model.now.timeIntervalSince(since))
-        Text(age)
-            .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
-            .lineLimit(1).fixedSize()
-            // It ticks as the counts do: never two ages on top of each other.
-            .contentTransition(reduce ? .opacity : .numericText())
-            .motion(reduce ? .easeOut(duration: 0.12) : RouterV2.counts, value: age)
-            .frame(minWidth: RouterV2.Line.ageWidth, alignment: .trailing)
+        // It ticks as the counts do, on Core Animation (`RouterV2Tick`): never two ages on top of each other.
+        RouterV2Tick(key: age, style: .numeric(font: Self.font)) {
+            Text(age)
+                .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
+                .lineLimit(1).fixedSize()
+                // Its column inside: the view keeps its frame as the age ticks.
+                .frame(minWidth: RouterV2.Line.ageWidth, alignment: .trailing)
+        }
     }
 }
 
