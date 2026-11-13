@@ -248,10 +248,10 @@ final class RouterModel {
 
     /// The list's rows, rewritten only when the order or a header's count changes.
     private(set) var layout: [RouterSlot] = [RouterSlot(id: RouterModel.firstRow, kind: .sentence(Router.Copy.nothingAtAll, clear: false))]
-    /// This turn's change of the layout moves rows and adds or takes none: the list places its rows at once and they
-    /// glide on Core Animation (`RouterList`). Any other change keeps its SwiftUI animation (the rows' folds, a card's
-    /// roll).
-    @ObservationIgnored private(set) var placedAtOnce = false
+    /// This turn's change of the layout adds or takes rows: the list keeps the change's SwiftUI animation, for their
+    /// folds. In every other turn (a card opening or shutting, a line moving) the list places its rows at once and they
+    /// glide on Core Animation (`RouterList`).
+    @ObservationIgnored private(set) var folding = false
     /// The counts and the projects, stored with the layout.
     private(set) var tally = RouterTally()
     /// There is a thread: the filter bar shows.
@@ -1047,10 +1047,10 @@ final class RouterModel {
     private func relayout() {
         let slots = slots()
         if slots != layout {
-            if slots.count == layout.count, Set(slots.map(\.id)) == Set(layout.map(\.id)) {
-                placedAtOnce = true
+            if slots.count != layout.count || Set(slots.map(\.id)) != Set(layout.map(\.id)) {
+                folding = true
                 // For this turn's update only.
-                DispatchQueue.main.async { [weak self] in self?.placedAtOnce = false }
+                DispatchQueue.main.async { [weak self] in self?.folding = false }
             }
             layout = slots
         }

@@ -279,6 +279,13 @@ final class RouterLineSlotView: RouterGlideView {
     let box: RouterLineBox
     /// The slot's height while the card was last open: the hosting view keeps it until the card's body goes.
     private var held: CGFloat = 0
+    /// The hosting view's height: room for the line and any card under it (`fit`).
+    private var room = RouterLineSlotView.roomStep
+    /// What the hosting view shows: down to the slot's bottom (`clip`).
+    private let mask = CALayer()
+    /// The mask's height as last set, for the roll from it.
+    private var clipped: CGFloat?
+    static let roomStep: CGFloat = 2400
     /// The room the hosting view has above and below the slot: the veil of a line in flight fades out past its row.
     static let overflow = Router.Surface.veilOut
 
@@ -305,15 +312,59 @@ final class RouterLineSlotView: RouterGlideView {
         fit()
     }
 
-    /// The hosting view's frame: the slot's width, and its height or the held one.
+    /// The hosting view's frame: the slot's width, and a height that doesn't change as the card opens, shuts or grows.
+    /// SwiftUI takes a hosting view's new size in the update that changed it and, in an animated one, animates its
+    /// root's size around the root's new centre: the line dropped by half the card's height as its card opened and slid
+    /// back up (the same, upwards, as it shut). So the hosting view is as tall as the slot could get (`room`), the line
+    /// drawn at its top; only the slot is hit, and what is past it is empty. It grows only for a card taller than that.
     func fit() {
         let height = bounds.height
         if box.selected, !box.moving { held = height } else if !box.built { held = 0 }
         let o = Self.overflow
-        let frame = CGRect(x: 0, y: -o, width: bounds.width, height: max(height, box.built ? held : 0) + 2 * o)
+        let needed = max(height, box.built ? held : 0) + 2 * o
+        if needed > room { room = (needed / Self.roomStep).rounded(.up) * Self.roomStep }
+        let frame = CGRect(x: 0, y: -o, width: bounds.width, height: room)
         if hosting.frame != frame {
             hosting.frame = frame
         }
+        clip()
+    }
+
+    /// The hosting view drawn down to the slot's bottom only: a card's roll is SwiftUI's, drawn on the main thread two or
+    /// three frames behind the rows' glides on Core Animation, and as a card shut the line rising under it covered its
+    /// last lines. The slot's bottom moves on Core Animation instead, on the glides' own curve, so what shows of a card
+    /// shutting (or opening, or growing) is always what the rows around it leave. A line in flight isn't masked (its veil
+    /// reaches past its row).
+    private func clip() {
+        guard let host = hosting.layer else { return }
+        guard !box.moving else {
+            if host.mask != nil { host.mask = nil }
+            clipped = nil
+            return
+        }
+        if host.mask !== mask {
+            mask.backgroundColor = CGColor(gray: 0, alpha: 1)
+            mask.actions = ["bounds": NSNull(), "position": NSNull(), "anchorPoint": NSNull(), "cornerRadius": NSNull()]
+            host.mask = mask
+            clipped = nil
+        }
+        // The hosting layer's sense of down: AppKit lays a view's layers out in the view's own coordinates. The room
+        // above the slot is the veil's.
+        let down = hosting.isFlipped
+        let o = Self.overflow
+        let height = bounds.height + o
+        let width = bounds.width
+        mask.anchorPoint = CGPoint(x: 0, y: down ? 0 : 1)
+        mask.position = CGPoint(x: 0, y: down ? 0 : host.bounds.height)
+        mask.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        // Its bottom corners the selected ground's, so the ground keeps its shape through the roll.
+        mask.cornerRadius = box.selected || box.built ? Router.Line.selectedRadius : 0
+        mask.maskedCorners = down ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        if let was = clipped, was != height, let glide = glides?.current,
+           let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height) {
+            mask.add(animation, forKey: "roll-\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))")
+        }
+        clipped = height
     }
 
     // The overflow is drawn, never hit: only the slot can be pointed at.
@@ -360,6 +411,10 @@ private struct RouterLineHost: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: RouterLineSlotView, context: Context) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > 0, let controller = context.coordinator.controller else { return nil }
+        // The slot's height is the list's, from the model (`RouterHostedLine`): measured here, a card that had just shut
+        // still came back at its open height (the hosting view not updated yet), and the slot stayed that tall under the
+        // rows after it, taking their clicks.
+        if let height = proposal.height, height.isFinite { return CGSize(width: width, height: height) }
         // A zero height: the root's flexible frame comes back at the line's own height.
         let size = controller.sizeThatFits(in: CGSize(width: width, height: 0))
         return CGSize(width: width, height: max(0, size.height - 2 * RouterLineSlotView.overflow))

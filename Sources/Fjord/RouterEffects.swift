@@ -846,9 +846,16 @@ private struct RouterFold: ViewModifier, Animatable {
         set { open = newValue }
     }
 
+    /// How far an open row's mask reaches past its top and bottom: a row gliding draws where it was, away from its slot
+    /// (`RouterGlides`), and the mask (SwiftUI's clipping container of the row) never cuts it.
+    static let reach: CGFloat = 20_000
+
     func body(content: Content) -> some View {
         content
-            .mask(alignment: .top) { Rectangle().scaleEffect(x: 1, y: max(0.0001, open), anchor: .top).padding(.horizontal, -40) }
+            .mask(alignment: .top) {
+                Rectangle().scaleEffect(x: 1, y: max(0.0001, open), anchor: .top)
+                    .padding(.horizontal, -40).padding(.vertical, open >= 1 ? -Self.reach : 0)
+            }
             // Seen only in the last third of the fold: a row never shows over its neighbours' words on the way.
             .opacity(Double(min(1, max(0, (open - 0.65) / 0.35))))
     }

@@ -36,13 +36,14 @@ struct RouterList: View {
                             .transition(.routerFold(reduce: reduce))
                     }
                 }
-                // This turn's change of order, with no row coming or going: every row is placed where it goes at once and
-                // glides there on Core Animation (`RouterGlides`). Animated here, the stack moved each row's container on
-                // every frame of the change's curve while its hosting view was held still inside it, and AppKit told
-                // every hosting view below that its place in the window had changed: each line laid out on every
-                // frame of every move. Rows that come or go keep the change's animation, for their fold, and so does
-                // every other change (placed at once as a card shut, the rows under it went missing for a few frames).
-                .transaction { [model] in if model.placedAtOnce { $0.animation = nil } }
+                // Every change but one where rows come or go (a card opening or shutting, a line moving, a count): every
+                // row is placed where it goes at once and glides there on Core Animation (`RouterGlides`). Animated here,
+                // the stack moved each row's container on every frame of the change's curve while its hosting view, placed
+                // at once, sat at its new place inside it, outside the container's clip: the rows under a card that opened
+                // or shut were blank until the curve ended, and AppKit told every hosting view below that its place in
+                // the window had changed, each line laying out on every frame. Rows that come or go keep the change's
+                // animation, for their fold.
+                .transaction { [model] in if !model.folding { $0.animation = nil } }
                 .coordinateSpace(.named(Router.listSpace))
                 .padding(.leading, leading).padding(.trailing, trailing)
                 .padding(.bottom, 28)
