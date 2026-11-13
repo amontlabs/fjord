@@ -55,6 +55,11 @@ struct RouterSummaryView: View {
     }
 }
 
+extension EnvironmentValues {
+    /// Demo only (`RouterLab`): the card's words' column from its ground's edge, where a wide layout draws the card.
+    @Entry var routerCardLeading: CGFloat? = nil
+}
+
 // MARK: - The layers' words
 
 /// What a thread or an item says, layer by layer: the line's sentence, the detail and the facts. One reading for the
@@ -266,6 +271,7 @@ private struct RouterSummaryCard: View {
     let thread: RouterThread
     let item: RouterItem?
     @Namespace private var rail
+    @Environment(\.routerCardLeading) private var leading
 
     private typealias M = Router.Card
     private var d: CDS.Density { .compact }
@@ -286,7 +292,7 @@ private struct RouterSummaryCard: View {
             footer
         }
         // Wide, every card of a block or line keeps to the right column (`Router.Wide`).
-        .padding(.leading, model.wide ? Router.Wide.start + (item != nil ? M.hang : 0) : inBlock ? Router.Items.indent + M.hang : M.leading)
+        .padding(.leading, leading ?? (model.wide ? Router.Wide.start + (item != nil ? M.hang : 0) : inBlock ? Router.Items.indent + M.hang : M.leading))
         .padding(.trailing, M.trailing).padding(.bottom, M.bottom)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)

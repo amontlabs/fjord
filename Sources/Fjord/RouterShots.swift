@@ -88,6 +88,8 @@ enum RouterShots {
         model.apply(.upsert(settings))
     }
 
+    private static let wideLab = CGSize(width: 1600, height: 1000)
+
     private static let opus = RouterSetting(kind: .model, value: "claude-opus-5-5", label: "Opus 5.5")
     private static let medium = RouterSetting(kind: .effort, value: "medium", label: "Medium")
 
@@ -279,6 +281,24 @@ enum RouterShots {
             model.focusItem(RouterDemo.Item.keep)
             model.pick(1)
         }, size: CGSize(width: 1480, height: 1000)),
+        // Four ways to use a wide window, to choose from (WIDE-OPTIONS.md, `RouterLab`): the same records in each, at
+        // rest and with Checkpoint boot's Decide open.
+    ] + RouterLab.Option.allCases.flatMap { option in
+        [
+            State(name: "v2-wide-\(option.rawValue)", make: { model in
+                model.lab = option
+                model.select(nil)
+                RouterDemo.items(model)
+            }, size: wideLab),
+            State(name: "v2-wide-\(option.rawValue)-card", make: { model in
+                model.lab = option
+                RouterDemo.items(model)
+                model.select(.line(ID.checkpoint))
+                model.focusItem(RouterDemo.Item.keep)
+                model.pick(1)
+            }, size: wideLab),
+        ]
+    } + [
         State(name: "v2-reassessing") { model in
             model.select(nil)
             RouterDemo.askPermission(model)

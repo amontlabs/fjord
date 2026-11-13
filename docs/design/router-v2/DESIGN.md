@@ -741,6 +741,11 @@ checking, closing with how, new).
 
 ### 1.15.1 Wide layout (look, for approval)
 
+**Turned down** (owner, 2026-11-13): the column should not grow (the ages end up far from their words, and the names
+from their content), and a thread's own sentence should have no rail. Four other ways to use a wide window are built
+behind a demo-only switch, with a recommendation: [WIDE-OPTIONS.md](WIDE-OPTIONS.md) (`FJORD_WIDE=a|b|c|d`, shots
+`v2-wide-<a..d>[-card]`). The layout below stays in the page until one is chosen.
+
 `Router.Wide`, shots `v2-wide`, `v2-wide-card` (light and dark). A page whose column can be 1000 pt or more gets a column
 that wide (to 1120; 720 below), and lays threads out in two columns, at once with no motion when the width crosses:
 

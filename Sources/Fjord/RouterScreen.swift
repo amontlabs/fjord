@@ -34,9 +34,22 @@ struct RouterScreen: View {
     /// The column's edges from the page's sides: the title, the headers, the names and the composer share them. With
     /// the drawer's toggle on the title line, the column's end stays clear of it.
     private var edges: RouterEdges {
-        let inset = AppPage<EmptyView, EmptyView>.columnInset((Router.Wide.column(page: width), Router.gutter), pageWidth: width)
+        // A wide layout being looked at (`RouterLab`): the title starts with its reading column, the search ends with
+        // its last one.
+        if let lab {
+            let toggle = store != nil && !(drawerOpen && side) ? Self.toggleRoom : 0
+            return RouterEdges(leading: max(lab.frame.start, leadingInset + 14), trailing: max(width - lab.frame.end, toggle))
+        }
+        let column = model.lab == nil ? Router.Wide.column(page: width) : Router.column
+        let inset = AppPage<EmptyView, EmptyView>.columnInset((column, Router.gutter), pageWidth: width)
         let toggle = store != nil && !(drawerOpen && side) ? Self.toggleRoom : 0
         return RouterEdges(leading: max(inset, leadingInset + 14), trailing: max(inset, toggle))
+    }
+
+    /// The wide layout being looked at, when the page has the room for it (demo only; without, the page is its own).
+    private var lab: (option: RouterLab.Option, frame: RouterLab.Frame)? {
+        guard let option = model.lab, let frame = RouterLab.frame(option, page: width) else { return nil }
+        return (option, frame)
     }
 
     var body: some View {
@@ -75,7 +88,11 @@ struct RouterScreen: View {
             topBar
             // The Router off, or Claude Code missing: one line under the title, with its button.
             if let store, let text { RouterSetupNotice(store: store, model: text, edges: edges) }
-            RouterList(model: model, edges: edges)
+            if let lab {
+                RouterLabPage(model: model, option: lab.option, frame: lab.frame, page: width)
+            } else {
+                RouterList(model: model, edges: edges)
+            }
             if let store, drawerOpen, !side {
                 RouterDrawer(store: store)
                     .frame(height: RouterDrawer.height)
@@ -92,7 +109,7 @@ struct RouterScreen: View {
             width = $0.width
             model.targets.viewport = $0
             // The page wide enough for the two-column blocks: they take it at once, with no motion (DESIGN.md 1.15.1).
-            let wide = Router.Wide.column(page: $0.width) >= Router.Wide.from
+            let wide = model.lab == nil && Router.Wide.column(page: $0.width) >= Router.Wide.from
             if model.wide != wide { model.wide = wide }
         }
         .foregroundStyle(Theme.text)
