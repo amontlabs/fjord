@@ -133,7 +133,7 @@ struct RouterLineView: View {
     private typealias M = Router.Line
 
     var body: some View {
-        let _ = RouterBodies.count("line", box.id)
+        let _ = RouterBodies.count("line", box.id, of: model)
         let thread = box.head
         let id = box.id
         let selected = box.selected
@@ -377,7 +377,7 @@ struct RouterSentenceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        let _ = RouterBodies.count("sentence", box.id)
+        let _ = RouterBodies.count("sentence", box.id, of: model)
         let thread = box.head
         let sentence = box.sentence
         ZStack(alignment: .leading) {

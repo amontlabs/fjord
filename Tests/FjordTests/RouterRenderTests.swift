@@ -12,7 +12,6 @@ import Testing
 
     /// The demo's page drawn in a window, settled.
     private func hosted() async -> (RouterModel, NSWindow) {
-        RouterBodies.reset()
         let model = RouterDemo.records(still: true)
         let hosting = NSHostingView(rootView: RouterScreen(model: model).frame(width: 1280, height: 960))
         let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 960), styleMask: .titled, backing: .buffered,
@@ -21,32 +20,32 @@ import Testing
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFront(nil)
-        await waitUntil { RouterBodies["list"] > 0 }
-        await settle()
+        await waitUntil { RouterBodies[model, "list"] > 0 }
+        await settle(model)
         return (model, window)
     }
 
     /// Lets the turn's end and SwiftUI's update run until no body runs any more: for some time too, not only some turns
     /// (under a full suite's load, turns pass between frames while the first layouts are still to come).
-    private func settle() async {
-        await waitUntilSteady(turns: 6, quiet: 0.25) { RouterBodies.counts }
+    private func settle(_ model: RouterModel) async {
+        await waitUntilSteady(turns: 6, quiet: 0.25) { RouterBodies.counts(model) }
     }
 
     /// Runs `change` on the settled page and returns the bodies it ran.
     private func bodies(_ model: RouterModel, _ change: () -> Void) async -> [String: Int] {
-        RouterBodies.reset()
+        RouterBodies.reset(model)
         change()
-        await settle()
-        return RouterBodies.counts
+        await settle(model)
+        return RouterBodies.counts(model)
     }
 
     @Test func onlyTheOpenCardIsBuilt() async {
         // Settings is selected in the demo: its card is the one with a body; every line drew once.
         let (model, window) = await hosted()
         defer { window.close() }
-        #expect(RouterBodies["card"] >= 1)
-        #expect(RouterBodies["card"] == RouterBodies["card", ID.settings])
-        #expect(RouterBodies["line"] >= model.threads.count)
+        #expect(RouterBodies[model, "card"] >= 1)
+        #expect(RouterBodies[model, "card"] == RouterBodies[model, "card", ID.settings])
+        #expect(RouterBodies[model, "line"] >= model.threads.count)
     }
 
     @Test func anUpsertThatKeepsTheOrderRunsOneLineBodyAndNoListBody() async throws {
@@ -75,7 +74,7 @@ import Testing
         let (model, window) = await hosted()
         defer { window.close() }
         model.hoverRow = ID.guide
-        await settle()
+        await settle(model)
         let ran = await bodies(model) { model.hoverRow = ID.bar }
         #expect(ran["line"] == 2)
         #expect(ran["line:" + ID.guide] == 1)
@@ -120,7 +119,7 @@ import Testing
         defer { window.close() }
         model.select(.line(ID.tab))
         model.apply(.reply(ID.tab, text: "The draft now survives", writing: true))
-        await settle()
+        await settle(model)
         let ran = await bodies(model) { model.apply(.reply(ID.tab, text: "The draft now survives the handover", writing: true)) }
         #expect(ran["lastLines:" + ID.tab] == 1)
         #expect(ran["card"] == nil)
@@ -132,16 +131,16 @@ import Testing
         defer { window.close() }
         let tab = try #require(model.thread(ID.tab))
         let stream = tab.sentence.stream + 1
-        RouterBodies.reset()
+        RouterBodies.reset(model)
         model.post(.words(ID.tab, stream: stream, text: "re-measured", done: false))
         model.post(.words(ID.tab, stream: stream, text: "re-measured the composer", done: false))
         model.post(.words(ID.tab, stream: stream, text: "re-measured the composer against T3", done: true))
         // Kept for the turn's end: nothing applied yet.
         #expect(model.thread(ID.tab)?.sentence.text == tab.sentence.text)
         await waitUntil { model.thread(ID.tab)?.sentence.text == "re-measured the composer against T3" }
-        #expect(RouterBodies["flush"] == 1)
-        await settle()
-        #expect(RouterBodies["line"] == 0)
+        #expect(RouterBodies[model, "flush"] == 1)
+        await settle(model)
+        #expect(RouterBodies[model, "line"] == 0)
     }
 
     @Test func anotherChangeAppliesAfterWhatWasKept() throws {

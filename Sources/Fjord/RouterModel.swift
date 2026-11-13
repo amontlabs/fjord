@@ -939,7 +939,7 @@ final class RouterModel {
         guard !kept.isEmpty else { return }
         let changes = kept
         kept = []
-        RouterBodies.count("flush")
+        RouterBodies.count("flush", of: self)
         let interval = RouterSignposts.begin("Flush")
         for (_, change) in changes { apply(change) }
         RouterSignposts.end(interval, afterCommit: true)

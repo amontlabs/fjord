@@ -18,7 +18,7 @@ struct RouterList: View {
     var body: some View {
         // The stored layout: this body runs when the order or a count changes, not when a line's fields do.
         let rows = model.layout
-        let _ = RouterBodies.count("list")
+        let _ = RouterBodies.count("list", of: model)
         // Each row's place on the page. The rows themselves are declared by id, an order no change of section moves:
         // a reordered `ForEach` takes the row out and puts it back in, and then nothing glides.
         let places = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })

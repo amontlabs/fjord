@@ -8,7 +8,6 @@ import Testing
 @MainActor
 @Suite(.serialized, .hostsWindows) struct RouterFilterTests {
     private func hosted() async -> (RouterModel, NSWindow) {
-        RouterBodies.reset()
         let model = RouterDemo.records(still: true)
         model.select(nil)
         let hosting = NSHostingView(rootView: RouterScreen(model: model).frame(width: 1280, height: 960))
@@ -18,8 +17,8 @@ import Testing
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFront(nil)
-        await waitUntil { RouterBodies["list"] > 0 }
-        await waitUntilSteady(turns: 6) { RouterBodies.counts }
+        await waitUntil { RouterBodies[model, "list"] > 0 }
+        await waitUntilSteady(turns: 6) { RouterBodies.counts(model) }
         return (model, window)
     }
 
@@ -40,7 +39,7 @@ import Testing
         model.toggle(project: "fjord")
         #expect(model.shownLines.allSatisfy { $0.section == .done && $0.project == "fjord" })
         // Pressed again: the state is cleared, the project stays.
-        await waitUntilSteady(turns: 4) { RouterBodies.counts }
+        await waitUntilSteady(turns: 4) { RouterBodies.counts(model) }
         let again = try #require(model.targets.actions[.state(.done)])
         again()
         #expect(model.section == nil)

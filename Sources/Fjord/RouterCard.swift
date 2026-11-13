@@ -18,7 +18,7 @@ struct RouterCard: View {
     private var thread: RouterThread { box.head }
 
     var body: some View {
-        let _ = RouterBodies.count("card", box.id)
+        let _ = RouterBodies.count("card", box.id, of: model)
         VStack(alignment: .leading, spacing: M.gap) {
             Text(thread.title).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(1).prose()
             if thread.loading {
@@ -314,7 +314,7 @@ struct RouterLastLines: View {
     @State private var cut: CGFloat = 0
 
     var body: some View {
-        let _ = RouterBodies.count("lastLines", box.id)
+        let _ = RouterBodies.count("lastLines", box.id, of: model)
         let d = CDS.Density.compact
         let thread = box.head
         let open = model.expanded.contains(thread.id) && thread.plan.isEmpty

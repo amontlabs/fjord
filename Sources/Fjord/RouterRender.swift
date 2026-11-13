@@ -213,19 +213,22 @@ final class RouterTurn {
     }
 }
 
-/// Body evaluations by component, counted under test only: the render tests read them (RouterRenderTests).
+/// Body evaluations by component, counted under test only, per page (the model that drew them): the render tests read
+/// them (RouterRenderTests), and other suites hosting a page side by side don't add to their counts.
 @MainActor
 enum RouterBodies {
-    static var counts: [String: Int] = [:]
+    private static var pages: [ObjectIdentifier: [String: Int]] = [:]
 
-    /// Counts one evaluation of `name`, and of `name:id` when it is one thread's.
-    static func count(_ name: String, _ id: String? = nil) {
+    /// Counts one evaluation of `name` on `model`'s page, and of `name:id` when it is one thread's.
+    static func count(_ name: String, _ id: String? = nil, of model: RouterModel) {
         guard UnderTest.isRunning else { return }
-        counts[name, default: 0] += 1
-        if let id { counts[name + ":" + id, default: 0] += 1 }
+        let page = ObjectIdentifier(model)
+        pages[page, default: [:]][name, default: 0] += 1
+        if let id { pages[page, default: [:]][name + ":" + id, default: 0] += 1 }
     }
 
-    static func reset() { counts = [:] }
-    static subscript(_ name: String) -> Int { counts[name] ?? 0 }
-    static subscript(_ name: String, _ id: String) -> Int { counts[name + ":" + id] ?? 0 }
+    static func reset(_ model: RouterModel) { pages[ObjectIdentifier(model)] = nil }
+    static func counts(_ model: RouterModel) -> [String: Int] { pages[ObjectIdentifier(model)] ?? [:] }
+    static subscript(_ model: RouterModel, _ name: String) -> Int { counts(model)[name] ?? 0 }
+    static subscript(_ model: RouterModel, _ name: String, _ id: String) -> Int { counts(model)[name + ":" + id] ?? 0 }
 }
