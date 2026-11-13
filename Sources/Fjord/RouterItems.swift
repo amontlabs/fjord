@@ -9,7 +9,7 @@ import SwiftUI
 /// One thing open with you on a thread.
 struct RouterItem: Identifiable, Equatable {
     /// Four kinds, no more. Stuck first, then Decide and Do, then Know.
-    enum Kind: String, CaseIterable, Equatable {
+    enum Kind: String, CaseIterable, Equatable, Codable, Sendable {
         case stuck, decide, `do`, know
 
         /// The section its thread goes to when it is the thread's most urgent item.

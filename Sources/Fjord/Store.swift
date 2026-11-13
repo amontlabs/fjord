@@ -407,6 +407,8 @@ final class Store {
     /// One streamed Haiku call per thread per fingerprint, four at once (RouterVerdicts.swift).
     @ObservationIgnored lazy var routerVerdicts: RouterVerdicts = makeRouterVerdicts()
     @ObservationIgnored lazy var routerTurnReads: RouterTurnReads = makeRouterTurnReads()
+    /// The open items' reads of a turn or a message: apart from the card's, so neither replaces the other in the queue.
+    @ObservationIgnored lazy var routerItemReads: RouterTurnReads = makeRouterItemReads()
     /// Where the page's draft goes: Jev, then Sonnet (RouterReader.swift).
     @ObservationIgnored lazy var routerReader: RouterReader = makeRouterReader()
     /// The page's acts on T3 (RouterActs.swift): the real page's source.

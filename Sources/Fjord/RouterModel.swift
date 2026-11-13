@@ -676,9 +676,11 @@ final class RouterModel {
             guard let self, !Task.isCancelled else { return }
             self.animate(.spatial) { self.update(id) { $0.ledger.items.removeAll { $0.id == item } } }
         }
+        source?.itemDone(id, item: item, on: true)
         act(RouterToast(id: fresh(), before: "Done:", name: was.sentence), threads: [id]) { [weak self] in
             guard let self else { return }
             fold.cancel()
+            self.source?.itemDone(id, item: item, on: false)
             self.animate(.spatial) {
                 self.update(id) { t in
                     if let i = t.ledger.items.firstIndex(where: { $0.id == item }) { t.ledger.items[i] = was } else { t.ledger.items.append(was) }

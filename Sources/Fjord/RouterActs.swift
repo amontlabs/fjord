@@ -17,8 +17,8 @@ import Foundation
     func took(send: RouterActs.Send)
     /// A settled or snoozed thread has no line until `on` is false again (the Revert, or T3 refusing).
     func hide(_ thread: String, on: Bool)
-    /// Fjord's own mark: the verdict's ask doesn't need you.
-    func notForMe(_ thread: String, on: Bool)
+    /// Done on an open item (`on`), or its Revert.
+    func itemDone(_ thread: String, item: String, on: Bool)
     /// The card was opened here: the new dot is gone before T3 says so.
     func seen(_ thread: String)
     /// Cancel on a queued row: its run hidden (`on`) until T3 drops it, or shown again when T3 kept it.
@@ -269,7 +269,10 @@ extension RouterActsRecords {
         if let until { doAct(.snooze, thread, detail: T3Timestamp(date: until).text) } else { undoAct(.snooze, thread) }
     }
 
-    func notForMe(_ thread: String, on: Bool) { records?.notForMe(thread, on: on) }
+    /// Real threads have no step to mark (their open items have Done): nothing to tell the records.
+    func notForMe(_ thread: String, on: Bool) {}
+
+    func itemDone(_ thread: String, item: String, on: Bool) { records?.itemDone(thread, item: item, on: on) }
 
     private func doAct(_ act: ThreadAct, _ thread: String, detail: String = "") {
         let logged = Logged()

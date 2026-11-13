@@ -18,6 +18,19 @@ final class RouterRecords {
     var cancel: (String) -> Void = { _ in }
     /// The thread's summary call is no longer wanted: it stopped working, it left (`RouterVerdicts.cancelSummary`).
     var cancelSummary: (String) -> Void = { _ in }
+    /// The thread's open-items read is no longer wanted: it was settled, it left (`RouterVerdicts.cancelItems`).
+    var cancelItems: (String) -> Void {
+        get { items.cancel }
+        set { items.cancel = newValue }
+    }
+    /// Reads a thread's projection once for an open-items input, answering with `itemFacts(_:key:_:)`. Nil: no reader
+    /// (tests that give the facts themselves, the demo).
+    var fetchItems: ((_ thread: String, _ key: String) -> Void)? {
+        get { items.fetch }
+        set { items.fetch = newValue }
+    }
+    /// The open items engine: one read per turn end and per message of yours, a ledger per thread (RouterItemLedgers).
+    let items = RouterItemLedgers()
     /// Whether a verdict or a name may be asked now (the Router on, not a demo). Not: a finished turn is plain Done on the
     /// code's words, and no line waits ("being read") on a call that won't come.
     var canAsk: () -> Bool = { true }
@@ -76,6 +89,36 @@ final class RouterRecords {
         self.saved = saved
         self.file = file
         self.gate = gate ?? MotionGate.shared
+        wireItems()
+    }
+
+    private func wireItems() {
+        items.load = { [unowned self] id in self.saved[id]?.ledger }
+        items.store = { [unowned self] id, ledger in self.save(id) { $0.ledger = ledger } }
+        items.ask = { [unowned self] r in self.ask(r) }
+        items.now = { [unowned self] in self.now() }
+        items.changed = { [unowned self] id in self.operation { self.refresh(id) } }
+        items.words = { [unowned self] id, text, done in
+            self.operation {
+                guard let e = self.entries[id] else { return }
+                if e.itemWords == nil { e.stream += 1 }
+                e.itemWords = text
+                // Done's line streams when the line is the turn's (no open item stands in for it).
+                if self.shown[id]?.ledger.items.isEmpty == true, self.shown[id]?.state == .done { self.stream(id, text: text, done: done) }
+            }
+        }
+        items.added = { [unowned self] id, new, key in
+            guard let t = self.entries[id]?.thread, let notifier = self.notifier, let first = new.first else { return }
+            let told = notifier.step(t, project: self.project(t), fingerprint: key, ask: first.sentence, told: self.saved[id]?.told ?? [])
+            if let told { self.tell(id, told) }
+        }
+    }
+
+    /// What the thread's open-items read needs from its record.
+    private func itemsContext(_ t: AgentThread, _ e: Entry) -> RouterItemLedgers.Context {
+        RouterItemLedgers.Context(title: t.title, project: project(t), firstAsk: firstAsk(t.id),
+                                  pullRequests: t.pullRequests.map { .init(url: $0.url, number: $0.number, state: $0.state) },
+                                  lastReply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 } ?? t.latestMessage)
     }
 
     // MARK: Reads
@@ -139,6 +182,7 @@ final class RouterRecords {
             if e.thread != t {
                 e.readFailed = nil
                 e.failed = false
+                items.moved(t.id)
             }
             e.thread = t
             refresh(t.id)
@@ -151,6 +195,7 @@ final class RouterRecords {
             guard let e = entries[id], e.thread != nil else { return }
             e.thread = nil
             e.send = nil
+            items.dropped(id)
             refresh(id)
             entries[id] = nil
         }
@@ -230,15 +275,12 @@ final class RouterRecords {
                     e.namingFor = nil
                     e.nameFailed = fingerprint
                     refresh(id)
-                case .state, .words: break
+                case .words: break
                 }
                 return
             }
             guard e.asked else { return }
             switch event {
-            case .state(let needsYou, let worth):
-                e.landed = Landed(needsYou: needsYou, worth: worth)
-                refresh(id)
             case .words(let text, let done):
                 guard !text.isEmpty else { return }
                 if e.words == nil { e.stream += 1 }
@@ -246,7 +288,6 @@ final class RouterRecords {
                 stream(id, text: text, done: done)
             case .done(let v):
                 e.asked = false
-                e.landed = nil
                 let streamed = e.words
                 e.words = nil
                 save(id) {
@@ -255,29 +296,41 @@ final class RouterRecords {
                     if !v.name.isEmpty, $0.nameKey != t.title { $0.name = v.name; $0.nameKey = t.title }
                 }
                 // The last words are drawn whole: a line that never streamed, or streamed short of its end, streams now.
-                if let shownText = shown[id]?.sentence.text, shownText != v.line, !v.line.isEmpty, !needsResult(id, v) {
+                if let shownText = shown[id]?.sentence.text, shownText != v.line, !v.line.isEmpty {
                     if streamed == nil { entries[id]?.stream += 1 }
                     stream(id, text: v.line, done: true)
                 }
                 refresh(id)
-                if v.needsYou, entries[id]?.code?.wants == .finished, saved[id]?.notForMe != fingerprint, let notifier {
-                    let key = notifier.step(t, project: project(t), fingerprint: fingerprint,
-                                            ask: v.ask.isEmpty ? v.line : v.ask, told: saved[id]?.told ?? [])
-                    if let key { tell(id, key) }
-                }
             case .failed:
                 e.asked = false
                 e.failed = true
-                e.landed = nil
                 e.words = nil
                 refresh(id)
             }
         }
     }
 
-    /// A finished turn's verdict that you said doesn't need you shows its result line, not the line.
-    private func needsResult(_ id: String, _ v: RouterVerdict) -> Bool {
-        v.needsYou && saved[id]?.notForMe == entries[id]?.fingerprint && !v.result.isEmpty
+    // MARK: The open items engine's events
+
+    /// What an open-items read says (`RouterVerdicts.onItems`), keyed by its input.
+    func items(_ id: String, key: String, _ event: RouterItemsEvent) {
+        operation {
+            guard let e = entries[id], let t = e.thread else { return }
+            items.event(id, key: key, event, context: itemsContext(t, e))
+        }
+    }
+
+    /// A thread's projection read for an open-items input (`fetchItems`); nil: the read failed.
+    func itemFacts(_ id: String, key: String, _ facts: RouterItemFacts?) {
+        operation {
+            guard let e = entries[id], let t = e.thread else { return }
+            items.facts(id, key: key, facts, context: itemsContext(t, e))
+        }
+    }
+
+    /// Done on an open item (`on`), or its Revert.
+    func itemDone(_ thread: String, item: String, on: Bool) {
+        operation { items.done(thread, item: item, on: on) }
     }
 
     // MARK: This app's own acts (pending until T3 says)
@@ -300,9 +353,12 @@ final class RouterRecords {
             case .queue:
                 e.queued = s.words
                 e.queuedRun = t.latestRunID
+                items.sent(s.thread, words: s.words, at: s.at, context: itemsContext(t, e))
             case .start:
                 return
             case .steer, .words, .answer, .continuing:
+                // Your words go against what is open: the block shows them at once, its items sheen until the read lands.
+                if s.kind != .continuing { items.sent(s.thread, words: s.words, at: s.at, context: itemsContext(t, e)) }
                 let steering = s.kind == .steer
                 e.send = Send(words: s.words, status: steering ? .steering : .sending, steering: steering, run: t.latestRunID,
                               runStarted: t.runStartedAt, request: t.pendingRequest?.id, plan: t.hasPlan, at: s.at,
@@ -373,15 +429,6 @@ final class RouterRecords {
         }
     }
 
-    /// Doesn't need me: a mark on the verdict, kept with its fingerprint (a restart keeps it, the next turn drops it).
-    func notForMe(_ thread: String, on: Bool) {
-        operation {
-            guard let e = entries[thread] else { return }
-            save(thread) { $0.notForMe = on ? e.fingerprint : nil }
-            refresh(thread)
-        }
-    }
-
     /// Its card opened here (`thread.visit` sent): no new dot until T3's `lastVisitedAt` moves.
     func seen(_ thread: String) {
         operation {
@@ -431,6 +478,8 @@ final class RouterRecords {
                 e.scope = .out
                 e.boundary = t.snoozedUntil.flatMap { $0 > now ? $0 : nil }
                 stopCalls(e, id)
+                // Settled: what was open goes with it.
+                if t.settled { items.settled(id) }
                 stopSummary(e, id, forget: e.hidden != true)
                 if let b = e.boundary, b < nextBoundary ?? .distantFuture { nextBoundary = b }
                 publish(id, e)
@@ -458,6 +507,10 @@ final class RouterRecords {
                 }
             }
             readIfNeeded(id, e, t, code)
+            // Turn ends and your messages are read against what is open; a run starting again never stops a read.
+            items.observe(id, t, ended: code.state == .done || code.state == .stopped,
+                          reads: canAsk() && e.scope == .line && e.hidden != true, context: itemsContext(t, e))
+            if !items.reading(id, run: t.latestRunID) { e.itemWords = nil }
             askIfNeeded(id, e, t, code)
             summarizeIfNeeded(id, e, t, code, now: now)
             if was != code, e.scope != .out, e.hidden != true, let notifier {
@@ -518,7 +571,6 @@ final class RouterRecords {
 
     /// The engine's calls for the thread stop: a run started, another fingerprint, the thread left.
     private func stopCalls(_ e: Entry, _ id: String) {
-        e.landed = nil
         e.words = nil
         guard e.asked || e.naming else { return }
         e.asked = false
@@ -546,35 +598,24 @@ final class RouterRecords {
         fetch(id, key)
     }
 
-    /// The facts a verdict reads are in: a finished turn's reply (read once for this turn), a T3 ask's request.
-    private func ready(_ e: Entry, _ t: AgentThread, _ code: RouterCodeState) -> Bool {
-        switch code.wants {
-        case .ask: return !code.loading
-        case .finished: return fetch == nil || e.read == turnKey(e, t)
-        case .nothing: return false
-        }
-    }
-
-    /// The verdict this state needs, asked once per fingerprint once its facts are in; a name once per T3 title.
+    /// The verdict a T3 ask needs (its short line), asked once per fingerprint once its request is in; a name once per T3
+    /// title. A finished turn is read against the open items instead (`items`).
     private func askIfNeeded(_ id: String, _ e: Entry, _ t: AgentThread, _ code: RouterCodeState) {
         guard canAsk() else { e.awaiting = false; return stopCalls(e, id) }
         let onPage = e.scope == .line && e.hidden != true
         let have = saved[id]?.fingerprint == e.fingerprint && saved[id]?.verdict != nil
         e.awaiting = false
-        if code.wants == .nothing || !onPage || e.send != nil {
+        if code.wants != .ask || !onPage || e.send != nil {
             // A run started, the thread left, or your words are on their way: no verdict now.
             if e.asked { stopCalls(e, id) }
-        } else if !have, !e.asked, !e.failed {
-            if ready(e, t, code) {
-                e.asked = true
-                let kind: RouterVerdictRequest.Kind = code.wants == .ask ? .ask : .finished
-                ask(RouterVerdictRequest(thread: id, fingerprint: e.fingerprint, kind: kind, input: input(t, e), at: code.since))
-            } else if code.wants == .finished, e.readFailed != turnKey(e, t) {
-                // Its reply is being read: the line is being read too, not Done yet.
-                e.awaiting = true
-            }
+        } else if !have, !e.asked, !e.failed, !code.loading {
+            e.asked = true
+            ask(RouterVerdictRequest(thread: id, fingerprint: e.fingerprint, kind: .ask, input: input(t, e), at: code.since))
         }
-        if saved[id]?.nameKey != t.title, e.nameFailed != t.title, onPage, !e.asked, !e.awaiting, !e.naming {
+        // A finished turn waits for its read: being read, not Done yet.
+        if code.wants == .finished, onPage, items.reading(id, run: t.latestRunID) { e.awaiting = true }
+        // An ask's verdict names the thread too; anything else asks for its name alone.
+        if saved[id]?.nameKey != t.title, e.nameFailed != t.title, onPage, !e.asked, !e.naming {
             e.naming = true
             e.namingFor = t.title
             ask(RouterVerdictRequest(thread: id, fingerprint: t.title, kind: .name, input: input(t, e), at: t.lastActivity))
@@ -687,8 +728,6 @@ final class RouterRecords {
             }
             let run = e.summaryRun
             switch event {
-            case .state:
-                break
             case .words(let text, let done):
                 guard !text.isEmpty else { return }
                 let first = e.summaryWords == nil
@@ -792,25 +831,31 @@ final class RouterRecords {
         if case .needsYou = code.state, let request = d?.request { card(&r, request) }
         if case .needsYou = code.state { r.askID = t.pendingRequest?.id ?? "plan:" + (t.latestRunID ?? "") }
 
-        // The verdict, when it is the current fingerprint's: its state as soon as it lands, its words as they stream.
-        if code.wants != .nothing {
+        // An ask's verdict, when it is the current fingerprint's: its words as they stream.
+        if code.wants == .ask {
             let v = keep?.fingerprint == e.fingerprint ? keep?.verdict : nil
-            let notForMe = keep?.notForMe == e.fingerprint
             if let v {
                 if !v.line.isEmpty { r.sentence = .init(text: v.line, stream: e.stream) }
-                if code.wants == .finished { judged(&r, needsYou: v.needsYou, worth: v.worth, notForMe: notForMe, v: v) }
-            } else if e.asked || e.awaiting {
-                if let l = e.landed, code.wants == .finished {
-                    judged(&r, needsYou: l.needsYou, worth: l.worth, notForMe: notForMe, v: nil)
-                } else if code.wants == .finished {
-                    // Its verdict's state isn't in: being read, not Done yet.
-                    r.judging = true
-                }
+            } else if e.asked {
                 if let words = e.words {
                     r.sentence = .init(text: words, phase: .streaming, stream: e.stream)
                 } else {
                     r.sentence.phase = .reassessing
                 }
+            }
+        }
+
+        // What is open with you, and a finished turn's line (its read's), or being read.
+        r.ledger = items.ledger(id)
+        if r.ledger.live.contains(where: { $0.kind == .know }) { r.worth = .look }
+        if code.wants == .finished {
+            if let words = e.itemWords {
+                r.sentence = .init(text: words, phase: .streaming, stream: e.stream)
+            } else if let line = items.line(id, run: t.latestRunID) {
+                r.sentence = .init(text: line, stream: e.stream)
+            } else if e.awaiting {
+                r.judging = r.ledger.items.isEmpty
+                r.sentence.phase = .reassessing
             }
         }
 
@@ -838,25 +883,6 @@ final class RouterRecords {
             r.work.lineReadsNewest = true
         }
         if e.summarizing { r.sentence.phase = .reassessing }
-    }
-
-    /// What a finished turn's verdict makes of it: it left you a step (Needs you, its ask, its options, the result line it
-    /// keeps), unless you said it doesn't need you (Done, worth a look, the result line); or Done, worth a look or quiet.
-    private func judged(_ r: inout RouterThread, needsYou: Bool, worth: RouterThread.Worth, notForMe: Bool, v: RouterVerdict?) {
-        let result = v.flatMap { $0.result.isEmpty ? nil : $0.result }
-        if needsYou, !notForMe {
-            r.state = .needsYou(.step)
-            r.askID = "step:" + (entries[r.id]?.fingerprint ?? "")
-            r.question = v.flatMap { $0.ask.isEmpty ? nil : $0.ask }
-            r.options = v?.options ?? []
-            r.result = result
-        } else if needsYou {
-            r.state = .done
-            r.worth = .look
-            if let result { r.sentence = .init(text: result, stream: r.sentence.stream) }
-        } else {
-            r.worth = worth
-        }
     }
 
     /// A T3 request's card: its options are T3's (a plan's are Fjord's two yeses), numbered as `ThreadAnswers` reads them.
@@ -1139,8 +1165,6 @@ extension RouterRecords {
         /// The fingerprint `verdict` is for.
         var fingerprint: String?
         var verdict: RouterVerdict?
-        /// "Doesn't need me", on this fingerprint.
-        var notForMe: String?
         var name: String?
         /// T3's title when the name was given.
         var nameKey: String?
@@ -1149,6 +1173,8 @@ extension RouterRecords {
         /// A working thread's summaries, newest first (`RouterWork.Summary`); nil when it has none. Optional, so a file
         /// written before them reads.
         var summaries: [RouterWork.Summary]?
+        /// Its open items, the inputs read, its latest turn's line (`RouterItemLedgers.Saved`); nil until it is first seen.
+        var ledger: RouterItemLedgers.Saved?
     }
 
     /// A send T3 hasn't confirmed.
@@ -1178,11 +1204,6 @@ extension RouterRecords {
         var project: String
         var launch: RouterLaunch
         var name: String
-    }
-
-    struct Landed: Equatable {
-        var needsYou: Bool
-        var worth: RouterThread.Worth
     }
 
     /// T3's row when a settle, a snooze or its Revert was done here: a move of any of these is T3's word.
@@ -1221,8 +1242,8 @@ extension RouterRecords {
         var namingFor: String?
         /// The title a name call failed for: not asked again until the title changes.
         var nameFailed: String?
-        /// The verdict's state, landed before its words.
-        var landed: Landed?
+        /// A finished turn's line as its open-items read streams it.
+        var itemWords: String?
         /// Its words so far.
         var words: String?
         /// The store's count of the model's lines for this thread.
@@ -1289,9 +1310,10 @@ final class RouterVerdictFile: @unchecked Sendable {
         RouterVerdictFile(url: support.appendingPathComponent("router-verdicts.json"))
     }
 
-    /// The file's shape. Version 2: verdicts asked only once the turn's reply was read (FINAL-REVIEW #2); what version 1
-    /// (a bare dictionary) saved was often asked without it, and is thrown away.
-    static let version = 2
+    /// The file's shape. Version 3: a finished turn is read against the thread's open items (its ledger), not judged on
+    /// its own; version 2's per-turn verdicts are thrown away. (Version 2: verdicts asked only once the turn's reply was
+    /// read, FINAL-REVIEW #2.)
+    static let version = 3
 
     private struct Contents: Codable {
         var version: Int

@@ -86,6 +86,13 @@ struct RouterOutgoing: Equatable {
     func settle(_ threads: [String], on: Bool)
     /// Snooze until then; nil is its Revert (unsnooze).
     func snooze(_ thread: String, until: Date?)
-    /// Doesn't need me (Fjord's own mark on the verdict); `on: false` is its Revert.
+    /// Doesn't need me on a step the demo's script left (real threads have open items instead); `on: false` is its
+    /// Revert.
     func notForMe(_ thread: String, on: Bool)
+    /// Done on one of the thread's open items; `on: false` is its Revert.
+    func itemDone(_ thread: String, item: String, on: Bool)
+}
+
+extension RouterSource {
+    func itemDone(_ thread: String, item: String, on: Bool) {}
 }

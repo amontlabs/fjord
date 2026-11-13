@@ -32,6 +32,17 @@ extension Store {
         records.cancel = { [weak self] thread in self?.routerVerdicts.cancel(thread) }
         records.cancelSummary = { [weak self] thread in self?.routerVerdicts.cancelSummary(thread) }
         records.fetch = { [weak self] thread, key in self?.routerTurnReads.read(thread, key: key) }
+        records.cancelItems = { [weak self] thread in self?.routerVerdicts.cancelItems(thread) }
+        records.fetchItems = { [weak self] thread, key in
+            guard let self else { return }
+            // A thread whose projection is held (it is working, or open): its facts are there, in the next turn.
+            if let held = self.t3.store.projections[thread] {
+                let facts = RouterItemFacts.make(held)
+                DispatchQueue.main.async { [weak self] in self?.routerRecords.itemFacts(thread, key: key, facts) }
+                return
+            }
+            self.routerItemReads.read(thread, key: key)
+        }
         records.onNeedsYou = { [weak self] n in if self?.routerNeedsYou != n { self?.routerNeedsYou = n } }
         records.emit = { [weak self] change in self?.routerPage.post(change) }
         let notifier = RouterNotifier()
@@ -65,6 +76,14 @@ extension Store {
         return reads
     }
 
+    func makeRouterItemReads() -> RouterTurnReads {
+        let reads = RouterTurnReads(read: { [weak self] id in await self?.t3.store.readSnapshot(id) })
+        reads.done = { [weak self] id, key, projection in
+            self?.routerRecords.itemFacts(id, key: key, projection.map(RouterItemFacts.make))
+        }
+        return reads
+    }
+
     func makeRouterVerdicts() -> RouterVerdicts {
         let verdicts = RouterVerdicts(binary: { [weak self] in
             guard let self else { return nil }
@@ -76,6 +95,9 @@ extension Store {
         }
         verdicts.onSummary = { [weak self] thread, fingerprint, event in
             self?.routerRecords.summary(thread, fingerprint: fingerprint, event)
+        }
+        verdicts.onItems = { [weak self] thread, key, event in
+            self?.routerRecords.items(thread, key: key, event)
         }
         return verdicts
     }

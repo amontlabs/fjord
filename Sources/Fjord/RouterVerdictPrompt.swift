@@ -1,8 +1,8 @@
 import Foundation
 
 // What a verdict call is told (docs/design/router-v2/IMPLEMENTATION.md 1.4, DESIGN.md 2.1): the rules, the schema in the
-// order the page needs the fields (the state first, so it lands before the line streams), and one thread's facts as text,
-// redacted and fenced. Three kinds: a finished turn (the whole verdict), an ask T3 raised (its short line), a name alone.
+// order the page needs the fields, and one thread's facts as text, redacted and fenced. Two kinds: an ask T3 raised (its
+// short line), a name alone. A finished turn is read against the thread's open items (`RouterItemsPrompt`).
 
 /// One thread's facts for its verdict, as values: the store fills it from the shell row and the thread's detail.
 struct RouterVerdictInput: Equatable, Sendable {
@@ -65,12 +65,10 @@ extension RouterVerdictInput.Request {
 }
 
 enum RouterVerdictPrompt {
-    /// Asks and names stay on Haiku; a finished turn's verdict runs on Sonnet (EVAL-verdicts.md: state at 2 s against 5 s,
-    /// 3 % wrong against 18 % on the needs-you turns).
+    /// Asks and names on Haiku (EVAL-verdicts.md: ask lines 0.95 accurate against Sonnet's 0.79).
     static let model = "claude-haiku-5-5"
-    static let finishedModel = "claude-sonnet-5-5"
 
-    static func model(_ kind: RouterVerdictRequest.Kind) -> String { kind == .finished ? finishedModel : model }
+    static func model(_ kind: RouterVerdictRequest.Kind) -> String { kind == .items ? RouterItemsPrompt.model : model }
     /// The agent's last reply is read from its end, this long at most.
     static let replyCharacters = 4000
     static let requestCharacters = 2000
@@ -95,32 +93,6 @@ enum RouterVerdictPrompt {
         """
     }
 
-    /// A finished turn: whether it leaves the user a step, then its line.
-    static let finished = common + "\n\n" + """
-    The thread's turn just ended. Fill the fields in order.
-    `state`: "needs_you" when the turn leaves something only the user can do or decide: the reply asks a question or \
-    offers a choice, has a section for the user to decide ("For you to decide", "What I need from you"), asks to \
-    approve a next step ("Want me to merge it?") that the work really stops at, leaves a thing to do by hand (merge an \
-    open pull request, install or update the app, sign in, post a reply, run a command, look at something), or ends on \
-    an error it couldn't fix and isn't handling (a build or a test that still fails, a blocker it stopped at). "done" \
-    when the work is finished or the reply only reports, even when it mentions possible follow-ups the user didn't ask \
-    for; and when the agent itself is handling what comes next: it waits on its own background tasks, other agents, \
-    reviews or CI, it says it is fixing or rerunning a failure, or it only offers to narrow or extend its answer with \
-    more detail from the user. Notes about what it didn't check are not a step for the user unless it asks for one.
-    `worth`: "look" when the user would want to see what it did (a pull request opened, a result, a finding, a choice \
-    made for them, something that went wrong) or when `state` is "needs_you"; "quiet" when it is routine or nothing new.
-    """ + "\n" + nameRule(whole: true) + "\n" + """
-    `line`: at most 12 words, starting in lower case, short clauses joined by semicolons. For "done": what the turn \
-    did and where it stands ("briefs moved into BriefLog; tests pass; PR #59"). For "needs_you": the step that waits \
-    on the user ("PR #2049 is open: read the diff, then merge it", "the build fails: cannot find RestoreToken; it \
-    stopped there").
-    `ask`: for "needs_you", what the user should do or decide, one or two plain sentences; else empty.
-    `options`: for "needs_you" when the reply offers choices, each as the short words the user would send to pick it \
-    (at most 4); else empty.
-    `result`: for "needs_you", the line it would have if nothing waited on the user (what the turn did, in the same \
-    style); else empty.
-    """
-
     /// An ask T3 raised (a question, a form, a plan, a permission): its short line; the card shows the request itself.
     static let ask = common + "\n\n" + """
     The thread waits on the user's answer to the request listed under "It waits on you". Fill the fields in order.
@@ -143,20 +115,12 @@ enum RouterVerdictPrompt {
 
     private static let text = #"{"type":"string"}"#
 
-    /// In this order: the state lands first, the line can stream.
-    static let finishedSchema = schema([
-        ("state", #"{"type":"string","enum":["needs_you","done"]}"#),
-        ("worth", #"{"type":"string","enum":["look","quiet"]}"#),
-        ("name", text), ("line", text), ("ask", text),
-        ("options", #"{"type":"array","items":{"type":"string"}}"#),
-        ("result", text),
-    ])
     static let askSchema = schema([("name", text), ("line", text)])
     static let nameSchema = schema([("name", text)])
 
     static func system(_ kind: RouterVerdictRequest.Kind) -> String {
         switch kind {
-        case .finished: finished
+        case .items: RouterItemsPrompt.turn
         case .ask: ask
         case .name: name
         case .summary: RouterSummaryPrompt.system
@@ -165,7 +129,7 @@ enum RouterVerdictPrompt {
 
     static func schema(_ kind: RouterVerdictRequest.Kind) -> String {
         switch kind {
-        case .finished: finishedSchema
+        case .items: RouterItemsPrompt.turnSchema
         case .ask: askSchema
         case .name: nameSchema
         case .summary: RouterSummaryPrompt.schema

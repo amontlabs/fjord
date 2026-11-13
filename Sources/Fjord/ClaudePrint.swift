@@ -92,7 +92,7 @@ enum ClaudePrint {
 /// which role and model, its tokens and its cost at API prices. Settings › T3 Code sums it for today, 7 days and all time.
 final class ModelUsageLog: @unchecked Sendable {
     enum Role: String, Codable, CaseIterable, Sendable {
-        case decider, cards, brief, jev, verdict, purpose, summary
+        case decider, cards, brief, jev, verdict, purpose, summary, items
         var title: String {
             switch self {
             case .decider: "Sonnet decider"
@@ -103,6 +103,7 @@ final class ModelUsageLog: @unchecked Sendable {
             case .verdict: "Haiku verdicts"
             case .purpose: "Haiku project purposes"
             case .summary: "Haiku working summaries"
+            case .items: "Sonnet open items"
             }
         }
     }
