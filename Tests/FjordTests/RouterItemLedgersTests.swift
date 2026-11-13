@@ -243,14 +243,35 @@ import Testing
         #expect(words == nil && woke == "Delegated task node finished")
     }
 
-    @Test func aFailedReadKeepsTheLedgerAndGoesOn() {
+    /// REVIEW-items 1.2: a read that fails (offline, a usage limit, Claude Code missing) keeps its input pending; it is
+    /// read again after a wait, or when T3 says something new, and after a relaunch. The ledger stays as it was meanwhile.
+    @Test func aFailedReadKeepsItsInputPendingAndReadsItAgain() throws {
         let h = seeded()
+        h.records.items.retryAfter = { _ in 0 }
         h.records.put(Self.ended("r2"))
-        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Kept it.")]))
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Sign in to Silo.")]))
         h.records.items("t1", key: "turn:r2", .failed)
         #expect(h.saved?.items.count == 2)
         #expect(h.ledger.items.allSatisfy { $0.state == .open })
-        #expect(h.saved?.read.contains("turn:r2") == true)
+        #expect(h.saved?.read.contains("turn:r2") == false && h.saved?.pending == [.turn(run: "r2")])
+        // Nothing is asked again until the wait ends.
+        h.records.put(Self.ended("r2"))
+        #expect(h.reads.count == 2)
+        // A relaunch now keeps it.
+        let back = RouterVerdictFile.decode(try #require(RouterVerdictFile.encode(h.records.saved)))
+        #expect(back["t1"]?.ledger?.pending == [.turn(run: "r2")])
+        // The wait ends: read again, the same input.
+        h.records.items.retried("t1")
+        #expect(h.reads.count == 3 && h.reads.last?.fingerprint == "turn:r2")
+        h.records.items("t1", key: "turn:r2", .failed)
+        // T3 saying something new of the thread tries it at once.
+        var t = Self.ended("r2")
+        t.title = "Renamed"
+        h.records.put(t)
+        #expect(h.reads.count == 4 && h.reads.last?.fingerprint == "turn:r2")
+        h.answer(RouterItemsAnswer(found: [.init(kind: .do, sentence: "sign in to Silo")]))
+        #expect(h.saved?.read.contains("turn:r2") == true && h.saved?.pending.isEmpty == true)
+        #expect(h.saved?.items.last?.sentence == "sign in to Silo")
     }
 
     @Test func aLateAnswerForAnotherReadIsDropped() {

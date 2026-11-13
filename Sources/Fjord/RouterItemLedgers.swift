@@ -156,6 +156,9 @@ struct RouterItemFacts: Equatable, Sendable {
     /// Items a read added that need you (banners).
     var added: (_ thread: String, _ items: [RouterItem], _ key: String) -> Void = { _, _, _ in }
     var now: () -> Date = Date.init
+    /// The wait before a failed read is made again (`n`: failures in a row): offline, a usage limit, Claude Code missing or
+    /// being updated. The input stays pending meanwhile; T3 saying something new of the thread tries it at once.
+    var retryAfter: (Int) -> TimeInterval = { n in min(30 * pow(2, Double(max(n, 1) - 1)), RouterVerdicts.maxBackoff) }
     /// How long a closed item strikes, and a new one is lit, before the ledger settles (0 in tests: `settle` by hand).
     var strike: TimeInterval = Router.Items.strike
 
@@ -180,6 +183,10 @@ struct RouterItemFacts: Equatable, Sendable {
         /// Items you marked Done, for their Revert: the item and where it was.
         var done: [String: (index: Int, item: RouterItem)] = [:]
         var settleToken = 0
+        /// Reads that failed in a row, and the retry's wait: nothing is read (nor sheens) until it ends.
+        var failures = 0
+        var held = false
+        var retryToken = 0
         /// A message you sent here, until T3 stamps it.
         var sentAt: Date?
     }
@@ -249,7 +256,22 @@ struct RouterItemFacts: Equatable, Sendable {
     }
 
     /// T3 says something new of the thread: a projection read that missed is tried again.
-    func moved(_ id: String) { live[id]?.factsFailed = nil }
+    func moved(_ id: String) {
+        guard let l = live[id] else { return }
+        l.factsFailed = nil
+        l.held = false
+    }
+
+    /// A failed read's wait is over: it is made again (`pump` on the next `observe`, or here).
+    func retry(_ id: String, context: @autoclosure () -> Context) {
+        guard let l = live[id], l.held else { return }
+        l.held = false
+        changed(id)
+        pump(id, context: context)
+    }
+
+    /// What to do once a failed read's wait is over (the records wire it to `retry` with the thread's context).
+    var retried: (String) -> Void = { _ in }
 
     /// A projection read for `key` landed (nil: it failed).
     func facts(_ id: String, key: String, _ f: RouterItemFacts?, context: @autoclosure () -> Context) {
@@ -271,7 +293,7 @@ struct RouterItemFacts: Equatable, Sendable {
     private func pump(_ id: String, context: () -> Context) {
         guard load(id)?.pending.isEmpty == false else { return }
         let l = entry(id)
-        guard l.reading == nil else { return }
+        guard l.reading == nil, !l.held else { return }
         while var s = load(id), let input = s.pending.first {
             if case .message = input {
                 // Nothing open: your words can't close anything. A turn after them in the queue reads them too.
@@ -345,15 +367,24 @@ struct RouterItemFacts: Equatable, Sendable {
             commit(id, l, input, answer)
             pump(id, context: context)
         case .failed:
+            // Offline, a usage limit, Claude Code missing: the input stays pending, at the head, and is read again after
+            // a wait. Only a well-formed answer marks it read.
             l.reading = nil
             l.closes = [:]
             l.found = []
             l.words = nil
-            var s = load(id) ?? Saved()
-            markRead(&s, key)
-            store(id, s)
+            l.failures += 1
+            l.held = true
+            l.retryToken &+= 1
+            let token = l.retryToken, wait = retryAfter(l.failures)
+            if wait > 0 {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(wait))
+                    guard let self, let l = self.live[id], l.held, l.retryToken == token else { return }
+                    self.retried(id)
+                }
+            }
             changed(id)
-            pump(id, context: context)
         }
     }
 
@@ -389,6 +420,7 @@ struct RouterItemFacts: Equatable, Sendable {
         markRead(&s, input.key)
         store(id, s)
         l.reading = nil
+        l.failures = 0
         l.closes = [:]
         l.found = []
         l.words = nil
@@ -488,7 +520,7 @@ struct RouterItemFacts: Equatable, Sendable {
             return RouterLedger()
         }
         let l = live[id]
-        let busy = l?.reading != nil || !s.pending.isEmpty
+        let busy = l?.held != true && (l?.reading != nil || !s.pending.isEmpty)
         var items = s.items.map { item -> RouterItem in
             var item = item
             if let how = l?.closes[item.id] {
@@ -532,7 +564,7 @@ struct RouterItemFacts: Equatable, Sendable {
 
     /// `run`'s turn is being read (or waits to be): Done's line isn't in yet.
     func reading(_ id: String, run: String?) -> Bool {
-        guard let run, let s = load(id), !s.pending.isEmpty else { return false }
+        guard let run, let s = load(id), !s.pending.isEmpty, live[id]?.held != true else { return false }
         return s.pending.contains(.turn(run: run))
     }
 

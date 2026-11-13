@@ -98,6 +98,12 @@ final class RouterRecords {
         items.ask = { [unowned self] r in self.ask(r) }
         items.now = { [unowned self] in self.now() }
         items.changed = { [unowned self] id in self.operation { self.refresh(id) } }
+        items.retried = { [unowned self] id in
+            self.operation {
+                guard let e = self.entries[id], let t = e.thread else { return }
+                self.items.retry(id, context: self.itemsContext(t, e))
+            }
+        }
         items.words = { [unowned self] id, text, done in
             self.operation {
                 guard let e = self.entries[id] else { return }
