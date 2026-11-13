@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-// The composer's item and answer pills (Router v2; shots `v2-pill-*`). The look for the owner to validate, on the demo's
-// data; what Return sends is unchanged.
+// The composer's item and answer pills (Router v2; shots `v2-pill-*`), on the page's live items and cards.
 //
 // - An **item pill** names an open item in your words: picked from the @ list (found by the words of its sentence, listed
 //   under its thread's name) or ⌘-clicked on the page. Its kind's mark and its short words on its kind's tint, as its name
@@ -13,6 +12,37 @@ import SwiftUI
 //   the picks are what it says, the draft mirrors them. Answer pills alone are no words (`draftEmpty`): the digits
 //   still pick and Return sends the picks as before.
 // - A click on either opens its card.
+// - Return sends the answers by code, never through the read: a T3 request's as its structured answer (`.answer(picks:
+//   typed:)`), an item's as words to its thread (one message a thread; joined to your words when they go there too). The
+//   split router gets every pill as `RouterPillContext` (`pillContext`), and the answers as sends (`answerSends`).
+
+/// One pill of the composer as the Router and Return get it: what the split router reads beside the free words, and what
+/// Return sends by code. Shared with the split (`RouterSplit`, the reader).
+struct RouterPillContext: Equatable {
+    enum Kind: Equatable {
+        /// An item named in the words (@ or ⌘-click): context for the free text, which says "@name" where it stands.
+        case item
+        /// A card's answer: never part of the free text; Return sends it by code.
+        case answer
+    }
+
+    var kind: Kind
+    var thread: String
+    /// The item it names or answers; nil for an answer to the thread's own T3 request (its picks are the thread's). An
+    /// item pill on a T3 request shown as an item names it by its id (`RouterItem.requestID`).
+    var item: String?
+    /// As the pill reads: `trial build`, `trial build → owed live tests`.
+    var name: String
+    /// An answer's picks, by question (0 for one question): the option's number, 1-based (`RouterModel.picks`).
+    var picks: [Int: Int] = [:]
+    /// An answer's words typed in its card's Other, by question.
+    var typed: [Int: String] = [:]
+    /// An answer as words: the option's label or the typed words, a form's questions joined with " · ".
+    var answer: String? = nil
+
+    /// It answers T3's request on the thread: sent structured, not as words.
+    var request: Bool { kind == .answer && item == nil }
+}
 
 /// One card's answer as the composer shows it.
 struct RouterAnswerPill: Identifiable, Equatable {
@@ -86,10 +116,11 @@ extension RouterModel {
                 let keys = [item.sentence] + (item.short.map { [$0] } ?? [])
                 if !query.isEmpty, !keys.contains(where: { RouterMentions.score($0, query: query).map { $0 <= 2 } ?? false }) { continue }
                 let key = Self.itemKey(t.id, item.id)
+                let look = MentionLook(label: Self.short(item), symbol: item.kind.symbol, tint: item.kind.tint, item: true)
+                // Picked in the live field, its pill is named and drawn through the store (`Store.pointerName`): noted now.
+                RouterPillLooks.note(.item(key), look, name: look.label)
                 rows.append(MentionSuggestion(section: .items, pick: .pointer(.item(key)), name: Self.clip(item.sentence, 64),
-                                              detail: "", look: MentionLook(label: Self.short(item), symbol: item.kind.symbol,
-                                                                            tint: item.kind.tint, item: true),
-                                              keys: keys, group: t.name))
+                                              detail: "", look: look, keys: keys, group: t.name))
             }
         }
         return rows
@@ -255,6 +286,102 @@ extension RouterModel {
             if picks[key]?.isEmpty == true { picks[key] = nil }
         }
     }
+
+    // MARK: What Return gets
+
+    /// The draft's pills, in its order, as the split router and Return get them.
+    var pillContext: [RouterPillContext] {
+        let answers = Dictionary(answerPills.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        return mentions.compactMap { m in
+            switch m.pointer {
+            case .item(let key):
+                guard let found = item(key: key) else { return nil }
+                return RouterPillContext(kind: .item, thread: found.thread.id, item: found.item.id, name: m.name)
+            case .answer(let key):
+                guard let pill = answers[key] else { return nil }
+                return RouterPillContext(kind: .answer, thread: pill.thread, item: pill.item, name: pill.name,
+                                         picks: picks[key] ?? [:], typed: typed[key] ?? [:], answer: answerWords(pill))
+            default: return nil
+            }
+        }
+    }
+
+    /// The draft's answers as the split's sends: sure, each to its thread (its item), with the answer as its words.
+    var answerSends: [RouterSend] {
+        pillContext.filter { $0.kind == .answer }.map {
+            RouterSend(places: [.thread($0.thread)], words: $0.answer ?? "", item: $0.item)
+        }
+    }
+
+    /// An answer pill's words, whole: a request's as the card says them (`answerWords`), an item's picked or typed.
+    private func answerWords(_ pill: RouterAnswerPill) -> String? {
+        if pill.item == nil { return thread(pill.thread).flatMap(answerWords) }
+        guard let found = item(key: pill.key) else { return nil }
+        return answerText(found.item, key: pill.key).map { typed[pill.key]?[0] == nil ? Self.unspoken(found.item, $0) : $0 }
+    }
+
+    /// A picked option's own label (the pill lowers its first letter; the thread gets it as the card shows it).
+    private static func unspoken(_ item: RouterItem, _ words: String) -> String {
+        item.options.first { spoken($0) == words } ?? words
+    }
+
+    /// A request still owed an answer to a form question can't go yet: its pill stays.
+    func ready(_ answer: RouterPillContext) -> Bool {
+        guard answer.request, let t = thread(answer.thread) else { return answer.answer != nil }
+        return openQuestions(t) == 0
+    }
+
+    /// The words a thread gets for its items' answers: the one answer alone, several each after its item's name.
+    private static func message(_ answers: [RouterPillContext]) -> String {
+        if answers.count == 1 { return answers[0].answer ?? "" }
+        return answers.map { a in (a.name.components(separatedBy: " → ").first ?? a.name) + " → " + (a.answer ?? "") }
+            .joined(separator: "\n")
+    }
+
+    /// Return with answer pills in the draft: each card's answer goes by code, then `words` (the free text, nil: none) to
+    /// `place`. A request's answer goes first and structured (so words to the same thread can't answer it instead); an
+    /// item's go as one message a thread, led into `words` when those go to that thread too. A form still owed an answer
+    /// keeps its pill. The picks of what went are cleared; the draft keeps the pills of what didn't.
+    func sendWithAnswers(_ words: String?, to place: RouterPlace?, queue: Bool) {
+        let answers = pillContext.filter { $0.kind == .answer && ready($0) }
+        syncingAnswers = true
+        // Requests first, structured.
+        for a in answers where a.request {
+            guard let t = thread(a.thread) else { continue }
+            dispatch(a.answer ?? "", to: t, kind: .answer(picks: a.picks, typed: a.typed))
+        }
+        var items: [String: [RouterPillContext]] = [:]
+        var order: [String] = []
+        for a in answers where !a.request {
+            if items[a.thread] == nil { order.append(a.thread) }
+            items[a.thread, default: []].append(a)
+        }
+        // The free words, led by their thread's answers.
+        var into: String? = nil
+        if let words, let place {
+            if case .thread(let id) = place, let lead = items[id] {
+                into = id
+                deliver(Self.message(lead) + "\n\n" + words, to: place, queue: queue)
+            } else {
+                deliver(words, to: place, queue: queue)
+            }
+        }
+        setDraft("")
+        for id in order where id != into {
+            deliver(Self.message(items[id] ?? []), to: .thread(id), queue: false)
+        }
+        for a in answers {
+            let key = a.item.map { Self.itemKey(a.thread, $0) } ?? a.thread
+            picks[key] = nil
+            typed[key] = nil
+        }
+        syncingAnswers = false
+        // What didn't go comes back as its pills.
+        answersChanged()
+    }
+
+    /// The draft has a card's answer as a pill.
+    var hasAnswers: Bool { mentions.contains { $0.pointer.isAnswer } }
 
     // MARK: A click on a pill
 

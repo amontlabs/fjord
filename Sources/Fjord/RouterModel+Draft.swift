@@ -15,9 +15,10 @@ extension RouterModel {
         // The page's own writes (Return emptying the composer, a prefill) never untick a card: only a pill you take out
         // does (`RouterAnswerPills`).
         if text.isEmpty {
+            let syncing = syncingAnswers
             syncingAnswers = true
             mentions = []
-            syncingAnswers = false
+            syncingAnswers = syncing
             // The draft empties in the same transaction as the row's reset: written apart (no animation, then the
             // spring), SwiftUI updated the page synchronously between the two, inside the key's handler.
             animate(.spatial) {
@@ -31,9 +32,10 @@ extension RouterModel {
         }
         // Words from the page with no pill for each mark carry none; the cards' answers come back as their pills.
         if mentions.count != text.filter({ $0 == MentionText.mark }).count {
+            let syncing = syncingAnswers
             syncingAnswers = true
             mentions = []
-            syncingAnswers = false
+            syncingAnswers = syncing
         }
         draft = text
         if scripted || still { updateScriptedMention() }
@@ -179,11 +181,13 @@ extension RouterModel {
     /// What the destination row shows; nil when Return would send nothing.
     var destination: RouterDestination? {
         if draftEmpty {
-            guard let t = selectedThread else { return nil }
-            // An item's card: its picked option goes to the thread as words.
-            if let (_, item) = selectedItem, let n = picks[RouterModel.itemKey(t.id, item.id)]?[0], n <= item.options.count {
-                return .picked(thread: t.id, words: item.options[n - 1])
+            // The cards' answers in the composer (`RouterAnswerPills`): the selected card's first, else the first that
+            // can go (a form owed an answer can't).
+            let answers = pillContext.filter { $0.kind == .answer }
+            if let a = answers.first(where: { $0.thread == selectedThread?.id }) ?? answers.first(where: ready) ?? answers.first {
+                return .picked(thread: a.thread, words: a.answer ?? "")
             }
+            guard let t = selectedThread else { return nil }
             if let words = answerWords(t) { return .picked(thread: t.id, words: words) }
             // A Stopped card: Return continues it, and the row says so as it does for any send.
             if t.state == .stopped { return .picked(thread: t.id, words: Router.Copy.continueWords) }
@@ -344,12 +348,14 @@ extension RouterModel {
         switch destination {
         case .picked(let id, let words):
             guard let t = thread(id) else { return }
-            if t.state == .stopped { resume(id); return }
             // A form goes once every question has an answer: until then Return moves on to the next open one.
             if !t.form.isEmpty, let open = t.form.indices.first(where: { !answered(t, $0) }) {
                 animate(.spatial) { formAt[id] = open }
                 return
             }
+            // The answers in the composer go by code, each to its thread.
+            if hasAnswers { sendWithAnswers(nil, to: nil, queue: false); return }
+            if t.state == .stopped { resume(id); return }
             deliver(words, to: .thread(id), queue: false, kind: answerKind(t))
         case .place(let place, _):
             if case .thread(let id) = place, let t = thread(id), !t.form.isEmpty, selection == .line(id) {
@@ -361,10 +367,14 @@ extension RouterModel {
                     if let open = t.form.indices.first(where: { $0 != at && !answered(t, $0) }) { formAt[id] = open }
                 }
                 setDraft("")
+                // The form's answer stays in the composer as its pill, with the words in it now.
+                answersChanged()
                 return
             }
+            if hasAnswers { sendWithAnswers(plainDraft, to: place, queue: queue); return }
             deliver(plainDraft, to: place, queue: queue)
         case .unsure(let places, let lit, _, _):
+            if hasAnswers { sendWithAnswers(plainDraft, to: places[lit], queue: queue); return }
             deliver(plainDraft, to: places[lit], queue: queue)
         case .prior(let id):
             // Not before the read: the words wait, shown held, and go if it agrees with the thread shown.
@@ -385,7 +395,7 @@ extension RouterModel {
         }
     }
 
-    private func deliver(_ words: String, to place: RouterPlace, queue: Bool, kind: RouterOutgoing.Kind = .words) {
+    func deliver(_ words: String, to place: RouterPlace, queue: Bool, kind: RouterOutgoing.Kind = .words) {
         // A place that sends nothing never takes the words.
         if case .here = place { return }
         let name = read?.name
