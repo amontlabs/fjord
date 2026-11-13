@@ -1192,10 +1192,7 @@ final class RouterModel {
     }
 
     private func focusChanged() {
-        if case .line(let id)? = selection, let box = boxes[id] {
-            box.item = focus
-            box.follow()
-        }
+        if case .line(let id)? = selection { boxes[id]?.focus(focus, curve: glides.current?.curve) }
     }
 
     private func selectionChanged(from old: RouterSelection?) {
@@ -1204,12 +1201,10 @@ final class RouterModel {
         // (`RouterBlockLayout.cut`), so none hops between the line's two hosting views as the card goes.
         if case .line(let id)? = old, let box = boxes[id] {
             box.selected = false
-            if !box.block { box.item = nil }
-            box.follow()
+            if !box.block { box.focus(nil, curve: nil) }
         }
         if case .line(let id)? = selection, let box = boxes[id] {
-            box.item = focus
-            box.follow()
+            box.focus(focus, curve: nil)
             box.selected = true
             box.built = true
         }

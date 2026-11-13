@@ -184,8 +184,16 @@ struct RouterLineView: View {
         // A line in flight is its row alone: in the frame it takes off its card's content and the selected surface are
         // gone (nothing half-faded is dragged across the page), while the card's place folds on the move's own curve, so
         // the rows under it close up as the next card opens. It opens again once the line has landed.
-        let open = selected && !moving && !box.switching
+        let open = selected && !moving
+        // A line's card rolling shut keeps its place whole: the slot's mask rolls it shut on Core Animation, in step
+        // with the lines under it. Shut in SwiftUI's own transaction, the place was sometimes at nothing in the first
+        // frame and the card's words went with it, its height left bare while the lines under it glided up.
+        let shutting = !open && !moving && box.built && !thread.ledger.block
         let block = thread.ledger.block
+        let rows = block ? RouterBlockLayout.rows(thread) : []
+        let cut = RouterBlockLayout.cut(rows, item: box.item)
+        // A block's card moving to another row: the old one shuts under its row as this one opens (`RouterBlockLeave`).
+        let leave = block ? RouterBlockLeave.Place(box.leaving, rows: rows, cut: cut) : nil
         VStack(alignment: .leading, spacing: 0) {
           if block {
             // A thread with two or more open items: a quiet header, then a line per item; the open card under its row,
@@ -226,6 +234,8 @@ struct RouterLineView: View {
             ZStack(alignment: .top) {
                 if box.built || open {
                     RouterCard(model: model, box: box)
+                        // Under its row while the card it replaces shuts above it (`RouterBlockLeave`).
+                        .modifier(RouterBlockLeave.Shift(leave: leave, index: leave.map { _ in cut } ?? 0))
                         .transition(.identity)
                 }
             }
@@ -244,10 +254,10 @@ struct RouterLineView: View {
                 }
                 .opacity(moving ? 0 : shown)
                 .transaction { if moving { $0.animation = nil } }
-                .frame(height: open ? (cardHeight > 0 ? cardHeight : nil) : 0, alignment: .top)
+                .frame(height: open || shutting ? (cardHeight > 0 ? cardHeight : nil) : 0, alignment: .top)
                 // In a block the card's place shuts at once and the card is still drawn below it while it rolls shut:
                 // the line's mask cuts it where the rows under it are, both on Core Animation (`placeTail`).
-                .clipShape(RouterPlaceClip(below: block ? RouterLineSlotView.roomStep : 0))
+                .clipShape(RouterPlaceClip(below: block ? RouterLineSlotView.roomStep + (leave?.leave.height ?? 0) : 0))
                 .background(alignment: .top) {
                     // A block's open card: its ground under the open row and its card only, not the whole block. Held by
                     // the card's place, it moves with it (an item folding above it). It reaches past the card: the line's
@@ -257,6 +267,7 @@ struct RouterLineView: View {
                         RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
                             .frame(height: max(0, focusRowHeight + cardHeight + RouterLineSlotView.roomStep))
                             .offset(y: -focusRowHeight)
+                            .modifier(RouterBlockLeave.Shift(leave: leave, index: leave.map { _ in cut } ?? 0))
                             .opacity(open ? shown : 0)
                             .modifier(GroundPresence(open: open, moving: moving))
                     }
@@ -281,14 +292,8 @@ struct RouterLineView: View {
                 .allowsHitTesting(open)
                 .accessibilityHidden(!open)
                 .environment(\.routerLive, open)
-                // Shut: once its roll has ended, the card's body goes (unless it opened again meanwhile).
-                // In a block, the line's slot ends it, with the mask's roll (`placeTail`).
-                .transaction(value: open) { t in
-                    guard !open, !block else { return }
-                    t.addAnimationCompletion(criteria: .removed) { [box] in
-                        if !box.selected { box.built = false }
-                    }
-                }
+                // Shut, the card's body goes once the slot's mask has rolled it shut (`RouterLineSlotView.clip`; in a
+                // block, `placeTail`), unless it opened again meanwhile.
             // A block's rows under the card are in a hosting view of their own (`RouterBlockTail`).
         }
         .background {
@@ -341,11 +346,14 @@ struct RouterLineView: View {
     /// The block's rows down to the one whose card is open (the header when none is): its height is the line's row height.
     private func blockHead(_ thread: RouterThread, open: Bool, hot: Bool, pressed: Bool) -> some View {
         let rows = RouterBlockLayout.rows(thread)
-        let cut = RouterBlockLayout.cut(rows, item: box.shown)
+        let cut = RouterBlockLayout.cut(rows, item: box.item)
+        let leave = RouterBlockLeave.Place(box.leaving, rows: rows, cut: cut)
         return VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rows.prefix(cut))) { row in
+            ForEach(Array(rows.prefix(cut).enumerated()), id: \.element.id) { index, row in
                 RouterBlockRowView(model: model, box: box, thread: thread, row: row, open: open, hot: hot, pressed: pressed,
                                    focusHeight: row.id == rows[cut - 1].id ? $focusRowHeight : nil)
+                    .modifier(RouterBlockLeave.Shift(leave: leave, index: index))
+                    .modifier(RouterBlockLeave.Ghost(model: model, box: box, leave: leave, index: index))
             }
         }
         // Inside a block, rows are placed at once: the slot's mask and the lines under the block move on Core Animation,

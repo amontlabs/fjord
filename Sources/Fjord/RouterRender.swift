@@ -33,21 +33,31 @@ final class RouterLineBox {
     /// Its card has a body: from its opening until its closing roll has ended.
     var built = false
     /// In a block: the item whose card is open (nil: the header's). Kept once the card shuts, so the rows split where they
-    /// were while it rolls shut and after (`RouterBlockLayout.cut`); the next selection sets it again.
-    var item: String?
-    /// In a block: the item whose card the views draw, and where they split the rows (nil: the header's). It is `item`
-    /// at once while no card is open; with one open on another row, that card rolls shut first and the next one opens
-    /// under its row once the roll has landed (`RouterLineSlotView.shutLanded`): a row moving between the line's two
-    /// hosting views as the card moves was placed at once, a jump of the card's height, and the card's words went in a
-    /// frame.
-    var shown: String?
-    /// A block's card is moving to another row: it is shut until `shown` has caught up.
-    var switching: Bool { block && shown != item }
+    /// were while it rolls shut and after (`RouterBlockLayout.cut`); the next selection sets it again. Set through
+    /// `focus(_:curve:)` while the line is selected.
+    private(set) var item: String?
+    /// In a block: the card shutting under the row it was open on while the next one opens under its own, one motion
+    /// (`RouterBlockLeave`). Nil once it has landed, or when the card moved while shut.
+    private(set) var leaving: RouterBlockLeave?
 
-    /// `item` or the selection changed: the views follow at once unless a block's card is open on screen on another row.
-    func follow() {
-        guard shown != item else { return }
-        if !block || slot?.cardOpen != true { shown = item }
+    /// The block's open card moves to `new`'s row (nil: the header's), on `curve`. Open on screen, it shuts where it is as
+    /// the new one opens, from the same frame and on the same curve: the rows between glide with them and nothing waits
+    /// for the other. Shut (or moved at once), the rows split at the new row in the same frame.
+    func focus(_ new: String?, curve: Motion.Curve?) {
+        guard new != item else { return }
+        if block, selected, !moving, built, cardHeight > 0, slot?.cardOpen == true, let curve, curve != .none {
+            let leave = RouterBlockLeave(item: item, height: cardHeight, curve: curve, start: Date(), line: self)
+            leaving = leave
+            DispatchQueue.main.asyncAfter(deadline: .now() + leave.length) { [weak self] in self?.landed(leave) }
+        } else {
+            leaving = nil
+        }
+        item = new
+    }
+
+    /// The card that shut under another row has landed.
+    func landed(_ leave: RouterBlockLeave) {
+        if leaving == leave { leaving = nil }
     }
     /// Two or more open items: a header and a row per item (`RouterLedger.block`). Stored, so what only needs to know reads
     /// this and not the record.

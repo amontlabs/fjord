@@ -31,7 +31,7 @@ struct RouterHostedLine: View {
         // The line's height from what the model sets, at once: the rows under it glide on the change's own curve
         // (`RouterGlides`) while the card opens, shuts or grows inside on the same curve. The line's height as measured
         // until it has been laid out once.
-        let open = box.selected && !box.moving && !box.switching
+        let open = box.selected && !box.moving
         let card = box.cardHeight
         let rest = box.rowHeight + box.queuedHeight + box.tailHeight
         let height: CGFloat? = box.rowHeight > 0 ? rest + (open ? card : 0) : nil
@@ -70,6 +70,8 @@ final class RouterGlides {
     }
 
     private(set) var current: Glide?
+    /// The last curve set, and when.
+    private var last: (glide: Glide, at: CFTimeInterval)?
     private var generation = 0
     /// Lines changing section, and what runs once each has landed (`RouterModel.move`).
     private var landings: [String: () -> Void] = [:]
@@ -123,6 +125,7 @@ final class RouterGlides {
         guard curve != .none else { return }
         generation &+= 1
         current = Glide(curve: curve, generation: generation)
+        last = (Glide(curve: curve, generation: generation), CACurrentMediaTime())
         commits = 2
         schedule()
     }
@@ -159,8 +162,18 @@ final class RouterGlides {
         for land in unclaimed.values { land() }
     }
 
+    /// The glide a slot laid out now joins: the current one, else the last one while its curve still runs, from when it
+    /// began (`at`). A line's slot can take its new height a turn after the lines under it took their new places: rolled
+    /// on the current curve only, its mask was cut at once while those lines glided up, and its card's height was bare.
+    var running: (glide: Glide, at: CFTimeInterval?)? {
+        if let current { return (current, nil) }
+        guard let last, CACurrentMediaTime() - last.at < Self.landing(last.glide.curve) else { return nil }
+        return (last.glide, last.at)
+    }
+
     /// The Core Animation twin of a curve, as an additive offset of `keyPath` from `from` to nothing.
-    static func animation(_ curve: Motion.Curve, keyPath: String, from: CGFloat) -> CABasicAnimation? {
+    /// `since`: when the glide it joins began (`running`), else now.
+    static func animation(_ curve: Motion.Curve, keyPath: String, from: CGFloat, since: CFTimeInterval? = nil) -> CABasicAnimation? {
         let animation: CABasicAnimation
         switch curve {
         case .none: return nil
@@ -178,6 +191,7 @@ final class RouterGlides {
         animation.toValue = 0
         animation.isAdditive = true
         animation.fillMode = .backwards
+        if let since { animation.beginTime = since }
         return animation
     }
 
@@ -332,6 +346,8 @@ final class RouterLineSlotView: RouterGlideView {
     private var under: String?
     /// The block's card's last shut roll: when it lands and the line is still unselected, the card's body goes.
     private var shut = 0
+    /// A line's card shutting has its landing on the way (`clip`).
+    private var landingShut = false
 
     init(hosting: RouterLineHosting, box: RouterLineBox) {
         self.hosting = hosting
@@ -364,7 +380,7 @@ final class RouterLineSlotView: RouterGlideView {
     /// drawn at its top; only the slot is hit, and what is past it is empty. It grows only for a card taller than that.
     func fit() {
         let height = bounds.height
-        if box.selected, !box.moving, !box.switching { held = height } else if !box.built { held = 0 }
+        if box.selected, !box.moving { held = height } else if !box.built { held = 0 }
         let o = Self.overflow
         let needed = max(height, box.built ? held : 0) + 2 * o
         if needed > room { room = (needed / Self.roomStep).rounded(.up) * Self.roomStep }
@@ -408,11 +424,35 @@ final class RouterLineSlotView: RouterGlideView {
         mask.cornerRadius = box.selected || box.built ? Router.Line.selectedRadius : 0
         mask.maskedCorners = down ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         // In a block the roll is `placeTail`'s, from where the rows under the card were drawn.
-        if blockTop == nil, let was = clipped, was != height, let glide = glides?.current,
-           let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height) {
-            mask.add(animation, forKey: "roll-\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))")
+        // Joining a glide under way (`running`): in step with the lines that began it.
+        if blockTop == nil, let was = clipped, was != height, let (glide, at) = glides?.running,
+           let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height, since: at) {
+            let key = "\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))"
+            mask.add(animation, forKey: "roll-" + key)
+            if tail == nil, height < was, box.built, !box.selected {
+                // A line's card shut: its body goes once the roll has landed (`RouterLineView`'s `shutting`).
+                shut &+= 1
+                let mine = shut
+                let landing = CABasicAnimation(keyPath: "opacity")
+                landing.fromValue = 0
+                landing.toValue = 0
+                landing.isAdditive = true
+                landing.duration = RouterGlides.landing(glide.curve)
+                if let at { landing.beginTime = at }
+                landing.delegate = Landing { [weak self] in self?.shutLanded(mine) }
+                mask.add(landing, forKey: "shut-" + key)
+                landingShut = true
+            }
         }
         clipped = height
+        // Shut with nothing to roll (no curve): its body goes now.
+        if box.selected { landingShut = false }
+        if tail == nil, box.built, !box.selected, !landingShut, glides?.running == nil {
+            landingShut = true
+            shut &+= 1
+            let mine = shut
+            DispatchQueue.main.async { [weak self] in self?.shutLanded(mine) }
+        }
     }
 
     /// The block's rows under the card start at `top` in the line, the card's place at `head` (the rows above it end
@@ -428,16 +468,23 @@ final class RouterLineSlotView: RouterGlideView {
         let card = top - head
         var from: CGFloat = 0
         if !made, let was = cardPlace {
-            from = first == under ? was.top - top : (was.top - was.head) - card
+            // The card moved up (`RouterBlockLeave`): the tail's first row was above the old card, where the new one's
+            // place starts. Else it was under the old card, its height below where the rows above the new one end.
+            let rows = RouterBlockLayout.rows(box.head)
+            let above = box.leaving.map { leave in
+                let old = RouterBlockLayout.cut(rows, item: leave.item)
+                return rows.firstIndex { $0.id == first }.map { $0 < old } ?? false
+            } ?? false
+            from = first == under ? was.top - top : above ? -card : (was.top - was.head) - card
         }
         cardPlace = RouterCardPlace(head: head, top: top)
         under = first
         fitTail()
         clip()
         var rolled = false
-        if from != 0, let glide = glides?.current, let tail, let layer = tail.layer {
+        if from != 0, let (glide, at) = glides?.running, let tail, let layer = tail.layer {
             let key = "\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))"
-            if let animation = RouterGlides.animation(glide.curve, keyPath: "transform.translation.y", from: from * Self.down(of: tail)) {
+            if let animation = RouterGlides.animation(glide.curve, keyPath: "transform.translation.y", from: from * Self.down(of: tail), since: at) {
                 layer.add(animation, forKey: "glide-" + key)
             }
             // The slot's height changed before this change's glide began (an item's card shut by a second click): its
@@ -445,17 +492,16 @@ final class RouterLineSlotView: RouterGlideView {
             // card missing for the glide. The mask then rolls with the tail, unless it rolled with the slot already
             // (`fitTail`, whose roll replaces this one when the slot changes after it).
             if tailRoll?.generation != glide.generation, tailBox?.layer?.mask === tailMask,
-               let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from) {
+               let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from, since: at) {
                 tailMask.add(animation, forKey: "roll-tail-" + key)
                 tailRoll = (glide.generation, "roll-tail-" + key)
             }
             if hosting.layer?.mask === mask,
-               let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from) {
+               let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from, since: at) {
                 mask.add(animation, forKey: "roll-" + key)
                 rolled = true
-                if card == 0, box.built, !box.selected || box.switching {
-                    // Shut: the card's body goes once the roll has landed, if the line wasn't opened again meanwhile;
-                    // moving to another row, the next card opens then.
+                if card == 0, box.built, !box.selected {
+                    // Shut: the card's body goes once the roll has landed, if the line wasn't opened again meanwhile.
                     shut &+= 1
                     let mine = shut
                     let landing = CABasicAnimation(keyPath: "opacity")
@@ -463,12 +509,13 @@ final class RouterLineSlotView: RouterGlideView {
                     landing.toValue = 0
                     landing.isAdditive = true
                     landing.duration = RouterGlides.landing(glide.curve)
+                    if let at { landing.beginTime = at }
                     landing.delegate = Landing { [weak self] in self?.shutLanded(mine) }
                     mask.add(landing, forKey: "shut-" + key)
                 }
             }
         }
-        if !rolled, card == 0, box.built, !box.selected || box.switching {
+        if !rolled, card == 0, box.built, !box.selected {
             shut &+= 1
             let mine = shut
             DispatchQueue.main.async { [weak self] in self?.shutLanded(mine) }
@@ -476,16 +523,10 @@ final class RouterLineSlotView: RouterGlideView {
     }
 
     private func shutLanded(_ roll: Int) {
-        guard roll == shut, box.built else { return }
-        if !box.selected {
-            box.built = false
-            box.follow()
-        } else if box.switching {
-            // The card moving to another row has shut: it opens under its row now, the rows under it gliding down as
-            // a card opening pushes them. The row reached the place it takes in the line's hosting view as the roll
-            // landed, so it moves there from the tail's in place.
-            hosting.rootView.model.animate(.spatial) { box.shown = box.item }
-        }
+        guard roll == shut else { return }
+        landingShut = false
+        guard !box.selected, box.built else { return }
+        box.built = false
     }
 
     /// The block's card is open on screen, as last laid out (`placeTail`).
@@ -553,8 +594,8 @@ final class RouterLineSlotView: RouterGlideView {
         tailMask.anchorPoint = CGPoint(x: 0, y: down ? 0 : 1)
         tailMask.position = CGPoint(x: 0, y: down ? 0 : layer.bounds.height)
         tailMask.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        if let was = tailClipped, was != height, let glide = glides?.current,
-           let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height) {
+        if let was = tailClipped, was != height, let (glide, at) = glides?.running,
+           let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: was - height, since: at) {
             let key = "roll-\(glide.generation)-\(Int(CACurrentMediaTime() * 1000))"
             if let roll = tailRoll, roll.generation == glide.generation, roll.key.hasPrefix("roll-tail-") {
                 tailMask.removeAnimation(forKey: roll.key)

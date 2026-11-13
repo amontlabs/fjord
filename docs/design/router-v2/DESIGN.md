@@ -713,8 +713,10 @@ checking, closing with how, new).
   (`RouterBlockTail`, `RouterGlides`), so a card opening or shutting between its rows rolls in place, at full opacity,
   with its ground. The ground is there whole as a card opens and stays under it as it rolls shut, gone as the roll
   lands (an ease-in as long as the roll); the same under any line's card. A card moving to another row of the block (↑↓,
-  a click on another item or on the header) rolls shut first, then opens under its row once the roll has landed
-  (`RouterLineBox.shown`): no row jumps between the line's rows and the rows under the card. An item, your words or
+  a click on another item or on the header) is one motion (~0.3 s): the old card rolls shut under its row while the new
+  one opens under its own, on the same spring from the same frame, the rows between gliding with them
+  (`RouterBlockLeave`); no row jumps between the line's rows and the rows under the card. Between lines too: the old
+  line's card stays whole while its slot's mask rolls it shut, so it never goes in a frame and leaves its height bare. An item, your words or
   the "reading" row arriving or leaving folds in or out as a line does (height from or to nothing, its opacity only in
   the fold's last part), and the rows after it slide on the curve the block's height glides on (an open card and its ground
   below a folding item too: its place glides with the rows above it); a struck item folds after its 1.6 s. A new item's ground fades over 0.6 s once it is seen. The name taking another kind's colour (its
