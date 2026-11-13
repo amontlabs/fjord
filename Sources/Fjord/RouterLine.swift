@@ -262,7 +262,7 @@ struct RouterLineView: View {
                 .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
                 .layoutPriority(2)
             RouterSentenceView(model: model, box: box)
-                // Its subagents, background commands and waits, right after the words (RouterActivityViews.swift).
+                // Its subagents, background commands and waits, at the end of its place, before the pill (RouterActivityViews.swift).
                 .routerActivity(model, thread)
                 .padding(.leading, M.sentenceGap)
                 .frame(maxWidth: .infinity, alignment: .leading)

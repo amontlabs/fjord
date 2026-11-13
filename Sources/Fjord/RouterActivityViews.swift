@@ -1,7 +1,7 @@
 import SwiftUI
 
 // A thread's subagents, background commands and waits (docs/design/router-v2/DESIGN.md 1.4, 1.5, 1.6): on the line, a
-// few muted glyphs after the sentence, a count beside one only when it is more than one; the pointer on them shows a
+// few muted glyphs at the end of the sentence's place, a count beside one only when it is more than one; the pointer on them shows a
 // read-only peek listing each; the open card lists them under its steps.
 
 extension Router {
@@ -14,7 +14,7 @@ extension Router {
         /// Between a glyph and its count, and between groups.
         static let countGap: CGFloat = 2
         static let groupGap: CGFloat = 7
-        /// After the sentence.
+        /// The least room between the sentence's words and the glyphs.
         static let lead: CGFloat = 8
         /// The rows' glyph column.
         static let glyphBox: CGFloat = 14
@@ -30,8 +30,8 @@ extension RouterModel {
 }
 
 extension View {
-    /// The line's sentence with the thread's activity glyphs right after its words. The words give way first: the glyphs
-    /// never truncate.
+    /// The line's sentence with the thread's activity glyphs pinned at the end of its place, right before the project
+    /// pill and the age: they hold still as the sentence changes. The words give way first: the glyphs never truncate.
     func routerActivity(_ model: RouterModel, _ thread: RouterThread) -> some View {
         modifier(RouterActivityTrail(model: model, thread: thread))
     }
@@ -43,7 +43,8 @@ private struct RouterActivityTrail: ViewModifier {
 
     func body(content: Content) -> some View {
         HStack(spacing: Router.Activity.lead) {
-            content
+            // The sentence takes the rest of the place, so the glyphs sit at its end whatever its words' width.
+            content.frame(maxWidth: .infinity, alignment: .leading)
             if !thread.activity.isEmpty {
                 RouterActivityMark(model: model, thread: thread.id, activity: thread.activity)
                     .fixedSize()

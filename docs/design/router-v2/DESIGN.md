@@ -196,7 +196,9 @@ What floats keeps CDS Menu's 10, the composer CDS's 14.
   code from the board, in footnote: open `BadgeTint.successText`, merged `BadgeTint.violetText`, closed `Text.danger`.
   **R3.** The word has a 14 pt space after the link. It swaps in one frame and pops from 1.25 (3).
 - **Activity.** **R5** (2026-11-12, owner: "show in a super compact way when there are subagents running, background
-  processes, something it's waiting on"). Right after the sentence's words, 8 pt on: one glyph per kind the thread has,
+  processes, something it's waiting on"). At the end of the sentence's place, right-aligned just before the project pill
+  and the age, at least 8 pt after the words, so they never move as the sentence changes (owner, 2026-11-13: they jumped
+  right whenever a command came): one glyph per kind the thread has,
   in page order subagents `person.2`, background commands `terminal`, waits `hourglass` (another thread, a monitor, a
   command the agent said it resumes after); 10 pt medium, 7 apart, `CDS.Text.muted`, no ground. A kind's count follows
   its glyph 2 pt on (sans 11, `monospacedDigit`, `numericText`) only when it is more than one: `person.2 2  terminal`.
