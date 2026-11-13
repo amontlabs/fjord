@@ -422,7 +422,7 @@ extension WindowSeams {
             window.show(.settings)
             away(window)
             let line = try #require(store.routerRecords.lines(in: .needsYou).first ?? store.routerRecords.lines(in: .done).first)
-            window.show(entry: BriefTarget(project: line.project ?? "", thread: line.id))
+            window.show(line: line.id)
             #expect(window.navigator.selection == .router && store.routerPage.selection == .line(line.id))
             window.close()
             await waitUntil { !window.isOpen }
@@ -1300,13 +1300,13 @@ extension WindowSeams {
         @Test func aCloseTurnedRoundOnAnotherEntryFadesIntoIt() throws {
             try morphing { controller, ticks in
                 let records = controller.store.routerRecords
-                let entries = (records.lines(in: .needsYou) + records.lines(in: .done)).map { BriefTarget(project: $0.project ?? "", thread: $0.id) }
+                let entries = (records.lines(in: .needsYou) + records.lines(in: .done)).map(\.id)
                 try #require(entries.count >= 2)
-                controller.store.routerFocus(entries[0].thread)
+                controller.store.routerFocus(entries[0])
                 openAndStartClosing(controller, ticks, on: .router)
                 guard let run = controller.run, let shown = run.image else { return #expect(Bool(false), "no close morph") }
                 let taken = AppTransition.captures
-                controller.show(entry: entries[1])
+                controller.show(line: entries[1])
                 #expect(controller.phase == .opening && controller.run === run && controller.navigator.selection == .router)
                 ticks.runTurns()
                 run.complete()
@@ -1343,7 +1343,7 @@ extension WindowSeams {
                 controller.show(.router)
                 ticks.runTurns()
                 guard let run = controller.run, let shown = run.image else { return #expect(Bool(false), "no kept picture") }
-                if let e = controller.store.routerRecords.lines(in: .needsYou).last { controller.pick(entry: BriefTarget(project: e.project ?? "", thread: e.id)) }
+                if let e = controller.store.routerRecords.lines(in: .needsYou).last { controller.pick(line: e.id) }
                 controller.pick(message: UUID())
                 controller.navigator.go(.done)
                 ticks.runTurns()
@@ -1377,7 +1377,7 @@ extension WindowSeams {
                 let taken = AppTransition.captures
                 controller.navigator.go(.done)
                 controller.showUpdates()
-                if let e = controller.store.routerRecords.lines(in: .needsYou).first { controller.pick(entry: BriefTarget(project: e.project ?? "", thread: e.id)) }
+                if let e = controller.store.routerRecords.lines(in: .needsYou).first { controller.pick(line: e.id) }
                 ticks.runTurns()
                 #expect(AppTransition.captures == taken)
             }

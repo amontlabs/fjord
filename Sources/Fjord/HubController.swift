@@ -92,9 +92,8 @@ struct HubRoot: View {
     var openApp: (AppDestination) -> Void = { _ in }
     var reopenApp: () -> Void = {}
     var openUpdates: () -> Void = {}
-    var openRouter: (BriefTarget?) -> Void = { _ in }
     var openRouterMessage: (UUID) -> Void = { _ in }
-    var pickBriefEntry: (BriefTarget) -> Void = { _ in }
+    var pickRouterLine: (String) -> Void = { _ in }
     /// A row's "Open in Router" (given while the Router is on).
     var openInRouter: ((String) -> Void)? = nil
     /// How the bar and its panels draw: the app's, or a fixed one in tests.
@@ -107,9 +106,8 @@ struct HubRoot: View {
             .environment(\.openApp, openApp)
             .environment(\.reopenApp, reopenApp)
             .environment(\.openUpdates, openUpdates)
-            .environment(\.openRouter, openRouter)
             .environment(\.openRouterMessage, openRouterMessage)
-            .environment(\.pickBriefEntry, pickBriefEntry)
+            .environment(\.pickRouterLine, pickRouterLine)
             .environment(\.openInRouter, store.offers(.openInRouter) ? openInRouter : nil)
             // Tooltips are drawn over the whole window, outside the hub's clipped shape, so they're never cut off.
             .tipSpace()
@@ -143,9 +141,8 @@ private struct HubActions {
     let openApp: (AppDestination) -> Void
     let reopenApp: () -> Void
     let openUpdates: () -> Void
-    let openRouter: (BriefTarget?) -> Void
     let openRouterMessage: (UUID) -> Void
-    let pickBriefEntry: (BriefTarget) -> Void
+    let pickRouterLine: (String) -> Void
     let openInRouter: (String) -> Void
 }
 
@@ -206,8 +203,8 @@ final class HubController {
     var reopenApp: () -> Void = {}
     /// Opens the app window on Settings, scrolled to Updates: the window's own Settings is the one that scrolls.
     var openUpdates: () -> Void = {}
-    /// Picks a brief entry, before the window opens on it.
-    var pickBriefEntry: (BriefTarget) -> Void = { _ in }
+    /// Picks a Router line by its thread's id, before the window opens on it.
+    var pickRouterLine: (String) -> Void = { _ in }
     /// Scrolls the Router's conversation to a message, before the window opens on it.
     var pickRouterMessage: (UUID) -> Void = { _ in }
     /// Tags a thing (its id) in the Router's composer, before the window opens on it: a row's "Open in Router".
@@ -284,22 +281,21 @@ final class HubController {
         let actions = rootActions
         host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout, openApp: actions.openApp,
                                 reopenApp: actions.reopenApp, openUpdates: actions.openUpdates,
-                                openRouter: actions.openRouter, openRouterMessage: actions.openRouterMessage,
-                                pickBriefEntry: actions.pickBriefEntry, openInRouter: actions.openInRouter)
+                                openRouterMessage: actions.openRouterMessage, pickRouterLine: actions.pickRouterLine,
+                                openInRouter: actions.openInRouter)
         window.setFrame(dockFrame(), display: true)
         syncTrigger()
     }
 
     /// What the bar's views do, made once: the root is given the same closures each time it is made again (docking on
     /// another edge or screen), so the environment that carries them never tells their readers they changed. Each asks
-    /// for what this controller is told to do (`openApp`, `pickBriefEntry`, ...) when it is called.
+    /// for what this controller is told to do (`openApp`, `pickRouterLine`, ...) when it is called.
     private lazy var rootActions = HubActions(
         openApp: { [weak self] in self?.opened($0) },
         reopenApp: { [weak self] in self?.reopened() },
         openUpdates: { [weak self] in self?.openedUpdates() },
-        openRouter: { [weak self] in self?.opened(.router, entry: $0) },
         openRouterMessage: { [weak self] in self?.pickRouterMessage($0); self?.opened(.router) },
-        pickBriefEntry: { [weak self] in self?.pickBriefEntry($0) },
+        pickRouterLine: { [weak self] in self?.pickRouterLine($0) },
         openInRouter: { [weak self] in self?.prefillRouter($0); self?.opened(.router) })
 
     /// The hub's frame on screen (AppKit coordinates).
@@ -421,9 +417,8 @@ final class HubController {
     // MARK: The app window
 
     /// A click on an item of the bar (or one of its peek's): the app window opens on it.
-    private func opened(_ destination: AppDestination, entry: BriefTarget? = nil) {
+    private func opened(_ destination: AppDestination) {
         hub.cancelDwell()
-        if let entry { pickBriefEntry(entry) }
         openApp(destination)
     }
 

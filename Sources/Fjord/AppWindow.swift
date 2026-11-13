@@ -305,9 +305,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
     /// Whether the window has the keyboard, or is about to.
     var isKey: Bool { window?.isKeyWindow == true || pending != nil }
 
-    /// Shows the window in front, on `destination` when one is given (else where it was left). `entry`: a brief entry to focus
-    /// (it opens on the Router).
-    func show(_ destination: AppDestination? = nil, entry: BriefTarget? = nil) {
+    /// Shows the window in front, on `destination` when one is given (else where it was left). `line`: a Router line (its
+    /// thread's id) to select (it opens on the Router).
+    func show(_ destination: AppDestination? = nil, line: String? = nil) {
         // Until the opening's first frame is flushed (see `startOpening`), or at once when there is no morph.
         let asked = MorphSignposts.signposter.beginInterval("Open to first flush")
         defer { MorphSignposts.signposter.endInterval("Open to first flush", asked) }
@@ -317,9 +317,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         Self.active = self
         settle()
         var destination = destination
-        if entry != nil { destination = .router }
-        if let entry {
-            store.routerFocus(entry.thread)
+        if line != nil { destination = .router }
+        if let line {
+            store.routerFocus(line)
             changes &+= 1
         }
         // Another place, while on its way in: the navigator says so (see `init`).
@@ -347,7 +347,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
             startOpening(window, bar: morph, reversing: reversing)
             // A close turned round on another line: the overlay's picture shows the card it closed on, so it fades into
             // the real window rather than cutting to it.
-            if entry != nil, reversing { run?.fadeHandoff() }
+            if line != nil, reversing { run?.fadeHandoff() }
         } else {
             // One on its way in with its window still to come gets it then.
             if pending == nil { bringIn(window) }
@@ -357,8 +357,8 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         // rather than being asked only once it is.
         AppPolicy.update(windowOpen: true)
         AppPolicy.activate()
-        // An entry picked on the way in: the place may be the same, what it shows is not.
-        if entry != nil, arriving { contentChanged() }
+        // A line picked on the way in: the place may be the same, what it shows is not.
+        if line != nil, arriving { contentChanged() }
         watchKeys()
         watchInput()
         watchFront()
@@ -938,9 +938,9 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         contentChanged()
     }
 
-    /// A brief entry picked from the bar (the window opens on the Router next).
-    func pick(entry: BriefTarget) {
-        store.routerFocus(entry.thread)
+    /// A Router line picked from the bar (the window opens on the Router next).
+    func pick(line thread: String) {
+        store.routerFocus(thread)
         contentChanged()
     }
 
@@ -1255,8 +1255,7 @@ struct AppRootView: View {
             .ignoresSafeArea(.container, edges: .top)
             .background(CDS.Surface.s1)
             .modifier(AppRootFollow(store: store, navigator: navigator, routerModel: routerModel, hub: hub, search: search))
-            .environment(\.openRouter, actions.openRouter)
-            .environment(\.pickBriefEntry, actions.pickBriefEntry)
+            .environment(\.pickRouterLine, actions.pickRouterLine)
             // Chips in the window's own lists: a place, or the Router on the message an action left in its conversation.
             .environment(\.openApp, actions.openApp)
             .environment(\.openRouterMessage, actions.openRouterMessage)
@@ -1272,8 +1271,7 @@ struct AppRootView: View {
 /// The window's actions on itself, for its lists' chips, cards and changes (see `AppRootView.actions`).
 @MainActor
 final class AppRootActions {
-    let openRouter: (BriefTarget?) -> Void
-    let pickBriefEntry: (BriefTarget) -> Void
+    let pickRouterLine: (String) -> Void
     let openInRouter: (String) -> Void
     let openApp: (AppDestination) -> Void
     let openRouterMessage: (UUID) -> Void
@@ -1282,11 +1280,7 @@ final class AppRootActions {
 
     init(store: Store, navigator: AppNavigator, routerModel: RouterComposerModel, hub: HubState, palette: PaletteModel) {
         openPalette = { palette.open(pointer: true) }
-        openRouter = { entry in
-            if let entry { store.routerFocus(entry.thread) }
-            navigator.go(.router)
-        }
-        pickBriefEntry = { entry in store.routerFocus(entry.thread) }
+        pickRouterLine = { store.routerFocus($0) }
         openInRouter = { routerModel.open(thing: $0, in: navigator) }
         openApp = { navigator.go($0.resolved(shown: store.shownCategories.map(\.id), tools: store.tools)) }
         openRouterMessage = { _ in

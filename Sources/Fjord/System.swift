@@ -592,7 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.appWindow?.showUpdates()
             self?.hub?.setWindowOpen(true)
         }
-        hub.pickBriefEntry = { [weak window] t in window?.pick(entry: t) }
+        hub.pickRouterLine = { [weak window] thread in window?.pick(line: thread) }
         hub.pickRouterMessage = { [weak window] id in window?.pick(message: id) }
         hub.prefillRouter = { [weak window] thing in window?.prefillRouter(thing: thing) }
         hub.windowPlace = { [weak window] in window?.navigator.selection }
@@ -613,8 +613,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showWindow(category.map { .category($0) } ?? AppDestination(self.store.tabNeedingYou))
             }
         }
-        // A brief entry's banner: the Router, on that entry.
-        store.onOpenBrief = { [weak self] t in self?.showWindow(.router, entry: t) }
+        // A Router banner: the Router, on that thread's line.
+        store.onOpenRouterLine = { [weak self] thread in self?.showWindow(.router, line: thread) }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         let globals = GlobalShortcuts(store: store, hotKeys: hotKeys) { [weak self] action in
             switch action {
@@ -707,9 +707,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Opens the app window on `destination` (the bar leaves the edge), or on a brief entry.
-    private func showWindow(_ destination: AppDestination?, entry: BriefTarget? = nil) {
-        appWindow?.show(destination, entry: entry)
+    /// Opens the app window on `destination` (the bar leaves the edge), or on a Router line (its thread's id).
+    private func showWindow(_ destination: AppDestination?, line: String? = nil) {
+        appWindow?.show(destination, line: line)
         hub?.setWindowOpen(true)
     }
 

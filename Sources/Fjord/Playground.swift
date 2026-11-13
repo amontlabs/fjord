@@ -18,7 +18,7 @@ struct PlaygroundView: View {
     /// Opens the app window on a place; a toast says so when there is none (in shots).
     var openApp: ((AppDestination) -> Void)? = nil
     var reopenApp: (() -> Void)? = nil
-    var pickBriefEntry: ((BriefTarget) -> Void)? = nil
+    var pickRouterLine: ((String) -> Void)? = nil
     /// How the bar and its panels draw: the app's, or a fixed one in shots.
     var chrome: Chrome = .shared
     @State private var behindClicks = 0
@@ -51,7 +51,7 @@ struct PlaygroundView: View {
         .coordinateSpace(.named(Self.space))
         .frame(minWidth: minSize.width, minHeight: minSize.height)
         .environment(chrome)
-        .environment(\.pickBriefEntry) { entry in pickBriefEntry?(entry) }
+        .environment(\.pickRouterLine) { thread in pickRouterLine?(thread) }
         .environment(\.openApp) { [hub] destination in
             if let openApp { openApp(destination) } else { hub.toast = "Open the window on \(destination.token)" }
         }
@@ -189,7 +189,7 @@ final class Playground: NSObject, NSWindowDelegate {
                                       guard let self else { return }
                                       self.openApp(self.app.navigator.selection)
                                   },
-                                  pickBriefEntry: { [weak self] entry in self?.store.routerFocus(entry.thread) })
+                                  pickRouterLine: { [weak self] thread in self?.store.routerFocus(thread) })
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
                           styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "Fjord playground"

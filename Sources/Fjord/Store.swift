@@ -374,8 +374,8 @@ final class Store {
     @ObservationIgnored var onRecordingShortcutChange: ((Bool) -> Void)?
     /// Shows the inbox: on a category with a thing selected (a banner for it), or on the first category (a summary's).
     @ObservationIgnored var onOpenInbox: ((_ category: UUID?, _ thing: String?) -> Void)?
-    /// Shows the Router on a brief entry (its banner's click).
-    @ObservationIgnored var onOpenBrief: ((BriefTarget) -> Void)?
+    /// Shows the Router on a thread's line (its banner's click).
+    @ObservationIgnored var onOpenRouterLine: ((String) -> Void)?
     /// Whether you're away, for the inbox's banners (`AwayGate`).
     @ObservationIgnored lazy var away = AwayGate()
     /// Registers a global shortcut system-wide; `false` when the system refuses it.
@@ -1014,7 +1014,7 @@ final class Store {
             onOpenInbox?(nil, nil)
             return
         } else if id.hasPrefix(Self.routerNoticePrefix), let t = BriefTarget(key: String(id.dropFirst(Self.routerNoticePrefix.count))) {
-            onOpenBrief?(t)
+            onOpenRouterLine?(t.thread)
             return
         }
         if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {

@@ -174,7 +174,7 @@ extension Store {
 
     // MARK: Helpers
 
-    /// Router banners' ids: `brief:<target key>`, so a click opens the thread's line (`onOpenBrief`).
+    /// Router banners' ids: `brief:<target key>`, so a click opens the thread's line (`onOpenRouterLine`).
     nonisolated static let routerNoticePrefix = "brief:"
 
     static func routerNotice(_ n: ThreadNotice) -> String {
