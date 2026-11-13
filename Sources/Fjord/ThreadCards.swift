@@ -201,6 +201,9 @@ struct ThreadCardRecord: Codable, Equatable, Sendable {
 
     // MARK: The archive, frozen per day
 
+    /// The archive's disk writes, one at a time, in order.
+    private static let archiveWrites = DispatchQueue(label: "fjord.thread-cards.archive", qos: .utility)
+
     /// The day's archive block: built the first time it is asked for after the day's 04:00, kept on disk and in memory all day.
     func archive(day start: Date, zone: TimeZone, build: () -> (text: String, keys: [String])) -> (text: String, keys: [String]) {
         let day = DeciderContext.formatter("yyyy-MM-dd", zone).string(from: start)
@@ -215,10 +218,12 @@ struct ThreadCardRecord: Codable, Equatable, Sendable {
         archive = (day, built.text, built.keys)
         if let url, let data = try? JSONEncoder().encode(Frozen(text: built.text, keys: built.keys)) {
             let dir = url.deletingLastPathComponent()
-            Task.detached(priority: .utility) {
+            // In the order they are asked for: an earlier day's write that ran late would remove a later day's file.
+            let name = url.lastPathComponent
+            Self.archiveWrites.async {
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 // Yesterday's goes: one snapshot is kept.
-                for old in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where old.hasPrefix("archive-") {
+                for old in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where old.hasPrefix("archive-") && old != name {
                     try? FileManager.default.removeItem(at: dir.appendingPathComponent(old))
                 }
                 try? data.write(to: url, options: .atomic)
