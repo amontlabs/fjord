@@ -258,19 +258,18 @@ One card component, inline under its line, inside the selected surface. Selectio
 same card. Body inset: leading 20 (under the name), trailing 16 (**R4**), bottom 10; blocks 10 apart. **R3.** Prose blocks keep to
 560; option rows run the card's width. Inline code is 0.92 of the size of the text beside it.
 
-Common blocks, in order:
+Common blocks, in order (no T3 title: it is the start of the thread's first message, which says little; the name
+says which thread it is):
 
-1. **T3 title.** Footnote 12/15 `CDS.Text.muted`, one line. The page's name is the short one; this says which T3
-   thread it is.
-2. **Last lines.** The agent's last message, body 13/19 `CDS.Text.secondary`, behind a 1 pt `Settings.railLine` rail
+1. **Last lines.** The agent's last message, body 13/19 `CDS.Text.secondary`, behind a 1 pt `Settings.railLine` rail
    with 10 pt inset, clipped to 4 lines (6 for Done) with a bottom fade and, under it, a footnote button "Show all" (`→`).
    `→`, the button or a click on the cut words opens it whole, no inner scroll: the card grows and the page scrolls;
    "Show less" (`←`) closes. While the thread's messages load: two skeleton bars (height 10, radius 5, fill
    `alpha(0.06)`, widths 92 % and 61 %, same sheen as 2.2). While the agent is writing (Working): the text grows live, a 2 × 14 pt caret in
    `CDS.Text.muted` after the last word. **R3.** `→` and `←` roll the text open and shut: one block in a place as tall as
    its first lines.
-3. **Kind block** (below).
-4. **Footer.** One row of text buttons, trailing: footnote 12 `CDS.Text.muted` (hover `CDS.Text.primary`), each with its
+2. **Kind block** (below).
+3. **Footer.** One row of text buttons, trailing: footnote 12 `CDS.Text.muted` (hover `CDS.Text.primary`), each with its
    keys (plain glyphs, 1.0), 16 apart. No hint text: the destination row says what Return does.
 
 Kind blocks:
@@ -308,7 +307,7 @@ Kind blocks:
 - Shell: width 360, the page's floating shell (1.0, **R4**), radius 10; padding 12; placed
   10 pt under the name in the top half of the page, over it in the bottom half (`BriefPanelPlacement`). **R3.** It
   enters with `scaleFade` 0.98.
-- Content: T3 title (footnote medium muted); last lines (4, body secondary); then by kind, as plain text: the options
+- Content: last lines (4, body secondary); then by kind, as plain text: the options
   numbered "1 A sidebar with sections"; a plan's first 4 lines; a permission's command; a stop's error line; PR badges
   for Done. Last row, caption `Text.muted`: "Click for its card" (**R3**).
 - **R5.** The activity glyphs' peek (pointer on the glyphs, not on a selected line, whose card lists the same): the
@@ -318,7 +317,7 @@ Kind blocks:
   in `CDS.mono(12)` · its age; a wait: what (a thread wait by the waited thread's page name, a command in mono) · its
   age. Ages are from T3's start, else from when Fjord first saw it. Subagents first, then commands, then waits.
 - **R6.** A working line's peek replaces both the name's and the glyphs' there: the pointer anywhere on the row. 400
-  wide, the same shell, hung from the name. T3's title; the command or tool running now (the working dots in the 14 pt
+  wide, the same shell, hung from the name. The command or tool running now (the working dots in the 14 pt
   glyph column, the words in `Text.primary`, a command in `CDS.mono(12)`, middle truncation) and up to three before it
   (`checkmark`, `Text.secondary`), each with its age trailing; then the activity rows.
 - The housekeeping line's peek lists its threads: name, project pill, age. **R3.** It is 400 wide, its names being T3
@@ -769,7 +768,7 @@ they are; nothing in the page waits a fixed time.
 | **Unsettled / snooze over / reopened** | as a new thread | as above | as above |
 | **Queued message's turn ends** | the queued row rises into the line: Sent with those words | nothing | Working when the run starts |
 | **Your send is refused or T3 drops** | the Sent line returns to its previous state and place (`lineMove`); failure line enters (1.11); connection line if T3 is gone | nothing | Send again → Sent |
-| **Thread renamed in T3** | the card's T3 title changes | name sheens | the short name may change, once |
+| **Thread renamed in T3** | nothing shows T3's title (the start of the first message, which says little) | name sheens | the short name may change, once |
 
 Curves, in one place:
 

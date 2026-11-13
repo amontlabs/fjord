@@ -122,7 +122,6 @@ struct RouterWorkingPeek: View {
         let _ = model.clock.minute
         let work = thread.work
         VStack(alignment: .leading, spacing: 10) {
-            Text(thread.title).cdsText(d.footnote, .medium, CDS.Text.muted).lineLimit(1)
             if work.hasSteps {
                 VStack(alignment: .leading, spacing: 6) {
                     if let now = work.now {

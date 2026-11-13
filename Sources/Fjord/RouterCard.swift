@@ -34,7 +34,6 @@ struct RouterCard: View {
     private var card: some View {
         let _ = RouterBodies.count("card", box.id, of: model)
         return VStack(alignment: .leading, spacing: M.gap) {
-            Text(thread.title).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(1).prose()
             if thread.loading {
                 VStack(alignment: .leading, spacing: 8) {
                     RouterSkeletonBar(share: 0.92)

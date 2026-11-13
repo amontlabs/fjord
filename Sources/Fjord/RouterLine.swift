@@ -679,14 +679,13 @@ struct RouterTextButton: View {
 
 // MARK: - Peek
 
-/// The hover peek: read-only, floating by the name. T3's title, the last lines, then by kind as plain text.
+/// The hover peek: read-only, floating by the name. The last lines, then by kind as plain text.
 struct RouterPeek: View {
     let thread: RouterThread
 
     var body: some View {
         let d = CDS.Density.compact
         VStack(alignment: .leading, spacing: 8) {
-            Text(thread.title).cdsText(d.footnote, .medium, CDS.Text.muted).lineLimit(1)
             if !thread.lastLines.isEmpty {
                 Text(RouterInline.text(thread.lastLines, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary).lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
