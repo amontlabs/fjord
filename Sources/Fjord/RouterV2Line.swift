@@ -432,7 +432,9 @@ struct RouterV2SentenceView: View {
             }
         }
         .motion(.fade, value: sentence.phase)
-        .motion(.fade, value: sentence.text)
+        // A new text taking another's place (`.id` above), not each word that grows: an animation on every streamed
+        // word laid the sentence out on every frame while it streamed (the words fade in on their own).
+        .motion(.fade, value: box.sentenceID)
     }
 }
 
