@@ -215,6 +215,10 @@ struct RouterLineView: View {
             // card's fold.
             RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
                 .opacity(open ? shown : 0)
+                // The card's content grew or shrank while open (a quote or a plan rolling): the ground follows on the
+                // place's curve. Sized by the line outside the place's own animation, it took its new height at once,
+                // and a quote rolling shut was drawn below it until its roll ended.
+                .motion(.spatial, value: cardHeight)
                 .transaction { if moving { $0.animation = nil } }
         }
         .onChange(of: open) { _, open in

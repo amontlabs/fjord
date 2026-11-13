@@ -249,9 +249,10 @@ Common blocks, in order:
 1. **T3 title.** Footnote 12/15 `CDS.Text.muted`, one line. The page's name is the short one; this says which T3
    thread it is.
 2. **Last lines.** The agent's last message, body 13/19 `CDS.Text.secondary`, behind a 1 pt `Settings.railLine` rail
-   with 10 pt inset, clipped to 4 lines (6 for Done) with a bottom fade. `→` opens it whole (max height 320, scrolls);
-   `←` closes. While the thread's messages load: two skeleton bars (height 10, radius 5, fill `alpha(0.06)`, widths 92 %
-   and 61 %, same sheen as 2.2). While the agent is writing (Working): the text grows live, a 2 × 14 pt caret in
+   with 10 pt inset, clipped to 4 lines (6 for Done) with a bottom fade and, under it, a footnote button "Show all" (`→`).
+   `→`, the button or a click on the cut words opens it whole, no inner scroll: the card grows and the page scrolls;
+   "Show less" (`←`) closes. While the thread's messages load: two skeleton bars (height 10, radius 5, fill
+   `alpha(0.06)`, widths 92 % and 61 %, same sheen as 2.2). While the agent is writing (Working): the text grows live, a 2 × 14 pt caret in
    `CDS.Text.muted` after the last word. **R3.** `→` and `←` roll the text open and shut: one block in a place as tall as
    its first lines.
 3. **Kind block** (below).

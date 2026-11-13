@@ -266,6 +266,27 @@ and `scripts/router-frames-check.py`, which reads each frame's `rows-*.json`: 0 
 both scenarios). The Select load at `c3061d76` → after, release, two runs each, interleaved, load 7-8: p95 25 / 26 → 23 /
 27 ms, p50 17 / 16 → 13 / 14.
 
+**A card's quote that couldn't be opened** (found 2026-11-13). A reply longer than 320 pt opened into a second view, a
+320 pt `ScrollView`: the whole text was drawn unclipped over the options for a few frames, then the box cut it with no
+fade and, with overlay scrollers, no scroller: it read as shut again, and `→` had nothing left to open. The quote is now
+one `Layout` (`RouterQuoteCut`): its words, the cut, the fade, the rail and "Show all" / "Show less" placed in one pass,
+no inner scroll. Two more things the long roll showed, in 60 fps frames:
+
+- *A view sized outside an `.animation(value:)` takes the new size at once.* The card's place follows its content on
+  `.motion(.spatial, value: cardHeight)`, but the selected ground behind the line is the line's background: as a quote
+  rolled shut with its card open, the ground shrank in one frame and the words were drawn below it until their roll
+  ended. The ground has the same `.motion` now.
+- *A button's colour changing mid-roll moved its title.* The quote rolling takes "Show less" from under the pointer;
+  its title going back to muted put it at the roll's end at once while its key still rode the edge. The button is a
+  `.geometryGroup()`. (Its titles are both always there, one clear; it is clipped to nothing, not swapped out by a
+  `ViewThatFits`, when the quote has nothing past its first lines.)
+
+The frames check now counts the rows that glide at the one offset that fits them together: the picture is the render
+server's frame for the next refresh, ahead of the presentation layers the rects are read from, by 15 to 80 pt in a tall
+card's roll. Checked with `--select-check` and `--select-check few` (a long reply opened by `→`, shut by `←`, opened by
+"Show all", shut by "Show less"): 0 rows missing in 2,399 and 2,195 frames; a row painted out in a gliding frame is
+found.
+
 ## Rules for new code
 
 1. Nothing synchronous and expensive between a user's action and the first frame that answers it. If it must happen, do it

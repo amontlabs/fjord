@@ -78,7 +78,6 @@ enum Router {
         static let railInset: CGFloat = 10
         static let lastLines = 4
         static let lastLinesDone = 6
-        static let openHeight: CGFloat = 320
         static let planLines = 8
         static let footerGap: CGFloat = 16
         static let steps = 5
