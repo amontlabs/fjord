@@ -68,7 +68,7 @@ enum RouterVerdictPrompt {
     /// Asks and names on Haiku (EVAL-verdicts.md: ask lines 0.95 accurate against Sonnet's 0.79).
     static let model = "claude-haiku-5-5"
 
-    static func model(_ kind: RouterVerdictRequest.Kind) -> String { kind == .items ? RouterItemsPrompt.model : model }
+    static func model(_ kind: RouterVerdictKind) -> String { model }
     /// The agent's last reply is read from its end, this long at most.
     static let replyCharacters = 4000
     static let requestCharacters = 2000
@@ -118,25 +118,23 @@ enum RouterVerdictPrompt {
     static let askSchema = schema([("name", text), ("line", text)])
     static let nameSchema = schema([("name", text)])
 
-    static func system(_ kind: RouterVerdictRequest.Kind) -> String {
+    static func system(_ kind: RouterVerdictKind) -> String {
         switch kind {
-        case .items: RouterItemsPrompt.turn
         case .ask: ask
         case .name: name
         case .summary: RouterSummaryPrompt.system
         }
     }
 
-    static func schema(_ kind: RouterVerdictRequest.Kind) -> String {
+    static func schema(_ kind: RouterVerdictKind) -> String {
         switch kind {
-        case .items: RouterItemsPrompt.turnSchema
         case .ask: askSchema
         case .name: nameSchema
         case .summary: RouterSummaryPrompt.schema
         }
     }
 
-    static func arguments(_ kind: RouterVerdictRequest.Kind) -> [String] {
+    static func arguments(_ kind: RouterVerdictKind) -> [String] {
         ClaudePrint.arguments(model: model(kind), system: system(kind), schema: schema(kind), effort: "low", streaming: true)
     }
 
@@ -144,7 +142,7 @@ enum RouterVerdictPrompt {
 
     /// The thread's facts as the call reads them: every text redacted, what the thread or the user wrote fenced. A name
     /// alone needs only the title and the first ask.
-    @MainActor static func text(_ x: RouterVerdictInput, kind: RouterVerdictRequest.Kind) -> String {
+    @MainActor static func text(_ x: RouterVerdictInput, kind: RouterVerdictKind) -> String {
         func r(_ s: String) -> String { RouterTools.redacted(s) }
         func fenced(_ s: String) -> String { SessionFence.fence(r(s)) }
         var lines = ["Thread: " + r(x.title)]

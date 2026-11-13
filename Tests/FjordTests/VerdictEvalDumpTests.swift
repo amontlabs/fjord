@@ -51,12 +51,12 @@ import Testing
         try fm.createDirectory(at: inputs, withIntermediateDirectories: true)
         try fm.createDirectory(at: verdicts, withIntermediateDirectories: true)
         func write(_ url: URL, _ s: String) throws { try s.write(to: url, atomically: true, encoding: .utf8) }
-        for kind in [RouterVerdictRequest.Kind.ask, .name] {
+        for kind in [RouterVerdictKind.ask, .name] {
             let name = "\(kind)"
             try write(root.appendingPathComponent("system-\(name).txt"), RouterVerdictPrompt.system(kind))
             try write(root.appendingPathComponent("schema-\(name).json"), RouterVerdictPrompt.schema(kind))
         }
-        for c in cases { try write(inputs.appendingPathComponent("\(c.id).txt"), RouterVerdictPrompt.text(c.input, kind: c.verdictKind)) }
+        for c in cases { try write(inputs.appendingPathComponent("\(c.id).txt"), RouterVerdictPrompt.text(c.input, kind: .ask)) }
 
         guard env["FJORD_VERDICT_EVAL_RUN"] == "1", let path = RouterStatus.findDefault() else { return }
         let todo = cases.filter { !fm.fileExists(atPath: verdicts.appendingPathComponent("\($0.id).json").path) }

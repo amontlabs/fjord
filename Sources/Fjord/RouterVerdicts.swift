@@ -61,13 +61,27 @@ enum RouterVerdictEvent: Equatable, Sendable {
 
 // MARK: - Reading one answer
 
+/// What is read as a verdict (a line, a name, a summary). Open items have their own prompt and reading
+/// (`RouterItemsPrompt`, `RouterItemsReading`), apart from these.
+enum RouterVerdictKind: Equatable, Sendable {
+    case ask, name, summary
+
+    var request: RouterVerdictRequest.Kind {
+        switch self {
+        case .ask: .ask
+        case .name: .name
+        case .summary: .summary
+        }
+    }
+}
+
 /// One call's answer read as it comes (pure): the pieces of `PartialJSON` into events, and the whole answer checked.
 struct RouterVerdictReading {
-    let kind: RouterVerdictRequest.Kind
+    let kind: RouterVerdictKind
     private(set) var lineDone = false
     private var shown = ""
 
-    init(kind: RouterVerdictRequest.Kind) { self.kind = kind }
+    init(kind: RouterVerdictKind) { self.kind = kind }
 
     mutating func take(_ piece: PartialJSON.Piece) -> [RouterVerdictEvent] {
         switch piece {
@@ -99,10 +113,10 @@ struct RouterVerdictReading {
     }
 
     /// The whole answer, checked: a line (but for a name), a name of 28 characters at most.
-    static func verdict(_ json: Data, kind: RouterVerdictRequest.Kind) -> RouterVerdict? {
+    static func verdict(_ json: Data, kind: RouterVerdictKind) -> RouterVerdict? {
         guard let o = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any] else { return nil }
         func text(_ k: String) -> String { flat(o[k] as? String ?? "") }
-        var v = RouterVerdict(kind: kind, name: clipName(text("name")), line: text("line"))
+        var v = RouterVerdict(kind: kind.request, name: clipName(text("name")), line: text("line"))
         switch kind {
         case .name:
             guard !v.name.isEmpty else { return nil }
@@ -112,8 +126,6 @@ struct RouterVerdictReading {
             guard !v.line.isEmpty else { return nil }
         case .ask:
             guard !v.line.isEmpty else { return nil }
-        case .items:
-            return nil
         }
         return v
     }
@@ -198,7 +210,8 @@ struct RouterVerdictReading {
         var attempt = 0
         /// Not started before then (a retry's backoff).
         var notBefore: Date?
-        /// "Verdict state" (to the state, or an ask's first words) and "Verdict done", from the ask; nil for a purpose.
+        /// "Verdict state" (to the state, or an ask's first words) and "Verdict done", from the ask ("Items state", to what
+        /// an open-items read closes or finds first, and "Items done" for those); nil for a summary or a purpose.
         var state: RouterSignposts.Interval?
         let done: RouterSignposts.Interval?
         var task: Task<Void, Never>?
@@ -272,9 +285,10 @@ struct RouterVerdictReading {
         tokens += 1
         // The verdict gates' signposts time verdicts only, not summaries.
         let timed = if case .verdict(let r) = work, r.kind != .summary { true } else { false }
+        let items = if case .verdict(let r) = work, r.kind == .items { true } else { false }
         queued.append(Job(key: key, work: work, token: tokens, attempt: attempt, notBefore: notBefore,
-                          state: timed ? RouterSignposts.begin("Verdict state") : nil,
-                          done: timed ? RouterSignposts.begin("Verdict done") : nil))
+                          state: !timed ? nil : items ? RouterSignposts.begin("Items state") : RouterSignposts.begin("Verdict state"),
+                          done: !timed ? nil : items ? RouterSignposts.begin("Items done") : RouterSignposts.begin("Verdict done")))
         pump()
     }
 
@@ -345,22 +359,23 @@ struct RouterVerdictReading {
             }
             return
         }
-        let (arguments, kind): ([String], RouterVerdictRequest.Kind?)
+        let (arguments, kind): ([String], RouterVerdictKind?)
         let input: @MainActor () -> Data
         var itemsReading: RouterItemsReading?
         switch job.work {
         case .verdict(let r) where r.kind == .items:
             let x = r.items ?? RouterItemsInput(title: r.input.title, input: .message(words: "", replyBefore: nil))
-            (arguments, kind) = (RouterItemsPrompt.arguments(turn: x.isTurn), r.kind)
+            (arguments, kind) = (RouterItemsPrompt.arguments(turn: x.isTurn), nil)
             itemsReading = RouterItemsReading(turn: x.isTurn, ids: Set(x.open.map(\.id)))
             input = { Data(RouterItemsPrompt.text(x).utf8) }
         case .verdict(let r) where r.kind == .summary:
-            (arguments, kind) = (RouterSummaryPrompt.arguments, r.kind)
+            (arguments, kind) = (RouterSummaryPrompt.arguments, .summary)
             let facts = r.summary ?? RouterSummaryInput(title: r.input.title, project: r.input.project)
             input = { Data(RouterSummaryPrompt.text(facts).utf8) }
         case .verdict(let r):
-            (arguments, kind) = (RouterVerdictPrompt.arguments(r.kind), r.kind)
-            input = { Data(RouterVerdictPrompt.text(r.input, kind: r.kind).utf8) }
+            let k: RouterVerdictKind = r.kind == .name ? .name : .ask
+            (arguments, kind) = (RouterVerdictPrompt.arguments(k), k)
+            input = { Data(RouterVerdictPrompt.text(r.input, kind: k).utf8) }
         case .purpose(let p):
             (arguments, kind) = (ClaudePrint.arguments(model: RouterVerdictPrompt.model, system: p.system, schema: p.schema,
                                                        effort: "low", streaming: true), nil)
