@@ -3,7 +3,8 @@ import Foundation
 // Starting new work in T3 (docs/design/t3-port-plan.md, step 11): one `orchestration.launchThread`, no clicks.
 //
 // `modelSelection`, `runtimeMode`, `interactionMode` and `workspaceStrategy` are required by T3 (OV2:3632); the title, the
-// branch and the message are not. Fjord has no model picker, so the model is T3's own default: the project's, else the
+// branch and the message are not. The settings are what the Router row's chips (or its `@` pills) set from T3's own lists
+// (`RouterLaunchCatalog`, docs/design/router-v2/DESIGN.md 1.9.1); with none given, T3's own default: the project's, else the
 // server's (`server.getConfig` settings), else what the project's latest thread ran, else the first ready provider's first model.
 // A worktree branch is left out: T3 names it temporarily and renames it from the first message (`ThreadLaunchService`).
 
