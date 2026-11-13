@@ -66,6 +66,9 @@ enum RouterLoad {
             }
             let working = model.threads.filter { $0.state == .working }.map(\.id)
             if let first = working.first { model.select(.line(first)) }
+            // The resize lays every row out again at the new width and the card opens: drawn before the timed events
+            // start, so the first ones measure the load, not the setup.
+            try? await Task.sleep(for: .seconds(0.6))
             let streams = Array(model.threads.filter { $0.state != .working }.map(\.id).prefix(streaming))
             let end = Date().addingTimeInterval(seconds)
             await withTaskGroup(of: Void.self) { group in
