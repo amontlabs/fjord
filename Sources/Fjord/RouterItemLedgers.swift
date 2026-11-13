@@ -92,6 +92,8 @@ struct RouterItemFacts: Equatable, Sendable {
         var pending: [Input] = []
         /// Your latest words sent from here: T3's copy of one of them is the same message, not read again.
         var sent: [Sent] = []
+        /// What was open when the thread was settled, kept for the Settle's Revert until a new run starts.
+        var settled: Stash?
 
         init(items: [RouterItem] = [], next: Int = 1, read: [String] = [], line: String? = nil, lineRun: String? = nil,
              run: String? = nil, message: Date? = nil, pending: [Input] = []) {
@@ -105,7 +107,7 @@ struct RouterItemFacts: Equatable, Sendable {
             self.pending = pending
         }
 
-        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending, sent }
+        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending, sent, settled }
 
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
@@ -118,7 +120,18 @@ struct RouterItemFacts: Equatable, Sendable {
             message = try c.decodeIfPresent(Date.self, forKey: .message)
             pending = try c.decodeIfPresent([Input].self, forKey: .pending) ?? []
             sent = try c.decodeIfPresent([Sent].self, forKey: .sent) ?? []
+            settled = try c.decodeIfPresent(Stash.self, forKey: .settled)
         }
+    }
+
+    /// A settled thread's ledger, as it was.
+    struct Stash: Codable, Equatable {
+        var items: [RouterItem]
+        var line: String?
+        var lineRun: String?
+        var pending: [Input]
+        /// The latest run when it was settled: a newer one means the settle stood.
+        var run: String?
     }
 
     /// Words you sent from here, until T3's copy of them is seen.
@@ -252,6 +265,7 @@ struct RouterItemFacts: Equatable, Sendable {
     /// `ended`: the latest run is over (the thread is Done or Stopped).
     func observe(_ id: String, _ t: AgentThread, ended over: Bool, reads: Bool, context: @autoclosure () -> Context) {
         guard reads else { return }
+        if let stash = load(id)?.settled { unsettled(id, stash, run: t.latestRunID) }
         let had = load(id)
         let ended = t.latestRunID.flatMap { over ? Input.turn(run: $0).key : nil }
         // Nothing new since it was last seen (the common case: one T3 event of many): only a waiting input may go on.
@@ -648,17 +662,33 @@ struct RouterItemFacts: Equatable, Sendable {
         changed(id)
     }
 
-    /// The thread was settled: its ledger goes, and any read of it with it.
+    /// The thread was settled: its ledger goes, and any read of it with it. What was open is kept for the Settle's
+    /// Revert (`unsettled`) until a new run starts.
     func settled(_ id: String) {
         if let l = live[id], l.reading != nil { cancel(id) }
         live[id] = nil
-        if let s = load(id), !s.items.isEmpty || s.line != nil {
-            var s = s
-            s.items = []
-            s.line = nil
-            s.lineRun = nil
-            store(id, s)
+        guard var s = load(id), !s.items.isEmpty || s.line != nil || !s.pending.isEmpty else { return }
+        let was = s.settled
+        s.settled = Stash(items: (was?.items ?? []) + s.items, line: s.line ?? was?.line, lineRun: s.line == nil ? was?.lineRun : s.lineRun,
+                          pending: (was?.pending ?? []) + s.pending, run: s.run)
+        s.items = []
+        s.line = nil
+        s.lineRun = nil
+        s.pending = []
+        store(id, s)
+    }
+
+    /// The thread is on the page again after a settle: its Revert (no run since) puts back what was open and the read
+    /// that was under way; a new run means the settle stood, and the stash goes.
+    private func unsettled(_ id: String, _ stash: Stash, run: String?) {
+        guard var s = load(id) else { return }
+        s.settled = nil
+        if stash.run == run {
+            s.items = stash.items + s.items.filter { i in !stash.items.contains { $0.id == i.id } }
+            if s.line == nil { s.line = stash.line; s.lineRun = stash.lineRun }
+            s.pending = stash.pending + s.pending.filter { p in !stash.pending.contains { $0.key == p.key } }
         }
+        store(id, s)
     }
 
     /// The thread left T3's list: its read stops.

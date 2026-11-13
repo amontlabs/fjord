@@ -495,6 +495,37 @@ import Testing
         #expect(h.saved?.items.isEmpty == true)
     }
 
+    /// REVIEW-items 1.6: Settle, then its Revert, puts back every open item and the read that was under way; a new run
+    /// after the settle means it stood, and nothing comes back.
+    @Test func revertingASettleRestoresTheItemsAndTheReadUnderWay() throws {
+        let h = seeded()
+        h.records.put(Self.ended("r2"))
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Kept it. Sign in to Silo?")]))
+        var t = Self.ended("r2")
+        t.settled = true
+        t.settledAt = h.clock
+        h.records.put(t)
+        #expect(h.itemCancels == ["t1"] && h.saved?.items.isEmpty == true && h.saved?.pending.isEmpty == true)
+        // Revert: T3 unsettles, no run since.
+        t.settled = false
+        t.settledAt = nil
+        h.records.put(t)
+        #expect(h.saved?.items.map(\.id) == ["i1", "i2"])
+        #expect(h.ledger.items.map(\.id) == ["i1", "i2"])
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Kept it. Sign in to Silo?")]))
+        #expect(h.reads.last?.fingerprint == "turn:r2" && h.reads.filter { $0.fingerprint == "turn:r2" }.count == 2)
+        h.answer(RouterItemsAnswer(found: [.init(kind: .do, sentence: "sign in to Silo")]))
+        #expect(h.saved?.items.count == 3 && h.saved?.settled == nil)
+        // Settled again, then a new run starts: the settle stood.
+        t.settled = true
+        h.records.put(t)
+        t.settled = false
+        t.latestRunID = "r3"
+        t.status = .running
+        h.records.put(t)
+        #expect(h.saved?.items.isEmpty == true && h.saved?.settled == nil)
+    }
+
     @Test func doneStrikesAnItemAndRevertPutsItBackWhereItWas() {
         let h = seeded()
         h.records.itemDone("t1", item: "i1", on: true)
