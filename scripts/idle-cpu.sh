@@ -39,6 +39,8 @@
 #   scripts/idle-cpu.sh                 build (release) and measure
 #   LIMIT=0.2 WINDOW=60 EDGES="right top bottom left" scripts/idle-cpu.sh
 #   SKIP_BUILD=1 scripts/idle-cpu.sh    use the release build as it is
+#   ROUTER=1 scripts/idle-cpu.sh        the window kept open on the Router page (`--demo router --open router`: working
+#                                       lines, a sheen, the mark), on the first of EDGES; LIMIT 0.6 unless set
 #   AB=1 [RUNS=5] [WS_LIMIT=0.3] [AB_STATES="rest open"] scripts/idle-cpu.sh    glass against opaque
 #   AB=1 scripts/idle-cpu.sh --baseline docs/design/fjord/baselines/idle-ab.json  store, then compare
 set -u
@@ -52,7 +54,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-limit=${LIMIT:-0.1}     # percent of one core
+router=${ROUTER:-0}
+if [ "$router" = 1 ]; then limit=${LIMIT:-0.6}; else limit=${LIMIT:-0.1}; fi     # percent of one core
 settle=${SETTLE:-5}     # seconds between launch and the wait for the CPU time to stop moving
 quiet_for=${QUIET_FOR:-3}   # whole seconds the CPU time must not move before the window begins (ps reports hundredths)
 quiet_max=${QUIET_MAX:-40}  # whole seconds that wait takes at most
@@ -232,7 +235,11 @@ sample() {
         'BEGIN { printf "%s\t%s\t%s\t%s\t%.4f\t%s\n", state, edge, scenario, glass, (a1 - a0) / window * 100, ws }' >>"$results"
 }
 
-if [ "$ab" = 1 ]; then
+if [ "$router" = 1 ]; then
+    # The Router page open, nothing changing but its own working lines (IMPLEMENTATION.md 2.4).
+    scenario=router
+    measure "open router" "${edges%% *}" --open router
+elif [ "$ab" = 1 ]; then
     # Glass against opaque: no ring turning (§7), opaque and glass in turn, the order swapped every run.
     scenario=busy
     edge=${edges%% *}

@@ -625,8 +625,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         globals.start()
         globalShortcuts = globals
-        // The first launch opens on the onboarding, where the tools are picked.
-        if CommandLine.arguments.contains("--open") || store.settings.toolsPicked != true { toggleWindow() }
+        // The first launch opens on the onboarding, where the tools are picked. `--open router` opens on the Router's page
+        // (`scripts/idle-cpu.sh`'s Router gate).
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--open"), i + 1 < args.count, args[i + 1] == "router" {
+            showWindow(.router)
+        } else if args.contains("--open") || store.settings.toolsPicked != true {
+            toggleWindow()
+        }
         playMotionScript(demo: demo)
         // The bar on screen first (its first frame shown, or a tenth of a second at most), the store's services after it,
         // and after the window's morph when the launch opens the window (the onboarding, `--open`).
