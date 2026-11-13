@@ -143,16 +143,22 @@ final class FakeClaude: @unchecked Sendable {
         e.ask(items("older", at: 10))
         e.ask(items("newer", at: 20))
         e.ask(request("asks", .ask))
+        // The order the four start in; a retry of the busy call (a slow runner's) is not one of them.
         var order: [String] = []
-        for _ in 0..<4 {
+        var named: Int?
+        for _ in 0..<8 where order.count < 4 {
             let n = fake.calls.count
             fake.close(n - 1)
             await until(fake.calls.count == n + 1)
+            guard fake.calls.count > n else { break }
             let input = fake.calls[n].input
-            order.append(["named", "older", "newer", "asks"].first { input.contains("Thread: \($0)") } ?? "?")
+            if let title = ["named", "older", "newer", "asks"].first(where: { input.contains("Thread: \($0)") }) {
+                order.append(title)
+                if title == "named" { named = n }
+            }
         }
         #expect(order == ["asks", "newer", "older", "named"])
-        #expect(fake.calls[4].arguments.contains { $0.contains(#""name""#) && !$0.contains(#""line""#) })
+        #expect(named.map { fake.calls[$0].arguments.contains { $0.contains(#""name""#) && !$0.contains(#""line""#) } } == true)
     }
 
     @Test func aCancelStopsTheProcessAndTellsNothing() async {
