@@ -427,6 +427,28 @@ import Testing
         #expect(h.saved?.items.last?.sentence == "log in to Silo")
     }
 
+    /// REVIEW-items 1.10: a run T3 shows ended while its last reply still streams in the projection is not read as a
+    /// turn with no words: the projection is read again until the reply is whole.
+    @Test func aTurnWhoseReplyStillStreamsIsReadOnceItIsWhole() throws {
+        var p = T3Projection(json: ["thread": T3Fixture.thread("t1"), "runs": [T3Fixture.run("r2", status: "completed")],
+                                    "messages": [T3Fixture.message("a1", role: "assistant", text: "Sign in to")]])
+        p.messages[0].streaming = true
+        p.messages[0].runId = "r2"
+        let f = RouterItemFacts.make(p)
+        #expect(f.turns["r2"]?.streaming == true && f.turns["r2"]?.live == false)
+        let h = seeded()
+        h.records.items.missAfter = { _ in 0 }
+        h.records.put(Self.ended("r2"))
+        h.facts(f)
+        #expect(h.reads.count == 1 && h.saved?.read.contains("turn:r2") == false)
+        h.records.items.retried("t1")
+        p.messages[0].streaming = false
+        p.messages[0].text = "Sign in to Silo, please."
+        h.facts(RouterItemFacts.make(p))
+        guard case .turn(let reply, _, _, _)? = h.reads.last?.items?.input else { Issue.record("not read"); return }
+        #expect(reply == "Sign in to Silo, please.")
+    }
+
     @Test func aWokenTurnSaysWhatWokeIt() throws {
         let h = Harness()
         h.records.put(Self.ended())

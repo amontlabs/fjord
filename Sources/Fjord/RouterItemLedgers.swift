@@ -20,6 +20,8 @@ struct RouterItemFacts: Equatable, Sendable {
         var status: String
         /// Still running: its reply isn't whole yet.
         var live: Bool
+        /// Ended, but its last reply is still streaming in the projection: not whole yet either (`reply` has it so far).
+        var streaming = false
     }
 
     struct Message: Equatable, Sendable {
@@ -49,11 +51,15 @@ struct RouterItemFacts: Equatable, Sendable {
             }), case .assistantMessage(_, let text, _) = item.detail {
                 reply = text
             }
+            // The run's last reply still streaming: the projection is behind the run's end.
+            let last = p.messages.last { $0.runId == run.id && $0.role == "assistant" && !$0.text.isEmpty }
+            let streaming = last?.streaming == true
+            if streaming { reply = last?.text }
             let own = run.userMessageId.flatMap { byID[$0] }
             f.turns[run.id] = Turn(reply: reply ?? "", yourWords: own?.createdBy == "user" ? own?.text : nil,
                                    woke: own.flatMap { $0.createdBy == "user" ? nil : $0.text },
                                    started: own?.createdBy == "user" ? own?.id : nil, status: run.status.rawValue,
-                                   live: run.status.isLive)
+                                   live: run.status.isLive, streaming: streaming && !run.status.isLive)
         }
         let ordered = p.messages.filter { $0.createdAt != nil }.sorted { ($0.createdAt?.date ?? .distantPast) < ($1.createdAt?.date ?? .distantPast) }
         var before: String?
@@ -420,7 +426,7 @@ struct RouterItemFacts: Equatable, Sendable {
         switch input {
         case .turn(let run):
             // Ended in the facts; or older than the runs they keep (the ones after it are read instead); or spent.
-            l.facts?.turns[run].map { !$0.live } ?? (l.facts.map { $0.order.contains(run) } ?? false) || spent(l, input.key)
+            l.facts?.turns[run].map { !$0.live && !$0.streaming } ?? (l.facts.map { $0.order.contains(run) } ?? false) || spent(l, input.key)
         case .messages(_, let upTo):
             // Facts read for it that list the message T3 stamped (the projection may lag the shell).
             spent(l, input.key) || l.factsFor == input.key && l.facts?.messages.contains { $0.at >= upTo.addingTimeInterval(-2) } == true
