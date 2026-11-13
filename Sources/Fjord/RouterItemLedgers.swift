@@ -724,9 +724,13 @@ struct RouterItemFacts: Equatable, Sendable {
                 s.items[i].sentence = f.sentence
                 s.items[i].kind = f.kind
                 if !f.options.isEmpty { s.items[i].options = f.options }
+                // Restated: its newer words, when the read has them.
+                if let detail = f.detail { s.items[i].detail = detail }
+                if let quote = f.quote { s.items[i].quote = quote }
                 s.items[i].since = now
             } else {
-                let item = RouterItem(id: "i\(s.next)", kind: f.kind, sentence: f.sentence, since: now, options: f.options)
+                let item = RouterItem(id: "i\(s.next)", kind: f.kind, sentence: f.sentence, since: now, options: f.options,
+                                      detail: f.detail, quote: f.quote)
                 s.next += 1
                 s.items.append(item)
                 added.append(item)
@@ -889,7 +893,8 @@ struct RouterItemFacts: Equatable, Sendable {
             // What the read under way found: restated items stay; new ones land lit (their ids as the commit gives them).
             var n = s.next
             for f in l.found where f.sameAs == nil || !s.items.contains(where: { $0.id == f.sameAs }) && !s.done.contains(where: { $0.item.id == f.sameAs }) {
-                var item = RouterItem(id: "i\(n)", kind: f.kind, sentence: f.sentence, since: now(), options: f.options, state: .new)
+                var item = RouterItem(id: "i\(n)", kind: f.kind, sentence: f.sentence, since: now(), options: f.options,
+                                      detail: f.detail, quote: f.quote, state: .new)
                 item.preview = true
                 items.append(item)
                 n += 1
@@ -924,13 +929,16 @@ struct RouterItemFacts: Equatable, Sendable {
 }
 
 extension RouterItem: Codable {
-    private enum CodingKeys: String, CodingKey { case id, kind, sentence, since, options }
+    private enum CodingKeys: String, CodingKey { case id, kind, sentence, since, options, detail, quote }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         self.init(id: try c.decode(String.self, forKey: .id), kind: try c.decode(Kind.self, forKey: .kind),
                   sentence: try c.decode(String.self, forKey: .sentence), since: try c.decode(Date.self, forKey: .since),
-                  options: try c.decodeIfPresent([String].self, forKey: .options) ?? [])
+                  options: try c.decodeIfPresent([String].self, forKey: .options) ?? [],
+                  // Items saved before reads kept them have neither: the card quotes the thread's last lines.
+                  detail: try c.decodeIfPresent(String.self, forKey: .detail),
+                  quote: try c.decodeIfPresent(String.self, forKey: .quote))
     }
 
     func encode(to e: Encoder) throws {
@@ -940,5 +948,7 @@ extension RouterItem: Codable {
         try c.encode(sentence, forKey: .sentence)
         try c.encode(since, forKey: .since)
         if !options.isEmpty { try c.encode(options, forKey: .options) }
+        try c.encodeIfPresent(detail, forKey: .detail)
+        try c.encodeIfPresent(quote, forKey: .quote)
     }
 }

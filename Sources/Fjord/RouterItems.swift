@@ -66,10 +66,10 @@ struct RouterItem: Identifiable, Equatable {
     var since: Date
     /// A choice's options, when the agent gave some: the item's card lists them.
     var options: [String] = []
-    /// What the sentence leaves out, in a sentence or two, when there is more to say (the demo's only, for now).
+    /// What the sentence leaves out, in a sentence or two, when there is more to say (the read's, `RouterItemsPrompt`).
     var detail: String? = nil
-    /// The exact lines of the agent's message the item comes from (the demo's only, for now): the peek and the card
-    /// quote them, their links clickable in the words.
+    /// The exact lines of the agent's message the item comes from (kept only when they are in it word for word): the
+    /// peek and the card quote them, their links clickable in the words.
     var quote: String? = nil
     var state: State = .open
 

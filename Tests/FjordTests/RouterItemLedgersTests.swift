@@ -895,10 +895,31 @@ import Testing
         #expect(text.components(separatedBy: SessionFence.close).count - 1 == 2)
     }
 
+    @Test func aFoundItemKeepsItsDetailAndOnlyAQuoteThatIsTheAgentsWords() {
+        let reply = "Released 0.8.13.\n- Install: the update panel offers 0.8.13; accept it there.\nDone."
+        let text = #"{"open":[],"found":["# + [
+            #"{"kind":"do","same_as":"","sentence":"install 0.8.13","detail":"The fix isn't live until the app is updated.","quote":"- Install: the update panel offers 0.8.13; accept it there.\n","options":[]}"#,
+            #"{"kind":"know","same_as":"","sentence":"released 0.8.13","detail":"released 0.8.13","quote":"Released 0.8.13 today.","options":[]}"#,
+        ].joined(separator: ",") + #"],"line":"released"}"#
+        let a = RouterItemsReading.answer(Data(text.utf8), turn: true, ids: [], source: reply)
+        #expect(a?.found.first?.detail == "The fix isn't live until the app is updated.")
+        #expect(a?.found.first?.quote == "- Install: the update panel offers 0.8.13; accept it there.")
+        // Its words aren't the agent's (it added "today"): dropped; a detail that is the sentence again says nothing more.
+        #expect(a?.found.last?.quote == nil && a?.found.last?.detail == nil)
+        // Saved and read back; an item saved before reads kept them reads with neither.
+        var item = RouterItem(id: "i1", kind: .do, sentence: "install", since: Date(timeIntervalSinceReferenceDate: 0), detail: "d", quote: "q")
+        let back = try? JSONDecoder().decode(RouterItem.self, from: JSONEncoder().encode(item))
+        #expect(back?.detail == "d" && back?.quote == "q")
+        item.detail = nil
+        item.quote = nil
+        let old = try? JSONDecoder().decode(RouterItem.self, from: Data(#"{"id":"i1","kind":"do","sentence":"install","since":0}"#.utf8))
+        #expect(old == item)
+    }
+
     @Test func theAppSendsTheEvalsV2Prompts() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
-        for (name, prompt) in [("turn-v2", RouterItemsPrompt.turn), ("message-v2", RouterItemsPrompt.message), ("said-v2", RouterItemsPrompt.said)] {
+        for (name, prompt) in [("turn-v3", RouterItemsPrompt.turn), ("message-v2", RouterItemsPrompt.message), ("said-v3", RouterItemsPrompt.said)] {
             let v = try String(contentsOf: root.appendingPathComponent("evals/router/items/prompts/system-\(name).txt"), encoding: .utf8)
             #expect(words(prompt) == words(v), "the \(name) prompt is EVAL-items.md's")
         }

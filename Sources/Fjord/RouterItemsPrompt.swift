@@ -45,6 +45,15 @@ struct RouterItemsInput: Equatable, Sendable {
 
     var isTurn: Bool { if case .turn = input { true } else { false } }
 
+    /// The agent's words a found item may quote: a turn's reply, a mid-run message (your words quote nothing).
+    var agentWords: String? {
+        switch input {
+        case .turn(let reply, _, _, _): reply
+        case .said(let message, _): message
+        case .message: nil
+        }
+    }
+
     var reads: Reads {
         switch input {
         case .turn: .turn
@@ -61,6 +70,10 @@ struct RouterItemsAnswer: Equatable, Sendable {
     struct Found: Equatable, Sendable {
         var kind: RouterItem.Kind
         var sentence: String
+        /// The whole item, when the sentence leaves something out.
+        var detail: String? = nil
+        /// The agent's exact lines behind it: kept only when they are, word for word, in what it wrote.
+        var quote: String? = nil
         var options: [String] = []
         /// The open item it restates: merged into it (no duplicate, its age resets), not added.
         var sameAs: String?
@@ -122,9 +135,13 @@ enum RouterItemsPrompt {
     nothing, or one item. A newer state of an open item (new results of the same check) is that item restated.
     - `same_as`: the `id` of an open item this one restates (the same question or step, in other words): it is not new. \
     Else "".
-    - `sentence`: at most 14 words, starting in lower case, concrete, as the user would say it ("merge PR #2049 once CI \
-    is green", "keep the 0.3 checkpoint as a fallback, or delete it?", "the VM boot times out at the same step, third \
-    try"). A decide ends with a question mark.
+    - `sentence`: at most 14 words, starting in lower case, concrete, as the user would say it, the key fact first \
+    ("merge PR #2049 once CI is green", "keep the 0.3 checkpoint as a fallback, or delete it?", "the VM boot times out at \
+    the same step, third try"). A decide ends with a question mark.
+    - `detail`: the whole item in one or two plain sentences (at most 280 characters), only when it adds what the \
+    sentence leaves out (why, what each choice means, what is at stake); else "".
+    - `quote`: the lines of the agent's message the item comes from, copied exactly, character for character (one \
+    passage, at most about 6 lines, never edited, joined or shortened inside); "" when no passage says it.
     - `options`: for a decide whose reply offers choices, each as the short words the user would send to pick it (at \
     most 4); else empty.
     """
@@ -155,7 +172,7 @@ enum RouterItemsPrompt {
 
     private static let how = #"{"type":"string","enum":["answered","done","obsolete",""]}"#
     private static let openSchema = #"{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["keep","close"]},"how":"# + how + #"},"required":["id","verdict","how"],"additionalProperties":false}}"#
-    private static let foundSchema = #"{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["stuck","decide","do","know"]},"same_as":{"type":"string"},"sentence":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}},"required":["kind","same_as","sentence","options"],"additionalProperties":false}}"#
+    private static let foundSchema = #"{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["stuck","decide","do","know"]},"same_as":{"type":"string"},"sentence":{"type":"string"},"detail":{"type":"string"},"quote":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}},"required":["kind","same_as","sentence","detail","quote","options"],"additionalProperties":false}}"#
 
     /// In this order: what closes lands first, then what is new, then the line streams.
     static let turnSchema = #"{"type":"object","properties":{"open":"# + openSchema + #","found":"# + foundSchema
@@ -281,18 +298,21 @@ struct RouterItemsReading {
     let lines: Bool
     /// The ids the read was given: anything else it names is ignored.
     let ids: Set<String>
+    /// The agent's words it read: a quote not found in them word for word is dropped.
+    let source: String?
     private(set) var closeTold = false
     private(set) var foundTold = false
     private(set) var lineDone = false
     private var shown = ""
 
-    init(_ reads: RouterItemsInput.Reads, ids: Set<String>) {
+    init(_ reads: RouterItemsInput.Reads, ids: Set<String>, source: String? = nil) {
         finds = reads.finds
         lines = reads.lines
         self.ids = ids
+        self.source = source
     }
 
-    init(turn: Bool, ids: Set<String>) { self.init(turn ? .turn : .message, ids: ids) }
+    init(turn: Bool, ids: Set<String>, source: String? = nil) { self.init(turn ? .turn : .message, ids: ids, source: source) }
 
     mutating func take(_ piece: PartialJSON.Piece) -> [RouterItemsEvent] {
         switch piece {
@@ -303,7 +323,7 @@ struct RouterItemsReading {
         case .field("found", let raw) where finds && !foundTold:
             guard let a = Self.array(raw) else { return [] }
             foundTold = true
-            return [.found(Self.found(a, ids: ids))]
+            return [.found(Self.found(a, ids: ids, source: source))]
         case .growing("line", let words) where lines && !lineDone:
             guard foundTold, words != shown else { return [] }
             shown = words
@@ -320,7 +340,7 @@ struct RouterItemsReading {
 
     /// The read's end: what wasn't told yet, then the answer; `failed` when it doesn't read.
     mutating func end(_ json: Data?) -> [RouterItemsEvent] {
-        guard let json, let answer = Self.answer(json, finds: finds, lines: lines, ids: ids) else { return [.failed] }
+        guard let json, let answer = Self.answer(json, finds: finds, lines: lines, ids: ids, source: source) else { return [.failed] }
         var out: [RouterItemsEvent] = []
         if !closeTold { closeTold = true; out.append(.closing(answer.close)) }
         if finds, !foundTold { foundTold = true; out.append(.found(answer.found)) }
@@ -330,14 +350,14 @@ struct RouterItemsReading {
     }
 
     /// The whole answer, checked: closes of known ids only, found items with a kind and a sentence, a turn's line.
-    static func answer(_ json: Data, turn: Bool, ids: Set<String>) -> RouterItemsAnswer? {
-        answer(json, finds: turn, lines: turn, ids: ids)
+    static func answer(_ json: Data, turn: Bool, ids: Set<String>, source: String? = nil) -> RouterItemsAnswer? {
+        answer(json, finds: turn, lines: turn, ids: ids, source: source)
     }
 
-    static func answer(_ json: Data, finds: Bool, lines: Bool, ids: Set<String>) -> RouterItemsAnswer? {
+    static func answer(_ json: Data, finds: Bool, lines: Bool, ids: Set<String>, source: String? = nil) -> RouterItemsAnswer? {
         guard let o = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any], let open = o["open"] as? [Any] else { return nil }
         var a = RouterItemsAnswer(close: closes(open, ids: ids))
-        if finds { a.found = found((o["found"] as? [Any]) ?? [], ids: ids) }
+        if finds { a.found = found((o["found"] as? [Any]) ?? [], ids: ids, source: source) }
         if lines { a.line = RouterVerdictReading.flat(o["line"] as? String ?? "") }
         return a
     }
@@ -353,7 +373,7 @@ struct RouterItemsReading {
         return out
     }
 
-    static func found(_ entries: [Any], ids: Set<String>) -> [RouterItemsAnswer.Found] {
+    static func found(_ entries: [Any], ids: Set<String>, source: String? = nil) -> [RouterItemsAnswer.Found] {
         var out: [RouterItemsAnswer.Found] = []
         for case let e as [String: Any] in entries.prefix(6) {
             guard let kind = (e["kind"] as? String).flatMap(RouterItem.Kind.init(rawValue:)) else { continue }
@@ -362,8 +382,28 @@ struct RouterItemsReading {
             let options = Array(((e["options"] as? [Any]) ?? []).compactMap { ($0 as? String).map(RouterVerdictReading.flat) }
                 .filter { !$0.isEmpty }.prefix(4))
             let same = (e["same_as"] as? String).flatMap { ids.contains($0) ? $0 : nil }
-            out.append(.init(kind: kind, sentence: sentence, options: kind == .decide ? options : [], sameAs: same))
+            out.append(.init(kind: kind, sentence: sentence, detail: detail(e["detail"] as? String, sentence: sentence),
+                             quote: quote(e["quote"] as? String, in: source), options: kind == .decide ? options : [], sameAs: same))
         }
         return out
+    }
+
+    /// The most a detail keeps: the prompt asks for 280 characters; past this it is cut at a word.
+    static let detailCharacters = 400
+
+    /// The detail, on one line, when it says more than the sentence; cut at a word past `detailCharacters`.
+    static func detail(_ raw: String?, sentence: String) -> String? {
+        let d = RouterVerdictReading.flat(raw ?? "")
+        guard !d.isEmpty, d.caseInsensitiveCompare(sentence) != .orderedSame else { return nil }
+        guard d.count > detailCharacters else { return d }
+        let head = d.prefix(detailCharacters)
+        return String(head[..<(head.lastIndex(of: " ") ?? head.endIndex)]) + "…"
+    }
+
+    /// The quote, only when it is the agent's words exactly (trimmed at its ends): the model never puts words in its mouth.
+    static func quote(_ raw: String?, in source: String?) -> String? {
+        let q = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, let source, source.contains(q) else { return nil }
+        return q
     }
 }

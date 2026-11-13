@@ -612,9 +612,11 @@ checking, closing with how, new).
   radius 6, the `quiet` fill, `chosen` under the pointer; `↗` and the address without its scheme, footnote 12
   `Text.secondary`, middle truncation), the options, then `Done ⌘⌫` · `Open in T3 ⌘O`. Never empty: an item with no
   detail, quote or options quotes the thread's last lines. The line's own item's card starts under the name as every
-  card; a block item's under its row's sentence. Demo only for now (`RouterItem.detail`, `.quote`; shots
-  `v2-item-line-wrap`, `v2-item-peek`, `v2-item-peek-row`, `v2-item-card`, `v2-item-card-block`); the engine doesn't
-  fill them yet.
+  card; a block item's under its row's sentence. Shots `v2-item-line-wrap`, `v2-item-peek`, `v2-item-peek-row`,
+  `v2-item-card`, `v2-item-card-block`. The read fills them (`RouterItem.detail`, `.quote`, saved with the item): each
+  found item has its `sentence` (key fact first), a `detail` (the whole item, at most about 280 characters, only when it
+  adds something) and a `quote` (the agent's exact lines), kept only when it is word for word in the reply or message
+  read, else dropped (`RouterItemsReading.quote`). Items saved before have neither and quote the thread's last lines.
 - **↑↓** walk the header, then each item. The header's card is the thread's (the working timeline); an item's card is its
   options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
   T3 ⌘O`. Done strikes the item "done by you", folds it after 1.6 s, and the toast offers Revert. The open card's ground
