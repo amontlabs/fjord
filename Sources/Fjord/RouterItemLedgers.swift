@@ -40,37 +40,62 @@ struct RouterItemFacts: Equatable, Sendable {
     /// How many of the latest runs and messages are read.
     static let kept = 8
 
+    /// Made off the main thread (a long thread's projection has thousands of items): one walk back from the end over the
+    /// messages, and over the turn items only for a run with no reply among them.
     static func make(_ p: T3Projection) -> RouterItemFacts {
         var f = RouterItemFacts()
-        f.order = p.runs.filter { !$0.isQueued }.sorted { $0.ordinal < $1.ordinal }.map(\.id)
-        let byID = Dictionary(p.messages.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        for run in p.runs.filter({ !$0.isQueued }).suffix(kept) {
-            var reply = p.messages.last { $0.runId == run.id && $0.role == "assistant" && !$0.text.isEmpty && !$0.streaming }?.text
-            if reply == nil, let item = p.turnItems.last(where: {
-                if $0.runId == run.id, case .assistantMessage(_, let t, let s) = $0.detail { !t.isEmpty && !s } else { false }
-            }), case .assistantMessage(_, let text, _) = item.detail {
-                reply = text
+        let runs = p.runs.filter { !$0.isQueued }.sorted { $0.ordinal < $1.ordinal }
+        f.order = runs.map(\.id)
+        let latest = runs.suffix(kept)
+        let wanted = Set(latest.map(\.id))
+        let starters = Set(latest.compactMap(\.userMessageId))
+        var whole: [String: String] = [:]
+        var last: [String: T3Message] = [:]
+        var starter: [String: T3Message] = [:]
+        // Your messages, newest first, each waiting for the reply before it.
+        var mine: [Message] = []
+        var waiting: [Int] = []
+        let ordered = p.messages.indices.dropFirst().allSatisfy { i in
+            (p.messages[i - 1].createdAt?.date ?? .distantPast) <= (p.messages[i].createdAt?.date ?? .distantPast)
+        } ? p.messages : p.messages.sorted { ($0.createdAt?.date ?? .distantPast) < ($1.createdAt?.date ?? .distantPast) }
+        for m in ordered.reversed() {
+            if starters.contains(m.id), starter[m.id] == nil { starter[m.id] = m }
+            if m.role == "assistant", !m.text.isEmpty {
+                if let r = m.runId, wanted.contains(r) {
+                    if last[r] == nil { last[r] = m }
+                    if whole[r] == nil, !m.streaming { whole[r] = m.text }
+                }
+                for i in waiting { mine[i].before = m.text }
+                waiting = []
             }
+            if m.role == "user", m.createdBy == "user", !m.text.isEmpty, mine.count < kept, let at = m.createdAt?.date {
+                mine.append(Message(id: m.id, at: at, text: m.text, before: nil))
+                waiting.append(mine.count - 1)
+            }
+            if mine.count >= kept, waiting.isEmpty, whole.count == wanted.count, starter.count == starters.count { break }
+        }
+        f.messages = mine.reversed()
+        // A run with no whole reply among the messages: its last finished reply in the turn items.
+        var missing = wanted.subtracting(whole.keys)
+        if !missing.isEmpty {
+            for item in p.turnItems.reversed() {
+                guard let r = item.runId, missing.contains(r), case .assistantMessage(_, let t, let streaming) = item.detail,
+                      !t.isEmpty, !streaming else { continue }
+                whole[r] = t
+                missing.remove(r)
+                if missing.isEmpty { break }
+            }
+        }
+        for run in latest {
             // The run's last reply still streaming: the projection is behind the run's end.
-            let last = p.messages.last { $0.runId == run.id && $0.role == "assistant" && !$0.text.isEmpty }
-            let streaming = last?.streaming == true
-            if streaming { reply = last?.text }
-            let own = run.userMessageId.flatMap { byID[$0] }
+            let streaming = last[run.id]?.streaming == true
+            let reply = streaming ? last[run.id]?.text : whole[run.id]
+            let own = run.userMessageId.flatMap { starter[$0] }
             f.turns[run.id] = Turn(reply: reply ?? "", yourWords: own?.createdBy == "user" ? own?.text : nil,
                                    woke: own.flatMap { $0.createdBy == "user" ? nil : $0.text },
                                    started: own?.createdBy == "user" ? own?.id : nil, status: run.status.rawValue,
                                    live: run.status.isLive, streaming: streaming && !run.status.isLive)
         }
-        let ordered = p.messages.filter { $0.createdAt != nil }.sorted { ($0.createdAt?.date ?? .distantPast) < ($1.createdAt?.date ?? .distantPast) }
-        var before: String?
-        var mine: [Message] = []
-        for m in ordered {
-            if m.role == "assistant", !m.text.isEmpty { before = m.text }
-            if m.role == "user", m.createdBy == "user", !m.text.isEmpty, let at = m.createdAt?.date {
-                mine.append(Message(id: m.id, at: at, text: m.text, before: before))
-            }
-        }
-        f.messages = Array(mine.suffix(kept))
         return f
     }
 
