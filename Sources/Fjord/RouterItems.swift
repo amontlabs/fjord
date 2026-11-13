@@ -139,6 +139,9 @@ extension Router {
             static let obsolete = "no longer open"
             static let doneByYou = "done by you"
             static let done = "Done"
+            /// A turn or message Fjord couldn't read (T3 never had it): kept as a Know, so what it said isn't silently lost.
+            static let unread = "a turn couldn't be read: open the thread to see what it said"
+            static let unreadMessage = "a message of yours couldn't be read: open the thread to check it was answered"
         }
     }
 }

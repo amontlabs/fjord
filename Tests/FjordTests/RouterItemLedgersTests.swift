@@ -257,6 +257,48 @@ import Testing
             h.records.items.retried("t1")
         }
         #expect(h.saved?.pending.isEmpty == true)
+        #expect(h.saved?.items.last?.sentence == Router.Items.Copy.unreadMessage)
+    }
+
+    /// REVIEW-items 1.4: a turn older than the projection's kept runs (the thread was snoozed through nine turns) doesn't
+    /// hold the ledger: the turns after it are read in order instead.
+    @Test func aTurnOlderThanTheFactsIsPassedAndTheTurnsAfterItAreRead() throws {
+        let h = seeded()
+        // r2 is under way when the thread goes off the page; it is back when r12 is.
+        h.records.put(Self.running("r2"))
+        h.records.put(Self.running("r12"))
+        #expect(h.fetched.last?.1 == "turn:r2")
+        var f = RouterItemFacts(order: (1...12).map { "r\($0)" })
+        for n in 5...11 { f.turns["r\(n)"] = Self.turn("Turn \(n).") }
+        f.turns["r12"] = Self.turn("", live: true)
+        h.facts(f)
+        #expect(h.reads.last?.fingerprint == "turn:r5")
+        for n in 5...11 {
+            #expect(h.reads.last?.fingerprint == "turn:r\(n)")
+            h.answer(RouterItemsAnswer())
+        }
+        #expect(h.saved?.pending.isEmpty == true)
+        #expect(h.saved?.items.count == 2)
+    }
+
+    /// REVIEW-items 1.4: a turn T3 never lists, or a projection read that keeps failing, doesn't freeze the ledger: after
+    /// a few reads on a backoff, it is passed with a note, and your next message is read.
+    @Test func aTurnThatCantBeFetchedIsPassedWithANoteAndTheNextInputIsRead() throws {
+        let h = seeded()
+        h.records.items.missAfter = { _ in 0 }
+        h.records.put(Self.ended("r2"))
+        // A failed read (nil) is tried again on its backoff, not only when T3 moves.
+        h.records.itemFacts("t1", key: "turn:r2", nil)
+        h.records.items.retried("t1")
+        #expect(h.fetched.filter { $0.1 == "turn:r2" }.count == 2)
+        for _ in 1..<RouterItemLedgers.maxMisses {
+            h.facts(RouterItemFacts(order: ["r1"]))
+            h.records.items.retried("t1")
+        }
+        #expect(h.saved?.read.contains("turn:r2") == true)
+        #expect(h.saved?.items.last?.sentence == Router.Items.Copy.unread && h.saved?.items.last?.kind == .know)
+        h.records.began(send: RouterActs.Send(thread: "t1", words: "delete it", kind: .words, at: h.clock))
+        #expect(h.reads.last?.fingerprint.hasPrefix("sent:") == true)
     }
 
     /// REVIEW-items 2.2: two messages in one T3 update, or written while the thread was off the page, are each read.

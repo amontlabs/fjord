@@ -30,12 +30,15 @@ struct RouterItemFacts: Equatable, Sendable {
 
     var turns: [String: Turn] = [:]
     var messages: [Message] = []
+    /// Every run T3 lists (not queued), oldest first: a turn older than the ones kept is known, not missing.
+    var order: [String] = []
 
     /// How many of the latest runs and messages are read.
     static let kept = 8
 
     static func make(_ p: T3Projection) -> RouterItemFacts {
         var f = RouterItemFacts()
+        f.order = p.runs.filter { !$0.isQueued }.sorted { $0.ordinal < $1.ordinal }.map(\.id)
         let byID = Dictionary(p.messages.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for run in p.runs.filter({ !$0.isQueued }).suffix(kept) {
             var reply = p.messages.last { $0.runId == run.id && $0.role == "assistant" && !$0.text.isEmpty && !$0.streaming }?.text
@@ -353,7 +356,9 @@ struct RouterItemFacts: Equatable, Sendable {
 
     private func has(_ l: Live, _ input: Input) -> Bool {
         switch input {
-        case .turn(let run): l.facts?.turns[run].map { !$0.live } ?? false
+        case .turn(let run):
+            // Ended in the facts; or older than the runs they keep (the ones after it are read instead); or spent.
+            l.facts?.turns[run].map { !$0.live } ?? (l.facts.map { $0.order.contains(run) } ?? false) || spent(l, input.key)
         case .messages(_, let upTo):
             // Facts read for it that list the message T3 stamped (the projection may lag the shell).
             spent(l, input.key) || l.factsFor == input.key && l.facts?.messages.contains { $0.at >= upTo.addingTimeInterval(-2) } == true
@@ -393,6 +398,12 @@ struct RouterItemFacts: Equatable, Sendable {
                     }
                     inputs.append(.message(id: m.id, at: m.at, words: m.text, before: m.before))
                 }
+                if !f.messages.contains(where: { $0.at >= upTo.addingTimeInterval(-2) }),
+                   s.items.allSatisfy({ $0.sentence != Router.Items.Copy.unreadMessage }) {
+                    // T3 never listed it: a note, so an answer of yours isn't silently unread.
+                    s.items.append(RouterItem(id: "i\(s.next)", kind: .know, sentence: Router.Items.Copy.unreadMessage, since: now()))
+                    s.next += 1
+                }
                 markRead(&s, input.key)
                 let fresh = inputs.filter { x in !s.read.contains(x.key) && !s.pending.contains { $0.key == x.key } }
                 s.pending.insert(contentsOf: fresh, at: 0)
@@ -408,8 +419,20 @@ struct RouterItemFacts: Equatable, Sendable {
                                      input: .message(words: "", replyBefore: nil), pullRequests: context.pullRequests)
             switch input {
             case .turn(let run):
+                // The turns that ended after it and were never seen (the thread was off the page): read after it, in order.
+                if let f = l.facts, let i = f.order.firstIndex(of: run) {
+                    let later = f.order[(i + 1)...].filter { r in
+                        f.turns[r].map { !$0.live } == true
+                            && !s.read.contains(Input.turn(run: r).key) && !s.pending.contains(.turn(run: r))
+                    }
+                    s.pending.insert(contentsOf: later.map { Input.turn(run: $0) }, at: 1)
+                }
                 guard let turn = l.facts?.turns[run], !turn.reply.isEmpty else {
-                    // A turn with no words: nothing to read.
+                    // A turn with no words, or older than the facts keep: nothing to read. One T3 never listed: a note.
+                    if l.facts?.order.contains(run) != true, s.items.allSatisfy({ $0.sentence != Router.Items.Copy.unread }) {
+                        s.items.append(RouterItem(id: "i\(s.next)", kind: .know, sentence: Router.Items.Copy.unread, since: now()))
+                        s.next += 1
+                    }
                     markRead(&s, input.key)
                     store(id, s)
                     changed(id)
