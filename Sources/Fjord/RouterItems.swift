@@ -431,3 +431,34 @@ extension RouterLedger {
         for i in items.indices where items[i].state == .new { items[i].state = .open }
     }
 }
+
+// MARK: - The first block of a launch
+
+/// The first block drawn in a launch took 41 ms to commit, later ones 7 to 16 ms (SwiftUI making the block's views and
+/// their ticks for the first time, `FJORD_LOAD_BLOCKS`). Once the page is still after it opens, one block is laid out
+/// off screen and dropped, so the first real one costs what the others do.
+@MainActor enum RouterBlockWarmup {
+    private static var done = false
+
+    static func once(_ model: RouterModel) {
+        guard !done, !model.still else { return }
+        done = true
+        MotionGate.whenStill {
+            var t = RouterThread(id: "warmup", name: "Warmup", title: "Warmup", project: "fjord", state: .done,
+                                 sentence: .init(text: "warm"), since: model.now)
+            t.ledger.items = [RouterItem(id: "w1", kind: .decide, sentence: "keep it?", since: model.now, state: .checking),
+                              RouterItem(id: "w2", kind: .know, sentence: "it is smaller", since: model.now, state: .new)]
+            let view = VStack(spacing: 0) {
+                RouterBlockHeader(model: model, thread: t, hot: false)
+                ForEach(t.ledger.items) { RouterItemRow(model: model, thread: t.id, item: $0, selected: false, hot: false, pressed: false) }
+                RouterItemSentRow(words: "warm")
+            }
+            .frame(width: 900)
+            .modifier(Brand.Scheme())
+            let host = NSHostingView(rootView: view)
+            host.frame = NSRect(x: 0, y: 0, width: 900, height: 200)
+            host.layoutSubtreeIfNeeded()
+            _ = host.fittingSize
+        }
+    }
+}

@@ -101,6 +101,7 @@ struct RouterScreen: View {
             flags.start(model)
             // The ages tick on one clock while the page shows (a still's stands).
             if !model.still { model.clock.start() }
+            RouterBlockWarmup.once(model)
         }
         .onDisappear {
             flags.stop()
