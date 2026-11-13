@@ -52,66 +52,14 @@ enum RouterBlockLayout {
     /// went and left its gap under the rows after it, which jumped up into it while the block shrank on the spring.
     static func rowsKey(_ thread: RouterThread) -> [String] { rows(thread).map(\.id) }
 
-    /// Wide (`Router.Wide`): whether the header has a row in the right column: its own words, Fjord's mark while a read is
-    /// under way, or its card open under it.
+    /// Whether the header has something of its own to say besides its name: its own words, Fjord's mark while a read
+    /// is under way, or its card open under it (the wide layouts to choose from give it a row only then, `RouterLab`).
     static func headerShown(_ thread: RouterThread, sentence: RouterThread.Sentence? = nil, card: Bool) -> Bool {
         card || thread.ledger.read != nil || !RouterBlockHeader.words(thread, sentence: sentence).isEmpty
     }
 
-    /// What the wide layout's left column holds beside a row: the name beside the first row of the right column, the
-    /// project and age beside the second (both beside the first when it is the only one).
-    enum Left { case name, meta, both }
-
-    static func left(_ rows: [Row], headerShown: Bool) -> [String: Left] {
-        let right = rows.filter { if case .header = $0 { headerShown } else { true } }.map(\.id)
-        guard let first = right.first else { return [:] }
-        guard right.count > 1 else { return [first: .both] }
-        return [first: .name, right[1]: .meta]
-    }
-
     /// The tail's rows' line in the targets (`RouterTargets.frames`): placed by its line's origin and the tail's top.
     static func tailRow(_ line: String) -> String { line + "#tail" }
-}
-
-/// Wide: a block's left column beside one of its rows (`RouterBlockLayout.left`): its name with its colour and mark,
-/// wrapping; its project and age. A click on it is a click on the header.
-struct RouterWideLeft: View {
-    let model: RouterModel
-    let thread: RouterThread
-    let part: RouterBlockLayout.Left
-    let hot: Bool
-    /// The row it is beside: its first line of words is centred in a row this tall.
-    let rowHeight: CGFloat
-
-    private typealias M = Router.Line
-    private typealias W = Router.Wide
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: W.metaGap) {
-            if part != .meta {
-                RouterBlockName(thread: thread, hot: hot, lines: 2)
-                    .padding(.top, (rowHeight - Router.Items.lineHeight) / 2 - M.namePadY)
-                    .routerTarget(model, .name(thread.id))
-            }
-            if part != .name {
-                HStack(spacing: 8) {
-                    if let project = thread.project {
-                        RouterProjectPill(model: model, thread: thread.id, project: project)
-                            .opacity(model.project == nil ? 1 : 0)
-                            .allowsHitTesting(model.project == nil)
-                    }
-                    RouterAge(model: model, since: thread.since).frame(minWidth: 0)
-                }
-                .padding(.leading, M.namePadX)
-                .padding(.top, part == .meta ? (rowHeight - CDS.Badge.height) / 2 : 0)
-                .padding(.bottom, part == .both ? (rowHeight - CDS.Badge.height) / 2 : 0)
-            }
-        }
-        .padding(.leading, M.nameLeading)
-        .frame(width: W.start - W.gap, alignment: .topLeading)
-        .contentShape(Rectangle())
-        .onTapGesture { model.click(row: thread.id) }
-    }
 }
 
 /// One row of a block: its header, an item, your words, the placeholder.
@@ -136,8 +84,7 @@ struct RouterBlockRowView: View {
         case .header:
             VStack(alignment: .leading, spacing: 0) {
                 RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                    RouterBlockHeader(model: model, thread: thread, hot: hot, sentence: box.sentence,
-                                      shown: RouterBlockLayout.headerShown(thread, sentence: box.sentence, card: open && box.item == nil))
+                    RouterBlockHeader(model: model, thread: thread, hot: hot, sentence: box.sentence)
                 }
                 .background {
                     RoundedRectangle(cornerRadius: M.radius, style: .continuous)
@@ -151,7 +98,6 @@ struct RouterBlockRowView: View {
                 }
             }
             .modifier(FocusHeight(height: focusHeight))
-            .modifier(WideCell(model: model, box: box, thread: thread, row: row, open: open, hot: hot))
         case .item(let item):
             let key = RouterModel.itemKey(id, item.id)
             let flags = model.flags(.row(key))
@@ -168,64 +114,18 @@ struct RouterBlockRowView: View {
                     arrow(pending != nil, top: (Router.Items.rowHeight - CDS.Dot.size) / 2, leading: M.dotLeading)
                 }
                 if let pending {
-                    RouterPendingLine(pending: pending, leading: Router.Items.markLeading(model.wide)).transition(.opacity)
+                    RouterPendingLine(pending: pending, leading: Router.Items.markLeading).transition(.opacity)
                 }
             }
             .modifier(FocusHeight(height: focusHeight))
-            .modifier(WideCell(model: model, box: box, thread: thread, row: row, open: open, hot: hot))
             .geometryGroup()
             .transition(.routerFold(reduce: reduce))
         case .sent(let words):
-            RouterItemSentRow(words: words, wide: model.wide)
-                .modifier(WideCell(model: model, box: box, thread: thread, row: row, open: open, hot: hot))
+            RouterItemSentRow(words: words)
                 .transition(.routerFold(reduce: reduce))
         case .reading:
-            RouterItemPlaceholder(wide: model.wide)
-                .modifier(WideCell(model: model, box: box, thread: thread, row: row, open: open, hot: hot))
+            RouterItemPlaceholder()
                 .transition(.routerFold(reduce: reduce))
-        }
-    }
-
-    /// Wide (`Router.Wide`): beside the row, its part of the left column (the name, or the project and age), and down
-    /// the right column's edge the thread's hairline in its colour, on every row the right column has, so it spans
-    /// exactly them. Narrow, nothing.
-    private struct WideCell: ViewModifier {
-        let model: RouterModel
-        let box: RouterLineBox
-        let thread: RouterThread
-        let row: RouterBlockLayout.Row
-        let open: Bool
-        let hot: Bool
-
-        func body(content: Content) -> some View {
-            if model.wide {
-                let card = open && box.item == nil
-                let shown = RouterBlockLayout.headerShown(thread, sentence: box.sentence, card: card)
-                let rows = RouterBlockLayout.rows(thread)
-                let left = RouterBlockLayout.left(rows, headerShown: shown)[row.id]
-                let header: Bool = if case .header = row { true } else { false }
-                let rowHeight = header ? Router.Line.minHeight : Router.Items.rowHeight
-                // The left column's part beside the row; the row grows when it is taller (a wrapped name, the name
-                // with its project).
-                ZStack(alignment: .topLeading) {
-                    // The hairline on the row itself, so it spans the right column's rows exactly (not the room a
-                    // taller left part makes under one).
-                    content.background(alignment: .topLeading) {
-                        if !header || shown {
-                            Rectangle().fill((thread.ledger.top?.tint ?? CDS.Text.muted).opacity(Router.Wide.ruleOpacity))
-                                .frame(width: Router.Wide.rule)
-                                .frame(maxHeight: .infinity)
-                                .padding(.leading, Router.Wide.start - Router.Wide.ruleGap)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    if let left {
-                        RouterWideLeft(model: model, thread: thread, part: left, hot: hot, rowHeight: rowHeight)
-                    }
-                }
-            } else {
-                content
-            }
         }
     }
 

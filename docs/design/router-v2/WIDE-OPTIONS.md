@@ -1,22 +1,22 @@
 # Router v2: four ways to use a wide window (2026-11-13)
 
-The first wide layout (DESIGN.md 1.15.1) was turned down: the column grew to 1120 pt, so the ages sat far from their
-words, the names far from their content, and a thread's own sentence had a quote-like rail. The owner asked for
-options that use the width and save the rows that thread names take, without stretching the reading column.
+The first wide layout was turned down: the column grew to 1120 pt, so the ages sat far from their words, the names
+far from their content, and a thread's own sentence had a quote-like rail. The owner asked for options that use the
+width and save the rows that thread names take, without stretching the reading column. That layout is removed: the
+real page keeps its 720 column at any width (shot `v2-items-1600`) until one of these is chosen.
 
 Four options are built as real components on the page's own records, bar, dock, cards and peeks. They are behind a
 demo-only switch and the real page is unchanged.
 
 ```sh
 swift build
-.build/debug/Fjord --window-shots .build/shots-lab v2-wide-a v2-wide-b v2-wide-c v2-wide-d   # 16 shots, light and dark
+.build/debug/Fjord --window-shots .build/shots-lab v2-wide-                                 # 16 shots, light and dark
 FJORD_WIDE=a .build/debug/Fjord --window-shots .build/shots-lab-a v2-items                   # any shot in one option
 ```
 
 Shots: `window-v2-wide-<a|b|c|d>[-card][-dark].png`, at 1600 × 1000, on `RouterDemo.items`; `-card` has Checkpoint
-boot's Decide open. (The name filter also renders the turned-down layout's `v2-wide` shots.) Code: `RouterLab.swift`
-(the switch, each option's columns, the pane, the board's second column, the ledger) and `RouterLabRows.swift` (the
-rows).
+boot's Decide open. Code: `RouterLab.swift` (the switch, each option's columns, the pane, the board's second column,
+the ledger) and `RouterLabRows.swift` (the rows).
 
 In every option: no rail by a thread's own words, the reading column is 720 pt at most, and the line, hover and card
 layers and the Surfaces rules are the page's.
@@ -83,4 +83,4 @@ What I would take from the others, later and only if needed:
 They are looks to choose from. Rows are placed at once, with no glides, sheen or streaming words. A split message's
 pending lines and ghost rows are not drawn, and a selection is not scrolled into view. Clicks, hover, peeks, picks, the
 dock and the filters work. Building the chosen one for real means giving its rows the page's hosted lines and glides,
-and deleting 1.15.1's `Router.Wide` and the other options with it.
+and deleting the other options.

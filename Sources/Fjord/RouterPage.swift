@@ -460,7 +460,7 @@ struct RouterFloating: View {
             }
             if let (thread, item) = model.peekedItem, let frame = frames[.row(RouterModel.itemKey(thread.id, item.id))] {
                 // An item's row in a block: hung from its words, under its row (over it in the page's lower half).
-                let words = frame.inset(by: Router.Items.markLeading(model.wide) + Router.Line.markBox + Router.Line.markGap)
+                let words = frame.inset(by: Router.Items.markLeading + Router.Line.markBox + Router.Line.markGap)
                 hung(from: words, width: Router.Peek.width) { RouterSummaryView(model: model, thread: thread, item: item, layer: .hover) }
                     .id("item-peek-" + item.id)
                     .transition(.scaleFade(0.98, reduce: reduce))

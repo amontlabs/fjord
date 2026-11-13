@@ -268,19 +268,11 @@ enum RouterShots {
             model.select(.line(ID.checkpoint))
             model.focusItem(RouterDemo.Item.keep)
         },
-        // The wide layout (DESIGN.md 1.15.1, for approval): a page whose column is 1000 pt or more puts a block's name,
-        // project and age in a left column and its words and items in the right one, a hairline in its colour down
-        // them; lines keep their name in the same column. Then an item's card open in it.
-        State(name: "v2-wide", make: { model in
+        // The page in a wide window: its column stays 720, centred (the wide layouts to choose from are below).
+        State(name: "v2-items-1600", make: { model in
             model.select(nil)
             RouterDemo.items(model)
-        }, size: CGSize(width: 1480, height: 1000)),
-        State(name: "v2-wide-card", make: { model in
-            RouterDemo.items(model)
-            model.select(.line(ID.checkpoint))
-            model.focusItem(RouterDemo.Item.keep)
-            model.pick(1)
-        }, size: CGSize(width: 1480, height: 1000)),
+        }, size: wideLab),
         // Four ways to use a wide window, to choose from (WIDE-OPTIONS.md, `RouterLab`): the same records in each, at
         // rest and with Checkpoint boot's Decide open.
     ] + RouterLab.Option.allCases.flatMap { option in

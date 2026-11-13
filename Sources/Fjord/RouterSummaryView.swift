@@ -291,8 +291,7 @@ private struct RouterSummaryCard: View {
             if !inBlock, RouterTimeline.has(thread) { RouterTimeline(model: model, thread: thread) }
             footer
         }
-        // Wide, every card of a block or line keeps to the right column (`Router.Wide`).
-        .padding(.leading, leading ?? (model.wide ? Router.Wide.start + (item != nil ? M.hang : 0) : inBlock ? Router.Items.indent + M.hang : M.leading))
+        .padding(.leading, leading ?? (inBlock ? Router.Items.indent + M.hang : M.leading))
         .padding(.trailing, M.trailing).padding(.bottom, M.bottom)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)

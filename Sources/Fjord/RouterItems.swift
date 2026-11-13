@@ -231,9 +231,6 @@ extension Router {
         /// An item's grounds (under the pointer, its open card's) start this far in: as far before its mark as a
         /// line's ground starts before the line's mark, so its card's inset matches every other card's.
         static let groundLeading: CGFloat = markLeading - (Line.nameLeading + Line.namePadX)
-        /// The same, in the wide layout's right column when `wide` (`Router.Wide`).
-        static func markLeading(_ wide: Bool) -> CGFloat { wide ? Wide.start : markLeading }
-        static func groundLeading(_ wide: Bool) -> CGFloat { markLeading(wide) - (Line.nameLeading + Line.namePadX) }
         static let mark: CGFloat = 9.5
         /// How long a closed item strikes before it folds away, and how long a new one's highlight holds.
         static let strike: Double = 1.6
@@ -326,14 +323,8 @@ struct RouterBlockHeader: View {
         }
     }
 
-    /// Wide (`Router.Wide`): whether the header has a row of its own in the right column (its words, Fjord's mark while
-    /// a read is under way, or its card open under it). Without, its name stands beside its first item.
-    var shown = true
-
     var body: some View {
-        Group {
-            if model.wide { wideBody } else { narrowBody }
-        }
+        row
         .onChange(of: thread.ledger.pulse) { _, _ in
             guard !reduce, !still else { return }
             var none = Transaction()
@@ -343,39 +334,7 @@ struct RouterBlockHeader: View {
         }
     }
 
-    /// Wide: the thread's own words alone, in the right column (the name, project and age are the left column's,
-    /// `RouterWideLeft`); no row at all when it has none.
-    @ViewBuilder private var wideBody: some View {
-        let summary = Self.words(thread, sentence: sentence)
-        let dots = thread.isRunning && thread.ledger.top != nil
-        if shown {
-            HStack(alignment: .top, spacing: Router.Thinking.gap) {
-                if dots {
-                    RouterWorkingDots(tint: CDS.Text.muted, paused: thread.paused).frame(width: M.markBox, height: Router.Items.lineHeight)
-                }
-                (Text(summary) + RouterFlow.end).font(CDS.sans(14)).foregroundStyle(thread.sentenceTint)
-                    .lineLimit(Router.Items.sentenceLines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if thread.ledger.read != nil {
-                    RouterThinking(label: "Fjord is checking what is open").frame(height: Router.Items.lineHeight).transition(.opacity)
-                }
-            }
-            .padding(.leading, Router.Wide.start).padding(.trailing, M.reach)
-            .padding(.vertical, (M.minHeight - Router.Items.lineHeight) / 2)
-            .frame(minHeight: M.minHeight, alignment: .top)
-            .background {
-                RoundedRectangle(cornerRadius: M.radius, style: .continuous).fill(Router.Surface.chosen).opacity(pulse)
-            }
-            .motion(.fade, value: thread.ledger.read)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(thread.name), \(thread.ledger.live.count) open")
-        } else {
-            // A little air over the first item, never nothing: a line whose row is 0 tall reads as not laid out yet.
-            Color.clear.frame(height: Router.Wide.headless).frame(maxWidth: .infinity)
-        }
-    }
-
-    @ViewBuilder private var narrowBody: some View {
+    @ViewBuilder private var row: some View {
         let running = thread.isRunning
         let summary = Self.words(thread, sentence: sentence)
         // Running with its mark taken by an item's kind: the dots lead its summary.
@@ -434,11 +393,10 @@ struct RouterBlockHeader: View {
 }
 
 /// A block's name: its most urgent item's mark, the name in that kind's tint, on its ground (the working dots, plain, for
-/// a running thread with none). On one line in the header; wrapping in the wide layout's left column.
+/// a running thread with none), on one line.
 struct RouterBlockName: View {
     let thread: RouterThread
     let hot: Bool
-    var lines = 1
 
     private typealias M = Router.Line
 
@@ -455,8 +413,7 @@ struct RouterBlockName: View {
                 }
                 .frame(width: M.markBox, height: Router.Items.lineHeight)
             }
-            Text(thread.name).font(CDS.sans(14, .medium)).foregroundStyle(tint).lineLimit(lines)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(thread.name).font(CDS.sans(14, .medium)).foregroundStyle(tint).lineLimit(1)
         }
         .padding(.horizontal, M.namePadX).padding(.vertical, M.namePadY)
         .background { RoundedRectangle(cornerRadius: M.nameRadius, style: .continuous).fill(ground) }
@@ -512,7 +469,7 @@ struct RouterItemRow: View {
                 }
                 kind.frame(height: I.lineHeight)
             }
-            .padding(.leading, I.markLeading(model.wide))
+            .padding(.leading, I.markLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             RouterAge(model: model, since: item.since)
                 .itemDone(model, thread: thread, item: item, rowHot: hot && !selected && model.atLit == nil)
@@ -532,7 +489,7 @@ struct RouterItemRow: View {
                 shape.fill(selected ? .clear : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
                     .transaction { $0.animation = nil }
             }
-            .padding(.leading, I.groundLeading(model.wide))
+            .padding(.leading, I.groundLeading)
         }
         .motion(.fade, value: item.state)
         .accessibilityElement(children: .combine)
@@ -608,7 +565,6 @@ extension View {
 /// Your words in the block, the moment you send them: `↑ "…" · sent`, until the read lands.
 struct RouterItemSentRow: View {
     let words: String
-    var wide = false
 
     var body: some View {
         HStack(spacing: Router.Line.markGap) {
@@ -619,7 +575,7 @@ struct RouterItemSentRow: View {
             Spacer(minLength: 0)
         }
         .frame(height: Router.Items.rowHeight)
-        .padding(.leading, Router.Items.markLeading(wide))
+        .padding(.leading, Router.Items.markLeading)
         .padding(.trailing, Router.Line.reach)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("You sent: \(words)")
@@ -628,8 +584,6 @@ struct RouterItemSentRow: View {
 
 /// Where a new turn's items land, while it is read: faint words, sheening.
 struct RouterItemPlaceholder: View {
-    var wide = false
-
     var body: some View {
         let text = Text(Router.Items.Copy.readingTurn).font(CDS.sans(13))
         HStack(spacing: 0) {
@@ -638,7 +592,7 @@ struct RouterItemPlaceholder: View {
             Spacer(minLength: 0)
         }
         .frame(height: Router.Items.rowHeight)
-        .padding(.leading, Router.Items.markLeading(wide))
+        .padding(.leading, Router.Items.markLeading)
         .accessibilityLabel("Reading the new turn")
     }
 }

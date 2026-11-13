@@ -278,7 +278,7 @@ struct RouterLineView: View {
                         // An item's hugs its row: from its mark's gutter, as a line's ground is from its mark (the
                         // header's is the whole line's).
                         RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
-                            .padding(.leading, box.item == nil ? 0 : Router.Items.groundLeading(model.wide))
+                            .padding(.leading, box.item == nil ? 0 : Router.Items.groundLeading)
                             .motion(.spatial, value: box.item == nil)
                             .frame(height: max(0, focusRowHeight + cardHeight + RouterLineSlotView.roomStep))
                             .offset(y: -focusRowHeight)
@@ -414,24 +414,19 @@ struct RouterLineView: View {
             if flows {
                 // The sentence flows as text, the name its highlight at the start, and a line it wraps to starts under
                 // the name's ground and runs to the pill (its first line leaves the name's width blank, `RouterFlow`).
-                // Wide (`Router.Wide`): the name in the left column, the sentence wrapping in the right one, so lines
-                // and blocks align.
-                let wide = model.wide
                 ZStack(alignment: .topLeading) {
-                    RouterSentenceView(model: model, box: box, lead: wide ? 0 : nameWidth > 0 ? nameWidth + M.sentenceGap : 0)
+                    RouterSentenceView(model: model, box: box, lead: nameWidth > 0 ? nameWidth + M.sentenceGap : 0)
                         .routerActivity(model, thread)
                         .padding(.top, M.namePadY)
-                        .padding(.leading, wide ? Router.Wide.start - M.nameLeading : 0)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     RouterName(model: model, thread: thread, rowHot: hot)
-                        .modifier(RouterWidthCap(cap: wide ? Router.Wide.name : rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
+                        .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
                         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { nameWidth = $0 }
                 }
                 .alignmentGuide(.routerFirstLine) { _ in M.namePadY + Router.Items.lineHeight / 2 }
             } else {
                 RouterName(model: model, thread: thread, rowHot: hot)
-                    .modifier(RouterWidthCap(cap: model.wide ? Router.Wide.name : rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
-                    .frame(width: model.wide ? Router.Wide.name + Router.Wide.gap - M.sentenceGap : nil, alignment: .leading)
+                    .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
                     .layoutPriority(2)
                 RouterSentenceView(model: model, box: box)
                     // Its subagents, background commands and waits, at the end of its place, before the pill (RouterActivityViews.swift).

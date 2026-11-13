@@ -739,26 +739,15 @@ checking, closing with how, new).
   most urgent item changed) fades (`Motion.fade`) and its mark rolls over. Your words to a block leave it where it is
   (no flight). Reduce Motion: the folds fade and the rest eases out in 0.12 s.
 
-### 1.15.1 Wide layout (look, for approval)
+### 1.15.1 Wide windows (open)
 
-**Turned down** (owner, 2026-11-13): the column should not grow (the ages end up far from their words, and the names
-from their content), and a thread's own sentence should have no rail. Four other ways to use a wide window are built
-behind a demo-only switch, with a recommendation: [WIDE-OPTIONS.md](WIDE-OPTIONS.md) (`FJORD_WIDE=a|b|c|d`, shots
-`v2-wide-<a..d>[-card]`). The layout below stays in the page until one is chosen.
+The page's column is 720 pt at any window width, centred (shot `v2-items-1600`).
 
-`Router.Wide`, shots `v2-wide`, `v2-wide-card` (light and dark). A page whose column can be 1000 pt or more gets a column
-that wide (to 1120; 720 below), and lays threads out in two columns, at once with no motion when the width crosses:
-
-- **A block**: left (180, from the name's usual start) its name with its kind's mark and ground, wrapping to two lines,
-  and under it its project pill and age; right (from `Wide.start`, 214) its own sentence (muted for a run), then its items
-  one a row, their ages trailing. The left column sits beside the right column's first rows (the name by the first, the
-  project and age by the second; both by an only one), so nothing pushes the items down. With no words of its own the
-  header has no row (4 pt of air): the name stands beside the first item.
-- **A hairline** (1.5 pt, the most urgent kind's tint at 55 %) 10 pt left of the right column, on each of its rows, so it
-  spans exactly them.
-- **A line without items**: one line, its name in the same left column (cut at 180), its sentence from `Wide.start`,
-  project and age trailing.
-- **Cards** keep to the right column (an item's words column; a line's sentence column).
+A first wide layout (the column growing to 1120 pt, a block's name, project and age in a 180 pt left column, a hairline
+down its rows) was turned down by the owner on 2026-11-13 and is removed: the ages ended up far from their words and
+the names from their content, and a thread's own sentence should have no rail. Four other ways to use a wide window
+are built behind a demo-only switch, with a recommendation, for the owner to choose from:
+[WIDE-OPTIONS.md](WIDE-OPTIONS.md) (`FJORD_WIDE=a|b|c|d`, shots `v2-wide-<a..d>[-card]`).
 
 ## 2. Thread state model
 
