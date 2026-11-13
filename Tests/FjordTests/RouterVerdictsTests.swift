@@ -279,8 +279,8 @@ final class FakeClaude: @unchecked Sendable {
         e.ask(request("a"))
         e.ask(request("b"))
         await until(fake.calls.count == 1)
-        // Claude Code names the wait: 150 ms.
-        fake.send(0, [#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":150,"error":"rate_limit"}"#])
+        // Claude Code names the wait: 600 ms (long enough that a loaded run still sees the hold).
+        fake.send(0, [#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":600,"error":"rate_limit"}"#])
         await until(fake.calls[0].terminated && e.held)
         // Not failed: back in the queue, the line still being read.
         #expect(told.of("a").isEmpty)
