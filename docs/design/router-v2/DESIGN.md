@@ -610,18 +610,30 @@ checking, closing with how, new).
   `Text.secondary`: "answered by your message", "done by the agent", "no longer open"), its kind faded, for 1.6 s, then
   goes; a new item comes in on its kind's 12 % ground, which fades; a merged item stays and its age resets; the rest
   stop sheening.
-- **The engine** (`RouterItemLedgers`, `RouterItemsPrompt`, EVAL-items.md). One read per input, in order, one at a time
-  per thread: every turn the agent ends (Done or Stopped; a run that is no longer the latest is read too, so a turn woken
-  at once by a background task's end is never lost, and a run starting again never cancels a read) and every message of
-  yours (sent here: read at once with its words; from T3's composer or the phone: read when T3 stamps it; not read when
-  nothing is open, nor when a turn after it is waiting to be read). Each input is read once, keyed by its id (`turn:<run>`,
-  `msg:<ms>`); its facts come from one projection read (or the one held). The read sees the open items with their ids and
-  ages and the input (the turn's reply, what started or woke it, the PRs; or your words and the reply they answer), and
-  says per item keep or close with how (answered, done, obsolete), then what is found: new, or the same as an open item
-  (merged: its words and age new, no duplicate), then the turn's line (Done's sentence). Sonnet, effort low, streamed:
-  closes strike as soon as their field is whole, found items land, the line streams. The ledger is kept per thread in the
-  verdict file (version 3), cleared when T3 says the thread is settled. A new Stuck, Decide or Do item is told once as a
-  banner. No legacy: a finished turn has no verdict of its own.
+- **The engine** (`RouterItemLedgers`, `RouterItemsPrompt`, EVAL-items.md, REVIEW-items.md). One read per input, in
+  order, one at a time per thread: every turn the agent ends (Done or Stopped; a run that is no longer the latest is read
+  too, so a turn woken at once by a background task's end is never lost, and a run starting again never cancels a read;
+  turns that ended while the thread was off the page are read in order after it) and every message of yours (sent here:
+  shown at once, read once T3 takes it, never if T3 refuses it; from T3's composer or the phone: each message T3 stamped
+  since the last one seen, listed from a projection read made after the stamp, by T3's id; read before the turn that
+  ended after it; not read when nothing is open, nor when the turn after it is the one it started). Each input is a
+  **pending entry in the verdict file**, written in the same write that marks its trigger seen, keyed by its own id
+  (`turn:<run>`, `msg:<T3 id>`, `sent:<ms>`); it leaves only when its read's answer is applied. A read that fails
+  (offline, a usage limit, Claude Code missing) keeps it pending and is made again after a wait (30 s doubling to 10 min),
+  when T3 moves, or after a relaunch. A projection read that fails or doesn't have the input yet is made again a few
+  times (2, 4, 8, 16 s), then the input goes on with what is known: an answer that doesn't read twice, or a turn or
+  message T3 never lists, leaves a Know saying so ("a turn couldn't be read: open the thread…"), so nothing goes
+  silently and nothing behind it waits. The read sees the open items with their ids and ages and the input (the turn's
+  reply, what started or woke it, the PRs; or your words and the reply they answer), and says per item keep or close with
+  how (answered, done, obsolete), then what is found: new, or the same as an open item (merged: its words and age new, no
+  duplicate), then the turn's line (Done's sentence, only the latest run's). Sonnet, effort low, streamed: closes strike
+  as soon as their field is whole, found items land, the line streams. The ledger is kept per thread in the verdict file
+  (version 3; a version 2 file keeps its names, told banners and summaries). Settle keeps what was open, and the read
+  under way, until a new run starts: its Revert puts them back. Done keeps the item in the file too: its Revert works
+  after a relaunch, and a read under way that restates it doesn't bring it back. A thread first seen reads its latest
+  turn only when it ended in the last ten minutes, six at most per launch. A new Stuck, Decide or Do item is told once as
+  a banner, only while fresh and unseen. A one-item thread stays one line through a read (its sheen, your words after it,
+  Fjord's mark). No legacy: a finished turn has no verdict of its own.
 - **Motion.** Inside a block, rows are placed at once and come and go with a short fade (0.12 s out, 0.2 s in); the
   block's height changes, and the lines under it glide, on Core Animation (`RouterGlides`). A SwiftUI glide inside the
   block drew rows outside the slot's mask, and an item's kind apart from its words, for a few frames. A shutting card
