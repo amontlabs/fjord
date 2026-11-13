@@ -30,7 +30,8 @@ struct RouterCard: View {
                 .padding(.vertical, 4)
                 .prose()
                 .transition(.opacity)
-            } else if box.talking {
+            } else if box.talking, !summarized {
+                // A working thread with summaries shows them instead (below): its last turn's words aren't news.
                 RouterLastLines(model: model, box: box).prose().transition(.opacity)
             }
             kind
@@ -40,6 +41,9 @@ struct RouterCard: View {
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    /// A working thread the Router's model has summed up: its card is the timeline of those lines, not the last quote.
+    private var summarized: Bool { thread.state == .working && !thread.work.summaries.isEmpty }
 
     // MARK: Kind blocks. Prose keeps to 560 pt; option rows run the card's width, their keycaps under the footer's.
 
@@ -95,6 +99,8 @@ struct RouterCard: View {
         case .working:
             // A thread started here: what it runs on, through its first run.
             if let launch = thread.launch { started(launch) }
+            // What it has been doing, as the Router's model summed it up, newest first.
+            if summarized { RouterWorkTimeline(summaries: thread.work.summaries).prose() }
             // T3's to-do steps, when the thread has a list (Claude sends one only with T3's to-do setting on).
             if !thread.steps.isEmpty { steps.prose() }
             // Its subagents, background commands and waits, each with how long it has run.

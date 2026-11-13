@@ -23,8 +23,10 @@ extension Router {
 
 extension RouterModel {
     /// The line whose activity peek shows: the pointer is on its glyphs, and its card (which lists the same) isn't open.
+    /// A working line's glyphs are in its one working peek (`peeked`, RouterWorkViews.swift).
     var activityPeeked: String? {
-        guard case .activity(let id)? = hoverControl, selection != .line(id), thread(id)?.activity.isEmpty == false else { return nil }
+        guard case .activity(let id)? = hoverControl, selection != .line(id), let t = thread(id), !t.activity.isEmpty,
+              !t.peeksWork else { return nil }
         return id
     }
 }

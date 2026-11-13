@@ -143,6 +143,26 @@ enum RouterShots {
             activity(model)
             model.select(.line(ID.tab))
         },
+        // Working threads as the Router's model sums them up: the page, the line's peek, the card's timeline.
+        State(name: "v2-working-summary") { model in
+            model.select(nil)
+            RouterDemo.workingSummaries(model)
+        },
+        State(name: "v2-working-hover", make: { model in
+            model.select(nil)
+            RouterDemo.workingSummaries(model)
+        }, pointer: { model in
+            model.hoverRow = ID.tab
+        }),
+        State(name: "v2-working-card") { model in
+            RouterDemo.workingSummaries(model)
+            model.select(.line(ID.tab))
+        },
+        // With a to-do list and waits: the timeline, then the steps, then what it waits on.
+        State(name: "v2-working-card-steps") { model in
+            RouterDemo.workingSummaries(model)
+            model.select(.line(ID.checkpoint))
+        },
         State(name: "v2-reassessing") { model in
             model.select(nil)
             RouterDemo.askPermission(model)

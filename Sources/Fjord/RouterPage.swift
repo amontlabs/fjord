@@ -426,7 +426,9 @@ struct RouterFloating: View {
         let frames = model.targets.frames
         ZStack(alignment: .topLeading) {
             if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)] {
-                hung(from: frame, width: Router.Peek.width) { RouterPeek(thread: thread) }
+                hung(from: frame, width: thread.peeksWork ? Router.Work.peekWidth : Router.Peek.width) {
+                    if thread.peeksWork { RouterWorkingPeek(model: model, thread: thread) } else { RouterPeek(thread: thread) }
+                }
                     .id("peek-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }

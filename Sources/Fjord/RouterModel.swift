@@ -548,10 +548,12 @@ final class RouterModel {
         lastPointer = [:]
     }
 
-    /// The line whose peek shows: the one whose name the pointer is on, unless it is selected.
+    /// The line whose peek shows: the one whose name the pointer is on, unless it is selected. A working line with raw
+    /// detail (what runs now, its subagents and commands) shows its peek from anywhere on the row.
     var peeked: String? {
-        guard let id = hoverName, selection != .line(id) else { return nil }
-        return id
+        if let id = hoverName, selection != .line(id) { return id }
+        if let id = hoverRow, selection != .line(id), thread(id)?.peeksWork == true { return id }
+        return nil
     }
 
     // MARK: Selection

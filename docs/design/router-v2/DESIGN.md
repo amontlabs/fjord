@@ -240,6 +240,12 @@ Exact sentence, by state, when the code writes it (the model's line replaces the
 | Working | **R3.** The running to-do step, else the agent's latest words, else the running tool or command (a command in `CDS.mono(12)`); "starting"; "paused at the usage limit, resumes 15:00" (final: code only) |
 | Done | **R3.** "finished" * |
 
+- **Working, summed up.** **R6** (2026-11-13, owner; demo only, the model call isn't wired: `RouterWork.swift`,
+  shots `v2-working-*`). A working line's sentence is the newest of short lines the Router's model writes about the run
+  ("Image built; waiting on CI before it boots the VM"), not the raw command. It is written again when the agent writes
+  something new or its to-do step changes, at most about once a minute, sheening then streaming in (2.2, 2.3). The pointer
+  anywhere on a working line shows its one peek (1.6); its card lists the summaries (1.5).
+
 ### 1.5 Card (the selected line's)
 
 One card component, inline under its line, inside the selected surface. Selection by ↑↓, click or page open shows the
@@ -273,6 +279,7 @@ Kind blocks:
 | **Done** | PR badges; "4 files" + `+96` in `Git.added`, `−212` in `Git.removed` (footnote, mono digits) | none | same three |
 | **Stopped** | reason banner: fill `Text.danger` 12 % (`RouterV2.dangerFill`), no ring (**R4**), radius 8, padding 10; the error in `CDS.mono(12)` `Text.primary`, max 6 lines; under it "Last step: " + step, footnote muted | none | **R3.** left: `Continue` + the key `⏎` (the page's button, **R4**: 24 tall, radius 6, the chosen fill); then the same three. T3 has no rerun: Continue sends T3's own words, "Continue where you left off.", and the destination row shows them (1.9). The Sent line reads those words |
 | **Working** | **R3.** T3's to-do steps only when the thread has a list (Claude sends one only with T3's to-do setting), footnote: done `checkmark` muted, running in `Text.primary` with the working dots, pending muted; at most 5, then "+3 more". A thread started here shows what it runs on as the card's first footnote through its first run | none | Stop · Open in T3 ⌘O. **R3.** Stop is the page's one act with no way back: a button, no key |
+| **Working: summaries** | **R6.** In the last lines' place (no quote: the last turn's words aren't news): the model's summaries, newest first, five at most then "N earlier". A 5 pt mark in the glyph column (the newest 6 pt, `Text.secondary`; older `Text.muted`) on a `Settings.railLine` hairline that stops 3 pt clear of each mark; the words body 13/19, the newest `Text.primary`, older `Text.secondary`; the clock time ("13:58") trailing at the prose's edge, caption muted mono digits, where the activity's ages end. Then the steps, then the activity | none | as Working |
 | **Working: activity** | **R5.** Under the steps, the activity peek's rows (1.6) at footnote size in `Text.muted`, the glyph column 14 wide like the steps' | none | as Working |
 | **Sent** | your words, body `Text.primary`; a thread started here: under them what it starts with, footnote `Text.muted` ("Opus 5.5 · High · Auto"), until its run starts | none | Open in T3 ⌘O |
 
@@ -305,6 +312,10 @@ Kind blocks:
   · its model as a person says it ("Opus 5.5"; T3's string when it isn't a Claude id) · its age; a background command
   in `CDS.mono(12)` · its age; a wait: what (a thread wait by the waited thread's page name, a command in mono) · its
   age. Ages are from T3's start, else from when Fjord first saw it. Subagents first, then commands, then waits.
+- **R6.** A working line's peek replaces both the name's and the glyphs' there: the pointer anywhere on the row. 400
+  wide, the same shell, hung from the name. T3's title; the command or tool running now (the working dots in the 14 pt
+  glyph column, the words in `Text.primary`, a command in `CDS.mono(12)`, middle truncation) and up to three before it
+  (`checkmark`, `Text.secondary`), each with its age trailing; then the activity rows.
 - The housekeeping line's peek lists its threads: name, project pill, age. **R3.** It is 400 wide, its names being T3
   titles, whole.
 
