@@ -89,6 +89,17 @@ def replay(a, case, parts):
             trace.append(rec)
             continue
         ids = {i["id"] for i in live}
+        # RouterItemsReading.quote: a quote is kept only when it is, trimmed, in the agent's words read, word for word.
+        source = step.get("reply") if turn else step.get("text") if finds else None
+        rec["quotes"] = {"given": 0, "kept": 0}
+        for f in ans.get("found", []) if finds else []:
+            q = (f.get("quote") or "").strip()
+            if q:
+                rec["quotes"]["given"] += 1
+                if source and q in source:
+                    rec["quotes"]["kept"] += 1
+                else:
+                    rec.setdefault("dropped_quotes", []).append(q)
         closes = {e["id"]: (e.get("how") or "obsolete") for e in ans.get("open", []) if e.get("verdict") == "close" and e.get("id") in ids}
         ledger = [i for i in ledger if i["id"] not in closes]
         for f in ans.get("found", []) if finds else []:

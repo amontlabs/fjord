@@ -44,7 +44,18 @@ Held-out set (n = 45, 234 reads each):
 
 | Sonnet, v2, after REVIEW-items fixes (2026-11-13, the app's inputs re-dumped: identical) | 156 | **0.96** | 1 | 0.99 | 6 | 0 | 37 | 60 | 2 | 13 | 1 | 4.0 / 5.9 s |
 
+| Sonnet, v3: `detail` and `quote` per item (2026-11-13) | 129 | **0.96** | 1 | 0.99 | 5 | 0 | 35 | 48 | 1 | 7 | 1 | 3.4 / 5.2 s |
+
 (The machine was busy with other agents; p50s are pessimistic, and two configs running at once share it.)
+
+- **v3** (`prompts/system-turn-v3.txt`, `system-said-v3.txt`; the message prompt is v2's): each found item also has its
+  `detail` (the whole item, at most about 280 characters, "" when the sentence says it all) and its `quote` (the agent's
+  lines, copied exactly), and the sentence puts the key fact first. Held out, against v2 after the fixes: precision
+  0.96 and recall 0.99 unchanged, no duplicates, wrong closes 2 → 1, missed closes 13 → 7, 156 → 129 items added (as
+  precise, so fewer restatements and near-items), 231 reads, $0.0086 a read (the two fields add about $0.0006).
+  133 details and 163 quotes; **2 quotes (1.2 %) fail the verbatim check** and are dropped (`RouterItemsReading.quote`):
+  one spans a redacted id (as it should be dropped), one a sentence the model reworded a word of. `judge.py score` counts
+  them (`run.py` checks each quote against the raw reply as the app does).
 
 - **Model: Sonnet.** Haiku finds items as well (precision 0.93, recall 0.95) but misses twice the closes (14 against 7:
   items you already answered stay open) and wrote six unclear sentences to Sonnet's none, and it is slower (it thinks for

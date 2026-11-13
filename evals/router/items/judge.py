@@ -95,7 +95,7 @@ def grade(run):
 
 def score(runs):
     for run in runs:
-        added = closes = merged = reads = 0
+        added = closes = merged = reads = given = kept = details = 0
         for f in sorted((D / "runs" / run).glob("*.json")):
             for s in json.load(open(f))["trace"]:
                 if "after" in s:
@@ -104,6 +104,9 @@ def score(runs):
                     added += sum(1 for i in s["after"] if i["id"] not in before)
                     closes += len(s.get("closed") or {})
                     merged += sum(1 for x in (s.get("answer") or {}).get("found", []) if x.get("same_as") in before)
+                    given += (s.get("quotes") or {}).get("given", 0)
+                    kept += (s.get("quotes") or {}).get("kept", 0)
+                    details += sum(1 for x in (s.get("answer") or {}).get("found", []) if (x.get("detail") or "").strip())
         c = {k: 0 for k in ["missed", "false_items", "wrong_kind", "duplicates", "wrong_closes", "missed_closes", "bad_sentences"]}
         gs = sorted((D / "grades" / run).glob("*.json"))
         for g in gs:
@@ -116,7 +119,8 @@ def score(runs):
         print(f"{run}: {len(gs)} cases, {reads} reads; added {added} (precision {precision:.2f}), missed {c['missed']} "
               f"(recall {recall:.2f}), false {c['false_items']}, wrong kind {c['wrong_kind']}, duplicates {c['duplicates']}, "
               f"merged {merged}; closes {closes}: wrong {c['wrong_closes']} (correct {1 - c['wrong_closes'] / max(closes, 1):.2f}), "
-              f"missed closes {c['missed_closes']}; bad sentences {c['bad_sentences']}")
+              f"missed closes {c['missed_closes']}; bad sentences {c['bad_sentences']}"
+              + (f"; details {details}, quotes {given}: {given - kept} fail the verbatim check" if given or details else ""))
 
 
 if __name__ == "__main__":
