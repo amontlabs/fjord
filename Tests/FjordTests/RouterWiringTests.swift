@@ -80,4 +80,71 @@ import Testing
         #expect(s.routerPage.thread("t1") != nil)
         #expect(s.routerPage.toast?.revertible == false)
     }
+
+    /// A store whose model calls are real (not a demo's): its verdicts run on `fake` instead of `claude -p`.
+    private func asking(_ threads: [T3JSON], _ fake: FakeClaude) -> Store {
+        let s = store(threads)
+        s.stateFile = FileManager.default.temporaryDirectory.appendingPathComponent("router-wiring-\(UUID().uuidString).json")
+        s.persists = true
+        let verdicts = RouterVerdicts(binary: { "/bin/claude" }, runner: fake.runner)
+        verdicts.onEvent = { [weak s] thread, fingerprint, event in s?.routerRecords.verdict(thread, fingerprint: fingerprint, event) }
+        s.routerVerdicts = verdicts
+        return s
+    }
+
+    @Test func aTurnEndAsksOneVerdictAndItsWordsReachTheLine() async throws {
+        let fake = FakeClaude()
+        let s = asking([F.shell("t1", title: "Install guide", minutes: 1, extra: ["latestRunId": "r1"])], fake)
+        defer { s.persists = false; if let f = s.stateFile { try? FileManager.default.removeItem(at: f) } }
+        let page = s.routerPage
+        // Asked once its reply is in (T3's projection of the thread).
+        var detail = RouterDetail()
+        detail.reply = "Rewrote the install guide for the Chrome setup and opened PR #41."
+        s.routerRecords.detail("t1", detail)
+        #expect(page.thread("t1")?.reading == true, "a finished turn is being read until its verdict lands")
+        await waitUntil { !fake.calls.isEmpty }
+        for i in fake.calls.indices {
+            fake.send(i, FakeClaude.answer(FakeClaude.quiet))
+            fake.close(i)
+        }
+        await waitUntil { page.thread("t1")?.sentence.text == "install guide written; PR #41" }
+        let line = try #require(page.thread("t1"))
+        #expect(line.sentence.text == "install guide written; PR #41" && line.state == .done && !line.reading)
+        #expect(fake.calls.count <= 2, "one verdict (and at most one name) for the turn")
+    }
+
+    @Test func returnOnAPickedOptionAnswersTheRequestAndTheLineIsSentAtOnce() async throws {
+        let s = store([F.shell("t1", title: "Pick a db", extra: ["pendingRuntimeRequest": Self.asking])])
+        let sent = Commands()
+        s.requestSender = { command, _ in sent.commands.append(command) }
+        let request = ThreadRequest(id: "r1", threadID: "t1", body: .question([T3Question(demo: "Db", "Which one?", id: "q1",
+            options: [("Postgres", ""), ("SQLite", "")])]), live: true)
+        s.requests["t1"] = request
+        var detail = RouterDetail()
+        detail.request = request
+        s.routerRecords.detail("t1", detail)
+        let page = s.routerPage
+        page.select(.line("t1"))
+        page.pick(2)
+        page.send()
+        // In the same turn: the line is Sent.
+        #expect(page.thread("t1")?.state == .sent)
+        let answers = { sent.commands.filter { if case .respondAnswers = $0 { true } else { false } } }
+        await waitUntil { !answers().isEmpty }
+        #expect(answers() == [.respondAnswers(threadId: "t1", requestId: "r1", answers: ["q1": .one("SQLite")])])
+    }
+
+    @Test func settleThenUndoSendsSettleThenUnsettle() async {
+        let s = store([F.shell("t1", title: "Fix the fence")])
+        let sent = Commands()
+        s.requestSender = { command, _ in sent.commands.append(command) }
+        let page = s.routerPage
+        page.settle("t1")
+        #expect(page.thread("t1") == nil)
+        page.undo()
+        #expect(page.thread("t1") != nil)
+        await waitUntil { sent.commands.count == 2 }
+        #expect(sent.commands.map { $0.payload(commandId: "c").str("type") } == ["thread.settle", "thread.unsettle"])
+    }
+
 }
