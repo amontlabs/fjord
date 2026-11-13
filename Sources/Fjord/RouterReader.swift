@@ -243,7 +243,11 @@ final class RouterReader {
             if let selected { return RouterRead(draft: draft, places: [.thread(selected)], sure: true) }
             return RouterRead(draft: draft, places: [], sure: false)
         }
-        if case .answer = decision.kind { return RouterRead(draft: draft, places: [.here], sure: true) }
+        // An answer from the Router itself has nowhere to show on this page yet: no place is offered for it (Return would
+        // send nothing), only the open card, unsure, for you to pick.
+        if case .answer = decision.kind {
+            return RouterRead(draft: draft, places: selected.map { [.thread($0)] } ?? [], sure: false)
+        }
         var places: [RouterPlace] = []
         for kind in decision.places {
             let place: RouterPlace

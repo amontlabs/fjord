@@ -446,4 +446,15 @@ import Testing
         #expect(model.picks[ID.settings] == nil)
         #expect(model.typed[ID.settings] == nil)
     }
+
+    // MARK: A place that sends nothing keeps the words (FINAL-REVIEW #3)
+
+    @Test func returnOnAPlaceThatSendsNothingKeepsTheDraft() {
+        let (model, _) = page()
+        model.select(nil)
+        model.setDraft("what runs now?")
+        model.apply(.read(RouterRead(draft: model.draft, places: [.here], sure: true)))
+        model.send()
+        #expect(model.draft == "what runs now?")
+    }
 }

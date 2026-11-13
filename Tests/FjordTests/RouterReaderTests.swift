@@ -168,13 +168,17 @@ import Testing
 
     // MARK: Decision to read
 
-    @Test func aSurePlaceThatCantBeSentToAnymoreIsNoAnswerAndAnAnswerHereIsHere() {
+    @Test func aSurePlaceThatCantBeSentToAnymoreIsNoAnswerAndAnAnswerHereIsNotOffered() {
         let sure = RouterProjectDecision(kind: .thread("th-login"), confidence: 0.95, decider: .sonnet)
         let gone = RouterReader.read("fix it now please", decision: sure, selected: nil, eligible: { _ in false })
         #expect(gone.places.isEmpty && !gone.sure)
         let here = RouterReader.read("what runs now?", decision: RouterProjectDecision(kind: .answer, confidence: 0.9, decider: .sonnet),
                                        selected: "th-login", eligible: { _ in true })
-        #expect(here.places == [.here] && here.sure)
+        // Nowhere to show the Router's own answer yet (FINAL-REVIEW #3): only the open card, unsure.
+        #expect(here.places == [.thread("th-login")] && !here.sure)
+        let nowhere = RouterReader.read("what runs now?", decision: RouterProjectDecision(kind: .answer, confidence: 0.9, decider: .sonnet),
+                                          selected: nil, eligible: { _ in true })
+        #expect(nowhere.places.isEmpty && !nowhere.sure)
         let some = RouterReader.read("fix it now please", decision: Self.ask([.thread("th-login"), .thread("th-docs"), .thread("th-login")]),
                                        selected: nil, eligible: { $0 != RouteTarget.thread("th-docs").targetID })
         #expect(some.places == [.thread("th-login")] && !some.sure)

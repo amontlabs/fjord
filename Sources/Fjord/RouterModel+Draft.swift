@@ -361,6 +361,8 @@ extension RouterModel {
     }
 
     private func deliver(_ words: String, to place: RouterPlace, queue: Bool, kind: RouterOutgoing.Kind = .words) {
+        // A place that sends nothing never takes the words.
+        if case .here = place { return }
         let name = read?.name
         // What the row showed, for the decision log.
         let shown = read
@@ -387,7 +389,7 @@ extension RouterModel {
             animate(.spatial) { threads.append(t) }
             source?.start(id, words: words, project: project, launch: launch, read: shown)
         case .here:
-            break
+            return
         }
     }
 
