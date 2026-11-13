@@ -31,7 +31,7 @@ struct RouterHostedLine: View {
         // The line's height from what the model sets, at once: the rows under it glide on the change's own curve
         // (`RouterGlides`) while the card opens, shuts or grows inside on the same curve. The line's height as measured
         // until it has been laid out once.
-        let open = box.selected && !box.moving
+        let open = box.selected && !box.moving && !box.switching
         let card = box.cardHeight
         let rest = box.rowHeight + box.queuedHeight + box.tailHeight
         let height: CGFloat? = box.rowHeight > 0 ? rest + (open ? card : 0) : nil
@@ -364,7 +364,7 @@ final class RouterLineSlotView: RouterGlideView {
     /// drawn at its top; only the slot is hit, and what is past it is empty. It grows only for a card taller than that.
     func fit() {
         let height = bounds.height
-        if box.selected, !box.moving { held = height } else if !box.built { held = 0 }
+        if box.selected, !box.moving, !box.switching { held = height } else if !box.built { held = 0 }
         let o = Self.overflow
         let needed = max(height, box.built ? held : 0) + 2 * o
         if needed > room { room = (needed / Self.roomStep).rounded(.up) * Self.roomStep }
@@ -453,8 +453,9 @@ final class RouterLineSlotView: RouterGlideView {
                let animation = RouterGlides.animation(glide.curve, keyPath: "bounds.size.height", from: from) {
                 mask.add(animation, forKey: "roll-" + key)
                 rolled = true
-                if card == 0, box.built, !box.selected {
-                    // Shut: the card's body goes once the roll has landed, if the line wasn't opened again meanwhile.
+                if card == 0, box.built, !box.selected || box.switching {
+                    // Shut: the card's body goes once the roll has landed, if the line wasn't opened again meanwhile;
+                    // moving to another row, the next card opens then.
                     shut &+= 1
                     let mine = shut
                     let landing = CABasicAnimation(keyPath: "opacity")
@@ -467,7 +468,7 @@ final class RouterLineSlotView: RouterGlideView {
                 }
             }
         }
-        if !rolled, card == 0, box.built, !box.selected {
+        if !rolled, card == 0, box.built, !box.selected || box.switching {
             shut &+= 1
             let mine = shut
             DispatchQueue.main.async { [weak self] in self?.shutLanded(mine) }
@@ -475,9 +476,20 @@ final class RouterLineSlotView: RouterGlideView {
     }
 
     private func shutLanded(_ roll: Int) {
-        guard roll == shut, !box.selected, box.built else { return }
-        box.built = false
+        guard roll == shut, box.built else { return }
+        if !box.selected {
+            box.built = false
+            box.follow()
+        } else if box.switching {
+            // The card moving to another row has shut: it opens under its row now, the rows under it gliding down as
+            // a card opening pushes them. The row reached the place it takes in the line's hosting view as the roll
+            // landed, so it moves there from the tail's in place.
+            hosting.rootView.model.animate(.spatial) { box.shown = box.item }
+        }
     }
+
+    /// The block's card is open on screen, as last laid out (`placeTail`).
+    var cardOpen: Bool { cardPlace.map { $0.top > $0.head } ?? false }
 
     /// The tail's hosting view, made the first time the line is a block. True when it was made now.
     @discardableResult func makeTail() -> Bool {

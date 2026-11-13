@@ -19,7 +19,7 @@ struct RouterCard: View {
 
     /// The open item's card instead, in a block (its focused item) or on a thread whose one item is the line.
     private var item: RouterItem? {
-        if let focus = box.item { return thread.ledger.items.first { $0.id == focus } }
+        if let focus = box.shown { return thread.ledger.items.first { $0.id == focus } }
         return thread.ledger.single
     }
 

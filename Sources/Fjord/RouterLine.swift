@@ -182,7 +182,7 @@ struct RouterLineView: View {
         // A line in flight is its row alone: in the frame it takes off its card's content and the selected surface are
         // gone (nothing half-faded is dragged across the page), while the card's place folds on the move's own curve, so
         // the rows under it close up as the next card opens. It opens again once the line has landed.
-        let open = selected && !moving
+        let open = selected && !moving && !box.switching
         let block = thread.ledger.block
         VStack(alignment: .leading, spacing: 0) {
           if block {
@@ -271,13 +271,13 @@ struct RouterLineView: View {
         .background(alignment: .top) {
             // A block's open card: its ground under the open row and its card only, not the whole block. It reaches past
             // the card: the line's mask ends it, with its corners, where the rows under the card are (`placeTail`), so a
-            // card shutting or changing rows keeps its ground down to them. Shutting, it fades on the change's curve.
+            // card shutting or changing rows keeps its ground down to them.
             if block {
                 RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
                     .frame(height: max(0, focusRowHeight + cardHeight + RouterLineSlotView.roomStep))
                     .padding(.top, max(0, box.rowHeight - focusRowHeight))
                     .opacity(open ? shown : 0)
-                    .transaction { if moving { $0.animation = nil } }
+                    .modifier(GroundPresence(open: open, moving: moving))
             }
         }
         .background {
@@ -285,6 +285,7 @@ struct RouterLineView: View {
             // card's fold.
             RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
                 .opacity(open && !block ? shown : 0)
+                .modifier(GroundPresence(open: open, moving: moving))
                 // The card's content grew or shrank while open (a quote or a plan rolling): the ground follows on the
                 // place's curve. Sized by the line outside the place's own animation, it took its new height at once,
                 // and a quote rolling shut was drawn below it until its roll ended.
@@ -310,10 +311,26 @@ struct RouterLineView: View {
         .accessibilityLabel("\(thread.name), \(thread.look.label)")
     }
 
+    /// The selected ground coming and going with its card. Opening, it is there whole in the frame the row's own ground
+    /// goes, and the line's mask rolls it open with the card: faded in on the spring, the row lost its hover ground for a
+    /// frame and the ground came up under a card already drawn (a flash). Shutting, it stays under the card while the
+    /// mask rolls them shut together and is gone as the roll lands (an ease-in as long as the roll): faded on the
+    /// spring, it was gone in a tenth of a second and the card's words rolled shut on the bare page. A line taking off
+    /// loses it in the frame it takes off.
+    private struct GroundPresence: ViewModifier {
+        let open: Bool
+        let moving: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduce
+
+        func body(content: Content) -> some View {
+            content.transaction(value: open) { $0.animation = open || moving ? nil : M.groundOut.resolved(reduce: reduce) }
+        }
+    }
+
     /// The block's rows down to the one whose card is open (the header when none is): its height is the line's row height.
     private func blockHead(_ thread: RouterThread, open: Bool, hot: Bool, pressed: Bool) -> some View {
         let rows = RouterBlockLayout.rows(thread)
-        let cut = RouterBlockLayout.cut(rows, item: box.item)
+        let cut = RouterBlockLayout.cut(rows, item: box.shown)
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rows.prefix(cut))) { row in
                 RouterBlockRowView(model: model, box: box, thread: thread, row: row, open: open, hot: hot, pressed: pressed,
@@ -322,8 +339,8 @@ struct RouterLineView: View {
         }
         // Inside a block, rows are placed at once: the slot's mask and the lines under the block move on Core Animation,
         // and a SwiftUI glide here drew rows outside the mask, and an item's kind and words apart, for a few frames. They
-        // fade in and out only when the block's rows change (`RouterBlockLayout.itemFade`).
-        .transaction(value: RouterBlockLayout.rowsKey(thread)) { $0.animation = reduce ? nil : RouterBlockLayout.fade }
+        // fold in and out only when the block's rows change (`RouterBlockLayout.rowsKey`).
+        .transaction(value: RouterBlockLayout.rowsKey(thread)) { $0.animation = Motion.spatial.resolved(reduce: reduce) }
         .transaction { $0.animation = nil }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             if box.rowHeight > 0, height != box.rowHeight, model.glides.current == nil {
@@ -380,6 +397,11 @@ struct RouterLineView: View {
         // A name being given: the sentence slides to its new start.
         .motion(.spatial, value: thread.name)
     }
+}
+
+extension Router.Line {
+    /// The selected ground going as its card rolls shut (`RouterLineView.GroundPresence`): as long as the roll.
+    static let groundOut = Animation.easeIn(duration: 0.3)
 }
 
 /// Its content at its own width, never wider than `cap` (a flexible frame would take the whole cap).

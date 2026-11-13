@@ -640,11 +640,18 @@ checking, closing with how, new).
   before the launch, nor one left pending by the last run), while fresh and unseen (a mid-run question: as it lands);
   a banner names the thread by its page name, never T3's title. A one-item thread stays one line through a read (its sheen, your words after it,
   Fjord's mark). No legacy: a finished turn has no verdict of its own.
-- **Motion.** Inside a block, rows are placed at once and come and go with a short fade (0.12 s out, 0.2 s in); the
-  block's height changes, and the lines under it glide, on Core Animation (`RouterGlides`). A SwiftUI glide inside the
-  block drew rows outside the slot's mask, and an item's kind apart from its words, for a few frames. A shutting card
-  between a block's rows goes at once, with its ground. Your words to a block leave it where it is (no flight), so the
-  next card opens at once.
+- **Motion.** A block moves as lines do, on `Motion.spatial`, with nothing at once and no whole-block fade. Its rows
+  under the open card are on a layer of their own that glides with the card's mask and the lines under the block
+  (`RouterBlockTail`, `RouterGlides`), so a card opening or shutting between its rows rolls in place, at full opacity,
+  with its ground. The ground is there whole as a card opens and stays under it as it rolls shut, gone as the roll
+  lands (an ease-in as long as the roll); the same under any line's card. A card moving to another row of the block (↑↓,
+  a click on another item or on the header) rolls shut first, then opens under its row once the roll has landed
+  (`RouterLineBox.shown`): no row jumps between the line's rows and the rows under the card. An item, your words or
+  the "reading" row arriving or leaving folds in or out as a line does (height from or to nothing, its opacity only in
+  the fold's last part), and the rows after it slide on the curve the block's height glides on; a struck item folds
+  after its 1.6 s. A new item's ground fades over 0.6 s once it is seen. The name taking another kind's colour (its
+  most urgent item changed) fades (`Motion.fade`) and its mark rolls over. Your words to a block leave it where it is
+  (no flight). Reduce Motion: the folds fade and the rest eases out in 0.12 s.
 
 ## 2. Thread state model
 

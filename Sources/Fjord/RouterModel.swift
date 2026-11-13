@@ -1180,7 +1180,10 @@ final class RouterModel {
     }
 
     private func focusChanged() {
-        if case .line(let id)? = selection { boxes[id]?.item = focus }
+        if case .line(let id)? = selection, let box = boxes[id] {
+            box.item = focus
+            box.follow()
+        }
     }
 
     private func selectionChanged(from old: RouterSelection?) {
@@ -1190,9 +1193,11 @@ final class RouterModel {
         if case .line(let id)? = old, let box = boxes[id] {
             box.selected = false
             if !box.block { box.item = nil }
+            box.follow()
         }
         if case .line(let id)? = selection, let box = boxes[id] {
             box.item = focus
+            box.follow()
             box.selected = true
             box.built = true
         }

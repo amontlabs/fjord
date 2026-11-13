@@ -35,6 +35,20 @@ final class RouterLineBox {
     /// In a block: the item whose card is open (nil: the header's). Kept once the card shuts, so the rows split where they
     /// were while it rolls shut and after (`RouterBlockLayout.cut`); the next selection sets it again.
     var item: String?
+    /// In a block: the item whose card the views draw, and where they split the rows (nil: the header's). It is `item`
+    /// at once while no card is open; with one open on another row, that card rolls shut first and the next one opens
+    /// under its row once the roll has landed (`RouterLineSlotView.shutLanded`): a row moving between the line's two
+    /// hosting views as the card moves was placed at once, a jump of the card's height, and the card's words went in a
+    /// frame.
+    var shown: String?
+    /// A block's card is moving to another row: it is shut until `shown` has caught up.
+    var switching: Bool { block && shown != item }
+
+    /// `item` or the selection changed: the views follow at once unless a block's card is open on screen on another row.
+    func follow() {
+        guard shown != item else { return }
+        if !block || slot?.cardOpen != true { shown = item }
+    }
     /// Two or more open items: a header and a row per item (`RouterLedger.block`). Stored, so what only needs to know reads
     /// this and not the record.
     private(set) var block: Bool

@@ -132,6 +132,8 @@ extension Router {
         /// How long a closed item strikes before it folds away, and how long a new one's highlight holds.
         static let strike: Double = 1.6
         static let highlight: Double = 1.8
+        /// A new item's highlight going.
+        static let highlightOut = Animation.easeOut(duration: 0.6)
         /// The header's pulse on a new turn.
         static let pulse: Double = 0.7
 
@@ -235,6 +237,10 @@ struct RouterBlockHeader: View {
         }
         .padding(.horizontal, M.namePadX).padding(.vertical, M.namePadY)
         .background { shape.fill(ground) }
+        // Its most urgent item changing (a Stuck closed, a Decide landing): the tint and the ground take the new kind's
+        // on a fade, the mark rolls over on Core Animation (`RouterTick`). The block's rows are placed at once, so it
+        // took the new colour in one frame.
+        .motion(.fade, value: top)
     }
 }
 
@@ -248,6 +254,7 @@ struct RouterItemRow: View {
     let selected: Bool
     let hot: Bool
     let pressed: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias M = Router.Line
     private typealias I = Router.Items
@@ -290,8 +297,10 @@ struct RouterItemRow: View {
         .background {
             let shape = RoundedRectangle(cornerRadius: M.radius, style: .continuous)
             ZStack {
-                // Just landed: the kind's tint, fading.
+                // Just landed: the kind's tint, fading slowly once it has been seen (`Router.Items.highlightOut`); on
+                // `Motion.fade` it went in a blink.
                 shape.fill(item.kind.tint.opacity(Router.Surface.tint)).opacity(item.state == .new ? 1 : 0)
+                    .animation(item.state == .new ? nil : I.highlightOut.resolved(reduce: reduce), value: item.state == .new)
                 shape.fill(selected ? .clear : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
                     .transaction { $0.animation = nil }
             }
