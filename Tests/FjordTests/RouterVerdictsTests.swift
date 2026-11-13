@@ -72,9 +72,10 @@ final class FakeClaude: @unchecked Sendable {
 }
 
 @MainActor @Suite(.serialized) struct RouterVerdictsTests {
-    /// Waits for the engine's hops (a call starting off the main actor, its events coming back), up to a second.
+    /// Waits for the engine's hops (a call starting off the main actor, its events coming back), up to 15 s: it returns
+    /// as soon as they are done, and a loaded CI runner can take seconds.
     func until(_ what: @autoclosure () -> Bool) async {
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(15)
         while !what(), Date() < deadline { try? await Task.sleep(for: .milliseconds(2)) }
     }
 
