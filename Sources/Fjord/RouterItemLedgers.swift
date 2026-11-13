@@ -511,7 +511,9 @@ struct RouterItemFacts: Equatable, Sendable {
         switch input {
         case .turn(let run):
             // Ended in the facts; or older than the runs they keep (the ones after it are read instead); or spent.
-            l.facts?.turns[run].map { !$0.live && !$0.streaming } ?? (l.facts.map { $0.order.contains(run) } ?? false) || spent(l, input.key)
+            // A turn ended with no reply yet: the projection hasn't its last message (it lags the shell); read again.
+            l.facts?.turns[run].map { !$0.live && !$0.streaming && !$0.reply.isEmpty } ?? (l.facts.map { $0.order.contains(run) } ?? false)
+                || spent(l, input.key)
         case .messages(_, let upTo):
             // Facts read for it that list the message T3 stamped (the projection may lag the shell).
             spent(l, input.key) || l.factsFor == input.key && l.facts?.messages.contains { $0.at >= upTo.addingTimeInterval(-2) } == true
