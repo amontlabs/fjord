@@ -770,7 +770,7 @@ final class RouterMCPServer: @unchecked Sendable {
         let question = r.numbered[option - 1].question
         let answer: ThreadAnswers.Answer
         do { answer = try ThreadAnswers.resolve(request, picks: [question: option], typed: [:]) } catch { throw Failure(error.localizedDescription) }
-        let snapshot = RequestSnapshot(target: BriefTarget(project: store.threads[r.id]?.projectID ?? "", thread: r.id), request: request)
+        let snapshot = RequestSnapshot(target: ThreadTarget(project: store.threads[r.id]?.projectID ?? "", thread: r.id), request: request)
         try live(ticket)
         if case .failure(let error) = await store.perform(answer, on: request, snapshot: snapshot) { throw Failure(error.localizedDescription) }
         return "Answered “\(title)”: \(labels[option - 1])"
@@ -790,7 +790,7 @@ final class RouterMCPServer: @unchecked Sendable {
 
 extension Store {
     /// A thread's title for History lines and the decision log: T3's, else the page's name for it.
-    func lineTitle(_ t: BriefTarget) -> String {
+    func lineTitle(_ t: ThreadTarget) -> String {
         threads[t.thread]?.title.nonEmpty ?? routerRecords.record(t.thread)?.title.nonEmpty ?? "Untitled thread"
     }
 }

@@ -11,7 +11,7 @@ enum Router {
     static let column: CGFloat = 720
     static let gutter: CGFloat = 32
     /// The page's coordinate space: the targets' frames are read in it (the peek's placement, the demo's pointer).
-    static let space = "router-v2"
+    static let space = "router-page"
 
     // MARK: Metrics
 

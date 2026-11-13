@@ -63,10 +63,10 @@ import Testing
         let sent = Commands()
         s.requestSender = { command, _ in sent.commands.append(command) }
         #expect(s.routerPage.thread("t1") != nil)
-        s.settleThread(BriefTarget(project: "p1", thread: "t1"))
+        s.settleThread(ThreadTarget(project: "p1", thread: "t1"))
         #expect(s.routerRecords.record("t1") == nil && s.routerPage.thread("t1") == nil)
         let change = try #require(s.router.changes.last)
-        s.replayBriefAction(change.patch, forward: false)
+        s.replayThreadAct(change.patch, forward: false)
         #expect(s.routerPage.thread("t1") != nil)
         await waitUntil { sent.commands.count == 2 }
         #expect(sent.commands.map { $0.payload(commandId: "c").str("type") } == ["thread.settle", "thread.unsettle"])
@@ -75,7 +75,7 @@ import Testing
     @Test func aSettleT3RefusesPutsTheLineBackAndThePageSaysWhy() async {
         let s = store([F.shell("t1", title: "Fix the fence")])
         s.requestSender = { _, _ in throw ThreadSendFailure("T3 said no") }
-        s.settleThread(BriefTarget(project: "p1", thread: "t1"))
+        s.settleThread(ThreadTarget(project: "p1", thread: "t1"))
         await waitUntil { s.routerPage.toast != nil }
         #expect(s.routerPage.thread("t1") != nil)
         #expect(s.routerPage.toast?.revertible == false)

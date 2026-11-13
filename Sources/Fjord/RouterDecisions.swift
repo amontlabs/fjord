@@ -71,7 +71,7 @@ struct RouterDecision: Identifiable, Equatable {
 
     struct Links: Codable, Equatable {
         var sessions: [String] = []
-        /// The threads it touched (`BriefTarget.key`).
+        /// The threads it touched (`ThreadTarget.key`).
         var threads: [String] = []
         var changes: [UUID] = []
         init(sessions: [String] = [], threads: [String] = [], changes: [UUID] = []) {
@@ -124,7 +124,7 @@ struct RouterDecision: Identifiable, Equatable {
     static let maxKept = 1000
 
     /// Adds `done` and the links it implies.
-    mutating func add(_ item: Done, session: String? = nil, thread: BriefTarget? = nil) {
+    mutating func add(_ item: Done, session: String? = nil, thread: ThreadTarget? = nil) {
         done.append(item)
         if case .changed(let id) = item, !links.changes.contains(id) { links.changes.append(id) }
         if let session, !links.sessions.contains(session) { links.sessions.append(session) }
@@ -398,7 +398,7 @@ extension RouterSaved {
             if case .session = d.trigger { return true }
             if let id = d.decision.targetID, ["session:", "answer:", "new:"].contains(where: id.hasPrefix) { return true }
             return !d.links.sessions.isEmpty
-                || d.links.threads.contains { BriefTarget(key: $0).map { Self.isClaudeEra(project: $0.project) } ?? false }
+                || d.links.threads.contains { ThreadTarget(key: $0).map { Self.isClaudeEra(project: $0.project) } ?? false }
         }
         decisions.removeAll(where: old)
         changes.removeAll { c in
@@ -494,7 +494,7 @@ extension Store {
     }
 
     /// Something you did on a brief entry (answered its form, approved its plan).
-    func logEntryAction(_ text: String, target: BriefTarget, now: Date = Date()) {
+    func logEntryAction(_ text: String, target: ThreadTarget, now: Date = Date()) {
         let title = routerRecords.record(target.thread)?.name ?? threads[target.thread]?.title.nonEmpty ?? "Untitled thread"
         var entry = RouterDecision(at: now, trigger: .you(text), decision: .init(target: title, intent: "answer"), outcome: .done)
         entry.add(.answered(thread: title), thread: target)

@@ -52,13 +52,13 @@ extension Store {
     }
 
     /// What T3 says the thread waits on you for now.
-    func heldRequest(_ target: BriefTarget) -> ThreadRequest? {
+    func heldRequest(_ target: ThreadTarget) -> ThreadRequest? {
         requests[target.thread]
     }
 
     /// The last check before an answer goes: the Router is on and the thread still holds that very request (and, for an
     /// answer the Router read, the one it was read against).
-    func answerStillValid(_ request: ThreadRequest, target: BriefTarget, snapshot: RequestSnapshot?,
+    func answerStillValid(_ request: ThreadRequest, target: ThreadTarget, snapshot: RequestSnapshot?,
                           alsoValid: (@MainActor () -> Bool)? = nil) -> Bool {
         guard routerOn, alsoValid?() != false, let held = heldRequest(target) else { return false }
         return held.id == request.id && snapshot.map { $0.holds(self) } != false
@@ -71,7 +71,7 @@ extension Store {
 
     /// The answer to a question (`runtime-request.respond`): an option's value, several for a multiple choice, or the
     /// words of a custom answer. Only while the thread still holds that request, checked again right before it is sent.
-    func answerQuestion(_ request: ThreadRequest, _ answers: [String: T3Answer], target: BriefTarget,
+    func answerQuestion(_ request: ThreadRequest, _ answers: [String: T3Answer], target: ThreadTarget,
                         snapshot: RequestSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         do {
             let checked = try request.validate(answers)
@@ -87,7 +87,7 @@ extension Store {
     }
 
     /// A permission's answer: a button's decision, or a decline carrying your words.
-    func answerPermission(_ request: ThreadRequest, _ decision: T3Decision, feedback: String? = nil, target: BriefTarget,
+    func answerPermission(_ request: ThreadRequest, _ decision: T3Decision, feedback: String? = nil, target: ThreadTarget,
                           snapshot: RequestSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         do {
             guard case .approval(_, _, let allowed) = request.body else { throw RequestFailure.notAPermission }
@@ -106,7 +106,7 @@ extension Store {
 
     /// "Yes" to a plan: the mode it runs in, the default interaction mode, then the message T3's own composer sends to
     /// implement it, naming the plan (S1 f).
-    func implementPlan(_ request: ThreadRequest, mode: T3RuntimeMode, target: BriefTarget,
+    func implementPlan(_ request: ThreadRequest, mode: T3RuntimeMode, target: ThreadTarget,
                        snapshot: RequestSnapshot? = nil) async -> Result<Void, Error> {
         do {
             guard let markdown = request.planMarkdown else { throw RequestFailure.notAPlan }
@@ -126,7 +126,7 @@ extension Store {
     }
 
     /// "No" to a plan: your words as a normal message, the thread still in plan mode.
-    func sendBackPlan(_ request: ThreadRequest, words: String, target: BriefTarget,
+    func sendBackPlan(_ request: ThreadRequest, words: String, target: ThreadTarget,
                       snapshot: RequestSnapshot? = nil) async -> Result<Void, Error> {
         do {
             guard request.isPlan else { throw RequestFailure.notAPlan }

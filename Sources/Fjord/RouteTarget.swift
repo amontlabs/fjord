@@ -48,9 +48,9 @@ enum RouteTarget: Equatable, Hashable, Sendable {
     }
 
     /// The thread's project and id as a brief target.
-    func briefTarget(store: Store) -> BriefTarget? {
+    func briefTarget(store: Store) -> ThreadTarget? {
         guard case .thread(let id) = self, let t = store.threads[id] else { return nil }
-        return BriefTarget(project: t.projectID, thread: id)
+        return ThreadTarget(project: t.projectID, thread: id)
     }
 
     /// A target as a button: the thread's title in its project, or "New thread in <project>".

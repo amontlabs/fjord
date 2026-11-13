@@ -86,12 +86,12 @@ struct ThreadRequest: Hashable, Identifiable, Sendable {
 /// The request a judgment was made against: applied only while the thread still holds that very request, when it is made and
 /// at the send. One that moved on to another request (a retried permission has a new id) isn't answered.
 struct RequestSnapshot: Equatable, Sendable {
-    var target: BriefTarget
+    var target: ThreadTarget
     var requestID: String
 
     static let changedWords = "The question changed while your answer was being read, so nothing was answered."
 
-    init(target: BriefTarget, request: ThreadRequest) {
+    init(target: ThreadTarget, request: ThreadRequest) {
         self.target = target
         requestID = request.id
     }

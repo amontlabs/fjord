@@ -21,6 +21,7 @@ extension Store {
             guard let self, t.folder != nil else { return nil }
             return self.projectName(of: t)
         }
+        records.firstAsk = { [weak self] id in self?.firstMessages[id] }
         records.pullRequests = { [weak self] t, reply in self?.routerPullRequests.states(for: t, reply: reply) ?? RouterRecords.linked(t) }
         // The model calls run only with the Router on, and never in a demo.
         records.canAsk = { [weak self] in self.map { $0.routerOn && !$0.routerIsPretend } ?? false }
@@ -187,11 +188,11 @@ extension Store {
 
     // MARK: Helpers
 
-    /// Router banners' ids: `brief:<target key>`, so a click opens the thread's line (`onOpenRouterLine`).
-    nonisolated static let routerNoticePrefix = "brief:"
+    /// Router banners' ids: `router:<target key>`, so a click opens the thread's line (`onOpenRouterLine`).
+    nonisolated static let routerNoticePrefix = "router:"
 
     static func routerNotice(_ n: ThreadNotice) -> String {
-        routerNoticePrefix + BriefTarget(project: n.project, thread: n.thread).key
+        routerNoticePrefix + ThreadTarget(project: n.project, thread: n.thread).key
     }
 
     /// A read as the page shows it: a new thread's project by the name its lines and pills have, not T3's id.

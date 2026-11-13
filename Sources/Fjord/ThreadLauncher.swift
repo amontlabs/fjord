@@ -321,7 +321,7 @@ extension RouterDispatcher {
             $0.decision.target = "a new thread in \(project.title)"
             $0.decision.targetID = target
             $0.add(.sent(to: "a new thread in \(project.title)", text: words.words, original: words.rephrased ? words.original : nil),
-                   session: nil, thread: BriefTarget(project: project.id, thread: launched.thread))
+                   session: nil, thread: ThreadTarget(project: project.id, thread: launched.thread))
             $0.delivered = RouterDecision.Delivered(thread: launched.thread, messageID: message.messageID, commandID: message.commandID,
                                                     outcome: .started, note: nil, at: Date())
             if $0.outcome == .pending { $0.outcome = .done }

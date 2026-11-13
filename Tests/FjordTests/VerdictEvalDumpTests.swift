@@ -24,7 +24,7 @@ import Testing
         var input: RouterVerdictInput {
             RouterVerdictInput(title: title, project: project, firstAsk: firstAsk, yourWords: yourWords, reply: reply,
                                request: request.map { .init(kind: $0.kind, words: $0.words, options: $0.options) },
-                               pullRequests: prs.map { .init(url: $0.url, number: $0.number, state: $0.state) }, files: files,
+                               pullRequests: prs.map { .init(url: $0.url, number: $0.number, state: $0.state) },
                                diff: diff.map { .init(files: $0.files, added: $0.added, removed: $0.removed) })
         }
     }

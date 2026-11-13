@@ -289,14 +289,6 @@ struct RouterVerdictReading {
         for kind in [RouterVerdictRequest.Kind.ask, .finished, .name] { drop(Self.key(thread, kind)) }
     }
 
-    /// Whether a call for this thread is queued or running.
-    func isAsked(_ thread: String) -> Bool {
-        [RouterVerdictRequest.Kind.ask, .finished, .name].contains { k in
-            let key = Self.key(thread, k)
-            return running[key] != nil || queued.contains { $0.key == key }
-        }
-    }
-
     /// A purpose call for a project; a newer one for the same project replaces it.
     func purpose(_ call: PurposeCall) {
         let key = "\u{1}purpose:" + call.project

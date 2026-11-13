@@ -28,7 +28,7 @@ extension RouterComposerModel {
     /// The same, for the draft as it will be sent, worked out once by the caller (`sentDraft` writes every pill's name).
     func context(_ store: Store, sent: (text: String, mentions: [RouterMention])) -> RouterContext {
         // The thread whose card is open on the Router page: the draft answers it.
-        let reply: BriefTarget? = {
+        let reply: ThreadTarget? = {
             guard case .line(let id)? = store.routerPage.selection else { return nil }
             return RouteTarget.thread(id).briefTarget(store: store)
         }()

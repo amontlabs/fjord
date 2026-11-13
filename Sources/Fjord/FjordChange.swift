@@ -43,16 +43,16 @@ struct FjordChange: Codable, Hashable, Identifiable {
         case order(before: [UUID], after: [UUID])
         case setting(key: String, before: SettingValue, after: SettingValue)
         case marks(state: String, [EntryChange])
-        /// An act on a brief entry's thread (archive, mark read, snooze, settle, rename, tag), done at once in T3 and taken back
+        /// An act on a thread (archive, mark read, snooze, settle, rename, tag), done at once in T3 and taken back
         /// by Revert. `mark`: what the act carries beyond the thread (`ThreadActDetail`).
-        case briefAction(project: String, thread: String, act: BriefAction, mark: String)
+        case briefAction(project: String, thread: String, act: ThreadAct, mark: String)
         /// A thread Fjord started in T3 (`Store.launchThread`); Revert archives it.
         case threadLaunch(project: String, thread: String, projectTitle: String)
     }
 
     var isReverted: Bool { revertedAt != nil }
-    /// An act on a brief entry, not a change the Router made.
-    var isBriefAction: Bool { if case .briefAction = patch { true } else { false } }
+    /// An act on a thread, not a change the Router made. (`briefAction`: the saved name, kept so History still reads.)
+    var isThreadAct: Bool { if case .briefAction = patch { true } else { false } }
     /// Why the last Apply or Revert didn't go through, for a change still active or waiting (a reverted or discarded one
     /// shows its note as it is). Cleared by the next success.
     var failureNote: String? { isReverted ? nil : revertNote }
@@ -425,7 +425,7 @@ extension Store {
                 marks[item.thing] = item.before
             }
         case .briefAction:
-            replayBriefAction(change.patch, forward: false)
+            replayThreadAct(change.patch, forward: false)
         case .threadLaunch(_, let thread, _):
             archiveLaunchedThread(change.id, thread: thread)
         }

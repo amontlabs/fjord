@@ -33,8 +33,6 @@ struct RouterVerdictInput: Equatable, Sendable {
     /// What it waits on you for (an ask).
     var request: Request?
     var pullRequests: [PullRequest] = []
-    /// The files the turn changed, when known by name.
-    var files: [String] = []
     /// What the turn changed, summed.
     var diff: RouterThread.Diff?
 }
@@ -42,10 +40,10 @@ struct RouterVerdictInput: Equatable, Sendable {
 extension RouterVerdictInput {
     /// From the shell row: the title, your last words and the PRs; the rest from the thread's detail.
     init(thread t: AgentThread, project: String?, firstAsk: String? = nil, reply: String? = nil, request: Request? = nil,
-         files: [String] = [], diff: RouterThread.Diff? = nil) {
+         diff: RouterThread.Diff? = nil) {
         self.init(title: t.title, project: project, firstAsk: firstAsk, yourWords: t.lastUserText, reply: reply ?? t.latestMessage,
                   request: request,
-                  pullRequests: t.pullRequests.map { PullRequest(url: $0.url, number: $0.number, state: $0.state) }, files: files,
+                  pullRequests: t.pullRequests.map { PullRequest(url: $0.url, number: $0.number, state: $0.state) },
                   diff: diff)
     }
 }
@@ -77,7 +75,6 @@ enum RouterVerdictPrompt {
     static let replyCharacters = 4000
     static let requestCharacters = 2000
     static let wordsCharacters = 1000
-    static let maxFiles = 12
 
     // MARK: The rules
 
@@ -203,10 +200,6 @@ enum RouterVerdictPrompt {
             for pr in x.pullRequests {
                 lines.append("- " + (pr.number.map { "#\($0) " } ?? "") + pr.url + ": " + (pr.state ?? "state unknown"))
             }
-        }
-        if !x.files.isEmpty {
-            let shown = x.files.prefix(maxFiles).map(r).joined(separator: ", ")
-            lines.append("Files changed: " + shown + (x.files.count > maxFiles ? " and \(x.files.count - maxFiles) more" : ""))
         }
         if let d = x.diff, d.files > 0 {
             lines.append("The turn changed \(d.files) file\(d.files == 1 ? "" : "s"), +\(d.added) −\(d.removed)")

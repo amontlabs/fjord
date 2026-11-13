@@ -5,7 +5,7 @@ import Testing
 /// Acts on a T3 thread (read, archive, snooze, settle, rename, tags) and the banners the shell drives.
 @MainActor @Suite struct ThreadActsTests {
     @MainActor final class Sent { var commands: [T3Command] = [] }
-    private func target() -> BriefTarget { BriefTarget(project: "p", thread: "t1") }
+    private func target() -> ThreadTarget { ThreadTarget(project: "p", thread: "t1") }
 
     private func fixture() -> (store: Store, sent: Sent) {
         let store = Store()
@@ -18,7 +18,7 @@ import Testing
     @Test func eachActSendsItsCommandAndRevertSendsTheOpposite() {
         let at = Date(timeIntervalSince1970: 1_800_000_000)
         let until = T3Timestamp(date: at).text
-        let cases: [(BriefAction, String, [String], [String])] = [
+        let cases: [(ThreadAct, String, [String], [String])] = [
             (.read, "", ["thread.visit"], ["thread.mark-unread"]),
             (.archive, "", ["thread.archive"], ["thread.unarchive"]),
             (.settle, "", ["thread.settle"], ["thread.unsettle"]),

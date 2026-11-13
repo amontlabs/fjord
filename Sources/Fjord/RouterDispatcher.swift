@@ -23,7 +23,7 @@ struct RouterShown: Equatable, Sendable {
 /// place a Retry goes to again or one waved off, and its pills.
 struct RouterContext: Equatable {
     /// The thread it replies to.
-    var replyTo: BriefTarget?
+    var replyTo: ThreadTarget?
     /// The local projects the message tags (their folders): context for an answer, and the folder a new project may use.
     var projects: [String]
     /// A T3 target (`RouteTarget`) it goes to: the place you confirmed.
@@ -51,7 +51,7 @@ struct RouterContext: Equatable {
     /// A new thread started from the Router v2 page: the id its line already has and the settings its row showed.
     var launch: RouterLaunchPlan?
 
-    init(replyTo: BriefTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
+    init(replyTo: ThreadTarget? = nil, projects: [String] = [], target: String? = nil, notTo: String? = nil, pills: [Range<Int>] = []) {
         self.replyTo = replyTo
         self.projects = projects
         self.target = target
@@ -139,7 +139,7 @@ struct RouterAskBack: Identifiable, Equatable {
         var send: @MainActor (RouterTools, Delivery) async throws -> RouterDecision.Delivered
         /// A question, permission or plan answered for a thread: what was done.
         /// Only while the thread still holds the request it was judged on (`RequestSnapshot`).
-        var answer: @MainActor (RouterTools, BriefTarget, RequestAnswer, RequestSnapshot) async throws -> String
+        var answer: @MainActor (RouterTools, ThreadTarget, RequestAnswer, RequestSnapshot) async throws -> String
         /// A Haiku run for an intent, given the context it starts from.
         var run: @MainActor (RouterTools, RouterRun.Intent, _ input: String) async throws -> RouterRun.Answer
     }
@@ -463,7 +463,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     func stage(_ job: Job, _ text: String) { progress[job.id] = text }
 
-    func note(_ job: Job, _ item: RouterDecision.Done, session: String? = nil, thread: BriefTarget? = nil) {
+    func note(_ job: Job, _ item: RouterDecision.Done, session: String? = nil, thread: ThreadTarget? = nil) {
         store?.updateDecision(job.id) { $0.add(item, session: session, thread: thread) }
     }
 
@@ -474,7 +474,7 @@ struct RouterAskBack: Identifiable, Equatable {
         switch Self.plan(text: job.text, context: job.context, store: store) {
         case .reply(let project, let thread, let session):
             chosen(job)
-            try await reply(job, to: BriefTarget(project: project, thread: thread), session: session)
+            try await reply(job, to: ThreadTarget(project: project, thread: thread), session: session)
         case .send(let target):
             // A place you tagged (or a Retry's, or one picked from the preview's menu): yours, as a pick is.
             confirm(job, target)
@@ -659,7 +659,7 @@ struct RouterAskBack: Identifiable, Equatable {
 
     /// Passes your words to a thread: the form's answer when you gave one, else your words without their addressing, as
     /// one `message.dispatch` (steering the turn under way, or queued behind it).
-    private func reply(_ job: Job, to t: BriefTarget, session: String) async throws {
+    private func reply(_ job: Job, to t: ThreadTarget, session: String) async throws {
         guard let store else { return }
         // What the session would get, its addressing taken out ("@router no rush"), is what answers its form.
         let said = (try? Addressing.edit(job.text, pills: job.context.pills).text) ?? job.text

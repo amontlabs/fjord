@@ -27,7 +27,7 @@ import Testing
         var queuedRuns: [String: String] = [:]
         var cancelled: [(String, String?, Bool)] = []
         var stopped: [String] = []
-        var acted: [(act: BriefAction, thread: String, detail: String, title: String)] = []
+        var acted: [(act: ThreadAct, thread: String, detail: String, title: String)] = []
         var holds: [@MainActor (Bool) -> Void] = []
         var refusals: [@MainActor (String) -> Void] = []
         var changeID: UUID? = UUID()
@@ -442,7 +442,7 @@ import Testing
         acts.settle(["t1"], on: true)
         #expect(f.hidden.map(\.1) == [true])
         let change = try #require(s.router.changes.last)
-        #expect(change.isBriefAction && change.title == "Settled Fix the fence" && !change.isReverted)
+        #expect(change.isThreadAct && change.title == "Settled Fix the fence" && !change.isReverted)
         acts.settle(["t1"], on: false)
         #expect(s.router.changes.first { $0.id == change.id }?.isReverted == true && f.hidden.map(\.1) == [true, false])
         await waitUntil { sent.commands.count == 2 }

@@ -50,7 +50,7 @@ import Testing
     @Test func answersFromThePageAreLogged() {
         let s = store()
         s.threads["local_a"] = AgentThread(id: "local_a", title: "Fix the login bug", lastActivity: Date())
-        s.logEntryAction("Answered the form", target: BriefTarget(project: "local:app", thread: "local_a"))
+        s.logEntryAction("Answered the form", target: ThreadTarget(project: "local:app", thread: "local_a"))
         let d = s.router.decisions[0]
         #expect(d.trigger == .you("Answered the form") && d.outcome == .done)
         #expect(d.done == [.answered(thread: "Fix the login bug")] && d.links.threads == ["local:app/local_a"])

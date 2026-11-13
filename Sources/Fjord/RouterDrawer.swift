@@ -42,7 +42,7 @@ struct RouterDrawer: View {
         /// Your words, the answer's words, or the change's title.
         var text: String
         /// The thread it went to or answered, when there is one.
-        var target: BriefTarget?
+        var target: ThreadTarget?
         /// Else the project it went to (a message to a project's coordinator, a new thread).
         var project: String?
         /// The decision it came from (a message's).
@@ -137,7 +137,7 @@ struct RouterDrawer: View {
         var out: [Line] = []
         for d in store.router.decisions.suffix(80) {
             guard case .you(let words) = d.trigger, !words.isEmpty, d.decision.intent != "answer" else { continue }
-            let target = d.links.threads.lazy.compactMap(BriefTarget.init(key:)).first ?? place(d.decision.targetID, store: store).thread
+            let target = d.links.threads.lazy.compactMap(ThreadTarget.init(key:)).first ?? place(d.decision.targetID, store: store).thread
             out.append(Line(id: d.id.uuidString, at: d.at, kind: .message(status(d, store: store)), text: words, target: target,
                             project: target == nil ? place(d.decision.targetID, store: store).project : nil, decision: d.id))
         }
@@ -148,11 +148,11 @@ struct RouterDrawer: View {
     }
 
     /// Where a decision's target sends: a thread, or a project.
-    static func place(_ targetID: String?, store: Store) -> (thread: BriefTarget?, project: String?) {
+    static func place(_ targetID: String?, store: Store) -> (thread: ThreadTarget?, project: String?) {
         switch targetID.flatMap(RouteTarget.init) {
         case .newThread(let project)?: (nil, project)
         // A thread's project isn't in its target: T3's shell has it.
-        case .thread(let id)?: store.threads[id].map { (BriefTarget(project: $0.projectID, thread: id), nil) } ?? (nil, nil)
+        case .thread(let id)?: store.threads[id].map { (ThreadTarget(project: $0.projectID, thread: id), nil) } ?? (nil, nil)
         default: (nil, nil)
         }
     }

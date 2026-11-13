@@ -1017,7 +1017,7 @@ final class Store {
         } else if id.hasPrefix(Notifier.summaryPrefix) {
             onOpenInbox?(nil, nil)
             return
-        } else if id.hasPrefix(Self.routerNoticePrefix), let t = BriefTarget(key: String(id.dropFirst(Self.routerNoticePrefix.count))) {
+        } else if id.hasPrefix(Self.routerNoticePrefix), let t = ThreadTarget(key: String(id.dropFirst(Self.routerNoticePrefix.count))) {
             onOpenRouterLine?(t.thread)
             return
         }

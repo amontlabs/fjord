@@ -1,12 +1,12 @@
 import AppKit
 import Foundation
 
-// Acts on a T3 thread from the brief (docs/design/t3-port-plan.md, Step 14). Each one applies at once, is sent to T3 as a
+// Acts on a T3 thread (docs/design/t3-port-plan.md, Step 14). Each one applies at once, is sent to T3 as a
 // command, and leaves a `FjordChange` whose Revert sends the opposite command. Read state, archive, snooze, settle, title and
 // tags are T3's, so they agree with its sidebar and phone app. Fjord keeps only what it hides until T3 has confirmed.
 
 /// An act on a brief entry's thread that Revert sets back: what `FjordChange.briefAction` records.
-enum BriefAction: String, Codable, Hashable, Sendable {
+enum ThreadAct: String, Codable, Hashable, Sendable {
     case archive, read, snooze, settle, rename, tag
 
     var label: String {
@@ -31,10 +31,11 @@ enum BriefAction: String, Codable, Hashable, Sendable {
         }
     }
 
-    /// What the thread was before, as the entry's Details say it.
+    /// What the thread was before, as History's details say it.
     var before: String {
         switch self {
-        case .archive, .snooze, .settle, .read: "Needs you"
+        case .read: "Unread"
+        case .archive, .snooze, .settle: "In play"
         case .rename: "Old title"
         case .tag: "Not tagged"
         }
@@ -60,7 +61,7 @@ enum ThreadActDetail {
 
 extension Store {
     /// The commands an act sends going forward, or back for Revert.
-    static func commands(for act: BriefAction, thread: String, detail: String, forward: Bool, now: Date = Date()) -> [T3Command] {
+    static func commands(for act: ThreadAct, thread: String, detail: String, forward: Bool, now: Date = Date()) -> [T3Command] {
         switch act {
         case .read: return [forward ? .threadVisit(threadId: thread, visitedAt: T3Timestamp(date: now)) : .threadMarkUnread(threadId: thread)]
         case .archive: return [forward ? .threadArchive(threadId: thread) : .threadUnarchive(threadId: thread)]
@@ -74,7 +75,7 @@ extension Store {
             return title.isEmpty ? [] : [.threadRename(threadId: thread, title: title)]
         case .tag:
             let (tag, state) = ThreadActDetail.parts(detail)
-            guard !tag.isEmpty, tag.count <= BriefAction.tagLimit else { return [] }
+            guard !tag.isEmpty, tag.count <= ThreadAct.tagLimit else { return [] }
             return [.tagSet(threadId: thread, tag: tag, tagged: (state == "on") == forward)]
         }
     }
@@ -83,7 +84,7 @@ extension Store {
     /// it back and says why on the entry. `hold` is what hides the thread meanwhile (default: the brief's); `refused` hears
     /// the reason after it is put back (default: the brief's `trouble`). Returns the change it logged.
     @discardableResult
-    func threadAct(_ act: BriefAction, on t: BriefTarget, detail: String = "", title: String, now: Date = Date(),
+    func threadAct(_ act: ThreadAct, on t: ThreadTarget, detail: String = "", title: String, now: Date = Date(),
                    hold: (@MainActor (_ on: Bool) -> Void)? = nil, refused: (@MainActor (String) -> Void)? = nil) -> UUID? {
         guard !Self.commands(for: act, thread: t.thread, detail: detail, forward: true, now: now).isEmpty else { return nil }
         let hide = hold ?? { [weak self] on in self?.routerHold(act, t.thread, on: on) }
@@ -111,7 +112,7 @@ extension Store {
     }
 
     /// Revert or Apply of an act: the opposite command (or the same again) and the hidden state set to match.
-    func replayBriefAction(_ patch: FjordChange.Patch, forward: Bool) {
+    func replayThreadAct(_ patch: FjordChange.Patch, forward: Bool) {
         guard case .briefAction(_, let thread, let act, let detail) = patch else { return }
         routerHold(act, thread, on: forward)
         send(Self.commands(for: act, thread: thread, detail: detail, forward: forward)) { [weak self] reason in
@@ -122,13 +123,13 @@ extension Store {
     }
 
     /// A settled, snoozed or archived thread has no line on the Router page until `on` is false again (the records hide it).
-    func routerHold(_ act: BriefAction, _ thread: String, on: Bool) {
+    func routerHold(_ act: ThreadAct, _ thread: String, on: Bool) {
         guard act == .settle || act == .snooze || act == .archive else { return }
         routerRecords.hide(thread, on: on)
     }
 
     /// T3 refused an act done outside the page (History, the bar, the palette): the page's toast says why.
-    func routerRefused(_ act: BriefAction, _ thread: String, reason: String) {
+    func routerRefused(_ act: ThreadAct, _ thread: String, reason: String) {
         guard act == .settle || act == .snooze || act == .archive else { return }
         routerPage.post(.actRefused(thread, reason: reason))
     }
@@ -147,14 +148,14 @@ extension Store {
 
     // MARK: Entry points
 
-    func snoozeThread(_ t: BriefTarget, until: Date) {
+    func snoozeThread(_ t: ThreadTarget, until: Date) {
         threadAct(.snooze, on: t, detail: T3Timestamp(date: until).text, title: lineTitle(t))
     }
 
-    func settleThread(_ t: BriefTarget) { threadAct(.settle, on: t, title: lineTitle(t)) }
+    func settleThread(_ t: ThreadTarget) { threadAct(.settle, on: t, title: lineTitle(t)) }
 
     /// A new title for the thread (`thread.metadata.update`); the old one is what Revert sends.
-    func renameThread(_ t: BriefTarget, to title: String) {
+    func renameThread(_ t: ThreadTarget, to title: String) {
         let old = threads[t.thread]?.title ?? lineTitle(t)
         let new = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !new.isEmpty, new != old else { return }
@@ -162,9 +163,9 @@ extension Store {
     }
 
     /// Tags (or untags) the thread; T3 keeps a tag to 64 characters.
-    func tagThread(_ t: BriefTarget, tag: String, on: Bool = true) {
+    func tagThread(_ t: ThreadTarget, tag: String, on: Bool = true) {
         let tag = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tag.isEmpty, tag.count <= BriefAction.tagLimit else { return }
+        guard !tag.isEmpty, tag.count <= ThreadAct.tagLimit else { return }
         threadAct(.tag, on: t, detail: ThreadActDetail.tag(tag, on: on), title: lineTitle(t))
     }
 

@@ -278,7 +278,7 @@ extension Store {
         case .marks(_, let changes):
             for item in changes { marks[item.thing] = item.after }
         case .briefAction:
-            replayBriefAction(patch, forward: true)
+            replayThreadAct(patch, forward: true)
         case .threadLaunch:
             break
         }

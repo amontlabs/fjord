@@ -1,7 +1,7 @@
 import Foundation
 
 /// A thread of a project: T3's project id and thread id.
-struct BriefTarget: Codable, Hashable, Sendable {
+struct ThreadTarget: Codable, Hashable, Sendable {
     var project: String
     var thread: String
 

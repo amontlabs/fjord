@@ -72,7 +72,7 @@ extension RouterActsRecords {
         var stop: (_ thread: String) async -> Bool
         /// An act with a Revert, logged for History: hidden through `hold` at once, `refused` hears T3's refusal after the line
         /// is back. Returns the change it logged.
-        var act: (_ act: BriefAction, _ thread: String, _ detail: String, _ title: String,
+        var act: (_ act: ThreadAct, _ thread: String, _ detail: String, _ title: String,
                   _ hold: @escaping @MainActor (Bool) -> Void, _ refused: @escaping @MainActor (String) -> Void) -> UUID?
         /// History's Revert of a change: its opposite command, and the change marked reverted.
         var revert: (_ change: UUID) -> Void
@@ -102,7 +102,7 @@ extension RouterActsRecords {
     /// Cancels waiting for T3 to list the run they take back (`threadChanged`).
     private var cancelling: [String: String] = [:]
     /// The changes logged for History, per thread and act, newest last: what a Revert marks reverted.
-    private var changes: [String: [BriefAction: [UUID]]] = [:]
+    private var changes: [String: [ThreadAct: [UUID]]] = [:]
 
     init(env: Environment, records: RouterActsRecords? = nil, emit: @escaping (RouterChange) -> Void = { _ in }) {
         self.env = env
@@ -152,7 +152,7 @@ extension RouterActsRecords {
         do { resolved = try ThreadAnswers.resolve(request, picks: picks, typed: typed) } catch {
             return refuse(send, Self.words(error))
         }
-        let snapshot = RequestSnapshot(target: BriefTarget(project: "", thread: out.thread), request: request)
+        let snapshot = RequestSnapshot(target: ThreadTarget(project: "", thread: out.thread), request: request)
         Task { @MainActor [env] in
             switch await env.perform(resolved, request, snapshot) {
             case .success: self.took(send)
@@ -271,7 +271,7 @@ extension RouterActsRecords {
 
     func notForMe(_ thread: String, on: Bool) { records?.notForMe(thread, on: on) }
 
-    private func doAct(_ act: BriefAction, _ thread: String, detail: String = "") {
+    private func doAct(_ act: ThreadAct, _ thread: String, detail: String = "") {
         let logged = Logged()
         let id = env.act(act, thread, detail, env.title(thread), { [weak self] on in self?.records?.hide(thread, on: on) },
                          { [weak self] reason in
@@ -289,7 +289,7 @@ extension RouterActsRecords {
 
     /// The Revert: the thread's line may return at once; the change History logged is marked reverted, which sends the opposite
     /// command. With no change to revert (it was refused, or not logged here) the opposite command goes by itself.
-    private func undoAct(_ act: BriefAction, _ thread: String) {
+    private func undoAct(_ act: ThreadAct, _ thread: String) {
         records?.hide(thread, on: false)
         if let id = changes[thread]?[act]?.popLast() {
             env.revert(id)
@@ -305,7 +305,7 @@ extension RouterActsRecords {
 extension RouterActs {
     /// The real acts on `store`: the dispatcher's sends are reported back here, and the records hear every act.
     static func live(store: Store, records: RouterActsRecords? = nil, emit: @escaping (RouterChange) -> Void = { _ in }) -> RouterActs {
-        func target(_ id: String) -> BriefTarget { BriefTarget(project: store.threads[id]?.projectID ?? "", thread: id) }
+        func target(_ id: String) -> ThreadTarget { ThreadTarget(project: store.threads[id]?.projectID ?? "", thread: id) }
         let env = Environment(
             submit: { [weak store] text, context in store?.routerDispatcher.submit(text, context: context) },
             request: { [weak store] id in store?.heldRequest(target(id)) },

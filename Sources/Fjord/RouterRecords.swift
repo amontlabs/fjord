@@ -33,6 +33,8 @@ final class RouterRecords {
     }
     /// A thread's pull requests with their states; `reply` is its last reply, where the unlinked ones are named.
     var pullRequests: (AgentThread, String?) -> [RouterThread.PR] = { t, _ in RouterRecords.linked(t) }
+    /// What the thread was first asked, when Fjord has read it (its icon's read): the name's input.
+    var firstAsk: (String) -> String? = { _ in nil }
     var notifier: RouterNotifier?
     var now: () -> Date = Date.init
 
@@ -575,7 +577,8 @@ final class RouterRecords {
     }
 
     private func input(_ t: AgentThread, _ e: Entry) -> RouterVerdictInput {
-        var input = RouterVerdictInput(thread: t, project: project(t), reply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 },
+        var input = RouterVerdictInput(thread: t, project: project(t), firstAsk: firstAsk(t.id),
+                                       reply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 },
                                        request: e.detail?.request.map(RouterVerdictInput.Request.init), diff: e.detail?.diff)
         if input.yourWords == nil { input.yourWords = e.detail?.youSaid }
         return input

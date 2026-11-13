@@ -19,7 +19,7 @@ import Testing
         var holdDecide = false
         var decideHeld: CheckedContinuation<Void, Never>?
         var sent: [RouterDispatcher.Delivery] = []
-        var answered: [(target: BriefTarget, answer: RouterDispatcher.RequestAnswer)] = []
+        var answered: [(target: ThreadTarget, answer: RouterDispatcher.RequestAnswer)] = []
         var runs: [(intent: RouterRun.Intent, input: String)] = []
         var answer = RouterRun.Answer(reply: "Done.", done: "set it")
         var finished: [UUID] = []
@@ -87,7 +87,7 @@ import Testing
     }
 
     func reply(_ thread: String, _ project: String = "p1") -> RouterContext {
-        RouterContext(replyTo: BriefTarget(project: project, thread: thread))
+        RouterContext(replyTo: ThreadTarget(project: project, thread: thread))
     }
 
     // MARK: No model

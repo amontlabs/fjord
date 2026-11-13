@@ -199,7 +199,7 @@ import UserNotifications
         let sent = Sent()
         let store = sending(sent)
         // The local question: its second option.
-        let t = BriefTarget(project: "local:lcu", thread: Demo.blockedAgentID)
+        let t = ThreadTarget(project: "local:lcu", thread: Demo.blockedAgentID)
         let request = try #require(store.heldRequest(t))
         let question = try #require(request.questions.first)
         let answers = [question.id: T3Answer.one("Ask first")]
@@ -210,7 +210,7 @@ import UserNotifications
     @Test func answeringWhileTheRouterIsSwitchedOffSendsNothing() async throws {
         let sent = Sent()
         let store = sending(sent)
-        let t = BriefTarget(project: "local:lcu", thread: Demo.blockedAgentID)
+        let t = ThreadTarget(project: "local:lcu", thread: Demo.blockedAgentID)
         let request = try #require(store.heldRequest(t))
         let answers = [try #require(request.questions.first).id: T3Answer.one("Ask first")]
         // Switched off before the answer goes.
@@ -224,7 +224,7 @@ import UserNotifications
     @Test func aRequestThatMovedOnIsNotAnsweredWithTheOldOnesAnswer() async throws {
         let sent = Sent()
         let store = sending(sent)
-        let t = BriefTarget(project: "local:lcu", thread: Demo.blockedAgentID)
+        let t = ThreadTarget(project: "local:lcu", thread: Demo.blockedAgentID)
         let old = try #require(store.heldRequest(t))
         // A retried permission is a new request id: the answer read for the old one doesn't go to it.
         var next = old
@@ -241,7 +241,7 @@ import UserNotifications
     @Test func aPermissionIsAllowedByItsButtonAndDeclinedByYourWords() async throws {
         let sent = Sent()
         let store = sending(sent)
-        let t = BriefTarget(project: "local:lcu", thread: "local_demo-ci")
+        let t = ThreadTarget(project: "local:lcu", thread: "local_demo-ci")
         let request = try #require(store.heldRequest(t))
         #expect(request.decisions == ThreadRequest.fallbackDecisions)
         if case .failure(let error) = await store.answerPermission(request, .acceptForSession, target: t) { Issue.record("\(error)") }
@@ -258,7 +258,7 @@ import UserNotifications
     @Test func anExpiredPermissionTakesNoDecision() async throws {
         let sent = Sent()
         let store = sending(sent)
-        let t = BriefTarget(project: "local:lcu", thread: "local_demo-ci")
+        let t = ThreadTarget(project: "local:lcu", thread: "local_demo-ci")
         var request = try #require(store.heldRequest(t))
         request.live = false
         store.requests["local_demo-ci"] = request
@@ -272,7 +272,7 @@ import UserNotifications
         let sent = Sent()
         let store = sending(sent)
         // The Linux sandbox's session, stopped on its plan.
-        let t = BriefTarget(project: "local:sandbox", thread: "local_demo-linux")
+        let t = ThreadTarget(project: "local:sandbox", thread: "local_demo-linux")
         let request = try #require(store.heldRequest(t))
         #expect(request.isPlan)
         if case .failure(let error) = await store.implementPlan(request, mode: .autoAcceptEdits, target: t) { Issue.record("\(error)") }
