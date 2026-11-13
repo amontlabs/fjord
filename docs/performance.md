@@ -202,6 +202,11 @@ fast:
   ticks. The line sheens on its record, its words stream through `.words`, and the record is handed on twice per summary
   (its first words, its end); the card doesn't read the sentence (`RouterWork.lineReadsNewest`). The prompt's input is
   built off the main actor with the verdicts'.
+- **Open items without polling** (R7, `RouterItemLedgers`): an input is noticed in the record's own refresh (the latest
+  run and your last message's time, compared with what the ledger saw; nothing new returns before any work), read one at
+  a time per thread through the verdicts' queue, its facts from one projection read (or the one already held). A read
+  hands the record on at most four times (it starts, what closes, what is found, the end) and once more when the ledger
+  settles 1.6 s later (one task, no timer). 500 rows still reduce in under 5 ms (`RouterRecordsTests`).
 
 Gates (2.4), release build, 1617 × 1188, 2026-11-13, at `c889736e`: three runs each, interleaved with the build before
 it (`5abf8131`); load average 4-12 throughout (a browser tab and WindowServer busy), so p95s move several ms between
@@ -220,8 +225,9 @@ identical runs. Before → after where it moved.
 | Select | demo, speed 4 / `--router-v2-load select` | p95 ≤ 8 ms | 31 / 29 / 31 → 29 / 28 / 30; select load 27 / 27 / 24 → 27 / 28 / 27 | red |
 | Select work | same | — | demo 12 / 13 / 12 → 7 / 7 / 7; select load 3 / 3 / 3 (max 15-17) → 0 / 0 / 0 (max 1) | |
 | Working summaries, real day | `--router-v2-load real` (now with each working line's summary once a minute), release, 3 runs interleaved with `2aaf1beb`, load average 16-30 | no regression | T3 event p95 7 / 12 / 12 → 10 / 6 / 9 ms, max 12-18 → 12-16; work ≤ 1 ms both; Flush p95 3-4 → 4 ms; a summary landing 3 ms to commit (`FJORD_LOAD_OFF=records`) | as before |
+| Open items, real day | `--router-v2-load real` (now with a read every 6 s on four blocks: pulse and sheen, the read landing, the ledger settling), release, 3 runs interleaved with `3741dbe1`, load average 19-30 | no regression | without the items (`FJORD_LOAD_OFF=items`): T3 event p95 6 / 12 / 10 → 9, max 14-22 → 20; work ≤ 1 ms; Flush p95 4 → 4. The reads alone: p95 9, max 9 ms. A line becoming a block (four at the load's start, timed with `FJORD_LOAD_ITEMS_SEED=1`): 30-60 ms each, one commit | reads green; becoming a block red |
 | Bodies per change | `RouterRenderTests` | 1 line body per upsert, 0 list; 2 per hover | as budgeted (counted per page since `0ed63fcc`) | green |
-| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 %; 0.200 % → 0.133 % with working summaries (2026-11-13) | green |
+| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 %; 0.200 % → 0.133 % with working summaries; 0.100 % with open items (2026-11-13) | green |
 | Open / Close | `morph-timings --scenario router --steps "open,close x10"` | p95 ≤ 325 ms | Open 314 / 318 / 315, Close 317 / 318 / 319 | green |
 | First flush | same | p95 ≤ 16 ms | Open 16 / 21 / 18 (before 20 / 16 / 18), Close 10 / 8 / 8 | Open red by 0-5 ms |
 | Captures inside a morph | same | 0 | 0 | green |

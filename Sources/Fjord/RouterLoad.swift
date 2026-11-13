@@ -14,7 +14,10 @@ import SwiftUI
 // streaming a verdict's words, a record about every second (one in ten moves its line), for thirty seconds, no reply
 // growing; and each working line's summary at the engine's rate, one a minute per line spread over the minute: its line
 // sheens for the call, its words stream, it lands on the card's timeline. The synthetic load stays the gate's target;
-// this one must be comfortably green. `FJORD_LOAD_OFF=summaries` leaves the summaries out.
+// this one must be comfortably green. `FJORD_LOAD_OFF=summaries` leaves the summaries out. And open items (R7) as the
+// records hand them on, one read every six seconds (busier than the owner's day, about 330 a day): a block's header
+// pulses and its items sheen, the read lands four seconds later (one item closes and strikes, one is restated, one is new),
+// and 1.6 s later the ledger settles. `FJORD_LOAD_OFF=items` leaves them out.
 
 @MainActor
 enum RouterLoad {
@@ -94,6 +97,9 @@ enum RouterLoad {
                 if !off.contains("records") { group.addTask { @MainActor in await records(model, until: end) } }
                 if isReal, !off.contains("summaries") {
                     group.addTask { @MainActor in await summaries(model, until: end) }
+                }
+                if isReal, !off.contains("items") {
+                    group.addTask { @MainActor in await items(model, until: end) }
                 }
                 if let first = working.first, !off.contains("reply"), !isReal {
                     group.addTask { @MainActor in await reply(model, first, until: end) }
@@ -182,6 +188,49 @@ enum RouterLoad {
             model.apply(.upsert(t))
             RouterSignposts.end(work)
             RouterSignposts.end(event, afterCommit: true)
+        }
+    }
+
+    /// Open items as the records hand them on: a read every six seconds on one of four lines, each a timed record.
+    private static func items(_ model: RouterModel, until end: Date) async {
+        func put(_ t: RouterThread) {
+            let event = RouterSignposts.begin("T3 event"), work = RouterSignposts.begin("T3 event work")
+            model.apply(.upsert(t))
+            RouterSignposts.end(work)
+            RouterSignposts.end(event, afterCommit: true)
+        }
+        let ids = Array(model.threads.filter { $0.state == .working || $0.state == .done }.map(\.id).prefix(4))
+        var next = 0
+        for (k, id) in ids.enumerated() {
+            guard var t = model.thread(id) else { continue }
+            t.ledger = RouterLedger(items: [
+                RouterItem(id: "i\(next)", kind: k % 2 == 0 ? .decide : .stuck, sentence: "keep the old checkpoint, or delete it?", since: model.now),
+                RouterItem(id: "i\(next + 1)", kind: .know, sentence: "the boot image is 1.2 GB smaller", since: model.now),
+            ])
+            next += 2
+            // Set up untimed unless FJORD_LOAD_ITEMS_SEED is set: a line becoming a block is timed apart.
+            if ProcessInfo.processInfo.environment["FJORD_LOAD_ITEMS_SEED"] != nil { put(t) } else { model.apply(.upsert(t)) }
+        }
+        var n = 0
+        while Date() < end, !ids.isEmpty {
+            try? await Task.sleep(for: .seconds(6))
+            let id = ids[n % ids.count]
+            n += 1
+            guard Date() < end, var t = model.thread(id) else { continue }
+            t.ledger.turnEnded()
+            put(t)
+            try? await Task.sleep(for: .seconds(4))
+            guard var t = model.thread(id), let first = t.ledger.live.first else { continue }
+            let restated = t.ledger.live.dropFirst().first?.id
+            next += 1
+            t.ledger.land(RouterLedgerRead(close: [first.id: Router.Items.Copy.doneByAgent], merge: Set([restated].compactMap { $0 }),
+                                          add: [RouterItem(id: "i\(next)", kind: .do, sentence: "sign in to Silo to boot the VM", since: model.now)]),
+                          at: model.now)
+            put(t)
+            try? await Task.sleep(for: .seconds(Router.Items.strike))
+            guard var t = model.thread(id) else { continue }
+            t.ledger.settle()
+            put(t)
         }
     }
 
