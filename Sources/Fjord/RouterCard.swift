@@ -248,10 +248,15 @@ struct RouterCard: View {
                         model.notForMe(id)
                     }
                 }
-                RouterTextButton(model: model, hit: .footer(id, .snooze), title: "Snooze", keys: ["alt", "cmd", "backspace"],
-                                   removes: true) { model.openSnooze() }
-                RouterTextButton(model: model, hit: .footer(id, .settle), title: "Settle", keys: ["cmd", "backspace"],
-                                   removes: true) { model.settle(id) }
+                if let why = model.holdReason(thread) {
+                    // T3 won't let go of it yet: shown off, with why.
+                    RouterHeldActs(why: why)
+                } else {
+                    RouterTextButton(model: model, hit: .footer(id, .snooze), title: "Snooze", keys: ["alt", "cmd", "backspace"],
+                                       removes: true) { model.openSnooze() }
+                    RouterTextButton(model: model, hit: .footer(id, .settle), title: "Settle", keys: ["cmd", "backspace"],
+                                       removes: true) { model.settle(id) }
+                }
                 // A request that is no longer live has it in its options' place.
                 if thread.live || thread.state == .needsYou(.step) { openButton }
             }
@@ -261,6 +266,23 @@ struct RouterCard: View {
 
     private var openButton: some View {
         RouterTextButton(model: model, hit: .footer(thread.id, .open), title: "Open in T3", keys: ["cmd", "O"]) { model.open(thread.id) }
+    }
+}
+
+/// Snooze and Settle where T3 refuses them (a request waits, a run is live): off, with the reason before them.
+private struct RouterHeldActs: View {
+    let why: String
+
+    var body: some View {
+        let d = CDS.Density.compact
+        HStack(spacing: 10) {
+            Text(why).cdsText(d.caption, .regular, CDS.Text.muted).lineLimit(1).fixedSize()
+            Text("Snooze").cdsText(d.footnote, .regular, CDS.Text.muted).opacity(0.45).fixedSize()
+            Text("Settle").cdsText(d.footnote, .regular, CDS.Text.muted).opacity(0.45).fixedSize()
+        }
+        .frame(height: 22)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Snooze and Settle are off: \(why)")
     }
 }
 

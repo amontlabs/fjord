@@ -208,6 +208,10 @@ enum Router {
         static let continueWords = "Continue where you left off."
         static let continueTitle = "Continue"
         static let doesntNeedMe = "Doesn't need me"
+        /// Why Settle and Snooze are off on a line T3 won't let go of yet (a request waits, a run is live, a message is queued).
+        static let answerOrStopFirst = "Answer or stop it first"
+        /// A settle or snooze T3 refused for no reason the page can see.
+        static let t3KeptIt = "T3 didn't take it"
         static func moreToAnswer(_ n: Int) -> String { "\(n) more to answer" }
     }
 

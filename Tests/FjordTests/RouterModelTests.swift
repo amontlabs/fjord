@@ -320,10 +320,12 @@ import Testing
         model.settle(ID.guide)
         // T3 refused it: the store puts the line back, the port says why.
         model.apply(.upsert(line))
-        model.apply(.actRefused(ID.guide, reason: "the thread is busy"))
+        model.apply(.actRefused(ID.guide, reason: "Thread 3f2a-9c is waiting on an approval or question."))
         let toast = try #require(model.toast)
         #expect(!toast.revertible)
-        #expect(toast.after.contains("the thread is busy"))
+        // T3's own words, and the id in them, are never shown (FINAL-REVIEW #5).
+        #expect(!toast.after.contains("3f2a") && !toast.after.contains("approval"))
+        #expect(toast.after == "· " + Router.Copy.t3KeptIt)
         #expect(!model.canUndo)
         model.undo()
         #expect(source.calls == [.settle([ID.guide], on: true)])
@@ -456,5 +458,30 @@ import Testing
         model.apply(.read(RouterRead(draft: model.draft, places: [.here], sure: true)))
         model.send()
         #expect(model.draft == "what runs now?")
+    }
+
+    // MARK: Settle and Snooze where T3 refuses them (FINAL-REVIEW #5)
+
+    @Test func aRequestOrARunningLineIsNeitherSettledNorSnoozedAndCmdBackspaceOnlySaysWhy() throws {
+        let (model, source) = recorded()
+        let settings = try #require(model.thread(ID.settings))
+        #expect(settings.state == .needsYou(.question))
+        #expect(model.holdReason(settings) == Router.Copy.answerOrStopFirst)
+        model.select(.line(ID.settings))
+        model.settleSelected()
+        #expect(model.thread(ID.settings) != nil)
+        #expect(source.calls.isEmpty)
+        #expect(model.toast?.revertible == false)
+        #expect(model.toast?.after == "· " + Router.Copy.answerOrStopFirst)
+        #expect(!model.canUndo)
+        model.settle(ID.settings)
+        model.snooze(ID.settings, choice: 0)
+        model.openSnooze()
+        #expect(model.snoozeMenu == nil)
+        #expect(source.calls.isEmpty)
+        let working = try #require(model.threads.first { $0.state == .working })
+        #expect(model.holdReason(working) != nil)
+        // A step Fjord found, a Done line: free to go.
+        #expect(model.holdReason(try #require(model.thread(ID.valCenis))) == nil)
     }
 }

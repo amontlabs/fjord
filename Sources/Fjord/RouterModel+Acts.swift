@@ -78,23 +78,41 @@ extension RouterModel {
     }
 
     /// T3 refused a settle or a snooze: the line is back through its record; the act has nothing left to revert for that
-    /// thread (an act on several keeps its Revert for the others), and the toast says why, with no Revert.
-    func actRefused(_ id: String, reason: String) {
+    /// thread (an act on several keeps its Revert for the others), and the toast says why in the page's words, with no
+    /// Revert. T3's own text (`reason`, with the thread's id in it) is never shown.
+    func actRefused(_ id: String, reason _: String) {
         var named = thread(id)?.name ?? older.first { $0.id == id }?.name ?? ""
         if let i = undos.firstIndex(where: { $0.threads.contains(id) }) {
             if toast?.id == undos[i].toast, named.isEmpty { named = toast?.name ?? "" }
             undos[i].threads.removeAll { $0 == id }
             if undos[i].threads.isEmpty { undos.remove(at: i) }
         }
-        let refusal = RouterToast(id: fresh(), before: "T3 refused it for", name: named.isEmpty ? "this thread" : named,
-                                    after: "· " + reason, revertible: false)
+        let why = thread(id).flatMap(holdReason) ?? Router.Copy.t3KeptIt
+        let refusal = RouterToast(id: fresh(), before: "T3 kept", name: named.isEmpty ? "this thread" : named,
+                                    after: "· " + why, revertible: false)
         animate(.fade) { toast = refusal }
+        startToastLife(Router.toastLife)
+    }
+
+    /// Why T3 won't settle or snooze this line now (a request waits on you, a run is live or a message is queued): the
+    /// card offers neither, and ⌘⌫ only says so. Nil: it can go.
+    func holdReason(_ t: RouterThread) -> String? {
+        switch t.state {
+        case .needsYou(.question), .needsYou(.form), .needsYou(.permission), .working, .sent: return Router.Copy.answerOrStopFirst
+        default: return t.queued == nil ? nil : Router.Copy.answerOrStopFirst
+        }
+    }
+
+    /// A quiet word that the act can't be done here now: no Revert, nothing changed.
+    private func hint(_ t: RouterThread, _ why: String) {
+        let note = RouterToast(id: fresh(), before: "Can't settle", name: t.name, after: "· " + why, revertible: false)
+        animate(.fade) { toast = note }
         startToastLife(Router.toastLife)
     }
 
     /// Settle: the line leaves at once.
     func settle(_ id: String) {
-        guard let t = thread(id) else { return }
+        guard let t = thread(id), holdReason(t) == nil else { return }
         remove(t, toast: RouterToast(id: fresh(), before: "Settled", name: t.name)) { [weak self] in
             self?.source?.settle([id], on: false)
         }
@@ -102,7 +120,7 @@ extension RouterModel {
     }
 
     func snooze(_ id: String, choice: Int) {
-        guard let t = thread(id) else { return }
+        guard let t = thread(id), holdReason(t) == nil else { return }
         remove(t, toast: RouterToast(id: fresh(), before: "Snoozed", name: t.name, after: Router.Copy.snoozedUntil[choice])) { [weak self] in
             self?.source?.snooze(id, until: nil)
         }
@@ -202,7 +220,9 @@ extension RouterModel {
     /// ⌘⌫: settles the selected row (the housekeeping line: all; a failure line: Edit).
     func settleSelected() {
         switch selection {
-        case .line(let id)?: settle(id)
+        case .line(let id)?:
+            guard let t = thread(id) else { return }
+            if let why = holdReason(t) { hint(t, why) } else { settle(id) }
         case .housekeeping?: settleAll()
         case .failure(let id)?: edit(id)
         case nil: break
@@ -210,7 +230,7 @@ extension RouterModel {
     }
 
     func openSnooze() {
-        guard let t = selectedThread, t.state != .working, t.state != .sent else { return }
+        guard let t = selectedThread, holdReason(t) == nil else { return }
         animate(.fade) { snoozeMenu = snoozeMenu == nil ? RouterSnoozeMenu(thread: t.id) : nil }
     }
 
