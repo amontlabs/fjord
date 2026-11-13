@@ -85,6 +85,23 @@ final class RouterGlides {
         views[id] = Weak(view: view)
     }
 
+    /// Where each row is drawn now, as the frames see it (`RouterFrames.rows`): its place in the window's content view
+    /// (top-left origin), moved by its glide as drawn this frame. Rows outside the list's visible part are left out.
+    func drawn() -> [String: CGRect] {
+        var out: [String: CGRect] = [:]
+        for (id, ref) in views {
+            guard let view = ref.view, let content = view.window?.contentView, let clip = view.enclosingScrollView?.contentView
+            else { continue }
+            var rect = view.convert(view.bounds, to: nil)
+            let visible = clip.convert(clip.bounds, to: nil)
+            let shift = (view.layer?.presentation()?.transform.m42 ?? 0) * RouterGlideView.down(of: view)
+            rect.origin.y -= shift
+            guard visible.contains(rect) else { continue }
+            out[id] = CGRect(x: rect.minX, y: content.bounds.height - rect.maxY, width: rect.width, height: rect.height)
+        }
+        return out
+    }
+
     /// The list placed row `id` with its top at `y` in the list's space.
     func placed(_ id: String, at y: CGFloat) {
         guard let view = views[id]?.view else { return }
@@ -219,7 +236,7 @@ class RouterGlideView: NSView {
     }
 
     /// +1 when a positive translation of the view's layer moves it down on screen, -1 when up.
-    private static func down(of view: NSView) -> CGFloat {
+    static func down(of view: NSView) -> CGFloat {
         guard let superlayer = view.layer?.superlayer else { return 1 }
         return superlayer.contentsAreFlipped() ? 1 : -1
     }

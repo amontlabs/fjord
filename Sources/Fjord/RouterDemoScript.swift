@@ -310,6 +310,7 @@ final class RouterDemoScript {
     private func enter() { key(["enter"], code: kVK_Return) }
     private func escape() { key(["esc"], code: kVK_Escape) }
     private func down(option: Bool = false) { key(option ? ["alt", "down"] : ["down"], code: kVK_DownArrow, flags: option ? .option : []) }
+    private func up() { key(["up"], code: kVK_UpArrow) }
     private func settle() { key(["cmd", "backspace"], code: kVK_Delete, flags: .command) }
 
     /// Types into the composer, 22 characters a second, each key through the page's map.
@@ -343,12 +344,18 @@ final class RouterDemoScript {
             (36, beat36), (37, beat37), (38, beat38), (39, beat39), (40, beat40), (41, beat41), (42, beat42), (43, beat43),
             (44, beat44),
         ]
-        for (number, play) in beats where (only?.contains(number) ?? true) && number <= (until ?? .max) {
+        if let shape = Self.selectCheck {
+            RouterDemo.frames?.start()
+            await selectCheck(few: shape == "few")
+        }
+        for (number, play) in beats where Self.selectCheck == nil && (only?.contains(number) ?? true) && number <= (until ?? .max) {
             // With `--from`, the frames start with the first beat played at its own speed.
             if let from, number == from { RouterDemo.frames?.start() }
             await play()
         }
-        if only != nil {
+        if Self.selectCheck != nil {
+            await pause(1)
+        } else if only != nil {
             if let onlyEnds { await pause(max(0, onlyEnds.timeIntervalSinceNow * speed)) }
             await pause(2)
         } else if let until, until < beats.count {
@@ -367,6 +374,53 @@ final class RouterDemoScript {
             stage.pointerShown = false
             model.scripted = false
         }
+    }
+
+    // MARK: The select check
+
+    /// `--select-check [few]`: instead of the beats, cards opened and shut every way, to check in the frames that a line
+    /// opens its card in place and no row goes missing on the way (`--frames`, its `rows-*.json`). `few`: a page shaped
+    /// as a real one, five lines.
+    static let selectCheck: String? = {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--select-check") else { return nil }
+        return i + 1 < args.count && !args[i + 1].hasPrefix("--") ? args[i + 1] : "all"
+    }()
+
+    private func selectCheck(few: Bool) async {
+        if few {
+            let keep: Set<String> = [ID.settings, ID.updater, ID.guide, ID.bar, ID.checkpoint]
+            model.apply(.batch(model.threads.filter { !keep.contains($0.id) }.map { .remove($0.id) } + [.older([])]))
+            await pause(1)
+        }
+        stage.pointerShown = true
+        // The open card shut, then cards opened from nothing, mid-list and last, and shut again.
+        escape()
+        await pause(1.2)
+        let lines = model.shownLines.map(\.id)
+        guard lines.count >= 3, let last = lines.last else { return }
+        let middle = lines[lines.count / 2]
+        for (note, id) in [("open middle", middle), ("switch to last", last), ("shut last", last), ("open last", last),
+                           ("switch to first", lines[0]), ("switch to middle", middle), ("shut middle", middle)] {
+            RouterFrames.note(note)
+            await click(.row(id))
+            await pause(1.0)
+        }
+        await park()
+        // The arrows: down the list from nothing, back up, and out.
+        for _ in 0..<lines.count {
+            RouterFrames.note("down")
+            down()
+            await pause(0.7)
+        }
+        for _ in 0..<2 {
+            RouterFrames.note("up")
+            up()
+            await pause(0.7)
+        }
+        RouterFrames.note("escape")
+        escape()
+        await pause(1.2)
     }
 
     // Act 1: read

@@ -38,6 +38,7 @@ enum RouterDemo {
         model.scripted = true
         if let speed = value("--speed").flatMap(Double.init), speed > 0 { source.speed = speed }
         let script = RouterDemoScript(model: model, source: source, stage: stage)
+        if Self.frames != nil { RouterFrames.rows = { [weak model] in model?.glides.drawn() ?? [:] } }
         script.from = value("--from").flatMap(Int.init)
         script.until = value("--until").flatMap(Int.init)
         script.only = value("--beats").map { $0.split(separator: ",").compactMap { Int($0) } }
@@ -228,6 +229,8 @@ enum RouterDemo {
 @MainActor
 final class RouterFrames {
     static let rate: Double = 10
+    /// The list's rows as drawn now, in the window's content view, top-left origin (`RouterGlides.drawn`).
+    static var rows: (() -> [String: CGRect])?
 
     private let dir: String
     private let rate: Double
@@ -259,6 +262,15 @@ final class RouterFrames {
         // Named by its time since the frames began, in hundredths of a second: `frame-01234.jpg` is at 12.34 s.
         let at = Int((Date().timeIntervalSince(began) * 100).rounded())
         let url = URL(fileURLWithPath: dir).appendingPathComponent(String(format: "frame-%05d.jpg", at))
+        // Where each row of the list is drawn in this frame, beside it: a check can look for each one's ink there.
+        if let rows = RouterFrames.rows?() {
+            let json = rows.map { id, r in
+                String(format: "\"%@\": [%.1f, %.1f, %.1f, %.1f]", id.replacingOccurrences(of: "\"", with: ""), r.minX, r.minY, r.width, r.height)
+            }
+            let rowsURL = url.deletingPathExtension().deletingLastPathComponent()
+                .appendingPathComponent(String(format: "rows-%05d.json", at))
+            try? ("{" + json.joined(separator: ", ") + "}").write(to: rowsURL, atomically: false, encoding: .utf8)
+        }
         // Encoded off the main thread, so the page keeps its pace.
         let picture = Picture(image: image)
         writes.enter()
