@@ -354,7 +354,7 @@ final class RouterDemoScript {
         ]
         if let shape = Self.selectCheck {
             RouterDemo.frames?.start()
-            await selectCheck(few: shape == "few")
+            if shape == "blocks" { stage.pointerShown = true; escape(); await pause(1.2); await blocks() } else { await selectCheck(few: shape == "few") }
         }
         for (number, play) in beats where Self.selectCheck == nil && (only?.contains(number) ?? true) && number <= (until ?? .max) {
             // With `--from`, the frames start with the first beat played at its own speed.
@@ -386,9 +386,9 @@ final class RouterDemoScript {
 
     // MARK: The select check
 
-    /// `--select-check [few]`: instead of the beats, cards opened and shut every way, to check in the frames that a line
-    /// opens its card in place and no row goes missing on the way (`--frames`, its `rows-*.json`). `few`: a page shaped
-    /// as a real one, five lines.
+    /// `--select-check [few|blocks]`: instead of the beats, cards opened and shut every way, to check in the frames that a
+    /// line opens its card in place and no row goes missing on the way (`--frames`, its `rows-*.json`). `few`: a page
+    /// shaped as a real one, five lines. `blocks`: a block's cards alone (`blocks`).
     static let selectCheck: String? = {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--select-check") else { return nil }
@@ -457,6 +457,11 @@ final class RouterDemoScript {
         RouterFrames.note("open item again")
         await click(.row(know))
         await pause(1.0)
+        // The item above the open card is answered: it strikes, then folds away, and the card and the rows under it
+        // glide up with the fold.
+        RouterFrames.note("fold above card")
+        model.itemsRead(ID.checkpoint, RouterLedgerRead(close: [RouterDemo.Item.keep: Router.Items.Copy.answered]))
+        await pause(Router.Items.strike + 1.2)
         // The block's header clicked while an item's card is open: the card moves up to the header's row.
         RouterFrames.note("card to header")
         await click(.row(ID.checkpoint))

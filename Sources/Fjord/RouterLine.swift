@@ -189,6 +189,8 @@ struct RouterLineView: View {
             // A thread with two or more open items: a quiet header, then a line per item; the open card under its row,
             // the rows after it under the card (RouterItems.swift).
             blockHead(thread, open: open, hot: hot, pressed: pressed)
+                // Over the open card's ground, which reaches up behind the open row from the card's place.
+                .zIndex(1)
           } else {
             RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
                 row(thread, hot: hot)
@@ -244,6 +246,19 @@ struct RouterLineView: View {
                 // In a block the card's place shuts at once and the card is still drawn below it while it rolls shut:
                 // the line's mask cuts it where the rows under it are, both on Core Animation (`placeTail`).
                 .clipShape(RouterPlaceClip(below: block ? RouterLineSlotView.roomStep : 0))
+                .background(alignment: .top) {
+                    // A block's open card: its ground under the open row and its card only, not the whole block. Held by
+                    // the card's place, it moves with it (an item folding above it). It reaches past the card: the line's
+                    // mask ends it, with its corners, where the rows under the card are (`placeTail`), so a card shutting
+                    // or changing rows keeps its ground down to them.
+                    if block {
+                        RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
+                            .frame(height: max(0, focusRowHeight + cardHeight + RouterLineSlotView.roomStep))
+                            .offset(y: -focusRowHeight)
+                            .opacity(open ? shown : 0)
+                            .modifier(GroundPresence(open: open, moving: moving))
+                    }
+                }
                 .onGeometryChange(for: RouterCardPlace.self) {
                     let f = $0.frame(in: .named(Router.rowSpace))
                     return RouterCardPlace(head: f.minY, top: f.maxY, block: block)
@@ -253,7 +268,13 @@ struct RouterLineView: View {
                 }
                 // Its content grew or shrank while open: the card follows, and the rows under it slide.
                 .motion(.spatial, value: block ? 0 : cardHeight)
-                // In a block, its place changes at once: the rows under it and the mask move on Core Animation.
+                // In a block, its place changes at once: the rows under it and the mask move on Core Animation. Except
+                // as the block's rows change: an item folding away above the card (struck, done) or in, the card and its
+                // ground glide with the rows above it, on their spring, as the rows under it and the mask do. Placed at
+                // once, the card went up by the row's height in the first frame while the row folded.
+                .transaction(value: RouterBlockLayout.rowsKey(thread)) {
+                    if block { $0.animation = Motion.spatial.resolved(reduce: reduce) }
+                }
                 .transaction { if block { $0.animation = nil } }
                 .allowsHitTesting(open)
                 .accessibilityHidden(!open)
@@ -267,18 +288,6 @@ struct RouterLineView: View {
                     }
                 }
             // A block's rows under the card are in a hosting view of their own (`RouterBlockTail`).
-        }
-        .background(alignment: .top) {
-            // A block's open card: its ground under the open row and its card only, not the whole block. It reaches past
-            // the card: the line's mask ends it, with its corners, where the rows under the card are (`placeTail`), so a
-            // card shutting or changing rows keeps its ground down to them.
-            if block {
-                RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
-                    .frame(height: max(0, focusRowHeight + cardHeight + RouterLineSlotView.roomStep))
-                    .padding(.top, max(0, box.rowHeight - focusRowHeight))
-                    .opacity(open ? shown : 0)
-                    .modifier(GroundPresence(open: open, moving: moving))
-            }
         }
         .background {
             // Selected, the row and its card share one ground (a fill, no outline), which comes and goes with the

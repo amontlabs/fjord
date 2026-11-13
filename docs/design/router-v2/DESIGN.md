@@ -648,8 +648,8 @@ checking, closing with how, new).
   a click on another item or on the header) rolls shut first, then opens under its row once the roll has landed
   (`RouterLineBox.shown`): no row jumps between the line's rows and the rows under the card. An item, your words or
   the "reading" row arriving or leaving folds in or out as a line does (height from or to nothing, its opacity only in
-  the fold's last part), and the rows after it slide on the curve the block's height glides on; a struck item folds
-  after its 1.6 s. A new item's ground fades over 0.6 s once it is seen. The name taking another kind's colour (its
+  the fold's last part), and the rows after it slide on the curve the block's height glides on (an open card and its ground
+  below a folding item too: its place glides with the rows above it); a struck item folds after its 1.6 s. A new item's ground fades over 0.6 s once it is seen. The name taking another kind's colour (its
   most urgent item changed) fades (`Motion.fade`) and its mark rolls over. Your words to a block leave it where it is
   (no flight). Reduce Motion: the folds fade and the rest eases out in 0.12 s.
 
