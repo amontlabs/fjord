@@ -66,6 +66,7 @@ extension RouterDemo {
                 t.sentence = .init(text: summary.text)
                 t.work.lineReadsNewest = true
             }
+            rehistory(&t)
             if let a = activity[id] { t.activity = a }
             if id == ID.checkpoint {
                 t.steps = steps(["Build the boot image", "Boot the VM from the checkpoint", "Check the boot log"], running: 1)
@@ -100,6 +101,7 @@ extension RouterDemo {
                          "r2": .usageLimit,
                          "r1": .asked("moving a tab to another window loses the draft in its composer, fix it")]
         t.sentence = .init(text: t.work.summaries[0].text)
+        rehistory(&t)
         model.apply(.upsert(t))
     }
 
@@ -155,6 +157,7 @@ extension RouterDemo {
         t.work.lineReadsNewest = true
         t.work.pose = .init(scrolledTo: 15, newer: newer)
         t.sentence = .init(text: t.work.summaries[0].text)
+        rehistory(&t)
         model.apply(.upsert(t))
     }
 
@@ -166,6 +169,7 @@ extension RouterDemo {
         t.work.summaries = Array(t.work.summaries.prefix(20))
         t.work.lineReadsNewest = true
         t.sentence = .init(text: text)
+        rehistory(&t)
         model.apply(.upsert(t))
     }
 

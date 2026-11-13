@@ -1,8 +1,8 @@
 import SwiftUI
 
-// A working thread's summaries and raw detail (docs/design/router-v2/DESIGN.md 1.4, 1.5, 1.6 "Working"): the line reads
-// the newest summary; the open card lists them as a timeline, newest first, each with its clock time; the pointer on the
-// line shows one peek with what runs now, the last few steps, and its subagents, background commands and waits.
+// A thread's history (docs/design/router-v2/DESIGN.md 1.5 "History", R6, R10): on every thread's card, newest first, the
+// Router's summaries of each run with what started it, the items as they were raised and closed, and the turns as they
+// ended. A working line reads its newest summary; its card's history is its source.
 
 extension Router {
     enum Work {
@@ -11,10 +11,6 @@ extension Router {
         static let timelineHeight: CGFloat = 8 * 19 + 7 * 3
         /// The soft fade at its bottom while more is under it.
         static let timelineFade: CGFloat = 28
-        /// The peek's earlier steps.
-        static let recent = 3
-        /// The working peek: commands and the activity's meta need more room than the name's peek.
-        static let peekWidth: CGFloat = 400
         /// Between a run's summaries, and between a run's summaries and what started it.
         static let rowGap: CGFloat = 3
         /// Between one run and the one before it.
@@ -38,29 +34,26 @@ extension Router {
     }
 }
 
-extension RouterWork {
-    /// The summaries the card lists: all but the newest while the line reads it.
-    var listed: ArraySlice<Summary> { lineReadsNewest ? summaries.dropFirst() : summaries[...] }
-}
 
 extension RouterThread {
-    /// A working line whose peek lists its raw detail: what runs now and before, or its subagents, commands and waits.
-    var peeksWork: Bool { state == .working && (work.hasSteps || !activity.isEmpty) }
+    /// A working line whose one peek shows from anywhere on its row: it has more to say than its line.
+    var peeksWork: Bool { state == .working && RouterSummaryView.peeks(self) }
 }
 
-/// What the thread did, as the Router's model summed it up, newest first, read as a conversation: each run's summaries,
-/// then under them, quiet, what started the run: your message (`↑ "fix the timeline…"`, one line), or what woke the agent
-/// (`↑ subagent finished · Review the diff`, `↑ background command finished · swift test`, `↑ resumed after the usage
-/// limit`, `↑ resumed by itself`). The arrow points up at what it led to. The words sit on the line's text column, the clock
-/// times trail in the line's ages column. The newest isn't listed while the line above reads it
-/// (`RouterWork.lineReadsNewest`).
+/// The thread's history, newest first, read as a conversation: each run's summaries and what happened in it (an item
+/// raised, one closed with how, the turn ending with its outcome), then under them, quiet, what started the run: your
+/// message (`↑ "fix the timeline…"`, one line), or what woke the agent (`↑ subagent finished · Review the diff`, `↑
+/// background command finished · swift test`, `↑ resumed after the usage limit`, `↑ resumed by itself`). The arrow points
+/// up at what it led to. Summaries are the words; the rest are quiet one-liners with their mark hung in the gutter. The
+/// words sit on the line's text column, the clock times trail in the line's ages column. A working line's newest summary
+/// isn't listed while the line reads it (`RouterWork.lineReadsNewest`).
 ///
 /// It holds the whole kept history and shows about eight lines of it, scrolling inside the card, softly faded at the
-/// bottom while more is under it. Read back (not at its top), a new summary doesn't move what you read: the timeline
+/// bottom while more is under it. Read back (not at its top), something new doesn't move what you read: the timeline
 /// holds what it showed and a quiet `↑ 1 new` pill springs in at its top edge, counting up; the pill (or scrolling up)
 /// takes it back to its top, where the new ones fold in and the pill fades out.
-struct RouterWorkTimeline: View {
-    let work: RouterWork
+struct RouterTimeline: View {
+    let thread: RouterThread
 
     /// What shows while you read back: the entries as they were when the first new one came; nil at the top.
     @State private var held: [Entry]?
@@ -72,27 +65,29 @@ struct RouterWorkTimeline: View {
 
     private typealias W = Router.Work
     private var d: CDS.Density { .compact }
-    private static let space = "routerWorkTimeline"
+    private static let space = "routerTimeline"
 
-    /// One row: a summary, or what started its run.
+    /// One row: a history event, and its gap above it (none for the first, `rowGap` within a run, `runGap` between runs).
     struct Entry: Identifiable, Equatable {
-        enum Kind: Equatable {
-            case summary(RouterWork.Summary, newest: Bool)
-            case start(RouterWork.Start)
-        }
-        var id: String
-        var kind: Kind
-        /// Above it: none for the first, `rowGap` within a run, `runGap` between runs.
+        var event: RouterEvent
         var gap: CGFloat
-        var isSummary: Bool { if case .summary = kind { true } else { false } }
+        /// The newest summary of the run working now, which the line doesn't read: the primary ink.
+        var newest = false
+        var id: String { event.id }
+        var isSummary: Bool { if case .summary = event.kind { true } else { false } }
+        /// Counted by the new pill: anything but a run's start.
+        var counts: Bool { if case .started = event.kind { false } else { true } }
     }
 
     private var atTop: Bool { offset <= 1 }
 
+    /// Whether a card has any history to show.
+    static func has(_ thread: RouterThread) -> Bool { !entries(thread).isEmpty }
+
     var body: some View {
-        let live = Self.entries(work)
+        let live = Self.entries(thread)
         let shown = held ?? live
-        let newer = held.map { Self.newSummaries(live, since: $0) } ?? 0
+        let newer = held.map { Self.newer(live, since: $0) } ?? 0
         let overflows = contentHeight > W.timelineHeight + 0.5
         let more = overflows && offset + W.timelineHeight < contentHeight - 1
         ScrollViewReader { proxy in
@@ -120,14 +115,14 @@ struct RouterWorkTimeline: View {
                 }
             }
             .animation(reduceMotion ? .easeOut(duration: 0.15) : W.pillIn, value: newer > 0)
-            .animation(.easeOut(duration: 0.15), value: more)
+            .animation(Motion.fade.resolved(reduce: reduceMotion), value: more)
             .onChange(of: live) { old, new in arrived(old, new) }
             .onChange(of: atTop) { _, top in if top, held != nil { release() } }
-            .onChange(of: work.pose?.toTop) { _, _ in toTop(proxy, shown) }
-            .onAppear { pose(proxy, live) }
+            .onChange(of: thread.work.pose?.toTop) { _, _ in toTop(proxy, shown) }
+            .onAppear { pose(proxy) }
         }
-        // The run starts' arrows hang left of the card's column (inside the scroll view, so they aren't clipped); every
-        // row's words start on it.
+        // The marks hang left of the card's column (inside the scroll view, so they aren't clipped); every row's words
+        // start on it.
         .padding(.leading, -Router.Card.hang)
         .agesColumn()
         .accessibilityElement(children: .contain)
@@ -136,14 +131,9 @@ struct RouterWorkTimeline: View {
     private func column(_ entries: [Entry]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(entries) { e in
-                Group {
-                    switch e.kind {
-                    case .summary(let s, let newest): row(s, newest: newest)
-                    case .start(let start): self.start(start)
-                    }
-                }
-                .padding(.top, e.gap)
-                .id(e.id)
+                row(e)
+                    .padding(.top, e.gap)
+                    .id(e.id)
             }
         }
         .accessibilityElement(children: .combine)
@@ -151,34 +141,54 @@ struct RouterWorkTimeline: View {
 
     // MARK: Entries
 
-    /// The listed summaries cut into runs, newest first, each run followed by what started it.
-    static func entries(_ work: RouterWork, dropping newest: Int = 0) -> [Entry] {
-        let listed = Array(work.listed.dropFirst(newest))
-        let first = work.listed.first?.id
-        var out: [Entry] = []
-        for (i, s) in listed.enumerated() {
-            let newRun = i == 0 || listed[i - 1].run != s.run
-            let newest = s.id == first && newest == 0 && !work.lineReadsNewest && s.run == work.run
-            out.append(Entry(id: "s\(s.id)", kind: .summary(s, newest: newest), gap: i == 0 ? 0 : newRun ? W.runGap : W.rowGap))
-            let runEnds = i == listed.count - 1 || listed[i + 1].run != s.run
-            if runEnds, let run = s.run, let start = work.starts[run] {
-                out.append(Entry(id: "r\(s.id)", kind: .start(start), gap: W.rowGap))
+    /// The history as rows, newest first, the newest `dropping` summaries (and what came after them) held back.
+    static func entries(_ thread: RouterThread, dropping: Int = 0) -> [Entry] {
+        var events = thread.history[...]
+        // The line reads the newest summary: the card is what came before it.
+        if thread.work.lineReadsNewest, let i = events.firstIndex(where: { if case .summary = $0.kind { true } else { false } }) {
+            events = events[events.index(after: i)...]
+        }
+        // An item still open is on the page already (the line, or its row): its raising isn't repeated.
+        let open = Set(thread.ledger.live.map { "raised:" + $0.id })
+        events = events.filter { !open.contains($0.id) }[...]
+        if dropping > 0 {
+            var left = dropping
+            while let e = events.first, left > 0 {
+                if case .summary = e.kind { left -= 1 }
+                events = events.dropFirst()
             }
+        }
+        var out: [Entry] = []
+        var previous: RouterEvent?
+        for e in events {
+            let gap: CGFloat
+            if let p = previous {
+                if case .started = p.kind { gap = W.runGap } else { gap = p.run == e.run ? W.rowGap : W.runGap }
+            } else {
+                gap = 0
+            }
+            var entry = Entry(event: e, gap: gap)
+            if previous == nil, dropping == 0, case .summary = e.kind, thread.state == .working, !thread.work.lineReadsNewest,
+               e.run == thread.work.run {
+                entry.newest = true
+            }
+            out.append(entry)
+            previous = e
         }
         return out
     }
 
-    /// The summaries in `live` that `held` doesn't show.
-    static func newSummaries(_ live: [Entry], since held: [Entry]) -> Int {
-        let had = Set(held.lazy.filter(\.isSummary).map(\.id))
-        return live.lazy.filter { $0.isSummary && !had.contains($0.id) }.count
+    /// The rows in `live` that `held` doesn't show (a run's start isn't counted).
+    static func newer(_ live: [Entry], since held: [Entry]) -> Int {
+        let had = Set(held.lazy.map(\.id))
+        return live.lazy.filter { $0.counts && !had.contains($0.id) }.count
     }
 
     // MARK: Reading back
 
-    /// A new summary while read back: hold what showed, so nothing moves; the pill counts it.
+    /// Something new while read back: hold what showed, so nothing moves; the pill counts it.
     private func arrived(_ old: [Entry], _ new: [Entry]) {
-        guard held == nil, !atTop, Self.newSummaries(new, since: old) > 0 else { return }
+        guard held == nil, !atTop, Self.newer(new, since: old) > 0 else { return }
         held = old
     }
 
@@ -190,17 +200,13 @@ struct RouterWorkTimeline: View {
     /// The pill pressed: glide back to the top (at once with Reduce Motion); `release` follows there.
     private func toTop(_ proxy: ScrollViewProxy, _ shown: [Entry]) {
         guard let first = shown.first?.id else { return }
-        if reduceMotion {
-            proxy.scrollTo(first, anchor: .top)
-        } else {
-            withAnimation(W.toTop) { proxy.scrollTo(first, anchor: .top) }
-        }
+        withAnimation(reduceMotion ? nil : W.toTop) { proxy.scrollTo(first, anchor: .top) }
     }
 
     /// A shot's or the demo's pose: read back to a summary, the newest held behind the pill.
-    private func pose(_ proxy: ScrollViewProxy, _ live: [Entry]) {
-        guard let pose = work.pose else { return }
-        if pose.newer > 0 { held = Self.entries(work, dropping: pose.newer) }
+    private func pose(_ proxy: ScrollViewProxy) {
+        guard let pose = thread.work.pose else { return }
+        if pose.newer > 0 { held = Self.entries(thread, dropping: pose.newer) }
         if let id = pose.scrolledTo { proxy.scrollTo("s\(id)", anchor: .top) }
     }
 
@@ -251,24 +257,67 @@ struct RouterWorkTimeline: View {
         .onHover { hot = $0 }
         .animation(reduceMotion ? nil : W.pillIn, value: n)
         .padding(.top, 2)
-        .accessibilityLabel(n == 1 ? "1 new summary, show it" : "\(n) new summaries, show them")
+        .accessibilityLabel(n == 1 ? "1 new in its history, show it" : "\(n) new in its history, show them")
     }
 
-    private func row(_ s: RouterWork.Summary, newest: Bool) -> some View {
+    @ViewBuilder private func row(_ e: Entry) -> some View {
+        switch e.event.kind {
+        case .summary(let text):
+            timed(e.event.at) {
+                Text(RouterInline.text(text, size: d.body.0))
+                    .cdsText(d.body, .regular, e.newest ? CDS.Text.primary : CDS.Text.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
+                    .padding(.leading, Router.Card.hang)
+            }
+        case .started(let start):
+            started(start)
+        case .raised(let kind, let sentence):
+            timed(e.event.at) {
+                quiet(Image(systemName: kind.symbol).foregroundStyle(kind.tint.opacity(0.8))) {
+                    Text(RouterInline.text(sentence, size: d.footnote.0)).foregroundColor(CDS.Text.secondary)
+                }
+            }
+            .accessibilityLabel("\(kind.word): \(sentence)")
+        case .closed(let kind, let sentence, let how):
+            timed(e.event.at) {
+                quiet(Image(systemName: kind.symbol).foregroundStyle(CDS.Text.muted.opacity(0.7))) {
+                    Text(RouterInline.text(sentence, size: d.footnote.0)).strikethrough(color: CDS.Text.muted).foregroundColor(CDS.Text.muted)
+                        + Text(verbatim: "  " + how).foregroundColor(CDS.Text.muted.opacity(0.8))
+                }
+            }
+            .accessibilityLabel("\(kind.word), closed: \(sentence), \(how)")
+        case .finished(let outcome):
+            timed(e.event.at) {
+                quiet(Image(systemName: "checkmark.circle").foregroundStyle(CDS.Text.muted)) {
+                    Text(RouterInline.text(outcome, size: d.footnote.0)).foregroundColor(CDS.Text.secondary)
+                }
+            }
+            .accessibilityLabel("Turn ended: \(outcome)")
+        }
+    }
+
+    /// A row with its clock time trailing in the ages column.
+    private func timed<Words: View>(_ at: Date, @ViewBuilder words: () -> Words) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(RouterInline.text(s.text, size: d.body.0))
-                .cdsText(d.body, .regular, newest ? CDS.Text.primary : CDS.Text.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
-                .padding(.leading, Router.Card.hang)
+            words()
             Spacer(minLength: 8)
-            Text(RouterWorkTime.clock(s.at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
+            Text(RouterWorkTime.clock(at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
                 .fixedSize()
         }
     }
 
+    /// A quiet one-liner: its mark hung in the gutter under the line's mark, its words footnote on the column.
+    private func quiet<Words: View>(_ mark: some View, @ViewBuilder words: () -> Words) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Router.Card.glyphGap) {
+            mark.font(.system(size: 9, weight: .medium)).frame(width: Router.Card.glyphBox)
+            words().font(CDS.sans(d.footnote.0)).lineLimit(1).truncationMode(.tail)
+        }
+        .frame(maxWidth: Router.Card.maxWidth + Router.Card.hang, alignment: .leading)
+    }
+
     /// Your words that started the run, quoted on one line; or, quieter still and unquoted, what woke it.
-    private func start(_ start: RouterWork.Start) -> some View {
+    private func started(_ start: RouterWork.Start) -> some View {
         let ink = Self.yours(start) ? CDS.Text.muted : CDS.Text.muted.opacity(0.7)
         return HStack(alignment: .firstTextBaseline, spacing: Router.Card.glyphGap) {
             Image(systemName: "arrow.up").font(.system(size: 9, weight: .medium)).foregroundStyle(ink)
@@ -299,7 +348,6 @@ struct RouterWorkTimeline: View {
     }
 }
 
-/// Its content's height, up to `cap`: a scroll view as tall as what it holds until it holds more.
 private struct CappedHeight: Layout {
     var cap: CGFloat
 
@@ -326,56 +374,5 @@ enum RouterWorkTime {
     /// "13:58", or "1:58 PM": the system's 12- or 24-hour clock, its own digits for the hour.
     static func clock(_ date: Date) -> String {
         date.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute(.twoDigits))
-    }
-}
-
-/// The working line's peek: T3's title; what runs now (the working dots) and the steps before it (checked), each with
-/// how long ago it started; then its subagents, background commands and waits. Read-only, the page's floating shell.
-struct RouterWorkingPeek: View {
-    let model: RouterModel
-    let thread: RouterThread
-
-    private typealias W = Router.Work
-    private typealias A = Router.Activity
-    private var d: CDS.Density { .compact }
-
-    var body: some View {
-        let _ = model.clock.minute
-        let work = thread.work
-        VStack(alignment: .leading, spacing: 10) {
-            if work.hasSteps {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let now = work.now {
-                        row(now, primary: true) { RouterWorkingDots(tint: CDS.Text.secondary) }
-                    }
-                    ForEach(work.recent.prefix(W.recent)) { step in
-                        row(step, primary: false) {
-                            Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
-                        }
-                    }
-                }
-            }
-            if !thread.activity.isEmpty {
-                RouterActivityRows(model: model, activity: thread.activity)
-                    .padding(.top, work.hasSteps ? 2 : 0)
-            }
-        }
-        .padding(Router.Peek.pad)
-        .frame(width: W.peekWidth, alignment: .leading)
-        .routerFloating(radius: Router.Peek.radius)
-        .allowsHitTesting(false)
-    }
-
-    private func row<G: View>(_ step: RouterWork.Step, primary: Bool, @ViewBuilder glyph: () -> G) -> some View {
-        HStack(spacing: 8) {
-            glyph().frame(width: A.glyphBox, height: 14)
-            Text(step.text)
-                .font(step.mono ? CDS.mono(12) : CDS.sans(d.body.0))
-                .foregroundStyle(primary ? CDS.Text.primary : CDS.Text.secondary)
-                .lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 8)
-            Text(BriefAge.short(model.now.timeIntervalSince(step.at))).font(CDS.sans(12)).monospacedDigit()
-                .foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
-        }
     }
 }

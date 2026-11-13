@@ -441,16 +441,11 @@ struct RouterFloating: View {
     var body: some View {
         let frames = model.targets.frames
         ZStack(alignment: .topLeading) {
-            if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)] {
-                hung(from: blockFrame(thread, name: frame, frames: frames), width: thread.peeksWork ? Router.Work.peekWidth : Router.Peek.width) {
-                    if thread.peeksWork {
-                        RouterWorkingPeek(model: model, thread: thread)
-                    } else if let item = thread.ledger.single {
-                        // The line is its one item: what the line doesn't say.
-                        if RouterItemPeek.has(thread, item) { RouterItemPeek(thread: thread, item: item) }
-                    } else if RouterPeek.has(thread) {
-                        RouterPeek(thread: thread)
-                    }
+            if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)],
+               RouterSummaryView.peeks(thread, thread.ledger.single) {
+                // The line's hover (a line that is its one item: the item's), hung from its name.
+                hung(from: blockFrame(thread, name: frame, frames: frames), width: Router.Peek.width) {
+                    RouterSummaryView(model: model, thread: thread, item: thread.ledger.single, layer: .hover)
                 }
                     .id("peek-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
@@ -458,13 +453,15 @@ struct RouterFloating: View {
             if let (thread, item) = model.peekedItem, let frame = frames[.row(RouterModel.itemKey(thread.id, item.id))] {
                 // An item's row in a block: hung from its words, under its row (over it in the page's lower half).
                 let words = frame.inset(by: Router.Items.indent + Router.Line.markBox + Router.Line.markGap)
-                hung(from: words, width: Router.Peek.width) { RouterItemPeek(thread: thread, item: item) }
+                hung(from: words, width: Router.Peek.width) { RouterSummaryView(model: model, thread: thread, item: item, layer: .hover) }
                     .id("item-peek-" + item.id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
             if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {
-                // The glyphs sit at the line's end: their peek hangs back from their trailing edge, inside the page.
-                hung(from: frame, width: Router.Peek.width, trailing: true) { RouterActivityPeek(model: model, thread: thread) }
+                // The glyphs sit at the line's end: the line's hover hangs back from their trailing edge, inside the page.
+                hung(from: frame, width: Router.Peek.width, trailing: true) {
+                    RouterSummaryView(model: model, thread: thread, item: thread.ledger.single, layer: .hover)
+                }
                     .id("activity-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }

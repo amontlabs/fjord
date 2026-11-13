@@ -453,9 +453,12 @@ struct RouterWordRenderer: TextRenderer {
 /// A line's sentence as text: its words in `tint`, a PR's link in the accent, its state word in footnote in the state's
 /// colour. `attributed`: each run carries its turn for the renderer (`turn`: a word's own, its index unless it arrived
 /// later than its index's time).
-enum RouterSentenceText {
-    static func text(_ words: RouterWords, tint: Color, mono: Bool, attributed: Bool, turn: (Int) -> Double = { Double($0) }) -> Text {
-        var out = Text("")
+@MainActor enum RouterSentenceText {
+    /// `lead`: a blank its first line starts with, where the line's name sits over it; a line it wraps to starts under the
+    /// name (`RouterFlow`), and it ends with the invisible word so its first line runs to the pill.
+    static func text(_ words: RouterWords, tint: Color, mono: Bool, attributed: Bool, lead: CGFloat = 0,
+                     turn: (Int) -> Double = { Double($0) }) -> Text {
+        var out = RouterFlow.lead(lead)
         for part in words.parts {
             var piece: Text
             switch part.kind {
@@ -475,7 +478,7 @@ enum RouterSentenceText {
             }
             out = out + piece
         }
-        return out.font(mono ? CDS.mono(12) : CDS.sans(14))
+        return (out + RouterFlow.end).font(mono ? CDS.mono(12) : CDS.sans(14))
     }
 }
 
@@ -497,6 +500,8 @@ struct RouterStreamedText: View {
     var complete = true
     /// The PR's state, to pop its word when it changes.
     var prState: RouterThread.PR.State?
+    /// The blank the first line starts with (the line's name over it).
+    var lead: CGFloat = 0
     var done: () -> Void = {}
 
     /// The stream's clock, in words' time: word `i` starts to fade in at `max(i, the clock when it arrived)`. `shown` is
@@ -512,6 +517,8 @@ struct RouterStreamedText: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.routerStill) private var still
     @Environment(\.colorScheme) private var scheme
+    /// The lines it may take, as its place says: the words streaming in wrap as the words drawn whole do.
+    @Environment(\.lineLimit) private var lines
 
     private struct Batch: Equatable {
         var from: Int
@@ -521,7 +528,8 @@ struct RouterStreamedText: View {
     static let all: Double = 100_000
 
     init(words: RouterWords, tint: Color, mono: Bool = false, arriving: Bool, complete: Bool = true,
-         prState: RouterThread.PR.State? = nil, done: @escaping () -> Void = {}) {
+         prState: RouterThread.PR.State? = nil, lead: CGFloat = 0, done: @escaping () -> Void = {}) {
+        self.lead = lead
         self.words = words
         self.tint = tint
         self.mono = mono
@@ -536,12 +544,12 @@ struct RouterStreamedText: View {
         if #available(macOS 15, *), !reduce {
             // Laid out from the words alone; the words as drawn sit over that place, so a word that fades in measures
             // nothing.
-            RouterSentenceText.text(words, tint: tint, mono: mono, attributed: false)
+            RouterSentenceText.text(words, tint: tint, mono: mono, attributed: false, lead: lead)
                 .hidden()
-                .overlay(alignment: .leading) {
+                .overlay(alignment: .topLeading) {
                     if !still, shown < Self.all {
-                        RouterFadingWords(text: RouterSentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn),
-                                            pop: pop, scheme: scheme, plan: plan) { ended($0) }
+                        RouterFadingWords(text: RouterSentenceText.text(words, tint: tint, mono: mono, attributed: true, lead: lead, turn: turn),
+                                            lines: lines, pop: pop, scheme: scheme, plan: plan) { ended($0) }
                     } else {
                         drawn()
                     }
@@ -556,7 +564,7 @@ struct RouterStreamedText: View {
                     DispatchQueue.main.async { withAnimation(spring) { pop = 1 } }
                 }
         } else {
-            RouterSentenceText.text(words, tint: tint, mono: mono, attributed: false)
+            RouterSentenceText.text(words, tint: tint, mono: mono, attributed: false, lead: lead)
                 .onAppear { if arriving, complete { done() } }
                 .onChange(of: complete) { _, complete in if complete, arriving { done() } }
         }
@@ -565,7 +573,7 @@ struct RouterStreamedText: View {
     /// The words that have arrived, drawn whole.
     @available(macOS 15, *)
     private func drawn() -> some View {
-        RouterSentenceText.text(words, tint: tint, mono: mono, attributed: true, turn: turn)
+        RouterSentenceText.text(words, tint: tint, mono: mono, attributed: true, lead: lead, turn: turn)
             .textRenderer(RouterWordRenderer(shown: Self.all, pop: pop))
             // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
             .contentTransition(.identity)
@@ -653,6 +661,8 @@ struct RouterFadingWords: NSViewRepresentable {
     typealias Plan = RouterFadePlan
 
     let text: Text
+    /// The lines the words may take (nil: as many as they need).
+    let lines: Int?
     let pop: CGFloat
     let scheme: ColorScheme
     let plan: Plan
@@ -685,8 +695,8 @@ struct RouterFadingWords: NSViewRepresentable {
         AnyView(text
             .textRenderer(RouterWordRenderer(shown: RouterStreamedText.all, pop: pop, places: fades.places))
             .contentTransition(.identity)
-            .lineLimit(1).truncationMode(.tail)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .lineLimit(lines).truncationMode(.tail)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .environment(\.colorScheme, scheme))
     }
 }
@@ -764,8 +774,9 @@ final class RouterWordFades: NSObject, CAAnimationDelegate {
         layTiles()
     }
 
-    /// One tile per word, from its start to the next word's, the layer's whole height; the first from the layer's start.
-    /// Past the last word's end nothing shows: a word drawn before its place is known stays hidden.
+    /// One tile per word, from its start to the next word's on its line (past its own end at a line's end), as tall as its
+    /// line and a little over; a line's first word's from the layer's start. Past the last word's end nothing shows: a
+    /// word drawn before its place is known stays hidden.
     private func layTiles() {
         guard let layer = view?.layer else { return }
         CATransaction.begin()
@@ -776,13 +787,20 @@ final class RouterWordFades: NSObject, CAAnimationDelegate {
             layer.mask = mask
         }
         mask.frame = layer.bounds
-        let order = rects.keys.sorted { rects[$0]!.minX < rects[$1]!.minX }
+        // In reading order: by line (a word's middle), then along it.
+        func line(_ r: CGRect) -> Int { Int((r.midY / max(1, r.height)).rounded(.down)) }
+        let order = rects.keys.sorted {
+            let a = rects[$0]!, b = rects[$1]!
+            return line(a) != line(b) ? line(a) < line(b) : a.minX < b.minX
+        }
         let now = CACurrentMediaTime()
-        let height = layer.bounds.height
         for (n, i) in order.enumerated() {
             let rect = rects[i]!
-            let minX = n == 0 ? -1000 : rect.minX
-            let maxX = n + 1 < order.count ? rects[order[n + 1]]!.minX : rect.maxX + 4
+            let next = n + 1 < order.count ? rects[order[n + 1]] : nil
+            let sameLine = next.map { line($0) == line(rect) } ?? false
+            let first = n == 0 || line(rects[order[n - 1]]!) != line(rect)
+            let minX = first ? -1000 : rect.minX
+            let maxX = sameLine ? next!.minX : rect.maxX + 4
             let tile: CALayer
             if let old = tiles[i] {
                 tile = old
@@ -807,7 +825,12 @@ final class RouterWordFades: NSObject, CAAnimationDelegate {
                     tile.add(fade, forKey: "fade")
                 }
             }
-            tile.frame = CGRect(x: minX, y: -height, width: maxX - minX, height: 3 * height)
+            // A one-line text's tiles run the layer's whole height (and over), as before; a wrapped one's, its line's.
+            let pad = rect.height * 0.25
+            let band = order.count > 0 && line(rects[order.last!]!) == line(rects[order.first!]!)
+                ? CGRect(x: minX, y: -layer.bounds.height, width: maxX - minX, height: 3 * layer.bounds.height)
+                : CGRect(x: minX, y: rect.minY - pad, width: maxX - minX, height: rect.height + 2 * pad)
+            tile.frame = band
         }
         for (i, tile) in tiles where rects[i] == nil {
             tile.removeFromSuperlayer()

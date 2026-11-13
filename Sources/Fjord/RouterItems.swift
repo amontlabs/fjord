@@ -492,77 +492,7 @@ struct RouterItemPlaceholder: View {
     }
 }
 
-// MARK: - An item's card
-
-/// The selected item's card: what the line doesn't say (its detail), the agent's words it comes from (cut with Show all
-/// when long; their links clickable there), links only the detail has as quiet buttons, its options (they pick; Return sends what the destination row shows),
-/// then Done, which closes it with a Revert, and Open in T3. Never empty: an item with nothing more of its own quotes the
-/// thread's last lines.
-struct RouterItemCard: View {
-    let model: RouterModel
-    let thread: RouterThread
-    let item: RouterItem
-    /// The thread's last lines (its line's box keeps them, not the record it draws from).
-    let lastLines: String
-
-    var body: some View {
-        let d = CDS.Density.compact
-        let key = RouterModel.itemKey(thread.id, item.id)
-        let picked = Set((model.picks[key] ?? [:]).values)
-        let quiet = !model.draftEmpty
-        let detail = item.extra
-        // The agent's words behind the item; with nothing of its own, its thread's last lines.
-        let quote = item.quote ?? (detail == nil && item.options.isEmpty && !lastLines.isEmpty ? lastLines : nil)
-        let links = item.links
-        VStack(alignment: .leading, spacing: Router.Card.gap) {
-            if let detail {
-                Text(RouterInline.text(detail, size: d.prose.0)).cdsText(d.prose, .regular, CDS.Text.primary)
-                    .fixedSize(horizontal: false, vertical: true).prose()
-            }
-            if let quote {
-                // Its rail hangs left of the column; its words start on it.
-                RouterItemQuote(model: model, thread: thread.id, text: quote).prose().padding(.leading, -Router.Card.railInset)
-            }
-            if !links.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(Array(links.enumerated()), id: \.offset) { n, url in
-                        RouterLinkButton(model: model, hit: .link(key, n), url: url)
-                    }
-                }
-                // The first link's words on the column, its ground around them.
-                .padding(.leading, -8)
-            }
-            if !item.options.isEmpty {
-                VStack(spacing: 1) {
-                    ForEach(Array(item.options.enumerated()), id: \.offset) { n, label in
-                        let number = n + 1
-                        RouterButton(model: model, hit: .option(key, number), action: { model.pick(number) }) { hot, pressed in
-                            RouterOptionRow(number: number, label: label, on: picked.contains(number), hot: hot, pressed: pressed,
-                                            quiet: quiet)
-                        }
-                        .accessibilityLabel(label)
-                    }
-                }
-                // The radios hang left of the column; the labels start on it.
-                .padding(.leading, -(Router.Card.optionReach + Router.Card.radioHang))
-                .padding(.trailing, -Router.Card.optionReach)
-            }
-            HStack(spacing: Router.Card.footerGap) {
-                Spacer(minLength: 0)
-                RouterTextButton(model: model, hit: .footer(key, .settle), title: Router.Items.Copy.done, keys: ["cmd", "backspace"],
-                                 removes: true) { model.itemDone(thread.id, item.id) }
-                RouterTextButton(model: model, hit: .footer(thread.id, .open), title: "Open in T3", keys: ["cmd", "O"]) {
-                    model.open(thread.id)
-                }
-            }
-        }
-        // In a block, under its row's sentence; the line's own item, under the name as every card.
-        .padding(.leading, thread.ledger.block ? Router.Items.indent + Router.Card.hang : Router.Card.leading)
-        .padding(.trailing, Router.Card.trailing).padding(.bottom, Router.Card.bottom)
-        .padding(.top, 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
+// MARK: - An item's card pieces
 
 /// A link from an item's quote, as a quiet button: the page's address without its scheme, opened in the browser.
 struct RouterLinkButton: View {
@@ -634,52 +564,6 @@ struct RouterItemQuote: View {
             RouterQuoteStops.views(quoted)
         }
         .compositingGroup()
-    }
-}
-
-// MARK: - An item's peek
-
-/// The pointer on an item (a line that is its thread's one item, or an item's row in a block): what the line doesn't
-/// already say. Its detail when it adds something, then the agent's words it comes from, behind a rail, cut by whole
-/// lines with a fade (never on the blank line between two paragraphs). With neither detail nor words, the thread's last
-/// lines.
-struct RouterItemPeek: View {
-    let thread: RouterThread
-    let item: RouterItem
-
-    var body: some View {
-        let d = CDS.Density.compact
-        let detail = item.extra
-        let quote = item.quote ?? (detail == nil ? (thread.lastLines.isEmpty ? nil : thread.lastLines) : nil)
-        VStack(alignment: .leading, spacing: 8) {
-            if let detail {
-                Text(RouterInline.text(detail, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let quote {
-                let quoted = RouterItem.quoted(quote)
-                let words = Text(RouterInline.text(quoted, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
-                RouterQuoteCut(open: false, button: false) {
-                    words.fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
-                        .clipped()
-                    words.lineLimit(Router.Items.peekLines).fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .hidden()
-                    LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
-                        .blendMode(.destinationOut)
-                    Rectangle().fill(CDS.Settings.railLine)
-                    RouterQuoteStops.views(quoted)
-                }
-                .compositingGroup()
-            }
-        }
-        .routerPeekShell()
-    }
-
-    /// Whether it has anything to say: an item whose line says it all has no peek.
-    static func has(_ thread: RouterThread, _ item: RouterItem) -> Bool {
-        item.extra != nil || item.quote != nil || !thread.lastLines.isEmpty
     }
 }
 

@@ -369,8 +369,10 @@ struct RouterLineView: View {
     private func row(_ thread: RouterThread, hot: Bool) -> some View {
         // The line the draft goes to, when it isn't the selected one: the destination row's arrow, in the dot's slot.
         let marked = box.marked
-        // A line that is its thread's one item may wrap its sentence: the rest keeps to its first line.
-        let single = thread.ledger.single != nil && thread.sent == nil
+        // The sentence is never cut: it flows as text from after the name and wraps under it; the rest keeps to its first
+        // line. (A Sent line keeps to one: your words in quotes, then their status.)
+        let flows = thread.sent == nil
+        let single = thread.ledger.single != nil && flows
         return HStack(alignment: .routerFirstLine, spacing: 0) {
             ZStack {
                 Circle().fill(CDS.Fill.accent).opacity(thread.isNew && !marked ? 1 : 0)
@@ -386,14 +388,14 @@ struct RouterLineView: View {
             .padding(.leading, M.dotLeading).padding(.trailing, M.dotGap)
             .motion(.fade, value: marked)
             .accessibilityLabel(marked ? "Your words go here" : thread.isNew ? "New" : "")
-            if single {
-                // The line is its one item: the sentence flows as text, the name its highlight at the start, and a line
-                // it wraps to starts under the name's ground and runs to the pill (its first line leaves the name's
-                // width blank, `RouterFlow`).
+            if flows {
+                // The sentence flows as text, the name its highlight at the start, and a line it wraps to starts under
+                // the name's ground and runs to the pill (its first line leaves the name's width blank, `RouterFlow`).
                 ZStack(alignment: .topLeading) {
                     RouterSentenceView(model: model, box: box, lead: nameWidth > 0 ? nameWidth + M.sentenceGap : 0)
                         .routerActivity(model, thread)
-                        .padding(.top, M.namePadY)
+                        // A command (mono 12) has a shorter line than the name's 14: dropped onto the name's baseline.
+                        .padding(.top, M.namePadY + (thread.sentence.mono && thread.ledger.single == nil ? M.monoDrop : 0))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     RouterName(model: model, thread: thread, rowHot: hot)
                         .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
@@ -428,7 +430,7 @@ struct RouterLineView: View {
                 .layoutPriority(1)
         }
         // As much air over and under the name's ground as a one-line row has, when the words wrap.
-        .padding(.vertical, single ? (M.minHeight - Router.Items.lineHeight - 2 * M.namePadY) / 2 : 0)
+        .padding(.vertical, flows ? (M.minHeight - Router.Items.lineHeight - 2 * M.namePadY) / 2 : 0)
         .frame(minHeight: M.minHeight)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         // A name being given: the sentence slides to its new start.
@@ -437,6 +439,9 @@ struct RouterLineView: View {
 }
 
 extension Router.Line {
+    /// How far a mono 12 sentence sits under a sans 14 one's top, so their baselines meet (measured on the shots).
+    static let monoDrop: CGFloat = 2
+
     /// The selected ground going as its card rolls shut (`RouterLineView.GroundPresence`): as long as the roll.
     static let groundOut = Animation.easeIn(duration: 0.3)
 }
@@ -606,24 +611,26 @@ struct RouterSentenceView: View {
                 let tint = reassessing ? CDS.Text.muted : thread.sentenceTint
                 let stream = s.stream
                 let id = thread.id
-                HStack(spacing: Router.Thinking.gap) {
+                let lines = Router.Items.sentenceLines
+                HStack(alignment: .top, spacing: Router.Thinking.gap) {
                     RouterStreamedText(words: words, tint: tint, mono: s.mono, arriving: s.phase == .streaming,
                                          complete: box.complete,
-                                         prState: words.parts.contains { $0.kind == .link } ? thread.prs.first?.state : nil) {
+                                         prState: words.parts.contains { $0.kind == .link } ? thread.prs.first?.state : nil,
+                                         lead: lead) {
                         model.streamed(id, stream: stream)
                     }
-                    .lineLimit(1).truncationMode(.tail)
-                    .overlay(alignment: .leading) {
+                    .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                    .overlay(alignment: .topLeading) {
                         if reassessing {
-                            RouterSheen().mask(alignment: .leading) {
-                                RouterSentenceText.text(words, tint: .black, mono: s.mono, attributed: false)
-                                    .lineLimit(1).truncationMode(.tail)
+                            RouterSheen().mask(alignment: .topLeading) {
+                                RouterSentenceText.text(words, tint: .black, mono: s.mono, attributed: false, lead: lead)
+                                    .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
                             }
                             .transition(.opacity)
                         }
                     }
                     // The Router's model is reading the thread: Fjord's mark after the words it is about to replace.
-                    if reassessing { RouterThinking().transition(.opacity) }
+                    if reassessing { RouterThinking().frame(height: Router.Items.lineHeight).transition(.opacity) }
                 }
                 // One view per line of words: the old line goes, then the new one is there (the model's words fade
                 // in themselves as they stream, from the frame the old line starts to go). Words that grow are the
@@ -745,82 +752,6 @@ struct RouterTextButton: View {
 }
 
 // MARK: - Peek
-
-/// The hover peek: read-only, floating by the name. The last lines, then by kind as plain text; none when neither has
-/// anything to say.
-struct RouterPeek: View {
-    let thread: RouterThread
-
-    var body: some View {
-        let d = CDS.Density.compact
-        VStack(alignment: .leading, spacing: 8) {
-            if !thread.lastLines.isEmpty {
-                Text(RouterInline.text(thread.lastLines, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary).lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            kind
-        }
-        .modifier(RouterPeekShell())
-    }
-
-    /// Whether it has anything to say: no empty shell under the pointer.
-    static func has(_ thread: RouterThread) -> Bool {
-        if !thread.lastLines.isEmpty { return true }
-        switch thread.state {
-        case .needsYou(.plan): return !thread.plan.isEmpty
-        case .needsYou(.permission): return thread.permission != nil
-        case .needsYou: return thread.question != nil || !thread.form.isEmpty || !thread.options.isEmpty
-        case .stopped: return thread.stop != nil
-        case .done: return !thread.prs.isEmpty
-        case .working, .sent: return false
-        }
-    }
-
-    @ViewBuilder private var kind: some View {
-        let d = CDS.Density.compact
-        switch thread.state {
-        case .needsYou(.plan):
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(thread.plan.prefix(4).enumerated()), id: \.offset) { _, line in
-                    Text(RouterText.inline(line)).cdsText(d.body, .regular, CDS.Text.secondary).lineLimit(1)
-                }
-            }
-        case .needsYou(.permission):
-            if let p = thread.permission {
-                Text(p.command).font(CDS.mono(12)).foregroundStyle(CDS.Text.primary).lineLimit(2)
-            }
-        case .needsYou:
-            VStack(alignment: .leading, spacing: 4) {
-                if let ask = thread.question { Text(ask).cdsText(d.body, .regular, CDS.Text.primary) }
-                ForEach(Array(thread.form.enumerated()), id: \.offset) { q, question in
-                    Text(question.title).cdsText(d.body, .medium, CDS.Text.primary)
-                    options(question.options, from: thread.form.prefix(q).reduce(0) { $0 + $1.options.count })
-                }
-                if thread.form.isEmpty { options(thread.options, from: 0) }
-            }
-        case .stopped:
-            if let stop = thread.stop {
-                Text(stop.error).font(CDS.mono(12)).foregroundStyle(CDS.Text.danger).lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        case .done:
-            if !thread.prs.isEmpty {
-                HStack(spacing: 6) { ForEach(thread.prs) { RouterPRBadge(pr: $0) } }
-            }
-        case .working, .sent:
-            EmptyView()
-        }
-    }
-
-    private func options(_ options: [String], from: Int) -> some View {
-        ForEach(Array(options.enumerated()), id: \.offset) { n, option in
-            HStack(spacing: 8) {
-                Text(verbatim: "\(from + n + 1)").font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
-                Text(option).cdsText(CDS.Density.compact.body, .regular, CDS.Text.secondary).lineLimit(1)
-            }
-        }
-    }
-}
 
 /// The housekeeping line's peek: its threads, each with its project and age. Wider: the names are T3's titles, whole.
 struct RouterOlderPeek: View {

@@ -188,6 +188,7 @@ enum RouterLoad {
             t.work.summaries.insert(.init(id: (t.work.summaries.first?.id ?? -1) + 1, text: text, at: Date()), at: 0)
             t.work.summaries = Array(t.work.summaries.prefix(20))
             t.work.lineReadsNewest = true
+            RouterDemo.rehistory(&t)
             t.sentence = .init(text: text, stream: stream)
             let event = RouterSignposts.begin("T3 event"), work = RouterSignposts.begin("T3 event work")
             model.apply(.upsert(t))

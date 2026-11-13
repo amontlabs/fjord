@@ -252,6 +252,36 @@ Exact sentence, by state, when the code writes it (the model's line replaces the
   summary's rate limit holds only the summaries. The summaries are kept, newest first, twenty at most, in the verdict file until the thread leaves the page.
   The pointer anywhere on a working line shows its one peek (1.6); its card lists the summaries (1.5).
 
+### 1.4.1 One layered structure (R10)
+
+**R10** (2026-11-13, owner-approved; `RouterSummaryView.swift`, `RouterTimeline` in `RouterWorkViews.swift`,
+`RouterDemoLayers.swift`, shots `v2-layer-{done,working,item}-{line,hover,card}`, `v2-layer-item-block-card`). Every thread
+and item has one structure in layers: the hover is the line plus more, the card is the hover plus more; nothing jumps
+between them and nothing repeats. Where an older rule below says otherwise (1.5's blocks, 1.6's peeks), this wins.
+
+- **Line.** The sentence: what matters now, never cut. It flows from after the name and wraps under it (`RouterFlow`,
+  3 lines at most, a guard); the mark, the name, the activity glyphs, the pill and the age stay on its first line. A Sent
+  line keeps to one.
+- **Hover** (one peek for every line, item row and the activity glyphs: 360 wide, the floating shell): the sentence
+  (prose 14 medium, primary), the detail (prose 14, primary; a real stop's error on the danger ground), the facts as quiet
+  chips (18 tall, radius 4, the quiet fill, 11 medium; a PR as its tinted badge, the diff in the git inks, a fact's kind
+  glyph 9 pt muted, its tone's ink; cut in the middle past 300). Only when there is a detail or a fact: a line that says
+  it all has no hover.
+- **Card**, under its line (which says the sentence), in order: the detail and the facts as the hover shows them; the
+  source (the agent's own words: the last lines with rail, cut and Show all; an item's quote and its links; a plan; a
+  permission's command; your words); the history; the controls in one place (an item's or the ask's options, then
+  Done / Settle · Snooze / Stop / Continue, then Open in T3).
+- **By state.** Done: sentence the outcome, facts PR, files, tests, source its last message. Working: sentence the
+  summary, facts its subagents, background commands and waits, source the history itself. Needs you and items: sentence
+  the item, detail why, source the quote, controls its options and Done. The engine fills `RouterThread.summary`
+  (sentence, detail, facts, source) and `RouterItem.summary`; a question's own words are its detail until then.
+- **History** (`RouterThread.history`, newest first): on every thread's card, under the source (for Working it is the
+  source, not repeated). Summaries as words (body 13 secondary); quiet one-liners (footnote, the mark 9 pt hung in the
+  gutter) for an item raised (its kind's mark at 80 %), an item closed (struck, muted, its how after it) and a turn
+  ended (`checkmark.circle`, its outcome); under each run what started it (R6). Clock times in the ages column. An item
+  still open isn't repeated there. Same height, scrolling, fade and `↑ new` pill as R6's timeline (the pill counts
+  anything new but a run's start). An item's card in a block has none: its header's card has it.
+
 ### 1.5 Card (the selected line's)
 
 One card component, inline under its line, inside the selected surface. Selection by ↑↓, click or page open shows the

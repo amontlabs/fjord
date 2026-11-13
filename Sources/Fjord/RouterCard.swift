@@ -1,299 +1,29 @@
 import AppKit
 import SwiftUI
 
-// Router v2's card (docs/design/router-v2/DESIGN.md 1.5): one component, inline under the selected line, inside the
-// selected surface. T3's title, the agent's last lines, the kind's block (question, form, plan, permission, a step the
-// model found, done, stopped, working, sent), and a footer of text buttons with their keys. Options only pick: Return
-// sends what the destination row shows.
+// Router v2's card (docs/design/router-v2/DESIGN.md 1.5): inline under the selected line, inside the selected surface;
+// the card layer of the one layered view (`RouterSummaryView`). This file holds its pieces: the quote and its cut, the
+// plan, the option rows, the snooze menu. Options only pick: Return sends what the destination row shows.
 
 struct RouterCard: View {
     let model: RouterModel
     /// Its line's box: the card redraws when the record does, not as the reply grows (`RouterLastLines` does).
     let box: RouterLineBox
-    @Namespace private var rail
-    @Environment(\.accessibilityReduceMotion) private var reduce
 
-    private typealias M = Router.Card
-    private var d: CDS.Density { .compact }
-    private var thread: RouterThread { box.head }
-
-    /// The open item's card instead, in a block (its focused item) or on a thread whose one item is the line.
+    /// The open item's card, in a block (its focused item) or on a thread whose one item is the line.
     private var item: RouterItem? {
-        if let focus = box.shown { return thread.ledger.items.first { $0.id == focus } }
+        let thread = box.head
+        if let focus = box.item { return thread.ledger.items.first { $0.id == focus } }
         return thread.ledger.single
     }
 
     var body: some View {
-        if let item {
-            RouterItemCard(model: model, thread: thread, item: item, lastLines: box.lastLines)
-        } else {
-            card
-        }
-    }
-
-    private var card: some View {
-        let _ = RouterBodies.count("card", box.id, of: model)
-        return VStack(alignment: .leading, spacing: M.gap) {
-            if thread.loading {
-                VStack(alignment: .leading, spacing: 8) {
-                    RouterSkeletonBar(share: 0.92)
-                    RouterSkeletonBar(share: 0.61)
-                }
-                .padding(.vertical, 4)
-                .prose()
-                .transition(.opacity)
-            } else if box.talking, !summarized {
-                // A working thread with summaries shows them instead (below): its last turn's words aren't news.
-                // Its rail hangs left of the column; its words start on it.
-                RouterLastLines(model: model, box: box).prose().padding(.leading, -M.railInset).transition(.opacity)
-            }
-            kind
-            footer
-        }
-        .padding(.leading, M.leading).padding(.trailing, M.trailing).padding(.bottom, M.bottom)
-        .padding(.top, 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// A working thread the Router's model has summed up: its card is the timeline of those lines, not the last quote.
-    /// Until the run working now has a summary, the card quotes its last words; earlier runs' summaries follow, apart.
-    private var summarized: Bool { thread.state == .working && thread.work.current }
-
-    // MARK: Kind blocks. Prose keeps to 560 pt; option rows run the card's width, their keycaps under the footer's.
-
-    @ViewBuilder private var kind: some View {
-        if case .needsYou(let request) = thread.state, !thread.live {
-            if let question = thread.question { ask(question) }
-            if request == .permission, let p = thread.permission { permission(p).prose() }
-            notLive
-        } else {
-            live
-        }
-    }
-
-    /// A request T3 can no longer answer (IMPLEMENTATION.md 1.3): no options, Open in T3 in their place.
-    private var notLive: some View {
-        HStack(spacing: 10) {
-            Text(Router.Copy.notLive).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(2)
-            RouterPushButton(model: model, hit: .footer(thread.id, .open), title: "Open in T3", keys: ["cmd", "O"]) {
-                model.open(thread.id)
-            }
-        }
-    }
-
-    @ViewBuilder private var live: some View {
-        switch thread.state {
-        case .needsYou(.question):
-            if let question = thread.question { ask(question) }
-            RouterOptions(model: model, thread: thread, labels: thread.options, from: 0)
-        case .needsYou(.form):
-            form
-        case .needsYou(.plan):
-            RouterPlan(model: model, thread: thread).prose()
-            RouterOptions(model: model, thread: thread, labels: thread.options, from: 0)
-        case .needsYou(.permission):
-            if let p = thread.permission { permission(p).prose() }
-            RouterOptions(model: model, thread: thread, labels: thread.options, from: 0)
-        case .done:
-            HStack(spacing: 8) {
-                badges
-                    // A badge's words, not its ground, start on the column.
-                    .padding(.leading, thread.prs.isEmpty ? 0 : -Router.Line.namePadX - 1)
-                if let diff = thread.diff {
-                    (Text(verbatim: "\(diff.files) file\(diff.files == 1 ? "" : "s")  ").foregroundColor(CDS.Text.muted)
-                        + Text(verbatim: "+\(diff.added)").foregroundColor(CDS.Git.added)
-                        + Text(verbatim: "  −\(diff.removed)").foregroundColor(CDS.Git.removed))
-                        .font(CDS.sans(12)).monospacedDigit()
-                }
-            }
-        case .stopped:
-            if let stop = thread.stop { stopped(stop).prose() }
-        case .working:
-            // A thread started here: what it runs on, through its first run.
-            if let launch = thread.launch { started(launch) }
-            // What it has been doing, as the Router's model summed it up, newest first.
-            if thread.state == .working, !thread.work.listed.isEmpty { RouterWorkTimeline(work: thread.work) }
-            // T3's to-do steps, when the thread has a list (Claude sends one only with T3's to-do setting on).
-            if !thread.steps.isEmpty { steps.prose() }
-            // Its subagents, background commands and waits, each with how long it has run.
-            if !thread.activity.isEmpty {
-                RouterActivityRows(model: model, activity: thread.activity, compact: true).padding(.leading, -M.hang).agesColumn()
-                    .transition(.opacity)
-            }
-        case .sent:
-            if let sent = thread.sent {
-                Text(sent.words).cdsText(d.body, .regular, CDS.Text.primary).fixedSize(horizontal: false, vertical: true).prose()
-            }
-            // A thread started here: what it starts with.
-            if let launch = thread.launch { started(launch) }
-        }
-    }
-
-    private func started(_ launch: RouterLaunch) -> some View {
-        Text(model.words(launch)).cdsText(d.footnote, .regular, CDS.Text.muted).lineLimit(1)
-    }
-
-    private func ask(_ text: String) -> some View {
-        Text(RouterInline.text(text, size: d.prose.0)).cdsText(d.prose, .regular, CDS.Text.primary)
-            .fixedSize(horizontal: false, vertical: true).prose()
-    }
-
-    @ViewBuilder private var badges: some View {
-        if !thread.prs.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(thread.prs) { pr in
-                    RouterPRBadge(pr: pr).routerTarget(model, .prBadge(thread.id, pr.number)).routerLink()
-                }
-            }
-        }
-    }
-
-    /// Each question with its option rows, numbered through the form; the current one has the accent rail, one rail
-    /// that slides from question to question.
-    private var form: some View {
-        let at = min(model.formAt[thread.id] ?? 0, thread.form.count - 1)
-        return VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(thread.form.enumerated()), id: \.element.id) { q, question in
-                let from = thread.form.prefix(q).reduce(0) { $0 + $1.options.count }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Text(question.title).cdsText(d.prose, .medium, CDS.Text.primary)
-                        if model.answered(thread, q) {
-                            Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(CDS.Text.muted)
-                                .transition(.opacity)
-                        }
-                    }
-                    // Its options' grounds stop short of the rail.
-                    RouterOptions(model: model, thread: thread, labels: question.options, from: from, reach: M.formReach)
-                    if let typed = model.typed[thread.id]?[q] {
-                        Text("Your answer: \(typed)").cdsText(d.body, .regular, CDS.Text.secondary).lineLimit(2)
-                            .transition(.opacity)
-                    }
-                }
-                .overlay(alignment: .leading) {
-                    // Hung in the gutter, left of the radios and their grounds.
-                    if q == at {
-                        RoundedRectangle(cornerRadius: 1).fill(CDS.Text.accent).frame(width: 2)
-                            .matchedGeometryEffect(id: "rail", in: rail)
-                            .offset(x: -(M.radioHang + M.formReach + 4))
-                    }
-                }
-            }
-        }
-        .motion(.spatial, value: at)
-        .motion(.fade, value: model.answeredCount(thread))
-    }
-
-    /// The command and its warning. T3 sends no reason with a permission: the line's words say what it is for.
-    private func permission(_ p: RouterThread.Permission) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(p.command).font(CDS.mono(12)).foregroundStyle(CDS.Text.primary)
-                .textSelection(.enabled)
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: Router.Surface.control, style: .continuous).fill(Router.Surface.quiet))
-                // The command's words on the column, its ground around them.
-                .padding(.leading, -8)
-            if !p.warning.isEmpty {
-                HStack(spacing: M.glyphGap) {
-                    Image(systemName: "exclamationmark.triangle").font(.system(size: 10, weight: .medium)).frame(width: M.glyphBox)
-                    Text(p.warning)
-                }
-                .cdsText(d.footnote, .regular, CDS.Text.warning)
-                .padding(.leading, -M.hang)
-            }
-        }
-    }
-
-    private func stopped(_ stop: RouterThread.Stop) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // The reason on the danger ink's tint: a ground, no ring.
-            let shape = RoundedRectangle(cornerRadius: Router.Surface.row, style: .continuous)
-            Text(stop.error).font(CDS.mono(12)).foregroundStyle(CDS.Text.primary).lineLimit(6)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(shape.fill(Router.dangerFill))
-                // The error's words on the column, its ground around them.
-                .padding(.leading, -10)
-            (Text("Last step: ") + Text(RouterInline.text(stop.lastStep, size: d.footnote.0)))
-                .cdsText(d.footnote, .regular, CDS.Text.muted)
-        }
-    }
-
-    /// T3's to-do steps: done, the running one with the dots, pending; five at most.
-    private var steps: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(thread.steps.prefix(M.steps)) { step in
-                HStack(spacing: M.glyphGap) {
-                    ZStack {
-                        switch step.state {
-                        case .done: Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
-                        case .running: RouterWorkingDots(tint: CDS.Text.primary)
-                        case .pending: Circle().strokeBorder(CDS.borderStrong, lineWidth: 1).frame(width: 7, height: 7)
-                        }
-                    }
-                    .frame(width: M.glyphBox, height: 14)
-                    Text(step.text).cdsText(d.footnote, .regular, step.state == .running ? CDS.Text.primary : CDS.Text.muted).lineLimit(1)
-                }
-            }
-            if thread.steps.count > M.steps {
-                Text(verbatim: "+\(thread.steps.count - M.steps) more").cdsText(d.footnote, .regular, CDS.Text.muted).padding(.leading, M.hang)
-            }
-        }
-        // The marks hang left of the column; the steps' words start on it.
-        .padding(.leading, -M.hang)
-    }
-
-    // MARK: Footer
-
-    private var footer: some View {
-        let id = thread.id
-        return HStack(spacing: M.footerGap) {
-            if thread.state == .stopped {
-                // T3 has no rerun: Continue sends its words for it, and the destination row shows them.
-                RouterPushButton(model: model, hit: .footer(id, .rerun), title: Router.Copy.continueTitle, keys: ["enter"]) {
-                    model.resume(id)
-                }
-                // Its title on the column, its ground around it.
-                .padding(.leading, -8)
-            }
-            if thread.state == .needsYou(.form) {
-                Text(verbatim: "\(model.answeredCount(thread)) of \(thread.form.count) answered")
-                    .cdsText(d.footnote, .regular, CDS.Text.muted).contentTransition(.numericText())
-            }
-            Spacer(minLength: 0)
-            switch thread.state {
-            case .working:
-                // The page's one act with no way back: a button only, no key.
-                RouterTextButton(model: model, hit: .footer(id, .stop), title: "Stop") { model.stop(id) }
-                openButton
-            case .sent:
-                openButton
-            default:
-                if let why = model.holdReason(thread) {
-                    // T3 won't let go of it yet: shown off, with why.
-                    RouterHeldActs(why: why)
-                } else {
-                    RouterTextButton(model: model, hit: .footer(id, .snooze), title: "Snooze", keys: ["alt", "cmd", "backspace"],
-                                       removes: true) { model.openSnooze() }
-                    RouterTextButton(model: model, hit: .footer(id, .settle), title: "Settle", keys: ["cmd", "backspace"],
-                                       removes: true) { model.settle(id) }
-                }
-                // A request that is no longer live has it in its options' place.
-                if thread.live { openButton }
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var openButton: some View {
-        RouterTextButton(model: model, hit: .footer(thread.id, .open), title: "Open in T3", keys: ["cmd", "O"]) { model.open(thread.id) }
+        RouterSummaryView(model: model, thread: box.head, item: item, layer: .card(box))
     }
 }
 
 /// Snooze and Settle where T3 refuses them (a request waits, a run is live): off, with the reason before them.
-private struct RouterHeldActs: View {
+struct RouterHeldActs: View {
     let why: String
 
     var body: some View {
@@ -578,7 +308,8 @@ private struct RouterPlanCut: Layout {
 /// keys on the footer's edge. A click or its digit picks one, nothing is sent.
 struct RouterOptions: View {
     let model: RouterModel
-    let thread: RouterThread
+    /// Whose picks they are: the thread's id, or an item's key.
+    let key: String
     let labels: [String]
     /// The options before these in the card: numbers run through a form.
     let from: Int
@@ -586,13 +317,13 @@ struct RouterOptions: View {
     var reach: CGFloat = Router.Card.optionReach
 
     var body: some View {
-        let picked = Set((model.picks[thread.id] ?? [:]).values)
+        let picked = Set((model.picks[key] ?? [:]).values)
         // With a draft, digits are words and Return sends the words: the rows show they are not what goes.
         let quiet = !model.draftEmpty
         VStack(spacing: 1) {
             ForEach(Array(labels.enumerated()), id: \.offset) { n, label in
                 let number = from + n + 1
-                RouterButton(model: model, hit: .option(thread.id, number), action: { model.pick(number) }) { hot, pressed in
+                RouterButton(model: model, hit: .option(key, number), action: { model.pick(number) }) { hot, pressed in
                     RouterOptionRow(number: number, label: label, on: picked.contains(number), hot: hot, pressed: pressed, quiet: quiet,
                                       reach: reach)
                 }

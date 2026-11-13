@@ -218,7 +218,8 @@ import Testing
         #expect(h.records.record("t1")?.work.lineReadsNewest == true)
         h.records.summary("t1", fingerprint: second.fingerprint, .words("Copy mo", done: false))
         #expect(h.records.record("t1")?.work.lineReadsNewest == false)
-        #expect(h.records.record("t1")?.work.listed.first?.text == "Moving the draft copy earlier")
+        let listed = h.records.record("t1").map { RouterTimeline.entries($0) }?.first { $0.isSummary }
+        #expect(listed.map { if case .summary(let text) = $0.event.kind { text } else { "" } } == "Moving the draft copy earlier")
         h.records.summary("t1", fingerprint: second.fingerprint, .failed)
         #expect(h.records.record("t1")?.work.lineReadsNewest == true)
         let r = try #require(h.records.record("t1"))
@@ -315,12 +316,13 @@ import Testing
         var next = Self.running()
         next.latestRunID = "r2"
         h.records.put(next)
-        let work = h.records.record("t1")?.work
+        let record = h.records.record("t1")
+        let work = record?.work
         #expect(work?.run == "r2")
         #expect(work?.current == false)
         #expect(work?.lineReadsNewest == false)
         // The card lists r1's summary after its quiet break, not as r2's newest.
-        #expect(work?.listed.map(\.run) == ["r1"])
+        #expect(record.map { RouterTimeline.entries($0) }?.filter(\.isSummary).map(\.event.run) == ["r1"])
     }
 
     @Test func theTimelineGoesWhenTheThreadLeavesThePage() {
@@ -498,22 +500,29 @@ import Testing
         #expect(words(RouterSummaryPrompt.system) == words(v4))
     }
 
-    /// The card's timeline (R6): every kept summary, cut into runs newest first, each run followed by what started it; a
-    /// summary the timeline doesn't show yet counts on the new pill.
+    /// The card's timeline (R6, R10): the thread's history newest first, a run's events then what started it, runs apart;
+    /// the newest summary left to the line that reads it; an item still open not repeated; what the timeline doesn't
+    /// show yet counts on the new pill (a run's start doesn't).
     @Test func timelineEntries() {
-        typealias S = RouterWork.Summary
         let at = RecordFixture.now
-        var work = RouterWork(summaries: [S(id: 4, text: "d", at: at, run: "b"), S(id: 3, text: "c", at: at, run: "b"),
-                                          S(id: 2, text: "b", at: at, run: "a"), S(id: 1, text: "a", at: at, run: "a")],
-                              run: "b", starts: ["b": .command("swift test"), "a": .asked("fix it")])
-        work.lineReadsNewest = true
-        let entries = RouterWorkTimeline.entries(work)
-        #expect(entries.map(\.id) == ["s3", "r3", "s2", "s1", "r1"])
+        func e(_ id: String, _ m: Double, _ run: String, _ kind: RouterEvent.Kind) -> RouterEvent {
+            RouterEvent(id: id, at: at.addingTimeInterval(-m * 60), run: run, kind: kind)
+        }
+        var t = RouterThread(id: "t", name: "T", title: "T", state: .working, sentence: .init(text: "d"), since: at)
+        t.work = RouterWork(run: "b")
+        t.work.lineReadsNewest = true
+        t.ledger.items = [RouterItem(id: "i", kind: .decide, sentence: "keep it?", since: at)]
+        t.history = [e("s4", 1, "b", .summary("d")), e("raised:i", 2, "b", .raised(.decide, "keep it?")),
+                     e("s3", 3, "b", .summary("c")), e("rb", 4, "b", .started(.command("swift test"))),
+                     e("f1", 5, "a", .finished("done a")), e("s2", 6, "a", .summary("b")),
+                     e("ra", 7, "a", .started(.asked("fix it")))]
+        let entries = RouterTimeline.entries(t)
+        #expect(entries.map(\.id) == ["s3", "rb", "f1", "s2", "ra"])
         #expect(entries.map(\.gap) == [0, Router.Work.rowGap, Router.Work.runGap, Router.Work.rowGap, Router.Work.rowGap])
-        let held = RouterWorkTimeline.entries(work, dropping: 1)
-        #expect(held.map(\.id) == ["s2", "s1", "r1"])
-        #expect(RouterWorkTimeline.newSummaries(entries, since: held) == 1)
-        #expect(RouterWorkTimeline.newSummaries(entries, since: entries) == 0)
+        let held = RouterTimeline.entries(t, dropping: 1)
+        #expect(held.map(\.id) == ["rb", "f1", "s2", "ra"])
+        #expect(RouterTimeline.newer(entries, since: held) == 1)
+        #expect(RouterTimeline.newer(entries, since: entries) == 0)
     }
 }
 

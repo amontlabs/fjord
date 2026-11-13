@@ -575,7 +575,7 @@ final class RouterModel {
         for t in threads where t.ledger.block && key.hasPrefix(t.id + "#") {
             guard let item = t.ledger.items.first(where: { Self.itemKey(t.id, $0.id) == key }), !item.closing else { continue }
             if selection == .line(t.id), focus == item.id { return nil }
-            return RouterItemPeek.has(t, item) ? (t, item) : nil
+            return RouterSummaryView.peeks(t, item) ? (t, item) : nil
         }
         return nil
     }

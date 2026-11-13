@@ -23,6 +23,7 @@ extension RouterDemo {
         if var t = model.thread(ID.checkpoint) {
             t.work.summaries.insert(.init(id: 9, text: "Booting the VM again with a longer timeout", at: ago(0.5)), at: 0)
             t.sentence = .init(text: "Booting the VM again with a longer timeout")
+            rehistory(&t)
             t.ledger = RouterLedger(items: [
                 RouterItem(id: Item.stuck, kind: .stuck, sentence: "the VM boot times out at the same step, third try", since: ago(4)),
                 RouterItem(id: Item.keep, kind: .decide, sentence: "keep the 0.3 checkpoint as a fallback, or delete it?",
