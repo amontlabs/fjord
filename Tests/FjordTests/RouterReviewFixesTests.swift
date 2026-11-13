@@ -233,4 +233,29 @@ import Testing
         h.records.cancelledQueue("t1", run: "run-mine", on: false)
         #expect(h.records.record("t1")?.queued == "and add tests")
     }
+
+    // MARK: #10: a send that starts no run ends on the row
+
+    @Test func aSendT3TookThatStartsNoRunEndsWhenTheRowFails() {
+        let h = Harness()
+        var t = F.thread()
+        h.records.put(t)
+        h.records.began(send: RouterActs.Send(thread: "t1", words: "go on", kind: .words, at: F.now))
+        #expect(h.records.record("t1")?.state == .sent)
+        // The provider session fails before T3 makes a run: same run id, the row failed.
+        t.status = .failed
+        t.lastError = "provider session failed to start"
+        h.records.put(t)
+        #expect(h.records.record("t1")?.state == .stopped)
+    }
+
+    @Test func aSendEndsWhenTheRunsEndMovesPastIt() {
+        let h = Harness()
+        var t = F.thread()
+        h.records.put(t)
+        h.records.began(send: RouterActs.Send(thread: "t1", words: "go on", kind: .words, at: F.now))
+        t.lastRunEndedAt = F.now.addingTimeInterval(5)
+        h.records.put(t)
+        #expect(h.records.record("t1")?.state != .sent)
+    }
 }

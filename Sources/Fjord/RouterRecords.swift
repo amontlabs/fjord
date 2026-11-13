@@ -301,7 +301,8 @@ final class RouterRecords {
             case .steer, .words, .answer, .continuing:
                 let steering = s.kind == .steer
                 e.send = Send(words: s.words, status: steering ? .steering : .sending, steering: steering, run: t.latestRunID,
-                              runStarted: t.runStartedAt, request: t.pendingRequest?.id, plan: t.hasPlan, at: s.at)
+                              runStarted: t.runStartedAt, request: t.pendingRequest?.id, plan: t.hasPlan, at: s.at,
+                              row: RowMark(status: t.status, error: t.lastError, ended: t.lastRunEndedAt))
             }
             refresh(s.thread)
         }
@@ -489,6 +490,10 @@ final class RouterRecords {
                 // Into the run under way: over when that run is (or when T3 shows it in the run, `delivered`).
                 if newRun || !t.running { e.send = nil }
             } else if newRun || started || s.request != nil && t.pendingRequest?.id != s.request || s.plan && !t.hasPlan {
+                e.send = nil
+            } else if let row = s.row, row.status != t.status || row.error != t.lastError
+                        || t.lastRunEndedAt != row.ended && (t.lastRunEndedAt ?? .distantPast) > s.at {
+                // T3 took the words but no run came of them (the provider failed to start): the row says so.
                 e.send = nil
             }
         }
@@ -973,6 +978,14 @@ extension RouterRecords {
         var plan: Bool
         var at: Date
         var start: Start?
+        /// The row's status, error and run end at the send: a move of any (no new run) is T3's word too.
+        var row: RowMark?
+    }
+
+    struct RowMark: Equatable {
+        var status: T3Status
+        var error: String?
+        var ended: Date?
     }
 
     /// A new thread started here.
