@@ -34,7 +34,7 @@ import Testing
         r.sonnetPause = .milliseconds(pauses.1)
         r.boardKey = { calls.board }
         r.jev = { text, _ in calls.jev.append(text); return Self.answer("th-login", p: p) }
-        r.decide = { text, tagged, selected, reuse in
+        r.decide = { text, tagged, selected, reuse, _ in
             calls.decided.append(text)
             calls.reused.append(reuse != nil)
             calls.selected.append(selected)
@@ -93,7 +93,7 @@ import Testing
         let calls = Calls()
         let gate = Gate()
         let r = reader(calls, p: 0.5)
-        r.decide = { text, _, _, _ in
+        r.decide = { text, _, _, _, _ in
             calls.decided.append(text)
             // Ignores cancellation, as an answer that was already in flight would.
             await gate.wait()
@@ -160,7 +160,7 @@ import Testing
     @Test func aFailedSonnetCallLandsTheOpenCardAsThePlace() async {
         let calls = Calls()
         let r = reader(calls, p: 0.5)
-        r.decide = { _, _, _, _ in nil }
+        r.decide = { _, _, _, _, _ in nil }
         r.read("the readme needs a section", selected: "th-docs", mentions: [])
         await waitUntil { !calls.reads.isEmpty }
         #expect(calls.reads[0].places == [.thread("th-docs")] && calls.decisions[0] == nil)

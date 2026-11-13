@@ -25,6 +25,7 @@ extension RouterModel {
                 draft = text
                 if scripted || still { updateScriptedMention() }
                 read = nil; explicit = nil; waved = false; lit = 0; placesMenu = false
+                splitAt = nil; splitMine = [:]
                 reading = false
                 launchMine = RouterLaunchAsk(); launchPills = RouterLaunchAsk(); launchFocus = nil; launchMenu = nil; launchRolls = [:]
             }
@@ -152,6 +153,11 @@ extension RouterModel {
         guard held else { return }
         let prior = heldPrior
         unhold()
+        // A split: every part goes when each is sure or lit by you; else the rows show the places and Return is asked again.
+        if let split {
+            if split.allSatisfy({ $0.sure || $0.mine }) { sendSplit(split) }
+            return
+        }
         let goes: Bool
         if let prior {
             goes = new.sure && new.places.first == .thread(prior)
@@ -225,6 +231,7 @@ extension RouterModel {
 
     /// Return would send now: the send button is lit.
     var canSend: Bool {
+        if split != nil { return !connectionLost && !held }
         guard let destination, !connectionLost, !held else { return false }
         switch destination {
         case .picked(let id, _): return thread(id).map { openQuestions($0) == 0 } ?? false
@@ -339,6 +346,16 @@ extension RouterModel {
         // Return to the commit of what it changed (the Sent line, the counts, the next card).
         let interval = RouterSignposts.begin("Send")
         defer { RouterSignposts.end(interval, afterCommit: true) }
+        // A split goes whole: once the read of these very words is in (else held until it lands).
+        if let split {
+            if connectionLost || held { return }
+            if !draftEmpty, reading || read?.draft != plainDraft {
+                animate(.fade) { held = true }
+            } else {
+                sendSplit(split, queue: queue)
+            }
+            return
+        }
         guard let destination else {
             if case .failure(let id)? = selection, !connectionLost { sendAgain(id) }
             return
@@ -395,13 +412,14 @@ extension RouterModel {
         }
     }
 
-    func deliver(_ words: String, to place: RouterPlace, queue: Bool, kind: RouterOutgoing.Kind = .words) {
+    /// `launch`: a new thread's settings when the composer emptied before (a split's second send); else the row's.
+    func deliver(_ words: String, to place: RouterPlace, queue: Bool, kind: RouterOutgoing.Kind = .words, launch: RouterLaunch? = nil) {
         // A place that sends nothing never takes the words.
         if case .here = place { return }
         let name = read?.name
         // What the row showed, for the decision log.
         let shown = read
-        let launch = launch
+        let launch = launch ?? self.launch
         // The composer empties first: the row leaves saying what it said at Return, not what the send made of the thread.
         setDraft("")
         switch place {

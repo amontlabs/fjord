@@ -6,8 +6,8 @@ import SwiftUI
 // elsewhere, never rephrased) and the preview is on the page, on the targets: each target line or item has the arrow in
 // its dot's slot and, under its row, a quiet line with what it will receive; a new thread is a ghost line in Working.
 // Over the composer, one compact row a destination says the same: the arrow, the place as the page names it, what it
-// receives (quoted to a thread, said as the answer to an item). Look only for now: the demo's reads carry the sends; the
-// decider doesn't write them yet.
+// receives (quoted to a thread, said as the answer to an item). The decider writes the parts (`RouterProjectDecision.sends`,
+// the reader's `RouterRead.sends`); the cards' answers are sends by code (`answerSends`); Return sends every one.
 
 /// A new thread the split starts, as its ghost line shows it.
 struct RouterGhost: Equatable {
@@ -16,24 +16,110 @@ struct RouterGhost: Equatable {
 }
 
 extension RouterModel {
-    /// The sends the page shows: the read's, while there is a draft and no place you picked yourself for all of it. nil:
-    /// the message goes to one place, as the usual destination row says.
+    /// The sends the page shows, while there is a draft and no place you picked yourself for all of it: the cards'
+    /// answers in the composer (by code, never read) and the read's parts of the words. With answers, the words read
+    /// to one place are one more send. nil: the message goes to one place, as the usual destination row says.
+    /// While the Router reads again, the parts the last read knew stay.
     var split: [RouterSend]? {
-        guard !draft.isEmpty, explicit == nil, !waved, let sends = read?.sends, !sends.isEmpty else { return nil }
-        return sends
+        guard !draft.isEmpty, explicit == nil, !waved else { return nil }
+        let answers = hasAnswers ? answerSends : []
+        var parts: [RouterSend] = []
+        if !draftEmpty, let read {
+            if !read.sends.isEmpty {
+                parts = read.sends
+            } else if !answers.isEmpty, !read.places.isEmpty {
+                parts = [RouterSend(places: read.sure ? [read.places[0]] : Array(read.places.prefix(3)), sure: read.sure,
+                                    words: plainDraft)]
+            }
+        }
+        // Answers with words still unread: a split already (the words' row is the skeleton).
+        let unread = !draftEmpty && parts.isEmpty && !answers.isEmpty
+        guard answers.count + parts.count >= 2 || unread else { return nil }
+        // Your own picks, by the part's words.
+        for i in parts.indices where !parts[i].sure {
+            if let mine = splitMine[parts[i].words], let at = parts[i].places.firstIndex(of: mine) {
+                parts[i].lit = at
+                parts[i].mine = true
+            }
+        }
+        // Words to a thread that asks one thing answer it: its T3 question, or its one open Decide item.
+        let answered = Set(answers.map(\.threadID))
+        for i in parts.indices where parts[i].item == nil {
+            guard let id = parts[i].threadID, !answered.contains(id), let t = thread(id) else { continue }
+            parts[i].item = Self.asked(t)
+        }
+        return answers + parts
     }
 
-    /// The send ⌘1–3 light: the first one the Router isn't sure of.
-    var splitFocus: Int? { split?.firstIndex { !$0.sure } }
+    /// The send ⌘1–3 light: the one Tab moved to, else the first the Router isn't sure of.
+    var splitFocus: Int? {
+        guard let split else { return nil }
+        if let at = splitAt, at < split.count, !split[at].sure { return at }
+        return split.firstIndex { !$0.sure }
+    }
+
+    /// Tab with a split: on to the next part the Router isn't sure of (round). False when none is unsure.
+    @discardableResult func nextSplitPart() -> Bool {
+        guard let split else { return false }
+        let unsure = split.indices.filter { !split[$0].sure }
+        guard !unsure.isEmpty else { return false }
+        let now = splitFocus ?? unsure[0]
+        let next = unsure.first { $0 > now } ?? unsure[0]
+        animate(.fade) { splitAt = next }
+        if let target = splitTarget(split[next]) { splitLit = target }
+        return true
+    }
 
     /// ⌘1–3 or a click on a place of the focused send: it is lit, and yours. False when no send asks for a place.
     @discardableResult func lightPart(_ index: Int, send: Int? = nil) -> Bool {
-        guard split != nil, let at = send ?? splitFocus, var r = read, at < r.sends.count, !r.sends[at].sure,
-              index < min(3, r.sends[at].places.count) else { return false }
-        r.sends[at].lit = index
-        r.sends[at].mine = true
-        animate(.fade) { read = r }
+        guard let split, let at = send ?? splitFocus, at < split.count, !split[at].sure,
+              index < min(3, split[at].places.count) else { return false }
+        animate(.fade) {
+            splitMine[split[at].words] = split[at].places[index]
+            splitAt = at
+        }
         return true
+    }
+
+    /// The one thing a thread asks that words to it answer (an item's id): its T3 question (one, no form), else its one
+    /// open Decide item. nil: a plan, a permission, a form, several asks, or none.
+    static func asked(_ t: RouterThread) -> String? {
+        if let request = t.ledger.request {
+            if case .ask(.question) = request.request, t.form.count <= 1 { return request.id }
+            return nil
+        }
+        let decides = t.ledger.live.filter { $0.kind == .decide && !$0.preview }
+        return decides.count == 1 ? decides[0].id : nil
+    }
+
+    /// Words that answer a thread's T3 question go as its structured answer: the option they name (its label, whatever
+    /// the case and end punctuation), else typed. nil: they go as words.
+    func requestAnswer(_ send: RouterSend) -> RouterOutgoing.Kind? {
+        guard send.item == RouterItem.requestID, let id = send.threadID, let t = thread(id),
+              case .needsYou(.question) = t.state, t.form.count <= 1 else { return nil }
+        func plain(_ s: String) -> String {
+            s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        }
+        let options = t.form.first?.options ?? t.options
+        if let at = options.firstIndex(where: { plain($0) == plain(send.words) }) {
+            return .answer(picks: [0: at + 1], typed: [:])
+        }
+        return .answer(picks: [:], typed: [0: send.words])
+    }
+
+    /// Return on a split: every destination at once, each going Sent on its own line (a refusal is that line's, with Send
+    /// again). The answers go by code (`sendWithAnswers`: a T3 request's first and structured, an item's as words to its
+    /// thread, led into the words that go there too); the words' parts to their threads (steering a run, or queued behind
+    /// it as any send) or a new thread started with the settings the row showed. One decision log entry for all of it.
+    func sendSplit(_ sends: [RouterSend], queue: Bool = false) {
+        // The answers lead the sends (`split`): the rest are the words' parts.
+        let parts = sends.dropFirst(hasAnswers ? answerSends.count : 0).map { (words: $0.words, place: $0.place, kind: requestAnswer($0)) }
+        source?.logSplit(plainDraft, sends: sends)
+        // The parts go without the read: it was the whole message's (a new thread takes its first words for a name), and
+        // the log has it once.
+        let launch = launch
+        read = nil
+        sendWithAnswers(parts, queue: queue, launch: launch)
     }
 
     /// What each target on the page will receive, by thread id (the thread itself) or item key (an item it answers).
@@ -44,7 +130,7 @@ extension RouterModel {
         for send in split {
             guard case .thread(let id) = send.place else { continue }
             let key = send.item.map { Self.itemKey(id, $0) } ?? id
-            if out[key] == nil { out[key] = RouterPending(words: send.words, answer: send.item != nil, guess: !send.sure) }
+            if out[key] == nil { out[key] = RouterPending(words: send.words, answer: send.item != nil, guess: !send.sure && !send.mine) }
         }
         return out
     }

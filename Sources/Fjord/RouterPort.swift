@@ -71,6 +71,9 @@ struct RouterOutgoing: Equatable {
     /// composer's @ pills.
     func read(_ draft: String, selected: String?, mentions: [RouterMention])
     func send(_ out: RouterOutgoing)
+    /// Return on a split message (SPLIT.md): its one decision log entry, with every destination and what it receives. Each
+    /// destination then goes as its own send (`send`, `start`).
+    func logSplit(_ draft: String, sends: [RouterSend])
     /// Cancel on a queued row: the words came back to the composer.
     func cancelQueued(_ thread: String)
     /// The id a new thread will have (T3's own: a lowercase UUID), so its line is there before T3 answers.
@@ -92,4 +95,5 @@ struct RouterOutgoing: Equatable {
 
 extension RouterSource {
     func itemDone(_ thread: String, item: String, on: Bool) {}
+    func logSplit(_ draft: String, sends: [RouterSend]) {}
 }

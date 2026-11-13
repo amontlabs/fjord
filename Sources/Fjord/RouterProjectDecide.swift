@@ -54,6 +54,19 @@ struct RouterProjectDecision: Equatable, Sendable {
     var action = ""
     /// E5's Jev-led path for this message (`JevPath`): its answer; nil when it didn't run (an unattended action, no Jev).
     var fused: Task<JevPath.Result?, Never>?
+    /// The message split across places (SPLIT.md): one part a place, in the order its words come, each with the message it
+    /// receives. Empty: the whole message goes where `kind` says.
+    var sends: [Part] = []
+
+    /// One place of a split message.
+    struct Part: Equatable, Sendable {
+        /// Its place, or (unsure) its guess first and up to two alternatives.
+        var places: [Kind]
+        var sure: Bool
+        /// The owner's own words for this place, as the model trimmed them.
+        var words: String
+        var confidence: Double
+    }
 
     /// Where it sends, for a thread or a new thread (nil for the others).
     var target: RouteTarget? {
@@ -100,12 +113,33 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
     var projectConfidence: Double = 0
     /// Chance the message is new work for a new thread, whatever the action. Absent: 0, so it never starts a thread.
     var pNew: Double = 0
+    /// Parts for different places (empty: one place).
+    var sends: [Send] = []
     var latency: TimeInterval?
     var usage: ModelUsage?
 
+    struct Send: Equatable, Sendable, Decodable {
+        var to: String
+        var words: String
+        var confidence: Double
+        var alternatives: [String]
+        init(to: String, words: String, confidence: Double, alternatives: [String] = []) {
+            self.to = to; self.words = words; self.confidence = confidence; self.alternatives = alternatives
+        }
+        private enum CodingKeys: String, CodingKey { case to, words, confidence, alternatives }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            to = try c.decodeIfPresent(String.self, forKey: .to) ?? ""
+            words = try c.decodeIfPresent(String.self, forKey: .words) ?? ""
+            confidence = try c.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+            alternatives = try c.decodeIfPresent([String].self, forKey: .alternatives) ?? []
+        }
+    }
+
     init(action: String, project: String, session: String, reason: String = "", confidence: Double, projectConfidence: Double = 0,
          alternatives: [String] = [], pNew: Double = 0, fits: [Fit] = [], ownedBy: String = "", referentUnique: Bool = false,
-         deliverable: String = "") {
+         deliverable: String = "", sends: [Send] = []) {
+        self.sends = sends
         self.action = action; self.project = project; self.session = session; self.reason = reason; self.confidence = confidence
         self.projectConfidence = projectConfidence; self.alternatives = alternatives; self.pNew = pNew; self.fits = fits
         self.ownedBy = ownedBy; self.referentUnique = referentUnique; self.messageDeliverable = deliverable
@@ -118,6 +152,7 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
         case referentUnique = "referent_unique"
         case projectConfidence = "project_confidence"
         case pNew = "p_new"
+        case sends
     }
 
     init(from decoder: Decoder) throws {
@@ -134,6 +169,7 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
         ownedBy = try c.decodeIfPresent(String.self, forKey: .ownedBy) ?? ""
         referentUnique = try c.decodeIfPresent(Bool.self, forKey: .referentUnique) ?? false
         pNew = try c.decodeIfPresent(Double.self, forKey: .pNew) ?? 0
+        sends = try c.decodeIfPresent([Send].self, forKey: .sends) ?? []
     }
 }
 
@@ -393,11 +429,14 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
         let known = key(a.session)
         let running = known.flatMap { k in board.threads.first { $0.key == k }?.running } ?? false
         let project = board.project(named: a.project)
+        // A split (attended only): each part its place by the same bars; the fields below still decide when it isn't one.
+        let parts = action == nil ? splitParts(a, message: context.message, board: board, key: key) : []
         func decided(_ kind: RouterProjectDecision.Kind) -> RouterProjectDecision {
             var d = RouterProjectDecision(kind: kind, confidence: a.confidence, decider: .sonnet, reason: a.reason)
             d.projectConfidence = a.projectConfidence; d.latency = a.latency; d.usage = a.usage; d.action = a.action
             d.pNew = a.pNew; d.deliverable = a.messageDeliverable; d.fits = a.fits; d.ownedBy = a.ownedBy
             d.referentUnique = a.referentUnique
+            d.sends = parts
             return d
         }
         if let action {
@@ -447,6 +486,58 @@ struct RouterContextAnswer: Equatable, Sendable, Decodable {
         var d = decided(.ask(Array(places.prefix(4))))
         d.decider = .sonnet
         return d
+    }
+
+    /// The model's parts as places, by the bars a whole message goes at: a thread at the idle (or running) bar, new work in a
+    /// project at the new bar; below, its guess first and its alternatives. Not a split (nothing) when fewer than two
+    /// places are left, when two parts land on one place (one place: a message about two things for one thread), or when a
+    /// part's words aren't the owner's (a word the message doesn't have: rephrased or added, never sent).
+    func splitParts(_ a: RouterContextAnswer, message: String, board: DeciderBoard,
+                    key: (String) -> String?) -> [RouterProjectDecision.Part] {
+        guard a.sends.count >= 2 else { return [] }
+        func place(_ to: String) -> RouterProjectDecision.Kind? {
+            if let k = key(to) { return .thread(k) }
+            if let p = board.project(named: to) { return .newThread(project: board.projectID(p)) }
+            return nil
+        }
+        let owned = Self.words(message)
+        var parts: [RouterProjectDecision.Part] = []
+        for send in a.sends {
+            let words = send.words.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let first = place(send.to), !words.isEmpty else { return [] }
+            guard Self.words(words).isSubset(of: owned) else { return [] }
+            let bar: Double
+            switch first {
+            case .thread(let k): bar = board.threads.first { $0.key == k }?.running == true ? runningBar : idleBar
+            default: bar = newBar
+            }
+            let sure = send.confidence >= bar
+            var places = [first]
+            if !sure {
+                for alt in send.alternatives { if let p = place(alt), !places.contains(p) { places.append(p) } }
+                places = Array(places.prefix(3))
+            }
+            parts.append(.init(places: places, sure: sure, words: words, confidence: send.confidence))
+        }
+        var firsts: [RouterProjectDecision.Kind] = []
+        for part in parts {
+            guard !firsts.contains(part.places[0]) else { return [] }
+            firsts.append(part.places[0])
+        }
+        return parts
+    }
+
+    /// A text's words, lowercased, for "the owner's own words": letters and digits (an apostrophe kept inside a word).
+    nonisolated static func words(_ text: String) -> Set<String> {
+        var out = Set<String>()
+        var run = ""
+        for ch in text.lowercased() {
+            if ch.isLetter || ch.isNumber || ((ch == "'" || ch == "’") && !run.isEmpty) { run.append(ch == "’" ? "'" : ch) }
+            else if !run.isEmpty { out.insert(run.trimmingCharacters(in: CharacterSet(charactersIn: "'"))); run = "" }
+        }
+        if !run.isEmpty { out.insert(run.trimmingCharacters(in: CharacterSet(charactersIn: "'"))) }
+        out.remove("")
+        return out
     }
 
     static func ask(_ places: [RouterProjectDecision.Kind], confidence: Double, decider: RouterProjectDecision.Decider,

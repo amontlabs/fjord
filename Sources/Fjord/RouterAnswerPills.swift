@@ -339,11 +339,21 @@ extension RouterModel {
     }
 
     /// Return with answer pills in the draft: each card's answer goes by code, then `words` (the free text, nil: none) to
-    /// `place`. A request's answer goes first and structured (so words to the same thread can't answer it instead); an
-    /// item's go as one message a thread, led into `words` when those go to that thread too. A form still owed an answer
-    /// keeps its pill. The picks of what went are cleared; the draft keeps the pills of what didn't.
+    /// `place`. A form still owed an answer keeps its pill.
     func sendWithAnswers(_ words: String?, to place: RouterPlace?, queue: Bool) {
+        sendWithAnswers(words.flatMap { w in place.map { [(w, $0, nil)] } } ?? [], queue: queue)
+    }
+
+    /// Return with answer pills and the words' parts (one place, or a split's each): each card's answer goes by code, a
+    /// request's first and structured (so words to the same thread can't answer it instead), an item's as one message a
+    /// thread, led into the first part that goes to that thread too; then each part to its place (`launch`: a new thread's
+    /// settings, as the row showed them before the composer emptied; a part's `kind`: words that answer its thread's T3
+    /// question, sent structured and alone). A form still owed an answer keeps its pill. The picks of what went are
+    /// cleared; the draft keeps the pills of what didn't.
+    func sendWithAnswers(_ parts: [(words: String, place: RouterPlace, kind: RouterOutgoing.Kind?)], queue: Bool,
+                         launch: RouterLaunch? = nil) {
         let answers = pillContext.filter { $0.kind == .answer && ready($0) }
+        let launch = launch ?? self.launch
         syncingAnswers = true
         // Requests first, structured.
         for a in answers where a.request {
@@ -357,17 +367,18 @@ extension RouterModel {
             items[a.thread, default: []].append(a)
         }
         // The free words, led by their thread's answers.
-        var into: String? = nil
-        if let words, let place {
-            if case .thread(let id) = place, let lead = items[id] {
-                into = id
-                deliver(Self.message(lead) + "\n\n" + words, to: place, queue: queue)
+        var led = Set<String>()
+        for (words, place, kind) in parts {
+            if let kind, case .thread(let id) = place, let t = thread(id) {
+                dispatch(words, to: t, kind: kind)
+            } else if case .thread(let id) = place, let lead = items[id], led.insert(id).inserted {
+                deliver(Self.message(lead) + "\n\n" + words, to: place, queue: queue, launch: launch)
             } else {
-                deliver(words, to: place, queue: queue)
+                deliver(words, to: place, queue: queue, launch: launch)
             }
         }
         setDraft("")
-        for id in order where id != into {
+        for id in order where !led.contains(id) {
             deliver(Self.message(items[id] ?? []), to: .thread(id), queue: false)
         }
         for a in answers {

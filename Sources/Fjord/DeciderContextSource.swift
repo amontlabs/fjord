@@ -44,7 +44,7 @@ extension Store {
     /// The context for a decision on `message`: the day's archive frozen, everything else as it is now. No read.
     /// `open`: the card open on the Router page (the decider's prior).
     func deciderContext(_ message: String, board: DeciderBoard, tagged: String? = nil, unattended: Bool = false, open: String? = nil,
-                        now: Date = Date(), zone: TimeZone = .current) -> DeciderContext.Built {
+                        pointed: [DeciderContext.Pointed] = [], now: Date = Date(), zone: TimeZone = .current) -> DeciderContext.Built {
         let threads = contextThreads(board)
         let cards = threadCards
         let ids = DeciderContext.ids(threads)
@@ -57,6 +57,7 @@ extension Store {
                                       turns: cards.turns, archive: archive, index: cards.index, search: search, now: now, zone: zone,
                                       mentioned: mentionedThreads())
         x.open = open
+        x.pointed = pointed
         return DeciderContext.build(message, x, tagged: tagged, unattended: unattended)
     }
 

@@ -64,6 +64,10 @@ struct RouterList: View {
                 .frame(maxWidth: .infinity)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                // The fade over the dock is part of its room: a line brought into view (a split's target, its pending
+                // line, a ghost) stops above the fade, never under the destination rows or half faded.
+                Color.clear.frame(height: Router.Bar.fade).allowsHitTesting(false)
                 RouterDock(model: model)
                     .padding(.leading, edges.leading).padding(.trailing, edges.trailing)
                     .padding(.bottom, Router.Dock.bottom)
@@ -79,6 +83,7 @@ struct RouterList: View {
                         .padding(.top, -Router.Bar.fade)
                         .allowsHitTesting(false)
                     }
+                }
             }
             .background { RouterReveal(model: model, proxy: proxy) }
         }

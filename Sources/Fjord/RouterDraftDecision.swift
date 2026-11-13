@@ -7,20 +7,21 @@ import Foundation
 extension Store {
     /// Fjord's decision on a draft, on the board as it is now (nothing waited for): Jev first, then Sonnet on the full context.
     /// `open`: the card open on the page, the decider's prior.
-    func decideDraft(_ text: String, tagged: String?, notTo: String?, reuse: JevPath.Result?, open: String? = nil) async -> RouterProjectDecision? {
+    func decideDraft(_ text: String, tagged: String?, notTo: String?, reuse: JevPath.Result?, open: String? = nil,
+                     pointed: [DeciderContext.Pointed] = []) async -> RouterProjectDecision? {
         try? await decideDestination(text, tagged: tagged, notTo: notTo, reuse: reuse, jev: jevAsker(.routing, base: routerDispatcher.asker),
-                                     open: open)
+                                     open: open, pointed: pointed)
     }
 
     /// The decider on the board with its reads and the full context, for the composer and the dispatcher alike.
     func decideDestination(_ text: String, tagged: String?, action: RouterActionSource? = nil, notTo: String? = nil,
-                           reuse: JevPath.Result? = nil, jev: JevAsker?, open: String? = nil,
+                           reuse: JevPath.Result? = nil, jev: JevAsker?, open: String? = nil, pointed: [DeciderContext.Pointed] = [],
                            stage: (RouterProjectDecider.Stage) -> Void = { _ in }) async throws -> RouterProjectDecision {
         let board = await deciderBoardWithReads()
         var decider = RouterProjectDecider.app(self)
         decider.jev = jev
         var decision = try await decider.decide(text, in: board, context: { [unowned self] in
-            self.deciderContext(text, board: board, tagged: tagged, unattended: action != nil, open: open)
+            self.deciderContext(text, board: board, tagged: tagged, unattended: action != nil, open: open, pointed: pointed)
         }, tagged: tagged, action: action, notTo: notTo, reuse: reuse, stage: stage)
         decision.board = board
         if decision.boardText.isEmpty { decision.boardText = board.render() }

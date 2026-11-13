@@ -101,6 +101,34 @@ final class DeciderLog: @unchecked Sendable {
         append(record)
     }
 
+    /// A split message's Return (SPLIT.md): one entry for every destination. `sends`: each place it went (`thread:<id>`,
+    /// `new_thread:<project>`), the item it answered, the words it got, whether the Router was sure, whether you lit the
+    /// place yourself, and an answer pill's (sent by code). `decision`: the decider's read of the words (nil: pills alone,
+    /// no model call).
+    func split(id: UUID, message: String, decision d: RouterProjectDecision?, sends: [[String: Any]], now: Date = Date()) {
+        var record: [String: Any] = ["type": "split", "id": id.uuidString, "at": ISO8601DateFormatter().string(from: now),
+                                     "message": message, "sends": sends, "decider": d?.decider.rawValue ?? "none"]
+        if let d {
+            record["action"] = d.action
+            record["confidence"] = d.confidence
+            record["parts"] = d.sends.map { p -> [String: Any] in
+                ["words": p.words, "sure": p.sure, "confidence": p.confidence,
+                 "places": p.places.map { k -> String in
+                     switch k {
+                     case .thread(let t): "thread:" + t
+                     case .newThread(let p): "new_thread:" + p
+                     default: "other"
+                     }
+                 }]
+            }
+            if !d.boardText.isEmpty { record["boardHash"] = Self.hash(d.boardText); record["board"] = d.boardText }
+            if !d.contextKey.isEmpty { record["contextKey"] = d.contextKey }
+            if let latency = d.latency { record["latencyMs"] = Int(latency * 1000) }
+            if let c = d.usage?.costUSD { record["costUSD"] = c }
+        }
+        append(record)
+    }
+
     /// The fused path's answer as the log keeps it: every place with its features, Jev's answers, the BM25, the gates.
     static func fused(_ f: JevPath.Result) -> [String: Any] {
         var out: [String: Any] = [

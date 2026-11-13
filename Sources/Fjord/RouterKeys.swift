@@ -158,6 +158,8 @@ enum RouterKeys {
             if isReturn { model.choosePlaces(); return true }
             if code == kVK_Tab { model.openPlaces(); return true }
         }
+        // A split message: Tab moves ⌘1–3 to its next part the Router isn't sure of.
+        if !empty, code == kVK_Tab, flags.isEmpty, model.nextSplitPart() { return true }
         // Tab goes into the row: its places when it asks for one, a new thread's settings below.
         if !empty, code == kVK_Tab, flags.isEmpty, !model.launchShown {
             switch model.destination {

@@ -224,6 +224,10 @@ final class RouterModel {
     var atLit: RouterHit? { didSet { if atLit != oldValue { hotChanged(oldValue, atLit) } } }
     /// The target a split message's row over the composer lights on the page (the pointer on the row, or its click).
     var splitLit: RouterHit? { didSet { if splitLit != oldValue { hotChanged(oldValue, splitLit) } } }
+    /// A split message's part ⌘1–3 light (Tab moves it among the unsure parts), and the places you lit yourself, by the
+    /// part's words (a later read that keeps the words keeps your pick).
+    var splitAt: Int?
+    var splitMine: [String: RouterPlace] = [:]
 
     /// The lines changing section now: drawn over their neighbours.
     var moving: Set<String> = [] { didSet { if moving != oldValue { movingChanged(from: oldValue) } } }

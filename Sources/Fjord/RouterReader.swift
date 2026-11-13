@@ -30,7 +30,8 @@ final class RouterReader {
     var jev: (@MainActor (_ text: String, _ tagged: String?) async -> JevPath.Result?)?
     /// The whole decision (Sonnet on the full context, reusing Jev's answer; `Store.decideDestination`), with the open
     /// card's thread (T3's id) for the prior. Nil: it couldn't decide.
-    var decide: (@MainActor (_ text: String, _ tagged: String?, _ selected: String?, _ reuse: JevPath.Result?) async -> RouterProjectDecision?)?
+    var decide: (@MainActor (_ text: String, _ tagged: String?, _ selected: String?, _ reuse: JevPath.Result?,
+                             _ pointed: [DeciderContext.Pointed]) async -> RouterProjectDecision?)?
     /// T3's `searchThreads` for the draft, fired when Jev wasn't sure (`Store.searchDraft`).
     var search: (@MainActor (_ text: String) async -> [DeciderContext.SearchHit])?
     /// The board as it stands, for "the same board" (`Store.deciderBoardKey`).
@@ -167,7 +168,9 @@ final class RouterReader {
             guard live() else { return }
             if let jevResult { jevLast = (text, board, jevResult) }
         }
-        if let jevResult, let sure = jevSure(jevResult) {
+        // Pills on two threads or more: the message has parts for each, which Jev's one place can't say.
+        let pointed = Self.pointed(ask.mentions)
+        if let jevResult, Set(pointed.map(\.thread)).count < 2, let sure = jevSure(jevResult) {
             decided = (key, sure)
             land(ask, sure, gen: gen)
             return
@@ -199,7 +202,7 @@ final class RouterReader {
         decisions += 1
         phase = "sonnet"
         trace("start", text, extra: ["model": "sonnet", "hurry": hurry])
-        let decision = await decide(text, tagged, ask.selected, jevResult)
+        let decision = await decide(text, tagged, ask.selected, jevResult, pointed)
         guard live() else { return }
         trace("done", text, extra: ["model": "sonnet"])
         if let decision { decided = (key, decision) }
@@ -229,7 +232,7 @@ final class RouterReader {
         guard gen == generation, current == ask else { return }
         task = nil
         asking = nil
-        let read = Self.read(ask.draft, decision: decision, selected: ask.selected, eligible: eligible)
+        let read = Self.read(ask.draft, decision: decision, selected: ask.selected, mentions: ask.mentions, eligible: eligible)
         onRead(read, decision)
     }
 
@@ -238,7 +241,8 @@ final class RouterReader {
     /// The decision as the page's read: the places that can still be sent to (three at most when unsure), whether it is sure,
     /// and, for a new thread, the settings the draft names with the words that say them (only when those words are found in
     /// the draft). With no decision there is only the prior: the open card, or no guess.
-    static func read(_ draft: String, decision: RouterProjectDecision?, selected: String?, eligible: (String) -> Bool) -> RouterRead {
+    static func read(_ draft: String, decision: RouterProjectDecision?, selected: String?, mentions: [RouterMention] = [],
+                     eligible: (String) -> Bool) -> RouterRead {
         guard let decision else {
             if let selected { return RouterRead(draft: draft, places: [.thread(selected)], sure: true) }
             return RouterRead(draft: draft, places: [], sure: false)
@@ -266,6 +270,51 @@ final class RouterReader {
         // A sure place that can't be sent to (gone) is no answer.
         let sure = decision.sure && !places.isEmpty
         if !sure { places = Array(places.prefix(3)) }
-        return RouterRead(draft: draft, places: places, sure: sure)
+        return RouterRead(draft: draft, places: places, sure: sure, sends: sends(decision.sends, mentions: mentions, eligible: eligible))
+    }
+
+    /// The decider's parts as the page's sends: each part's places that can still be sent to (a part left with none is no
+    /// split: the message goes to one place), and the item a pill of the draft points at in its thread, which the words
+    /// answer. Fewer than two parts: none.
+    static func sends(_ parts: [RouterProjectDecision.Part], mentions: [RouterMention], eligible: (String) -> Bool) -> [RouterSend] {
+        guard parts.count >= 2 else { return [] }
+        var items: [String: String] = [:]
+        for m in mentions {
+            guard case .item(let key) = m.pointer, let cut = key.firstIndex(of: "#") else { continue }
+            let thread = String(key[..<cut])
+            if items[thread] == nil { items[thread] = String(key[key.index(after: cut)...]) }
+        }
+        var out: [RouterSend] = []
+        for part in parts {
+            let places: [RouterPlace] = part.places.compactMap { kind in
+                switch kind {
+                case .thread(let id): eligible(RouteTarget.thread(id).targetID) ? .thread(id) : nil
+                case .newThread(let p): eligible(RouteTarget.newThread(project: p).targetID) ? .newThread(project: p) : nil
+                default: nil
+                }
+            }
+            // Its sure place gone: it isn't sure any more, and with nothing left it is no split.
+            guard let first = places.first else { return [] }
+            let sure = part.sure && places.count == part.places.count
+            var item: String?
+            if case .thread(let id) = first { item = items[id] }
+            out.append(RouterSend(places: sure ? [first] : places, sure: sure, words: part.words, item: item))
+        }
+        return out
+    }
+
+    /// What the draft's pills point at, for the decider: an item pill's thread and its words, a thread pill's thread.
+    static func pointed(_ mentions: [RouterMention]) -> [DeciderContext.Pointed] {
+        mentions.compactMap { m in
+            switch m.pointer {
+            case .item(let key):
+                guard let cut = key.firstIndex(of: "#") else { return nil }
+                return DeciderContext.Pointed(thread: String(key[..<cut]), item: m.name, said: m.pointer.said(m.name))
+            case .t3(let target):
+                guard let id = RouteTarget(target)?.threadID else { return nil }
+                return DeciderContext.Pointed(thread: id, item: nil, said: m.pointer.said(m.name))
+            default: return nil
+            }
+        }
     }
 }

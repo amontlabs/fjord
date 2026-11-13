@@ -83,6 +83,8 @@ extension RouterActsRecords {
         var away: () -> Bool
         var title: (_ thread: String) -> String
         var now: () -> Date
+        /// A split's one decision log entry: the words, the decider's decision for them (nil: pills alone), every send.
+        var logSplit: (_ draft: String, _ decision: RouterProjectDecision?, _ sends: [[String: Any]]) -> Void = { _, _, _ in }
     }
 
     var env: Environment
@@ -221,6 +223,33 @@ extension RouterActsRecords {
         return said.split(separator: "\n").first.map(String.init) ?? "The answer wasn't sent."
     }
 
+    // MARK: A split
+
+    func logSplit(_ draft: String, sends: [RouterSend]) {
+        env.logSplit(draft, decision(draft), sends.map(Self.logged))
+    }
+
+    /// One send of a split as the decision log keeps it.
+    static func logged(_ send: RouterSend) -> [String: Any] {
+        var out: [String: Any] = ["words": send.words, "sure": send.sure, "mine": send.mine]
+        switch send.place {
+        case .thread(let id): out["place"] = "thread:" + id
+        case .newThread(let p): out["place"] = "new_thread:" + p
+        case .here: out["place"] = "here"
+        }
+        if let item = send.item { out["item"] = item }
+        if send.places.count > 1 {
+            out["guess"] = send.places.first.map { p -> String in
+                switch p {
+                case .thread(let id): "thread:" + id
+                case .newThread(let p): "new_thread:" + p
+                case .here: "here"
+                }
+            }
+        }
+        return out
+    }
+
     // MARK: A new thread
 
     func mintThread() -> String { UUID().uuidString.lowercased() }
@@ -331,7 +360,10 @@ extension RouterActs {
             },
             away: { [weak store] in store?.t3Away ?? false },
             title: { [weak store] id in store?.threads[id]?.title ?? "thread" },
-            now: { Date() })
+            now: { Date() },
+            logSplit: { [weak store] draft, decision, sends in
+                store?.routerDispatcher.decisionLog?.split(id: UUID(), message: draft, decision: decision, sends: sends)
+            })
         let acts = RouterActs(env: env, records: records, emit: emit)
         store.routerDispatcher.onSend = { [weak acts] entry, event in acts?.sendEvent(entry, event) }
         return acts

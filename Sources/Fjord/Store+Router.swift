@@ -114,8 +114,8 @@ extension Store {
         // Each pause, start, skip and cancel, counts only (no text), into the decision log: what the pauses are tuned from.
         reader.log = Store.isDemo ? nil : routerDispatcher.decisionLog
         reader.jev = { [weak self] text, tagged in await self?.readDraft(text, tagged: tagged) }
-        reader.decide = { [weak self] text, tagged, selected, reuse in
-            await self?.decideDraft(text, tagged: tagged, notTo: nil, reuse: reuse, open: selected)
+        reader.decide = { [weak self] text, tagged, selected, reuse, pointed in
+            await self?.decideDraft(text, tagged: tagged, notTo: nil, reuse: reuse, open: selected, pointed: pointed)
         }
         reader.search = { [weak self] text in await self?.searchDraft(text) ?? [] }
         reader.boardKey = { [weak self] in self?.deciderBoardKey() ?? "" }
