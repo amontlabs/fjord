@@ -17,7 +17,8 @@ import SwiftUI
 // this one must be comfortably green. `FJORD_LOAD_OFF=summaries` leaves the summaries out. And open items (R7) as the
 // records hand them on, one read every six seconds (busier than the owner's day, about 330 a day): a block's header
 // pulses and its items sheen, the read lands four seconds later (one item closes and strikes, one is restated, one is new),
-// and 1.6 s later the ledger settles. `FJORD_LOAD_OFF=items` leaves them out.
+// and 1.6 s later the ledger settles. `FJORD_LOAD_OFF=items` leaves them out. `FJORD_LOAD_BLOCKS=1` adds a line that
+// becomes a block (a second item) and a line again every half second, each timed as "Block" to its commit.
 
 @MainActor
 enum RouterLoad {
@@ -100,6 +101,9 @@ enum RouterLoad {
                 }
                 if isReal, !off.contains("items") {
                     group.addTask { @MainActor in await items(model, until: end) }
+                }
+                if ProcessInfo.processInfo.environment["FJORD_LOAD_BLOCKS"] != nil {
+                    group.addTask { @MainActor in await blocks(model, until: end) }
                 }
                 if let first = working.first, !off.contains("reply"), !isReal {
                     group.addTask { @MainActor in await reply(model, first, until: end) }
@@ -231,6 +235,31 @@ enum RouterLoad {
             guard var t = model.thread(id) else { continue }
             t.ledger.settle()
             put(t)
+        }
+    }
+
+    /// Lines with one item that get a second (each becomes a block) and lose it again, every half second, a line after
+    /// another (each line's first time is timed too).
+    private static func blocks(_ model: RouterModel, until end: Date) async {
+        let ids = model.threads.filter { $0.ledger.isEmpty && $0.state != .stopped }.map(\.id)
+        guard !ids.isEmpty else { return }
+        let one = RouterItem(id: "b1", kind: .decide, sentence: "keep the old checkpoint, or delete it?", since: model.now)
+        let two = RouterItem(id: "b2", kind: .know, sentence: "the boot image is 1.2 GB smaller", since: model.now)
+        for id in ids {
+            guard var t = model.thread(id) else { continue }
+            t.ledger = RouterLedger(items: [one])
+            model.apply(.upsert(t))
+        }
+        var n = 0
+        while Date() < end {
+            try? await Task.sleep(for: .milliseconds(500))
+            let id = ids[(n / 2) % ids.count]
+            guard var t = model.thread(id) else { return }
+            n += 1
+            t.ledger = RouterLedger(items: n % 2 == 1 ? [one, two] : [one])
+            let block = RouterSignposts.begin("Block")
+            model.apply(.upsert(t))
+            RouterSignposts.end(block, afterCommit: true)
         }
     }
 
