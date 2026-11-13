@@ -573,18 +573,32 @@ struct RouterSentenceView: View {
                 }
                 .transition(.routerSwap)
             } else if let item = thread.ledger.single {
-                // The line is its one open item: its sentence, sheening while a read may close it.
+                // The line is its one open item: its sentence, sheening while a read may close it; your words sent
+                // against it follow it on the line (`↑ "…" · sent`), and a new turn being read shows Fjord's mark.
                 let text = Text(item.sentence).font(CDS.sans(14))
-                text.foregroundStyle(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
-                    .strikethrough(item.closing, color: CDS.Text.muted)
-                    .lineLimit(1).truncationMode(.tail)
-                    .overlay(alignment: .leading) {
-                        if item.state == .checking {
-                            RouterSheen().mask(alignment: .leading) { text.lineLimit(1).truncationMode(.tail) }
+                HStack(spacing: Router.Thinking.gap) {
+                    text.foregroundStyle(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
+                        .strikethrough(item.closing, color: CDS.Text.muted)
+                        .lineLimit(1).truncationMode(.tail)
+                        .overlay(alignment: .leading) {
+                            if item.state == .checking {
+                                RouterSheen().mask(alignment: .leading) { text.lineLimit(1).truncationMode(.tail) }
+                            }
                         }
+                    switch thread.ledger.read {
+                    case .message(let words)?:
+                        Text("↑ “\(words)” · \(Router.Items.Copy.sent)").font(CDS.sans(14)).foregroundStyle(CDS.Text.muted)
+                            .lineLimit(1).truncationMode(.middle)
+                            .layoutPriority(-1)
+                            .transition(.opacity)
+                    case .turn?:
+                        RouterThinking().transition(.opacity)
+                    case nil:
+                        EmptyView()
                     }
-                    .id(item.id)
-                    .transition(.routerSwap)
+                }
+                .id(item.id)
+                .transition(.routerSwap)
             } else {
                 let s = sentence
                 let reassessing = s.phase == .reassessing

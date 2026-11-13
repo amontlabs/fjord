@@ -97,9 +97,10 @@ struct RouterLedger: Equatable {
     /// The most urgent open item's kind.
     var top: RouterItem.Kind? { live.min { $0.kind.rank < $1.kind.rank }?.kind }
 
-    /// The thread shows as a block (a header with its items under it), not as one line: two or more items, or one with a
-    /// read under way (your words, a new turn's placeholder) to show beside it.
-    var block: Bool { items.count >= 2 || (items.count == 1 && read != nil) }
+    /// The thread shows as a block (a header with its items under it), not as one line: two or more items. One item stays
+    /// the line through a read (REVIEW-items 5.1): it sheens on the line, your words follow it there, so a read doesn't
+    /// turn the line into a block and back.
+    var block: Bool { items.count >= 2 }
 
     /// The one item that is the line itself (a thread with one item and nothing else to show).
     var single: RouterItem? { !block && items.count == 1 ? items.first : nil }

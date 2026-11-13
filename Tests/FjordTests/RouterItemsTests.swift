@@ -130,4 +130,15 @@ import Testing
         #expect(model.toast == nil)
         #expect(model.thread(ID.checkpoint)?.ledger.items.last?.state == .new)
     }
+
+    /// REVIEW-items 5.1: a one-item thread stays one line through a read (your words, a new turn): no block and back.
+    @Test func aOneItemThreadStaysALineThroughARead() {
+        var ledger = RouterLedger(items: [RouterItem(id: "i1", kind: .decide, sentence: "keep it?", since: .now)])
+        ledger.sent("keep it")
+        #expect(!ledger.block && ledger.single?.id == "i1" && ledger.read == .message("keep it"))
+        ledger.read = .turn
+        #expect(!ledger.block && ledger.single != nil)
+        ledger.items.append(RouterItem(id: "i2", kind: .know, sentence: "k", since: .now))
+        #expect(ledger.block)
+    }
 }
