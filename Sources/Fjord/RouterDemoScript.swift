@@ -265,7 +265,8 @@ final class RouterDemoScript {
         await move(to: point(hit, frame))
     }
 
-    private func click(_ hit: RouterHit) async {
+    /// `rehover`: what the pointer is on once the page has moved under it lights (off when the script moves on at once).
+    private func click(_ hit: RouterHit, rehover: Bool = true) async {
         await move(to: hit)
         await pause(0.14)
         stage.down = true
@@ -275,6 +276,7 @@ final class RouterDemoScript {
         model.pressed = nil
         if let action = model.targets.actions[hit] { action() } else { log("no action for \(hit)") }
         // The page moved under the pointer: what it is on now.
+        guard rehover else { return }
         await pause(0.4)
         hover(at: stage.pointer)
     }
@@ -418,6 +420,36 @@ final class RouterDemoScript {
             up()
             await pause(0.7)
         }
+        RouterFrames.note("escape")
+        escape()
+        await pause(1.2)
+        await longReply()
+    }
+
+    /// A card whose reply is longer than its quote (a line both shapes keep, so no row folds in): → rolls the quote open
+    /// to its whole text and it stays so until ←; then the same by its "Show all" and "Show less".
+    private func longReply() async {
+        guard var t = model.thread(ID.settings) else { return }
+        t.lastLines = RouterDemo.longReply
+        model.apply(.upsert(t))
+        await pause(0.6)
+        RouterFrames.note("open long reply")
+        await click(.row(t.id))
+        await pause(1.0)
+        RouterFrames.note("right")
+        key(["right"], code: kVK_RightArrow)
+        await pause(1.5)
+        RouterFrames.note("left")
+        key(["left"], code: kVK_LeftArrow)
+        await pause(1.2)
+        RouterFrames.note("show all")
+        await click(.longText(t.id))
+        await pause(1.5)
+        RouterFrames.note("show less")
+        // The quote shuts from under the pointer, which stays put: rows gliding under it would light and peek over the
+        // rows checked.
+        await click(.longText(t.id), rehover: false)
+        await pause(1.2)
         RouterFrames.note("escape")
         escape()
         await pause(1.2)

@@ -206,6 +206,23 @@ enum RouterDemo {
         return model
     }
 
+    /// A reply longer than a card's quote, shaped as real ones: paragraphs, a list, bold leads (`--select-check`).
+    static let longReply = """
+        Booked, and the confirmation is in your inbox (`VC-21482`). The old quote is saved in the thread if you need to compare.
+
+        **What changed.** There were four things to sort out:
+        1. **The sofa bed costs extra** because the owner charges a flat fee for a fifth guest, so the week went from €1,240 to €1,302.
+        2. **Late checkout is only on request** because the cleaners come at eleven, and they said yes for noon if we ask a day before.
+        3. **The ski passes are not included.**
+        4. **The deposit is due on arrival:** €300 in cash or by card, back within a week of leaving if nothing is broken.
+
+        **What it looks like now.** Five of us, Saturday 14 to Saturday 21 February, the chalet with the sofa bed made up in the living room. Parking is one car in the garage and one outside. The owner leaves the key in the box by the door, and the code comes by text the day before. I checked the cancellation terms too: free until 31 January, half after that. The total is paid except the deposit.
+
+        **One thing to judge.** If a sixth person joins, the chalet can't take them, and the nearest free flat is a ten-minute walk. Booking it now would hold it until the end of the month at no cost. Tell me if you want that.
+
+        Still open from before: should I book the ski passes online now, or buy them there?
+        """
+
     static func steps(_ texts: [String], running: Int) -> [RouterThread.Step] {
         texts.enumerated().map { i, text in .init(id: i, text: text, state: i < running ? .done : i == running ? .running : .pending) }
     }

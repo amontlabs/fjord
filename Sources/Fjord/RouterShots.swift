@@ -71,6 +71,13 @@ enum RouterShots {
                                        name: "write the changelog for 0.4")))
     }
 
+    /// The selected card's reply longer than its quote: cut with a fade and "Show all" under it.
+    private static func longReply(_ model: RouterModel) {
+        guard var settings = model.thread(ID.settings) else { return }
+        settings.lastLines = RouterDemo.longReply
+        model.apply(.upsert(settings))
+    }
+
     private static let opus = RouterSetting(kind: .model, value: "claude-opus-5-5", label: "Opus 5.5")
     private static let medium = RouterSetting(kind: .effort, value: "medium", label: "Medium")
 
@@ -84,6 +91,11 @@ enum RouterShots {
         State(name: "v2-card-plan") { $0.select(.line(ID.briefs)) },
         State(name: "v2-card-plan-open") { model in
             model.select(.line(ID.briefs))
+            model.expand(true)
+        },
+        State(name: "v2-card-quote") { model in longReply(model) },
+        State(name: "v2-card-quote-open") { model in
+            longReply(model)
             model.expand(true)
         },
         State(name: "v2-card-permission") { model in
