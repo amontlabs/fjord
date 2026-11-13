@@ -117,3 +117,24 @@ Owner: free text never sets a new thread's settings. `@` lists models (T3 names,
   mark replace ~1 %); streams ~30 %; records without moves ~13 %. `.drawingGroup()` on the ticks removes the CPU draw but
   the commit then waits on the GPU: p95 260-380 ms, don't. Next: count/age ticks as Core Animation digit layers, and
   cheaper line updates (a record's `.fade` re-renders the whole line's drawing layer per frame).
+
+## Layout performance, part 3 (2026-11-13) — 76c9f3b8 dfb961bb 1d9d5127
+- `--router-v2-load real` (76c9f3b8): 20 lines, 2 streaming, a record about every second, a move every ten, 30 s.
+- Ticks on Core Animation (`RouterV2Ticks.swift`, dfb961bb): ages, header/filter counts and the state mark are drawn in
+  small hosting views and rolled as pictures by CA. CPU interpolation under moves 12-14 % -> 1 % of main. Tick views keep
+  their frame (column/box inside the content): any NSView frame change makes AppKit walk the window's whole view tree
+  for tracking areas (~6 % of main when the sentence view's width followed its text).
+- Streams (1d9d5127): `.motion(.fade, value: sentence.text)` relaid the faded words out every frame while streaming.
+- Tried and dropped: the record's fade (sentence swap, new dot) in hosting views of their own with CA fades. It took the
+  per-frame redraw away but each extra host costs every change a fixed update (records-only T3 event p95 2 -> 4-7 ms);
+  main-thread share came out no better than without it, so the swap stays a SwiftUI transition in the line.
+- Gates, release, 1617x1188, a busy machine (load average 10-35; p95s move several ms between identical runs), before ->
+  after, three runs each: synthetic T3 event p95 25/25/41 -> 17/25/18, Flush p95 21/19/29 -> 8/15/11; real T3 event p95
+  23/26/10 -> 18/10/14, max 14-29 -> 12-22, Flush p95 7/7/3 -> 10/6/3; demo Select p95 32-35 -> 26-32. Morph (router,
+  open,close x10): Open p95 315/317 -> 313/309, Close 321/317 -> 321/312, Bring in p95 26 -> 15. Still red.
+- NEXT LEVER (not fixed): during a move every line's hosting view lays out on every frame (~5000 line layouts a second
+  under the load's moves, ~25-30 % of main). The list's `RouterV2Stack` still animates each row's container on the move's
+  curve while `routerV2Glides()` holds the hosting view still inside it, so both frames change every frame and AppKit
+  posts "geometry in window changed" to every NSHostingView below (`NSHostingView.rootTransform` → invalidate → layout).
+  A `.transaction { animation = nil }` on the stack for changes that add or take no row cut it to ~600 a second; the
+  frames' check of it was not clean, so it isn't in. Rows that come or go (a header appearing in a move) need their fold.
