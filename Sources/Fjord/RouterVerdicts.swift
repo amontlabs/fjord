@@ -249,6 +249,10 @@ struct RouterVerdictReading {
         var at: Date {
             if case .verdict(let r) = self { r.at } else { .distantPast }
         }
+
+        /// A working thread's summary: the most frequent call, it never takes the last slot, and its rate limit holds
+        /// only the summaries.
+        var isSummary: Bool { if case .verdict(let r) = self { r.kind == .summary } else { false } }
     }
 
     private struct Job {
@@ -278,6 +282,9 @@ struct RouterVerdictReading {
     /// A rate limit stopped the queue: until the time the API named, or the backoff.
     private(set) var held = false
     private var heldUntil: Date?
+    /// A summary hit a rate limit: the summaries wait until then (asks and the rest don't).
+    private(set) var summariesHeld = false
+    private var summariesHeldUntil: Date?
     /// Rate limits in a row: each one that names no time waits longer.
     private var limits = 0
     /// The one wake scheduled: the hold's end or the earliest retry.
@@ -345,13 +352,17 @@ struct RouterVerdictReading {
     }
 
     /// Starts what the cap allows, by need: asks, finished turns newest first, names, purposes; a retry not before its
-    /// time, nothing while a rate limit holds. Then one wake for the earliest of what waits on the clock.
+    /// time, nothing while a rate limit holds. Summaries keep one slot free for the rest, and wait out their own limit.
+    /// Then one wake for the earliest of what waits on the clock.
     private func pump() {
         let now = now()
         if held, (heldUntil ?? .distantFuture) <= now { held = false; heldUntil = nil }
+        if summariesHeld, (summariesHeldUntil ?? .distantFuture) <= now { summariesHeld = false; summariesHeldUntil = nil }
         while !held, running.count < cap {
+            let summaries = running.values.filter(\.work.isSummary).count
+            let summaryRoom = !summariesHeld && summaries < max(1, cap - 1)
             var best: Int?
-            for i in queued.indices where (queued[i].notBefore ?? .distantPast) <= now {
+            for i in queued.indices where (queued[i].notBefore ?? .distantPast) <= now && (summaryRoom || !queued[i].work.isSummary) {
                 guard let b = best else { best = i; continue }
                 let a = queued[i].work, w = queued[b].work
                 if a.need < w.need || a.need == w.need && a.at > w.at { best = i }
@@ -359,7 +370,10 @@ struct RouterVerdictReading {
             guard let best else { break }
             start(queued.remove(at: best))
         }
-        let next = held ? heldUntil : queued.lazy.compactMap(\.notBefore).filter { $0 > now }.min()
+        var next = held ? heldUntil : queued.lazy.compactMap(\.notBefore).filter { $0 > now }.min()
+        if !held, summariesHeld, let until = summariesHeldUntil, queued.contains(where: \.work.isSummary) {
+            next = min(next ?? until, until)
+        }
         schedule(next)
     }
 
@@ -468,7 +482,14 @@ struct RouterVerdictReading {
             running[key] = nil
             var job = job
             job.close()
-            hold(limit.after ?? backoff(limits))
+            let after = min(max(limit.after ?? backoff(limits), 0), Self.maxHold)
+            if job.work.isSummary {
+                // A summary's limit holds only the summaries: asks and finished turns go on.
+                summariesHeld = true
+                summariesHeldUntil = now().addingTimeInterval(after)
+            } else {
+                hold(after)
+            }
             enqueue(key, job.work, attempt: job.attempt)
             return
         }

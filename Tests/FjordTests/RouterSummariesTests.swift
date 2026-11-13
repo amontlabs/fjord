@@ -267,6 +267,62 @@ import Testing
         #expect(h.summaries.last?.summary?.last == nil)
     }
 
+    @Test func aSummaryAskedForARunThatMovedOnIsDroppedAndTheNewRunsIsAsked() {
+        let h = Harness()
+        start(h)
+        let asked = h.summaries.last
+        #expect(asked?.fingerprint.hasSuffix("|r1") == true)
+        // r1 ends and r2 starts in the same shell update: still working, the call for r1 goes.
+        var next = Self.running()
+        next.latestRunID = "r2"
+        h.records.put(next)
+        #expect(h.summaryCancels == ["t1"])
+        // Its late answer is about r1: dropped, never r2's line.
+        if let asked {
+            h.records.summary("t1", fingerprint: asked.fingerprint, .done(RouterVerdict(kind: .summary, line: "Old run's step")))
+        }
+        #expect(h.records.saved["t1"]?.summaries == nil)
+        #expect(h.records.record("t1")?.sentence.text != "Old run's step")
+        // The same step and no new words in r2: the run is in the trigger, so r2 gets its own summary after the gap.
+        h.wait(61)
+        #expect(h.summaries.last?.fingerprint.hasSuffix("|r2") == true)
+        h.answer("Running the snapshot suite")
+        #expect(h.records.saved["t1"]?.summaries?.first?.run == "r2")
+    }
+
+    @Test func theSameWordsInANewRunAreANewEntryWithItsOwnTime() {
+        let h = Harness()
+        start(h)
+        h.answer("Running the snapshot suite")
+        let first = h.records.saved["t1"]?.summaries?.first
+        h.wait(120)
+        var next = Self.running()
+        next.latestRunID = "r2"
+        h.records.put(next)
+        h.records.detail("t1", Self.detail(said: "Again.", id: "m9"))
+        h.wait(61)
+        h.answer("Running the snapshot suite")
+        let all = h.records.saved["t1"]?.summaries ?? []
+        #expect(all.count == 2)
+        #expect(all.first?.run == "r2" && all.first?.at != first?.at)
+        #expect(all.last == first)
+    }
+
+    @Test func aRestartedThreadsCardDoesntShowAnEarlierRunsStepAsCurrent() {
+        let h = Harness()
+        start(h)
+        h.answer("Running the snapshot suite")
+        var next = Self.running()
+        next.latestRunID = "r2"
+        h.records.put(next)
+        let work = h.records.record("t1")?.work
+        #expect(work?.run == "r2")
+        #expect(work?.current == false)
+        #expect(work?.lineReadsNewest == false)
+        // The card lists r1's summary after its quiet break, not as r2's newest.
+        #expect(work?.listed.map(\.run) == ["r1"])
+    }
+
     @Test func theTimelineGoesWhenTheThreadLeavesThePage() {
         let h = Harness()
         start(h)
@@ -354,6 +410,35 @@ import Testing
             order.append(["summed", "named", "finished", "purpose"].first { input.contains("Thread: \($0)") } ?? "?")
         }
         #expect(order == ["finished", "named", "summed", "purpose"])
+    }
+
+    @Test func summariesLeaveOneSlotForAsks() async {
+        let fake = FakeClaude()
+        let e = RouterVerdicts(binary: { "/bin/claude" }, runner: fake.runner, log: nil, cap: 4)
+        for n in 0..<5 { e.ask(request("s\(n)", .summary)) }
+        await until(fake.calls.count == 3)
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(fake.calls.count == 3)
+        e.ask(request("asks", .ask))
+        await until(fake.calls.count == 4)
+        #expect(fake.calls[3].input.contains("Thread: asks"))
+    }
+
+    @Test func aSummarysRateLimitHoldsOnlyTheSummaries() async {
+        let fake = FakeClaude()
+        let e = RouterVerdicts(binary: { "/bin/claude" }, runner: fake.runner, log: nil, cap: 4)
+        e.ask(request("s", .summary))
+        await until(fake.calls.count == 1)
+        fake.send(0, [#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":60000,"error":"rate_limit"}"#])
+        fake.close(0)
+        await until(e.summariesHeld)
+        #expect(!e.held)
+        e.ask(request("asks", .ask))
+        e.ask(request("other", .summary))
+        await until(fake.calls.count == 2)
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(fake.calls.count == 2)
+        #expect(fake.calls[1].input.contains("Thread: asks"))
     }
 
     @Test func aThreadsSummaryIsCancelledOnItsOwn() async {

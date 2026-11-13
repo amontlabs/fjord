@@ -602,15 +602,25 @@ final class RouterRecords {
         guard canAsk(), code.state == .working, !code.paused, e.scope == .line, e.hidden != true, let d = e.detail else {
             return stopSummary(e, id, forget: e.scope != .line && e.hidden != true)
         }
+        // A summary asked for an earlier run is about that run: it is dropped, and this run's is asked.
+        if e.summarizing, e.summaryRun != t.latestRunID {
+            e.summarizing = false
+            e.summaryPrint = nil
+            e.summaryWords = nil
+            e.summaryRun = nil
+            cancelSummary(id)
+        }
         let step = d.steps.first { $0.state == .running }?.text
         guard d.said != nil || step != nil else { return }
-        let trigger = (d.saidID ?? "-") + "|" + (step ?? "-")
+        // The run is in the trigger: a new run with the same step and no words yet gets its own summary.
+        let said = (d.saidID ?? "-") + "|" + (step ?? "-")
+        let trigger = said + "|" + (t.latestRunID ?? "-")
         if trigger != e.summaryTrigger {
             e.summaryTrigger = trigger
             e.summaryDirty = true
         }
         guard e.summaryDirty, !e.summarizing, e.send == nil else { return }
-        let print = Self.summaryPrint(trigger: trigger, tool: d.toolKind, run: t.latestRunID)
+        let print = Self.summaryPrint(trigger: said, tool: d.toolKind, run: t.latestRunID)
         let newest = saved[id]?.summaries?.first
         if print == newest?.print || print == e.summaryFailed {
             e.summaryDirty = false
@@ -626,6 +636,7 @@ final class RouterRecords {
         e.summaryDue = nil
         e.summarizing = true
         e.summaryPrint = print
+        e.summaryRun = t.latestRunID
         e.summaryAskedAt = now
         let last = newest.flatMap { $0.run == t.latestRunID ? $0.text : nil }
         let facts = RouterSummaryInput(
@@ -653,6 +664,7 @@ final class RouterRecords {
             e.summarizing = false
             e.summaryPrint = nil
             e.summaryWords = nil
+            e.summaryRun = nil
             cancelSummary(id)
         }
         if forget, saved[id]?.summaries != nil { save(id) { $0.summaries = nil } }
@@ -662,7 +674,18 @@ final class RouterRecords {
     /// joins the timeline. A late answer (another call's, a cancelled one's) is dropped; a failure keeps the line it had.
     func summary(_ id: String, fingerprint: String, _ event: RouterVerdictEvent) {
         operation {
-            guard let e = entries[id], e.summarizing, e.summaryPrint == fingerprint, let t = e.thread else { return }
+            guard let e = entries[id], e.summarizing, e.summaryPrint == fingerprint, e.thread != nil else { return }
+            // Asked for a run that is no longer the thread's: its words are about that run, never this one's line.
+            guard e.summaryRun == e.thread?.latestRunID else {
+                e.summarizing = false
+                e.summaryPrint = nil
+                e.summaryWords = nil
+                e.summaryRun = nil
+                cancelSummary(id)
+                refresh(id)
+                return
+            }
+            let run = e.summaryRun
             switch event {
             case .state:
                 break
@@ -680,7 +703,8 @@ final class RouterRecords {
                 e.summarizing = false
                 e.summaryPrint = nil
                 e.summaryWords = nil
-                keep(id, RouterWork.Summary(id: 0, text: v.line, at: now(), run: t.latestRunID, print: fingerprint))
+                e.summaryRun = nil
+                keep(id, RouterWork.Summary(id: 0, text: v.line, at: now(), run: run, print: fingerprint))
                 if shown[id]?.sentence.text != v.line {
                     if streamed == nil { e.stream += 1 }
                     stream(id, text: v.line, done: true)
@@ -690,18 +714,19 @@ final class RouterRecords {
                 e.summarizing = false
                 e.summaryPrint = nil
                 e.summaryWords = nil
+                e.summaryRun = nil
                 e.summaryFailed = fingerprint
                 refresh(id)
             }
         }
     }
 
-    /// A new summary on top of the timeline, newest first, `summariesKept` at most; one that says what the newest already
-    /// says (the same words) takes its facts and keeps its place and time.
+    /// A new summary on top of the timeline, newest first, `summariesKept` at most; one that says what the newest of the
+    /// same run already says (the same words) takes its facts and keeps its place and time. Another run's never merges.
     private func keep(_ id: String, _ new: RouterWork.Summary) {
         save(id) { s in
             var all = s.summaries ?? []
-            if let newest = all.first, Self.same(newest.text, new.text) {
+            if let newest = all.first, newest.run == new.run, Self.same(newest.text, new.text) {
                 all[0].print = new.print
                 all[0].run = new.run
             } else {
@@ -757,7 +782,7 @@ final class RouterRecords {
         r.activity = d?.activity ?? .init()
         r.diff = d?.diff
         if code.state == .working {
-            r.work = RouterWork(summaries: keep?.summaries ?? [], now: d?.workNow, recent: d?.workRecent ?? [])
+            r.work = RouterWork(summaries: keep?.summaries ?? [], now: d?.workNow, recent: d?.workRecent ?? [], run: t.latestRunID)
             if !code.paused { summed(&r, e, run: t.latestRunID) }
         }
         r.queued = e.queued ?? d?.queued.first { e.cancelled[$0.id] == nil }?.words
@@ -1217,6 +1242,8 @@ extension RouterRecords {
         var summarizing = false
         var summaryPrint: String?
         var summaryWords: String?
+        /// The run the summary under way was asked for.
+        var summaryRun: String?
         /// The agent's words and to-do step last seen (`summarizeIfNeeded`), and whether they moved since the last call.
         var summaryTrigger: String?
         var summaryDirty = false

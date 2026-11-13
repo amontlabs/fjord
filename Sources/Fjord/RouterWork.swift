@@ -38,6 +38,11 @@ struct RouterWork: Equatable {
     var now: Step?
     /// The ones that ran before it, newest first: a few.
     var recent: [Step] = []
+    /// The run working now: its summaries are the current ones; an earlier run's are listed after a quiet break.
+    var run: String?
+
+    /// Summaries of the run working now (a restarted thread's earlier runs aren't its current step).
+    var current: Bool { summaries.first.map { $0.run == run } ?? false }
 
     var isEmpty: Bool { summaries.isEmpty && now == nil && recent.isEmpty }
     /// The raw detail the peek lists: the running step and the ones before it.

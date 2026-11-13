@@ -14,6 +14,8 @@ extension Router {
         static let peekWidth: CGFloat = 400
         /// A timeline mark: the newest a little larger.
         static let dot: CGFloat = 5
+        /// The quiet break before an earlier run's summaries.
+        static let earlierRun = "earlier run"
     }
 }
 
@@ -41,9 +43,17 @@ struct RouterWorkTimeline: View {
         let shown = Array(all.prefix(W.timeline))
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { i, s in
+                // A run before the one working now: a quiet break above its first summary, and nothing of it reads current.
+                let earlier = s.run != work.run && (i == 0 ? true : shown[i - 1].run != s.run)
+                let newest = i == 0 && !work.lineReadsNewest && s.run == work.run
+                if earlier {
+                    Text(Router.Work.earlierRun).cdsText(d.footnote, .regular, CDS.Text.muted)
+                        .padding(.leading, Router.Activity.glyphBox + 7)
+                        .padding(.top, i == 0 ? 0 : 4).padding(.bottom, 4)
+                }
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(RouterInline.text(s.text, size: d.body.0))
-                        .cdsText(d.body, .regular, i == 0 && !work.lineReadsNewest ? CDS.Text.primary : CDS.Text.secondary)
+                        .cdsText(d.body, .regular, newest ? CDS.Text.primary : CDS.Text.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, Router.Activity.glyphBox + 7)
                         .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
@@ -52,7 +62,9 @@ struct RouterWorkTimeline: View {
                         .fixedSize()
                 }
                 .padding(.bottom, i == shown.count - 1 ? 0 : 6)
-                .overlay(alignment: .topLeading) { mark(newest: i == 0 && !work.lineReadsNewest, first: i == 0, last: i == shown.count - 1) }
+                .overlay(alignment: .topLeading) {
+                    mark(newest: newest, first: i == 0 || earlier, last: i == shown.count - 1 || shown[i + 1].run != s.run)
+                }
             }
             if all.count > shown.count {
                 Text(verbatim: "\(all.count - shown.count) earlier").cdsText(d.footnote, .regular, CDS.Text.muted)
@@ -90,9 +102,9 @@ extension View {
 }
 
 enum RouterWorkTime {
-    /// "13:58", in the user's locale (24-hour where it is the custom).
+    /// "13:58", or "1:58 PM": the system's 12- or 24-hour clock, its own digits for the hour.
     static func clock(_ date: Date) -> String {
-        date.formatted(.dateTime.hour(.twoDigits(amPM: .abbreviated)).minute(.twoDigits))
+        date.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute(.twoDigits))
     }
 }
 

@@ -57,7 +57,8 @@ struct RouterCard: View {
     }
 
     /// A working thread the Router's model has summed up: its card is the timeline of those lines, not the last quote.
-    private var summarized: Bool { thread.state == .working && !thread.work.summaries.isEmpty }
+    /// Until the run working now has a summary, the card quotes its last words; earlier runs' summaries follow, apart.
+    private var summarized: Bool { thread.state == .working && thread.work.current }
 
     // MARK: Kind blocks. Prose keeps to 560 pt; option rows run the card's width, their keycaps under the footer's.
 
@@ -114,7 +115,7 @@ struct RouterCard: View {
             // A thread started here: what it runs on, through its first run.
             if let launch = thread.launch { started(launch) }
             // What it has been doing, as the Router's model summed it up, newest first.
-            if summarized, !thread.work.listed.isEmpty { RouterWorkTimeline(work: thread.work) }
+            if thread.state == .working, !thread.work.listed.isEmpty { RouterWorkTimeline(work: thread.work) }
             // T3's to-do steps, when the thread has a list (Claude sends one only with T3's to-do setting on).
             if !thread.steps.isEmpty { steps.prose() }
             // Its subagents, background commands and waits, each with how long it has run.

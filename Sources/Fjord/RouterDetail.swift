@@ -117,12 +117,15 @@ struct RouterDetail: Equatable {
     /// The peek's steps and a summary's input, from the live run's items read once from their end: the tool running now,
     /// the three before it, the latest whole words.
     static let recentSteps = 3
+    /// How far back from the run's end the walk looks: a long tool-only stretch is not walked whole on every T3 event
+    /// (no words in it: `said` is nil).
+    static let workScan = 200
 
     private static func work(_ d: inout RouterDetail, _ items: [T3TurnItem], messages: [T3Message], now: Date) {
         var tools: [RouterWork.Step] = []
         var kind: String?
         var running = false
-        for item in items.reversed() {
+        for item in items.suffix(workScan).reversed() {
             if d.said == nil, case .assistantMessage(let id, var text, let streaming) = item.detail, !streaming {
                 if text.isEmpty { text = messages.first { $0.id == id }?.text ?? "" }
                 if !text.isEmpty { d.said = text; d.saidID = id.isEmpty ? item.id : id }
