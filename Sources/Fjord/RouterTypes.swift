@@ -402,6 +402,12 @@ struct RouterThread: Identifiable, Equatable {
     /// Its open items (Stuck, Decide, Do, Know) and the read that may change them (RouterItems.swift). The block is
     /// placed in the section of its most urgent item.
     var ledger = RouterLedger()
+    /// What matters on it now, in the one layout every thread and item shares (line → hover → card): Done's is its last
+    /// turn's outcome (the items read's), Working's its newest summary and what it has going, Stopped's its stop.
+    var summary: RouterSummary?
+    /// What happened on it, newest first, at most `RouterEvent.kept`: summaries, run starts, items raised and closed, turns
+    /// ended. Kept for every state while it is on the page; gone when it leaves.
+    var history: [RouterEvent] = []
 
     var section: RouterSection {
         if let top = ledger.top, state != .stopped { return top.section }
@@ -453,6 +459,52 @@ extension RouterThread {
 
     /// The sentence's colour once settled.
     var sentenceTint: Color { isRunning && ledger.single == nil ? CDS.Text.muted : CDS.Text.secondary }
+}
+
+/// One layout for what matters on a thread or an item, in layers: the sentence (what matters now, never cut), its
+/// detail (why, what), the facts as quiet chips, and the source (the agent's own words).
+struct RouterSummary: Equatable, Codable {
+    struct Fact: Equatable, Codable, Identifiable {
+        enum Kind: String, Codable { case pr, diff, tests, agents, commands, waits, note }
+        enum Tone: String, Codable { case neutral, good, warning, bad }
+        var kind: Kind
+        /// Short: "PR #59 open", "3 files +120 −40", "tests pass", "2 subagents".
+        var text: String
+        var tone: Tone = .neutral
+        /// A pull request's page.
+        var link: URL? = nil
+        var id: String { kind.rawValue + ":" + text }
+    }
+
+    var sentence: String
+    var detail: String? = nil
+    var facts: [Fact] = []
+    /// The agent's words behind it: Done's last message, Working's latest message, an item's quote.
+    var source: String? = nil
+}
+
+/// One thing that happened on a thread, for its card's history.
+struct RouterEvent: Equatable, Codable, Identifiable {
+    enum Kind: Equatable, Codable {
+        /// A working summary.
+        case summary(String)
+        /// What started a run.
+        case started(RouterWork.Start)
+        /// An item was raised: its kind and sentence.
+        case raised(RouterItem.Kind, String)
+        /// An item was closed, and how ("answered by your message", "done by you", …).
+        case closed(RouterItem.Kind, String, how: String)
+        /// A turn ended: its outcome.
+        case finished(String)
+    }
+
+    var id: String
+    var at: Date
+    var run: String?
+    var kind: Kind
+
+    /// The most a thread's history keeps.
+    static let kept = 40
 }
 
 /// A thread that finished more than a day ago and was not settled: no line of its own, one of the housekeeping line's.

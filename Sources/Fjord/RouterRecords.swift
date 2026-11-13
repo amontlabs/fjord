@@ -96,6 +96,11 @@ final class RouterRecords {
         items.load = { [unowned self] id in self.saved[id]?.ledger }
         items.store = { [unowned self] id, ledger in self.save(id) { $0.ledger = ledger } }
         items.ask = { [unowned self] r in self.ask(r) }
+        items.logged = { [unowned self] id, events in self.log(id, events) }
+        items.unlogged = { [unowned self] id, event in self.save(id) { s in
+            s.history?.removeAll { $0.id == event }
+            if s.history?.isEmpty == true { s.history = nil }
+        } }
         items.now = { [unowned self] in self.now() }
         items.changed = { [unowned self] id in self.operation { self.refresh(id) } }
         items.retried = { [unowned self] id in
@@ -532,6 +537,7 @@ final class RouterRecords {
                 }
             }
             readIfNeeded(id, e, t, code)
+            if e.scope == .line, e.hidden != true, let d = e.detail { logStarts(id, d) }
             // Turn ends and your messages are read against what is open; a run starting again never stops a read. A turn
             // that ended while its subagents or background work go on is ended too (no run is live: the shell lists them
             // only then), and a whole message the agent posts while its run goes on is read as it lands.
@@ -739,7 +745,12 @@ final class RouterRecords {
             e.summaryRun = nil
             cancelSummary(id)
         }
-        if forget, saved[id]?.summaries != nil { save(id) { $0.summaries = nil } }
+        if forget, saved[id]?.summaries != nil || saved[id]?.history != nil {
+            save(id) {
+                $0.summaries = nil
+                $0.history = nil
+            }
+        }
     }
 
     /// What the engine says of a summary call (`RouterVerdicts.onSummary`): its words stream on the line, the whole line
@@ -851,11 +862,11 @@ final class RouterRecords {
         r.steps = d?.steps ?? []
         r.activity = d?.activity ?? .init()
         r.diff = d?.diff
-        if code.state == .working {
-            r.work = RouterWork(summaries: keep?.summaries ?? [], now: d?.workNow, recent: d?.workRecent ?? [], run: t.latestRunID,
-                                starts: d?.starts ?? [:])
-            if !code.paused { summed(&r, e, run: t.latestRunID) }
-        }
+        // The timeline is kept whatever the state: what ran, and what started each run.
+        r.work = RouterWork(summaries: keep?.summaries ?? [], now: code.state == .working ? d?.workNow : nil,
+                            recent: code.state == .working ? d?.workRecent ?? [] : [], run: t.latestRunID,
+                            starts: starts(keep, d))
+        if code.state == .working, !code.paused { summed(&r, e, run: t.latestRunID) }
         r.queued = e.queued ?? d?.queued.first { e.cancelled[$0.id] == nil }?.words
         r.prs = pullRequests(t, d?.reply ?? t.latestMessage)
         r.launch = e.launch
@@ -891,6 +902,10 @@ final class RouterRecords {
             }
         }
 
+        r.summary = summary(r, t, code, d, outcome: code.wants == .finished ? items.outcome(id, run: t.latestRunID) : nil,
+                            verdict: code.wants == .ask && keep?.fingerprint == e.fingerprint ? keep?.verdict?.line : nil)
+        r.history = Self.history(summaries: keep?.summaries ?? [], log: keep?.history ?? [])
+
         // Your send, until T3 shows it: Sent, at the top of Working.
         if let s = e.send {
             r.state = .sent
@@ -901,6 +916,105 @@ final class RouterRecords {
             r.paused = false
         }
         return r
+    }
+
+    // MARK: Summary and history
+
+    /// The record's summary in the one layout: the sentence it shows, the items read's detail and facts for a finished
+    /// turn, the facts code knows (its pull requests, the turn's diff; a working run's subagents, commands and waits),
+    /// and the agent's words. Sent has none.
+    /// Its sentence is the settled one, never words still streaming: the record doesn't change as they grow (the hot
+    /// path sends the words alone).
+    private func summary(_ r: RouterThread, _ t: AgentThread, _ code: RouterCodeState, _ d: RouterDetail?,
+                         outcome: RouterSummary?, verdict: String?) -> RouterSummary? {
+        guard code.state != .sent else { return nil }
+        let newest = r.work.summaries.first.flatMap { $0.run == t.latestRunID ? $0.text : nil }
+        let settled = switch code.state {
+        case .working: newest ?? code.line
+        default: outcome?.sentence ?? verdict.flatMap { $0.isEmpty ? nil : $0 } ?? code.line
+        }
+        var s = RouterSummary(sentence: settled)
+        var facts: [RouterSummary.Fact] = r.prs.map { pr in
+            let url = t.pullRequests.first { $0.number == pr.number }.flatMap { URL(string: $0.url) }
+            let tone: RouterSummary.Fact.Tone = switch pr.state {
+            case .merged: .good
+            case .closed: .neutral
+            case .open: .warning
+            }
+            return .init(kind: .pr, text: "PR #\(pr.number) \(pr.state.rawValue)", tone: tone, link: url)
+        }
+        if let diff = r.diff, diff.files > 0 {
+            facts.append(.init(kind: .diff, text: "\(diff.files) file\(diff.files == 1 ? "" : "s") +\(diff.added) −\(diff.removed)"))
+        }
+        switch code.state {
+        case .working:
+            let a = r.activity
+            if !a.agents.isEmpty { facts.append(.init(kind: .agents, text: a.agents.count == 1 ? "1 subagent" : "\(a.agents.count) subagents")) }
+            if !a.processes.isEmpty {
+                facts.append(.init(kind: .commands, text: a.processes.count == 1 ? "1 background command" : "\(a.processes.count) background commands"))
+            }
+            if !a.waits.isEmpty { facts.append(.init(kind: .waits, text: "waiting on \(a.waits.count)")) }
+            s.source = d?.said
+        case .stopped:
+            s.detail = r.stop.flatMap { $0.error == settled || $0.error.isEmpty ? nil : $0.error }
+            s.source = r.lastLines.isEmpty ? nil : r.lastLines
+        default:
+            if let outcome {
+                s.detail = outcome.detail
+                facts += outcome.facts
+            }
+            s.source = r.lastLines.isEmpty ? nil : r.lastLines
+        }
+        s.facts = facts
+        return s
+    }
+
+    /// What started each run: the projection's, else the history's (kept after the detail is gone, a relaunch).
+    private func starts(_ keep: Saved?, _ d: RouterDetail?) -> [String: RouterWork.Start] {
+        var out: [String: RouterWork.Start] = [:]
+        for event in keep?.history ?? [] {
+            if case .started(let start) = event.kind, let run = event.run { out[run] = start }
+        }
+        for (run, start) in d?.starts ?? [:] { out[run] = start }
+        return out
+    }
+
+    /// The thread's history, newest first, `RouterEvent.kept` at most: its summaries (`s<id>`) and its log (run starts
+    /// `r<run>`, items, turn ends), by time; at the same time, the later logged first.
+    static func history(summaries: [RouterWork.Summary], log: [RouterEvent]) -> [RouterEvent] {
+        guard !summaries.isEmpty || !log.isEmpty else { return [] }
+        let all = summaries.reversed().map { RouterEvent(id: "s\($0.id)", at: $0.at, run: $0.run, kind: .summary($0.text)) } + log
+        return all.enumerated().sorted { a, b in a.element.at != b.element.at ? a.element.at > b.element.at : a.offset > b.offset }
+            .prefix(RouterEvent.kept).map(\.element)
+    }
+
+    /// Entries the history gains, oldest first; one with an id already logged replaces it (a turn read again).
+    private func log(_ id: String, _ events: [RouterEvent]) {
+        save(id) { s in
+            var all = s.history ?? []
+            for event in events {
+                if let i = all.firstIndex(where: { $0.id == event.id }) { all[i] = event } else { all.append(event) }
+            }
+            all.sort { $0.at < $1.at }
+            if all.count > RouterEvent.kept { all.removeFirst(all.count - RouterEvent.kept) }
+            s.history = all
+        }
+    }
+
+    /// The run starts the projection shows that the history hasn't yet, at the run's start.
+    private func logStarts(_ id: String, _ d: RouterDetail) {
+        guard !d.starts.isEmpty else { return }
+        let have = Set((saved[id]?.history ?? []).map(\.id))
+        let oldest = saved[id]?.history?.first?.at
+        let new = d.starts.compactMap { run, start -> RouterEvent? in
+            let key = "r" + run
+            guard !have.contains(key) else { return nil }
+            let at = d.startedAt[run] ?? now()
+            // Older than all it keeps once full: it was dropped for room, not missed.
+            if (saved[id]?.history?.count ?? 0) >= RouterEvent.kept, let oldest, at < oldest { return nil }
+            return RouterEvent(id: key, at: at, run: run, kind: .started(start))
+        }
+        if !new.isEmpty { log(id, new.sorted { $0.at < $1.at }) }
     }
 
     /// A working line's words: the summary being written as it streams, else its run's newest summary (sheening while the
@@ -1207,6 +1321,9 @@ extension RouterRecords {
         var summaries: [RouterWork.Summary]?
         /// Its open items, the inputs read, its latest turn's line (`RouterItemLedgers.Saved`); nil until it is first seen.
         var ledger: RouterItemLedgers.Saved?
+        /// What happened on it besides its summaries (run starts, items raised and closed, turns ended), oldest first,
+        /// `RouterEvent.kept` at most; nil when it has none. Gone with the summaries when it leaves the page.
+        var history: [RouterEvent]?
     }
 
     /// A send T3 hasn't confirmed.

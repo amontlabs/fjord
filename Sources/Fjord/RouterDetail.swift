@@ -51,6 +51,8 @@ struct RouterDetail: Equatable {
     var toolKind: String?
     /// What started each of the latest runs, by run id: the working card's timeline shows it under the run's summaries.
     var starts: [String: RouterWork.Start] = [:]
+    /// When each of those runs started (T3's `startedAt`, else `requestedAt`): their history entries' time.
+    var startedAt: [String: Date] = [:]
 
     /// Reads a projection. `now` stands in for a missing run start.
     static func make(_ p: T3Projection, now: Date) -> RouterDetail {
@@ -112,6 +114,9 @@ struct RouterDetail: Equatable {
         d.steers = ThreadSender.steers(session: p.capabilities, driver: p.thread.providerInstanceId)
         d.activity = RouterActivity.make(p)
         d.starts = starts(p)
+        for run in p.runs.filter({ !$0.isQueued }).suffix(startsKept) {
+            if let at = (run.startedAt ?? run.requestedAt)?.date { d.startedAt[run.id] = at }
+        }
         return d
     }
 

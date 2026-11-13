@@ -919,7 +919,7 @@ import Testing
     @Test func theAppSendsTheEvalsV2Prompts() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
-        for (name, prompt) in [("turn-v3", RouterItemsPrompt.turn), ("message-v2", RouterItemsPrompt.message), ("said-v3", RouterItemsPrompt.said)] {
+        for (name, prompt) in [("turn-v4", RouterItemsPrompt.turn), ("message-v2", RouterItemsPrompt.message), ("said-v3", RouterItemsPrompt.said)] {
             let v = try String(contentsOf: root.appendingPathComponent("evals/router/items/prompts/system-\(name).txt"), encoding: .utf8)
             #expect(words(prompt) == words(v), "the \(name) prompt is EVAL-items.md's")
         }

@@ -22,6 +22,8 @@ struct RouterItemFacts: Equatable, Sendable {
         var live: Bool
         /// Ended, but its last reply is still streaming in the projection: not whole yet either (`reply` has it so far).
         var streaming = false
+        /// When it ended, as T3 stamps it: its history entries' time.
+        var ended: Date? = nil
     }
 
     struct Message: Equatable, Sendable {
@@ -94,7 +96,8 @@ struct RouterItemFacts: Equatable, Sendable {
             f.turns[run.id] = Turn(reply: reply ?? "", yourWords: own?.createdBy == "user" ? own?.text : nil,
                                    woke: own.flatMap { $0.createdBy == "user" ? nil : $0.text },
                                    started: own?.createdBy == "user" ? own?.id : nil, status: run.status.rawValue,
-                                   live: run.status.isLive, streaming: streaming && !run.status.isLive)
+                                   live: run.status.isLive, streaming: streaming && !run.status.isLive,
+                                   ended: run.completedAt?.date)
         }
         return f
     }
@@ -113,9 +116,11 @@ struct RouterItemFacts: Equatable, Sendable {
         var next = 1
         /// The inputs read (`turn:<run>`, `msg:<ms>`), the latest few.
         var read: [String] = []
-        /// The latest turn's line, and its run.
+        /// The latest turn's line (its outcome), and its run; what the outcome leaves out, and the reply's facts.
         var line: String?
         var lineRun: String?
+        var lineDetail: String?
+        var lineFacts: [RouterSummary.Fact]?
         /// The latest run seen: a new one means the one before it ended (a wake reads it too).
         var run: String?
         /// Your latest message seen (T3's `latestUserAuthoredMessageAt`).
@@ -144,7 +149,9 @@ struct RouterItemFacts: Equatable, Sendable {
             self.pending = pending
         }
 
-        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending, sent, settled, done }
+        private enum CodingKeys: String, CodingKey {
+            case items, next, read, line, lineRun, lineDetail, lineFacts, run, message, pending, sent, settled, done
+        }
 
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
@@ -153,6 +160,8 @@ struct RouterItemFacts: Equatable, Sendable {
             read = try c.decodeIfPresent([String].self, forKey: .read) ?? []
             line = try c.decodeIfPresent(String.self, forKey: .line)
             lineRun = try c.decodeIfPresent(String.self, forKey: .lineRun)
+            lineDetail = try c.decodeIfPresent(String.self, forKey: .lineDetail)
+            lineFacts = try c.decodeIfPresent([RouterSummary.Fact].self, forKey: .lineFacts)
             run = try c.decodeIfPresent(String.self, forKey: .run)
             message = try c.decodeIfPresent(Date.self, forKey: .message)
             pending = try c.decodeIfPresent([Input].self, forKey: .pending) ?? []
@@ -175,6 +184,8 @@ struct RouterItemFacts: Equatable, Sendable {
         var items: [RouterItem]
         var line: String?
         var lineRun: String?
+        var lineDetail: String? = nil
+        var lineFacts: [RouterSummary.Fact]? = nil
         var pending: [Input]
         /// The latest run when it was settled: a newer one means the settle stood.
         var run: String?
@@ -265,6 +276,10 @@ struct RouterItemFacts: Equatable, Sendable {
     var changed: (String) -> Void = { _ in }
     /// A turn's line as it streams, with its run.
     var words: (_ thread: String, _ run: String, _ text: String, _ done: Bool) -> Void = { _, _, _, _ in }
+    /// What the thread's history gains (items raised and closed, turns ended), in order; `unlogged`: an entry taken back
+    /// (a Done's Revert), by id.
+    var logged: (_ thread: String, _ events: [RouterEvent]) -> Void = { _, _ in }
+    var unlogged: (_ thread: String, _ event: String) -> Void = { _, _ in }
     /// Items a read added that need you (banners).
     var added: (_ thread: String, _ items: [RouterItem], _ key: String) -> Void = { _, _, _ in }
     var now: () -> Date = Date.init
@@ -711,11 +726,20 @@ struct RouterItemFacts: Equatable, Sendable {
         var s = load(id) ?? Saved()
         let now = now()
         var striking: [(Int, RouterItem)] = []
+        // Its history: the turn's end (at T3's stamp), then what it closed and raised.
+        var turnRun: String?
+        if case .turn(let r) = input { turnRun = r }
+        let at = turnRun.flatMap { l.facts?.turns[$0]?.ended } ?? now
+        var events: [RouterEvent] = []
+        if let turnRun, !a.line.isEmpty {
+            events.append(RouterEvent(id: "turn:" + turnRun, at: at, run: turnRun, kind: .finished(a.line)))
+        }
         for (i, item) in s.items.enumerated() {
             guard let how = a.close[item.id] else { continue }
             var item = item
             item.state = .closing(Self.copy(how))
             striking.append((i, item))
+            events.append(RouterEvent(id: "closed:" + item.id, at: at, run: turnRun, kind: .closed(item.kind, item.sentence, how: Self.copy(how))))
         }
         s.items.removeAll { a.close[$0.id] != nil }
         var added: [RouterItem] = []
@@ -736,14 +760,18 @@ struct RouterItemFacts: Equatable, Sendable {
                 s.next += 1
                 s.items.append(item)
                 added.append(item)
+                events.append(RouterEvent(id: "raised:" + item.id, at: at, run: turnRun, kind: .raised(item.kind, item.sentence)))
             }
         }
         if case .turn(let run) = input, !a.line.isEmpty {
             s.line = a.line
             s.lineRun = run
+            s.lineDetail = a.detail
+            s.lineFacts = a.facts.isEmpty ? nil : a.facts
         }
         markRead(&s, input.key)
         store(id, s)
+        if !events.isEmpty { logged(id, events) }
         l.reading = nil
         l.failures = 0
         l.closes = [:]
@@ -814,12 +842,15 @@ struct RouterItemFacts: Equatable, Sendable {
             var was = s.items.remove(at: i)
             s.done = Array((s.done.filter { $0.item.id != item } + [Done(item: was, index: i)]).suffix(Self.doneKept))
             store(id, s)
+            logged(id, [RouterEvent(id: "closed:" + was.id, at: now(), run: s.run,
+                                    kind: .closed(was.kind, was.sentence, how: Router.Items.Copy.doneByYou))])
             was.state = .closing(Router.Items.Copy.doneByYou)
             l.closing.append((i, was))
             settleLater(id, l)
         } else {
             guard let mark = s.done.last(where: { $0.item.id == item }) else { return }
             s.done.removeAll { $0.item.id == item }
+            unlogged(id, "closed:" + item)
             l.closing.removeAll { $0.item.id == item }
             if !s.items.contains(where: { $0.id == item }) {
                 var back = mark.item
@@ -838,11 +869,15 @@ struct RouterItemFacts: Equatable, Sendable {
         live[id] = nil
         guard var s = load(id), !s.items.isEmpty || s.line != nil || !s.pending.isEmpty else { return }
         let was = s.settled
-        s.settled = Stash(items: (was?.items ?? []) + s.items, line: s.line ?? was?.line, lineRun: s.line == nil ? was?.lineRun : s.lineRun,
+        let mine = s.line != nil
+        s.settled = Stash(items: (was?.items ?? []) + s.items, line: mine ? s.line : was?.line, lineRun: mine ? s.lineRun : was?.lineRun,
+                          lineDetail: mine ? s.lineDetail : was?.lineDetail, lineFacts: mine ? s.lineFacts : was?.lineFacts,
                           pending: (was?.pending ?? []) + s.pending, run: s.run)
         s.items = []
         s.line = nil
         s.lineRun = nil
+        s.lineDetail = nil
+        s.lineFacts = nil
         s.pending = []
         store(id, s)
     }
@@ -854,7 +889,12 @@ struct RouterItemFacts: Equatable, Sendable {
         s.settled = nil
         if stash.run == run {
             s.items = stash.items + s.items.filter { i in !stash.items.contains { $0.id == i.id } }
-            if s.line == nil { s.line = stash.line; s.lineRun = stash.lineRun }
+            if s.line == nil {
+                s.line = stash.line
+                s.lineRun = stash.lineRun
+                s.lineDetail = stash.lineDetail
+                s.lineFacts = stash.lineFacts
+            }
             s.pending = stash.pending + s.pending.filter { p in !stash.pending.contains { $0.key == p.key } }
         }
         store(id, s)
@@ -913,9 +953,13 @@ struct RouterItemFacts: Equatable, Sendable {
     }
 
     /// The latest turn's line, when it is `run`'s.
-    func line(_ id: String, run: String?) -> String? {
-        guard let s = load(id), let run, s.lineRun == run else { return nil }
-        return s.line
+    func line(_ id: String, run: String?) -> String? { outcome(id, run: run)?.sentence }
+
+    /// The latest turn's outcome as the items read wrote it, when it is `run`'s: its sentence, detail and the reply's
+    /// facts (the records add what code knows, and the agent's words).
+    func outcome(_ id: String, run: String?) -> RouterSummary? {
+        guard let s = load(id), let run, s.lineRun == run, let line = s.line else { return nil }
+        return RouterSummary(sentence: line, detail: s.lineDetail, facts: s.lineFacts ?? [])
     }
 
     /// `run`'s turn is being read (or waits to be): Done's line isn't in yet.
@@ -953,4 +997,10 @@ extension RouterItem: Codable {
         try c.encodeIfPresent(detail, forKey: .detail)
         try c.encodeIfPresent(quote, forKey: .quote)
     }
+}
+
+extension RouterItem {
+    /// The item in the layout every thread and item shares: its sentence, its detail, its quote as the agent's words (its
+    /// options are its controls, not facts).
+    var summary: RouterSummary { RouterSummary(sentence: sentence, detail: extra, source: quote) }
 }

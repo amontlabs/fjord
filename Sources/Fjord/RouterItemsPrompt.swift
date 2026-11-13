@@ -82,8 +82,12 @@ struct RouterItemsAnswer: Equatable, Sendable {
     /// The open items it closes, and how.
     var close: [String: How] = [:]
     var found: [Found] = []
-    /// A turn's line: what it did and where it stands (Done's sentence); empty for your words.
+    /// A turn's outcome (Done's sentence): what it found, made or answered, and where it stands; empty for your words.
     var line = ""
+    /// What the outcome leaves out, in a sentence or two, when there is more to say.
+    var detail: String? = nil
+    /// What the reply states that code can't know (tests and their result, a version released), as chips.
+    var facts: [RouterSummary.Fact] = []
 }
 
 enum RouterItemsPrompt {
@@ -147,8 +151,17 @@ enum RouterItemsPrompt {
     """
 
     private static let line = """
-    `line`: at most 12 words, starting in lower case, short clauses joined by semicolons: what the turn did and where it \
-    stands ("briefs moved into BriefLog; tests pass; PR #59").
+    `line`: the turn's outcome, what the user would want to read first, at most 16 words, starting in lower case, the key \
+    fact first, short clauses joined by semicolons or a colon. For a question it answered, the answer itself, not that it \
+    answered ("the skill is Markdown only: SKILL.md and 8 reference files, no scripts"); for work, the result and where \
+    it stands ("briefs moved into BriefLog; tests pass; PR #59 open"); for a stop, what stopped it. Never "finished" or \
+    "answered the question", never a list of steps it took.
+    `detail`: one or two plain sentences (at most 280 characters) of why or what the line leaves out that the user would \
+    want (a caveat, the reason, what is left); "" when the line says it all.
+    `facts`: at most 3 short chips (at most 5 words each) the reply states and the user would scan for: tests or checks \
+    run and their result ("tests pass", "2 UI tests fail"), a version released or installed ("v0.8.13 released"), a \
+    build or eval's number ("recall 0.99"). `kind` "tests" for tests or checks, else "note". `tone` "good" for a pass, "bad" for a failure, else "neutral". Never a pull \
+    request, a file or line count (those are known), nor what the line already says. [] when the reply states none.
     """
 
     /// A turn the agent ended.
@@ -174,9 +187,11 @@ enum RouterItemsPrompt {
     private static let openSchema = #"{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["keep","close"]},"how":"# + how + #"},"required":["id","verdict","how"],"additionalProperties":false}}"#
     private static let foundSchema = #"{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["stuck","decide","do","know"]},"same_as":{"type":"string"},"sentence":{"type":"string"},"detail":{"type":"string"},"quote":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}},"required":["kind","same_as","sentence","detail","quote","options"],"additionalProperties":false}}"#
 
-    /// In this order: what closes lands first, then what is new, then the line streams.
+    private static let factsSchema = #"{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["tests","note"]},"text":{"type":"string"},"tone":{"type":"string","enum":["good","bad","neutral"]}},"required":["kind","text","tone"],"additionalProperties":false}}"#
+    /// In this order: what closes lands first, then what is new, then the outcome streams, then its detail and facts.
     static let turnSchema = #"{"type":"object","properties":{"open":"# + openSchema + #","found":"# + foundSchema
-        + #","line":{"type":"string"}},"required":["open","found","line"],"additionalProperties":false}"#
+        + #","line":{"type":"string"},"detail":{"type":"string"},"facts":"# + factsSchema
+        + #"},"required":["open","found","line","detail","facts"],"additionalProperties":false}"#
     static let saidSchema = #"{"type":"object","properties":{"open":"# + openSchema + #","found":"# + foundSchema
         + #"},"required":["open","found"],"additionalProperties":false}"#
     static let messageSchema = #"{"type":"object","properties":{"open":"# + openSchema + #"},"required":["open"],"additionalProperties":false}"#
@@ -358,8 +373,29 @@ struct RouterItemsReading {
         guard let o = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any], let open = o["open"] as? [Any] else { return nil }
         var a = RouterItemsAnswer(close: closes(open, ids: ids))
         if finds { a.found = found((o["found"] as? [Any]) ?? [], ids: ids, source: source) }
-        if lines { a.line = RouterVerdictReading.flat(o["line"] as? String ?? "") }
+        if lines {
+            a.line = RouterVerdictReading.flat(o["line"] as? String ?? "")
+            a.detail = detail(o["detail"] as? String, sentence: a.line)
+            a.facts = facts((o["facts"] as? [Any]) ?? [], line: a.line)
+        }
         return a
+    }
+
+    /// The model's chips: short, at most 3, each once.
+    static func facts(_ entries: [Any], line: String) -> [RouterSummary.Fact] {
+        var out: [RouterSummary.Fact] = []
+        for case let e as [String: Any] in entries {
+            let text = RouterVerdictReading.flat(e["text"] as? String ?? "")
+            guard !text.isEmpty, text.count <= 48, !out.contains(where: { $0.text.caseInsensitiveCompare(text) == .orderedSame }) else { continue }
+            let tone: RouterSummary.Fact.Tone = switch e["tone"] as? String {
+            case "good": .good
+            case "bad": .bad
+            default: .neutral
+            }
+            out.append(.init(kind: e["kind"] as? String == "tests" ? .tests : .note, text: text, tone: tone))
+            if out.count == 3 { break }
+        }
+        return out
     }
 
     private static func array(_ raw: String) -> [Any]? { PartialJSON.value(raw) as? [Any] }

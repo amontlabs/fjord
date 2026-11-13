@@ -47,7 +47,7 @@ struct RouterWork: Equatable {
     var pose: Pose?
 
     /// What started a run, from T3's fields on its message, never from its words (docs/design/router-v2/DESIGN.md R6).
-    enum Start: Equatable {
+    enum Start: Equatable, Codable {
         /// Your message (`createdBy: "user"`, from T3, the phone or Fjord): the card quotes it under the run's summaries.
         case asked(String)
         /// Delegated tasks or subagents ended (`delegatedCompletion`, a `subagent` notification): their titles, as T3
