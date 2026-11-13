@@ -9,14 +9,29 @@ import SwiftUI
 // main-thread work, to the end of `apply`. Read with
 // `scripts/morph-timings.sh --args "--window --router-v2-load --quit-after"`. `FJORD_LOAD_OFF=streams,reply,records,moves`
 // leaves those parts out, to see what each costs.
+//
+// `--router-v2-load real`: the shape of the owner's T3 day instead of the stress above. Twenty lines, two of them
+// streaming a verdict's words, a record about every second (one in ten moves its line), for thirty seconds, no reply
+// growing. The synthetic load stays the gate's target; this one must be comfortably green.
 
 @MainActor
 enum RouterV2Load {
     static var isRequested: Bool { CommandLine.arguments.contains("--router-v2-load") }
 
-    static let lines = 60
-    static let streaming = 8
-    static let seconds: Double = 12
+    /// `--router-v2-load real`: the realistic scenario.
+    static var isReal: Bool {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--router-v2-load"), i + 1 < args.count else { return false }
+        return args[i + 1] == "real"
+    }
+
+    static var lines: Int { isReal ? 20 : 60 }
+    static var streaming: Int { isReal ? 2 : 8 }
+    static var seconds: Double { isReal ? 30 : 12 }
+    /// Between two records, in ms: every 30 ms, or about a second (700–1300 ms) in the real one.
+    static func recordPause(_ n: Int) -> Int { isReal ? 700 + (n * 7919) % 601 : 30 }
+    /// One record in `moveEvery` moves its line.
+    static var moveEvery: Int { isReal ? 10 : 8 }
 
     /// The demo's records and 49 more, across five projects and every state.
     static func records() -> RouterV2Model {
@@ -25,7 +40,7 @@ enum RouterV2Load {
         let projects = ["fjord", "silo", "lcu", "docs-site", "val-cenis"]
         let states: [RouterV2Thread.State] = [.working, .working, .working, .done, .done, .needsYou(.question), .stopped]
         var more: [RouterV2Change] = []
-        for i in 0..<(lines - model.threads.count) {
+        for i in 0..<max(0, lines - model.threads.count) {
             let state = states[i % states.count]
             var t = RouterV2Thread(id: "load-\(i)", name: "Load thread \(i + 1)", title: "A thread of the load scenario, \(i + 1)",
                                    project: projects[i % projects.count], state: state,
@@ -59,7 +74,7 @@ enum RouterV2Load {
                     group.addTask { @MainActor in await stream(model, id, offset: n, until: end) }
                 }
                 if !off.contains("records") { group.addTask { @MainActor in await records(model, until: end) } }
-                if let first = working.first, !off.contains("reply") {
+                if let first = working.first, !off.contains("reply"), !isReal {
                     group.addTask { @MainActor in await reply(model, first, until: end) }
                 }
             }
@@ -84,7 +99,7 @@ enum RouterV2Load {
         }
     }
 
-    /// T3's records: one every 30 ms, each timed to its commit.
+    /// T3's records: one every 30 ms (about a second in the real scenario), each timed to its commit.
     private static func records(_ model: RouterV2Model, until end: Date) async {
         var n = 0
         while Date() < end {
@@ -93,7 +108,7 @@ enum RouterV2Load {
             guard !ids.isEmpty else { return }
             let id = ids[(n * 7919) % ids.count]
             if var t = model.thread(id) {
-                if n % 8 == 0, ProcessInfo.processInfo.environment["FJORD_LOAD_OFF"]?.contains("moves") != true {
+                if n % moveEvery == 0, ProcessInfo.processInfo.environment["FJORD_LOAD_OFF"]?.contains("moves") != true {
                     // Another state: the line moves.
                     t.state = t.state == .working ? .done : .working
                     t.sentence = .init(text: t.state == .working ? "Starting" : "finished", stream: t.sentence.stream)
@@ -108,7 +123,7 @@ enum RouterV2Load {
                 RouterSignposts.end(work)
                 RouterSignposts.end(event, afterCommit: true)
             }
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(for: .milliseconds(recordPause(n)))
         }
     }
 
