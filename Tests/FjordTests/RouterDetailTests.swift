@@ -206,4 +206,53 @@ import Testing
         #expect(RouterDetail.make(projection(), now: now).steers)
         #expect(!RouterDetail.make(projection(thread: ["providerInstanceId": "opencode"]), now: now).steers)
     }
+
+    /// Each run's start, from its message's fields as T3 sets them (R6): your words; a delegated completion or a subagent's
+    /// notification (the subagent's title); a background command's notification (its command); T3's own "continue" after
+    /// a usage limit (stamped as yours, `server`, the recovery's id); anything else T3 queued: resumed by itself.
+    @Test func runStarts() {
+        func run(_ id: String, _ message: String, ordinal: Int) -> T3JSON {
+            guard case .object(var o) = F.run(id, status: "completed") else { fatalError() }
+            o["userMessageId"] = .string(message); o["ordinal"] = .number(Double(ordinal))
+            return .object(o)
+        }
+        func message(_ id: String, _ text: String, _ extra: [String: T3JSON]) -> T3JSON {
+            guard case .object(var o) = F.message(id, text: text) else { fatalError() }
+            for (k, v) in extra { o[k] = v }
+            return .object(o)
+        }
+        let agent: [String: T3JSON] = ["createdBy": "agent", "creationSource": "server"]
+        let messages = [
+            message("m1", "  fix the   draft\n", [:]),
+            message("m2", "Delegated task finished", agent.merging(["delegatedCompletion": ["parentRunId": "r1", "generation": 1, "taskIds": ["n1"]]]) { $1 }),
+            message("m3", "Command finished", agent.merging(["notification": ["source": ["kind": "command"], "outcome": "completed",
+                                                                                "summary": "Command \"swift test --filter X\" finished (exit 0)"]]) { $1 }),
+            message("limit-resume:t1:r3:q1", "Continue where you left off.", ["createdBy": "user", "creationSource": "server"]),
+            message("m5", "/compact", agent.merging(["idleCompaction": "beforeCacheExpires"]) { $1 }),
+            message("m6", "Subagent finished", ["createdBy": "agent", "creationSource": "provider",
+                                                "notification": ["source": ["kind": "subagent", "childThreadId": "c2"], "outcome": "completed",
+                                                                 "summary": "Subagent finished"]]),
+            message("m7", "Monitor reported", agent.merging(["notification": ["source": ["kind": "monitor"], "outcome": "updated",
+                                                                              "summary": "Monitor reported new output"]]) { $1 }),
+            message("m8", "", [:]),
+        ]
+        let runs = (1...8).map { run("r\($0)", "m\($0)", ordinal: $0) }.enumerated().map { i, r -> T3JSON in
+            i == 3 ? run("r4", "limit-resume:t1:r3:q1", ordinal: 4) : r
+        }
+        var p = projection(runs: runs, messages: messages, status: "completed")
+        p.others["subagents"] = [["id": "n1", "title": "Review the diff", "prompt": "Look at it", "childThreadId": "c1"],
+                                 ["id": "n2", "title": nil, "prompt": "Check scroll restore\nthen report", "childThreadId": "c2"]]
+        let starts = RouterDetail.starts(p)
+        #expect(starts["r1"] == .asked("fix the   draft"))
+        #expect(starts["r2"] == .subagents(["Review the diff"]))
+        #expect(starts["r3"] == .command("swift test --filter X"))
+        #expect(starts["r4"] == .usageLimit)
+        #expect(starts["r5"] == .woken)
+        #expect(starts["r6"] == .subagents(["Check scroll restore"]))
+        #expect(starts["r7"] == .woken)
+        #expect(starts["r8"] == nil)
+        #expect(RouterDetail.commandLabel("2 commands finished") == nil)
+        #expect(RouterDetail.commandLabel("Command \"a\", command \"b\" finished") == nil)
+    }
 }
+

@@ -497,4 +497,23 @@ import Testing
         func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
         #expect(words(RouterSummaryPrompt.system) == words(v4))
     }
+
+    /// The card's timeline (R6): every kept summary, cut into runs newest first, each run followed by what started it; a
+    /// summary the timeline doesn't show yet counts on the new pill.
+    @Test func timelineEntries() {
+        typealias S = RouterWork.Summary
+        let at = RecordFixture.now
+        var work = RouterWork(summaries: [S(id: 4, text: "d", at: at, run: "b"), S(id: 3, text: "c", at: at, run: "b"),
+                                          S(id: 2, text: "b", at: at, run: "a"), S(id: 1, text: "a", at: at, run: "a")],
+                              run: "b", starts: ["b": .command("swift test"), "a": .asked("fix it")])
+        work.lineReadsNewest = true
+        let entries = RouterWorkTimeline.entries(work)
+        #expect(entries.map(\.id) == ["s3", "r3", "s2", "s1", "r1"])
+        #expect(entries.map(\.gap) == [0, Router.Work.rowGap, Router.Work.runGap, Router.Work.rowGap, Router.Work.rowGap])
+        let held = RouterWorkTimeline.entries(work, dropping: 1)
+        #expect(held.map(\.id) == ["s2", "s1", "r1"])
+        #expect(RouterWorkTimeline.newSummaries(entries, since: held) == 1)
+        #expect(RouterWorkTimeline.newSummaries(entries, since: entries) == 0)
+    }
 }
+
