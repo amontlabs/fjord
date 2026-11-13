@@ -139,9 +139,9 @@ struct RouterThinking: View {
     @Environment(\.routerStill) private var still
 
     var body: some View {
-        FjordLoader(color: tint, label: label, fromStart: true)
+        // A still (a shot, the demo's stills) draws one frame of its cycle; Reduce Motion, the whole mark.
+        FjordLoader(color: tint, label: label, fromStart: true, posed: still)
             .frame(width: size, height: size)
-            .transformEnvironment(\._accessibilityReduceMotion) { if still { $0 = true } }
     }
 }
 

@@ -47,10 +47,13 @@ struct FjordLoader: View {
     /// Starts its cycle at the whole mark when it appears, not on the wall clock's phase: for a small loader that comes
     /// and goes (the Router's), which would otherwise often come in as a trace.
     var fromStart = false
+    /// Drawn still for a picture (a shot, a still of the demo), not for Reduce Motion: one frame of its cycle (the sun
+    /// faded, the bands whole), so it reads as the loader at work, not as a filled disk.
+    var posed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        FjordLoaderRepresentable(color: NSColor(color), still: reduceMotion, fromStart: fromStart)
+        FjordLoaderRepresentable(color: NSColor(color), still: reduceMotion || posed, posed: posed, fromStart: fromStart)
             .aspectRatio(1, contentMode: .fit)
             .accessibilityElement()
             .accessibilityLabel(label)
@@ -60,6 +63,7 @@ struct FjordLoader: View {
 private struct FjordLoaderRepresentable: NSViewRepresentable {
     let color: NSColor
     let still: Bool
+    var posed = false
     var fromStart = false
 
     func makeNSView(context: Context) -> FjordLoaderView {
@@ -70,6 +74,7 @@ private struct FjordLoaderRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: FjordLoaderView, context: Context) {
         view.color = color
+        view.posed = posed
         view.still = still
     }
 }
@@ -82,6 +87,8 @@ final class FjordLoaderView: NSView {
 
     var color: NSColor = .labelColor { didSet { if color != oldValue { paint() } } }
     var still = false { didSet { if still != oldValue { animate() } } }
+    /// Still as one frame of the cycle (the sun at its trace), not the whole mark.
+    var posed = false { didSet { if posed != oldValue { animate() } } }
     /// The cycle starts at the whole mark each time it comes into view, not on the wall clock's phase.
     var fromStart = false
     private let layers = (0..<3).map { _ in CAShapeLayer() }
@@ -124,6 +131,7 @@ final class FjordLoaderView: NSView {
     /// Each part's fade, on the wall clock's phase so every loader on screen moves together; none when it can't be seen.
     private func animate() {
         for l in layers { l.removeAllAnimations(); l.opacity = 1 }
+        if still, posed { layers[0].opacity = Self.trace + 0.15 }
         guard !still, window != nil, !isHiddenOrHasHiddenAncestor else { return }
         // Smoothstep (3x² − 2x³) is exactly this cubic Bézier: control points evenly spaced in time, flat at both ends.
         let smooth = CAMediaTimingFunction(controlPoints: 1 / 3, 0, 2 / 3, 1), linear = CAMediaTimingFunction(name: .linear)
