@@ -269,13 +269,14 @@ between them and nothing repeats. Where an older rule below says otherwise (1.5'
   it all has no hover.
 - **Card**, under its line (which says the sentence), in order: the detail and the facts as the hover shows them; the
   source (the agent's own words: the last lines with rail, cut and Show all; an item's quote and its links; a plan; a
-  permission's command; your words); the history; the controls in one place (an item's or the ask's options, then
-  Done / Settle · Snooze / Stop / Continue, then Open in T3).
+  permission's command; your words); then the controls that answer it (an item's or the ask's options, a form,
+  Continue, the permission's buttons); THEN the history; last the footer's acts (Done / Settle · Snooze / Stop, Open in
+  T3). What matters now comes before the past, so the history never pushes the answer down.
 - **By state.** Done: sentence the outcome, facts PR, files, tests, source its last message. Working: sentence the
   summary, facts its subagents, background commands and waits, source the history itself. Needs you and items: sentence
   the item, detail why, source the quote, controls its options and Done. The engine fills `RouterThread.summary`
   (sentence, detail, facts, source) and `RouterItem.summary`; a question's own words are its detail until then.
-- **History** (`RouterThread.history`, newest first): on every thread's card, under the source (for Working it is the
+- **History** (`RouterThread.history`, newest first): on every thread's card, under the controls and above the footer (for Working it is the
   source, not repeated). Summaries as words (body 13 secondary); quiet one-liners (footnote, the mark 9 pt hung in the
   gutter) for an item raised (its kind's mark at 80 %), an item closed (struck, muted, its how after it) and a turn
   ended (`checkmark.circle`, its outcome); under each run what started it (R6). Clock times in the ages column. An item

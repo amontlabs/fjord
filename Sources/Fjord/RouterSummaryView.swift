@@ -271,10 +271,11 @@ private struct RouterSummaryCard: View {
             RouterLayerDetail(detail: layers.detail)
             RouterFacts(model: model, thread: thread, facts: layers.facts, live: true)
             source
-            // The thread's history, newest first: on every thread's card, not on an item's in a block (its header's
-            // card has it). For a summed-up working thread it is the source itself.
-            if !inBlock, RouterTimeline.has(thread) { RouterTimeline(thread: thread) }
+            // What answers it comes before the past: the controls, then the thread's history, newest first, on every
+            // thread's card but an item's in a block (its header's card has it); for a summed-up working thread it
+            // is the source itself. Then the footer's acts.
             controls
+            if !inBlock, RouterTimeline.has(thread) { RouterTimeline(thread: thread) }
             footer
         }
         .padding(.leading, inBlock ? Router.Items.indent + M.hang : M.leading)
@@ -390,6 +391,15 @@ private struct RouterSummaryCard: View {
     // MARK: Controls: options, then the footer
 
     @ViewBuilder private var controls: some View {
+        if item == nil, thread.state == .stopped {
+            // T3 has no rerun: Continue sends its words for it, and the destination row shows them. It answers the
+            // stop, so it sits with the controls, before the history.
+            RouterPushButton(model: model, hit: .footer(thread.id, .rerun), title: Router.Copy.continueTitle, keys: ["enter"]) {
+                model.resume(thread.id)
+            }
+            // Its title on the column, its ground around it.
+            .padding(.leading, -8)
+        }
         if let item {
             if !item.options.isEmpty {
                 RouterOptions(model: model, key: RouterModel.itemKey(thread.id, item.id), labels: item.options, from: 0)
@@ -450,14 +460,6 @@ private struct RouterSummaryCard: View {
     private var footer: some View {
         let id = thread.id
         return HStack(spacing: M.footerGap) {
-            if item == nil, thread.state == .stopped {
-                // T3 has no rerun: Continue sends its words for it, and the destination row shows them.
-                RouterPushButton(model: model, hit: .footer(id, .rerun), title: Router.Copy.continueTitle, keys: ["enter"]) {
-                    model.resume(id)
-                }
-                // Its title on the column, its ground around it.
-                .padding(.leading, -8)
-            }
             if item == nil, thread.state == .needsYou(.form) {
                 Text(verbatim: "\(model.answeredCount(thread)) of \(thread.form.count) answered")
                     .cdsText(d.footnote, .regular, CDS.Text.muted).contentTransition(.numericText())
