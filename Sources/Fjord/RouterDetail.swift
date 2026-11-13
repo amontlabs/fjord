@@ -49,6 +49,8 @@ struct RouterDetail: Equatable {
     var saidID: String?
     /// The kind of tool running now ("command", T3's tool name): a summary's fingerprint has it.
     var toolKind: String?
+    /// What started each of the latest runs, by run id: the working card's timeline shows it under the run's summaries.
+    var starts: [String: RouterWork.Start] = [:]
 
     /// Reads a projection. `now` stands in for a missing run start.
     static func make(_ p: T3Projection, now: Date) -> RouterDetail {
@@ -109,7 +111,68 @@ struct RouterDetail: Equatable {
 
         d.steers = ThreadSender.steers(session: p.capabilities, driver: p.thread.providerInstanceId)
         d.activity = RouterActivity.make(p)
+        d.starts = starts(p)
         return d
+    }
+
+    // MARK: Run starts
+
+    /// The runs whose start is read: as many as summaries are kept, each on its own run at most.
+    static let startsKept = 20
+
+    /// What started each of the latest runs, from its message's fields as T3 sets them (who wrote it, the delegated
+    /// completion or notification T3 queued it with, the limit recovery's message), never from the words.
+    static func starts(_ p: T3Projection) -> [String: RouterWork.Start] {
+        let runs = p.runs.filter { !$0.isQueued }.suffix(startsKept)
+        let wanted = Set(runs.compactMap(\.userMessageId))
+        guard !wanted.isEmpty else { return [:] }
+        var messages: [String: T3Message] = [:]
+        for m in p.messages where wanted.contains(m.id) { messages[m.id] = m }
+        var out: [String: RouterWork.Start] = [:]
+        for run in runs {
+            if let id = run.userMessageId, let m = messages[id], let start = start(m, p) { out[run.id] = start }
+        }
+        return out
+    }
+
+    /// One run's start from its message. Nil: your message with no words (only attachments), nothing to quote.
+    static func start(_ m: T3Message, _ p: T3Projection) -> RouterWork.Start? {
+        if let ids = m.delegatedTaskIds { return .subagents(subagentTitles(p, ids: ids, child: nil)) }
+        if let n = m.notification {
+            switch n.kind {
+            case "delegated_task", "subagent": return .subagents(subagentTitles(p, ids: [], child: n.childThreadId))
+            case "command": return .command(commandLabel(n.summary))
+            default: return .woken
+            }
+        }
+        guard m.createdBy == "user" else { return .woken }
+        // T3's own "continue" once a usage limit resets is stamped as yours; its id is the recovery's
+        // (`UsageLimitRecoveryWorker`: `limit-resume:<thread>:<run>:<request>`).
+        if m.creationSource == "server", m.id.hasPrefix(limitResumePrefix) { return .usageLimit }
+        let words = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return words.isEmpty ? nil : .asked(words)
+    }
+
+    static let limitResumePrefix = "limit-resume:"
+
+    /// The subagents' titles (else their prompt's first line), by their ids or their own thread, in T3's order.
+    private static func subagentTitles(_ p: T3Projection, ids: [String], child: String?) -> [String] {
+        let agents = p.others["subagents"] ?? []
+        let picked: [T3JSON] = child.map { c in agents.filter { $0.str("childThreadId") == c } }
+            ?? ids.compactMap { id in agents.first { $0.str("id") == id } }
+        return picked.compactMap { a in
+            let title = (a.str("title") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = title.isEmpty ? firstLine(a.str("prompt") ?? "") : title
+            return name.isEmpty ? nil : name
+        }
+    }
+
+    /// The command a `command` notification names: T3 writes its summary as `Command "<label>" finished (exit 0)`
+    /// (`backgroundWorkNotification`), the label the command's first line; nil when it names none, or several.
+    static func commandLabel(_ summary: String) -> String? {
+        guard let open = summary.firstIndex(of: "\""), let close = summary.lastIndex(of: "\""), open < close else { return nil }
+        let label = summary[summary.index(after: open)..<close]
+        return label.isEmpty || label.contains("\"") ? nil : String(label)
     }
 
     // MARK: Pieces

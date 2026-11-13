@@ -852,7 +852,8 @@ final class RouterRecords {
         r.activity = d?.activity ?? .init()
         r.diff = d?.diff
         if code.state == .working {
-            r.work = RouterWork(summaries: keep?.summaries ?? [], now: d?.workNow, recent: d?.workRecent ?? [], run: t.latestRunID)
+            r.work = RouterWork(summaries: keep?.summaries ?? [], now: d?.workNow, recent: d?.workRecent ?? [], run: t.latestRunID,
+                                starts: d?.starts ?? [:])
             if !code.paused { summed(&r, e, run: t.latestRunID) }
         }
         r.queued = e.queued ?? d?.queued.first { e.cancelled[$0.id] == nil }?.words

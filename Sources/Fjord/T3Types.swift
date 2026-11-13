@@ -490,14 +490,34 @@ struct T3Message: T3Decodable, Hashable, Sendable, Identifiable {
     var runId: String?
     var role: String
     var createdBy: String
+    /// Where it was written: `web`, `mobile`, `mcp` (Fjord), `provider` or `server` (T3 itself).
+    var creationSource: String
     var text: String
     var streaming: Bool
     var createdAt: T3Timestamp?
     var updatedAt: T3Timestamp?
+    /// T3 queued it when delegated tasks ended (`delegatedCompletion.taskIds`): the subagents' ids; nil for any other.
+    var delegatedTaskIds: [String]?
+    /// T3 queued it when background work ended (`notification`): its source's kind (`delegated_task`, `subagent`,
+    /// `command`, `monitor`, `background_task`, `system`), the subagent's thread, and T3's one-line summary.
+    var notification: Notification?
+
+    struct Notification: Hashable, Sendable {
+        var kind: String
+        var childThreadId: String?
+        var summary: String
+    }
+
     init(json j: T3JSON) {
         id = j.str("id") ?? ""; runId = j.str("runId"); role = j.str("role") ?? ""
-        createdBy = j.str("createdBy") ?? ""; text = j.str("text") ?? ""; streaming = j.flag("streaming")
+        createdBy = j.str("createdBy") ?? ""; creationSource = j.str("creationSource") ?? ""
+        text = j.str("text") ?? ""; streaming = j.flag("streaming")
         createdAt = j.ts("createdAt"); updatedAt = j.ts("updatedAt")
+        delegatedTaskIds = j["delegatedCompletion"]?["taskIds"]?.array?.compactMap(\.string)
+        if let n = j["notification"], let source = n["source"] {
+            notification = Notification(kind: source.str("kind") ?? "", childThreadId: source.str("childThreadId"),
+                                        summary: n.str("summary") ?? "")
+        }
     }
 }
 

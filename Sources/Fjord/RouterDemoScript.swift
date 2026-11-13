@@ -135,6 +135,7 @@ final class RouterDemoScript {
         12.0, 5.6, 3.2, 3.2, 5.6, 5.4, 6.8, 6.4, 20.4, 6.0, // 34–43 clear
         7.0,                                                // 44    a cold launch
         21.0,                                               // 45    open items
+        8.0,                                                // 46    a working card read back
     ]
     /// When each beat starts, and when the last one ends.
     private static let times: [Double] = lengths.reduce(into: [0]) { $0.append($0[$0.count - 1] + $1) }
@@ -343,6 +344,11 @@ final class RouterDemoScript {
             itemsScene()
             try? await Task.sleep(for: .seconds(0.6))
         }
+        // Played alone from beat 46: Tab handover's card open on its whole history, read back, before the frames start.
+        if (only?.first ?? from) == 46 {
+            timelineScene()
+            try? await Task.sleep(for: .seconds(0.6))
+        }
         if from == nil { RouterDemo.frames?.start() }
         let beats: [(Int, () async -> Void)] = [
             (1, beat1), (2, beat2), (3, beat3), (4, beat4), (5, beat5), (6, beat6), (7, beat7), (8, beat8), (9, beat9), (10, beat10),
@@ -350,7 +356,7 @@ final class RouterDemoScript {
             (20, beat20), (21, beat21), (22, beat22), (23, beat23), (24, beat24), (25, beat25), (26, beat26), (27, beat27),
             (28, beat28), (29, beat29), (30, beat30), (31, beat31), (32, beat32), (33, beat33), (34, beat34), (35, beat35),
             (36, beat36), (37, beat37), (38, beat38), (39, beat39), (40, beat40), (41, beat41), (42, beat42), (43, beat43),
-            (44, beat44), (45, beat45),
+            (44, beat44), (45, beat45), (46, beat46),
         ]
         if let shape = Self.selectCheck {
             RouterDemo.frames?.start()
@@ -1033,5 +1039,28 @@ final class RouterDemoScript {
         RouterFrames.note("turn read")
         model.itemsRead(ID.checkpoint, RouterDemo.turnRead)
         await pause(2.2)
+    }
+
+    // Act 8: a working card read back (DESIGN.md R6)
+
+    /// Tab handover's card open on its twenty summaries, scrolled down them.
+    private func timelineScene() {
+        RouterDemo.workingScrolled(model, newer: 0)
+        model.select(.line(ID.tab))
+    }
+
+    private func beat46() async {
+        if model.thread(ID.tab)?.work.pose == nil { timelineScene() }
+        await beat(46, "New summaries while you read back wait behind a pill")
+        await pause(0.8)
+        RouterFrames.note("new")
+        RouterDemo.newSummary(model, "Caret kept; running the handover tests again")
+        await pause(1.4)
+        RouterFrames.note("new 2")
+        RouterDemo.newSummary(model, "Handover tests pass; the caret and the draft both survive")
+        await pause(1.4)
+        RouterFrames.note("to top")
+        RouterDemo.timelineToTop(model)
+        await pause(2.0)
     }
 }

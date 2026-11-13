@@ -168,10 +168,16 @@ enum RouterShots {
             RouterDemo.workingSummaries(model)
             model.select(.line(ID.tab))
         },
-        // Three runs read as a conversation: each run's summaries, then under them your words that started it (or that T3
-        // woke it), newest first.
+        // Five runs read as a conversation: each run's summaries, then under them what started it as T3 marks it (your
+        // words, a subagent or a background command finishing, the usage limit's reset), newest first.
         State(name: "v2-working-card-runs") { model in
             RouterDemo.workingRuns(model)
+            model.select(.line(ID.tab))
+        },
+        // The whole kept history read back: scrolled down inside the card, faded at its bottom, two new summaries held
+        // behind the `↑ 2 new` pill at its top edge.
+        State(name: "v2-working-card-scroll") { model in
+            RouterDemo.workingScrolled(model)
             model.select(.line(ID.tab))
         },
         // A new summary being written: the line sheens on its last one, the card's timeline unchanged under it.
