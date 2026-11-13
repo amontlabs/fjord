@@ -6,16 +6,18 @@ import SwiftUI
 
 extension Router {
     enum Work {
-        /// The card's timeline: this many summaries, then "N earlier".
+        /// The card's timeline: this many summaries, then a quiet "Show all".
         static let timeline = 5
         /// The peek's earlier steps.
         static let recent = 3
         /// The working peek: commands and the activity's meta need more room than the name's peek.
         static let peekWidth: CGFloat = 400
-        /// A timeline mark: the newest a little larger.
-        static let dot: CGFloat = 5
-        /// The quiet break before an earlier run's summaries.
-        static let earlierRun = "earlier run"
+        /// Between a run's summaries, and between a run's summaries and what started it.
+        static let rowGap: CGFloat = 3
+        /// Between one run and the one before it.
+        static let runGap: CGFloat = 9
+        /// A run T3 woke with no message of yours.
+        static let woken = "woke on its own"
     }
 }
 
@@ -29,67 +31,102 @@ extension RouterThread {
     var peeksWork: Bool { state == .working && (work.hasSteps || !activity.isEmpty) }
 }
 
-/// Each summary the model wrote of the run, newest first: a mark on a hairline rail in the glyph column (the steps' and
-/// the activity's), the words at the prose's width, and its clock time trailing in the line's ages column. The newest
-/// isn't listed while the line above reads it (`RouterWork.lineReadsNewest`): the timeline is what came before.
+/// What the thread did, as the Router's model summed it up, newest first, read as a conversation: each run's summaries,
+/// then under them, quiet, what started the run: your message (`↑ "fix the timeline…"`, one line), or that T3 woke the
+/// agent itself. The arrow points up at what your words led to. The words sit on the line's text column, the clock times
+/// trail in the line's ages column. The newest isn't listed while the line above reads it (`RouterWork.lineReadsNewest`).
 struct RouterWorkTimeline: View {
     let work: RouterWork
+
+    @State private var all = false
+    @State private var hot = false
 
     private typealias W = Router.Work
     private var d: CDS.Density { .compact }
 
+    /// A run's summaries in the card, and what started it once its first summary is shown.
+    private struct Run: Identifiable {
+        var id: Int
+        var summaries: [RouterWork.Summary]
+        var start: RouterWork.Start?
+    }
+
     var body: some View {
-        let all = work.listed
-        let shown = Array(all.prefix(W.timeline))
+        let listed = Array(work.listed)
+        let shown = all ? listed : Array(listed.prefix(W.timeline))
+        let runs = Self.runs(shown, cut: shown.count < listed.count, work: work)
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(shown.enumerated()), id: \.element.id) { i, s in
-                // A run before the one working now: a quiet break above its first summary, and nothing of it reads current.
-                let earlier = s.run != work.run && (i == 0 ? true : shown[i - 1].run != s.run)
-                let newest = i == 0 && !work.lineReadsNewest && s.run == work.run
-                if earlier {
-                    Text(Router.Work.earlierRun).cdsText(d.footnote, .regular, CDS.Text.muted)
-                        .padding(.leading, Router.Activity.glyphBox + 7)
-                        .padding(.top, i == 0 ? 0 : 4).padding(.bottom, 4)
+            ForEach(Array(runs.enumerated()), id: \.element.id) { i, run in
+                VStack(alignment: .leading, spacing: W.rowGap) {
+                    ForEach(run.summaries) { s in
+                        row(s, newest: i == 0 && s.id == listed.first?.id && !work.lineReadsNewest && s.run == work.run)
+                    }
+                    if let start = run.start { self.start(start) }
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(RouterInline.text(s.text, size: d.body.0))
-                        .cdsText(d.body, .regular, newest ? CDS.Text.primary : CDS.Text.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, Router.Activity.glyphBox + 7)
-                        .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
-                    Spacer(minLength: 8)
-                    Text(RouterWorkTime.clock(s.at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
-                        .fixedSize()
-                }
-                .padding(.bottom, i == shown.count - 1 ? 0 : 6)
-                .overlay(alignment: .topLeading) {
-                    mark(newest: newest, first: i == 0 || earlier, last: i == shown.count - 1 || shown[i + 1].run != s.run)
-                }
+                .padding(.top, i == 0 ? 0 : W.runGap)
             }
-            if all.count > shown.count {
-                Text(verbatim: "\(all.count - shown.count) earlier").cdsText(d.footnote, .regular, CDS.Text.muted)
-                    .padding(.leading, Router.Activity.glyphBox + 7).padding(.top, 4)
-            }
+            if listed.count > W.timeline { more(open: all).padding(.top, 2) }
         }
+        .padding(.leading, Router.Activity.glyphBox + 7)
         .agesColumn()
         .accessibilityElement(children: .combine)
     }
 
-
-    /// The row's mark on the rail: a hairline from the row above's mark into this one, and on from it to the row's end
-    /// (where the next row's picks up), each stopping 3 pt clear of the mark.
-    private func mark(newest: Bool, first: Bool, last: Bool) -> some View {
-        let lineMid = d.body.1 / 2
-        let size = newest ? W.dot + 1 : W.dot
-        let clear: CGFloat = 3
-        return VStack(spacing: 0) {
-            Rectangle().fill(first ? .clear : CDS.Settings.railLine).frame(width: 1, height: max(0, lineMid - size / 2 - clear))
-            Circle().fill(newest ? CDS.Text.secondary : CDS.Text.muted.opacity(0.7)).frame(width: size, height: size)
-                .padding(.vertical, clear)
-            Rectangle().fill(last ? .clear : CDS.Settings.railLine).frame(width: 1).frame(maxHeight: .infinity)
+    /// The shown summaries cut into runs, newest first. A run whose first summary is cut off doesn't show what started it.
+    private static func runs(_ shown: [RouterWork.Summary], cut: Bool, work: RouterWork) -> [Run] {
+        var runs: [Run] = []
+        for s in shown {
+            if let last = runs.last, last.summaries.last?.run == s.run {
+                runs[runs.count - 1].summaries.append(s)
+            } else {
+                runs.append(Run(id: s.id, summaries: [s]))
+            }
         }
-        .frame(width: Router.Activity.glyphBox)
-        .frame(maxHeight: .infinity, alignment: .top)
+        for i in runs.indices where !(cut && i == runs.count - 1) {
+            if let run = runs[i].summaries.first?.run { runs[i].start = work.starts[run] }
+        }
+        return runs
+    }
+
+    private func row(_ s: RouterWork.Summary, newest: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(RouterInline.text(s.text, size: d.body.0))
+                .cdsText(d.body, .regular, newest ? CDS.Text.primary : CDS.Text.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
+            Spacer(minLength: 8)
+            Text(RouterWorkTime.clock(s.at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
+                .fixedSize()
+        }
+    }
+
+    /// Your words that started the run, quoted on one line; or, quieter still and unquoted, that T3 woke it.
+    private func start(_ start: RouterWork.Start) -> some View {
+        let words: String
+        let ink: Color
+        switch start {
+        case .asked(let text):
+            words = "\u{201C}" + text.split(whereSeparator: \.isWhitespace).joined(separator: " ") + "\u{201D}"
+            ink = CDS.Text.muted
+        case .woken:
+            words = W.woken
+            ink = CDS.Text.muted.opacity(0.7)
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "arrow.up").font(.system(size: 9, weight: .medium)).foregroundStyle(ink)
+            Text(words).cdsText(d.footnote, .regular, ink).lineLimit(1).truncationMode(.tail)
+        }
+        .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
+    }
+
+    /// "Show all" under a cut timeline, "Show less" under an open one.
+    private func more(open: Bool) -> some View {
+        Button { withAnimation(.snappy(duration: 0.25)) { all.toggle() } } label: {
+            Text(open ? "Show less" : "Show all").cdsText(d.footnote, .regular, hot ? CDS.Text.primary : CDS.Text.muted)
+                .frame(height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hot = $0 }
     }
 }
 

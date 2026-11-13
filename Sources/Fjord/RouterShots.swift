@@ -167,6 +167,12 @@ enum RouterShots {
             RouterDemo.workingSummaries(model)
             model.select(.line(ID.tab))
         },
+        // Three runs read as a conversation: each run's summaries, then under them your words that started it (or that T3
+        // woke it), newest first.
+        State(name: "v2-working-card-runs") { model in
+            RouterDemo.workingRuns(model)
+            model.select(.line(ID.tab))
+        },
         // A new summary being written: the line sheens on its last one, the card's timeline unchanged under it.
         State(name: "v2-working-writing") { model in
             RouterDemo.workingSummaries(model)

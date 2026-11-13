@@ -12,15 +12,22 @@ extension RouterDemo {
         typealias S = RouterWork.Summary
         typealias Step = RouterWork.Step
 
+        // Two runs: the one working now, from your words about the caret, and the one before it, from your first ask.
         let tab = RouterWork(
-            summaries: [S(id: 3, text: "Putting the caret back where it was; two reviews running", at: ago(1)),
-                        S(id: 2, text: "The draft now survives the handover; the caret is next", at: ago(5)),
-                        S(id: 1, text: "Found the gap: the composer remounts before the draft is copied", at: ago(9)),
-                        S(id: 0, text: "Reading how the tab hands its composer over", at: ago(12))],
+            summaries: [S(id: 6, text: "Putting the caret back where it was; two reviews running", at: ago(1), run: "r2"),
+                        S(id: 5, text: "The caret jumps because the field is rebuilt, not moved", at: ago(4), run: "r2"),
+                        S(id: 4, text: "Reproduced the caret jump with a long draft", at: ago(7), run: "r2"),
+                        S(id: 3, text: "Handover tests pass; draft and scroll survive the move", at: ago(16), run: "r1"),
+                        S(id: 2, text: "The draft now survives the handover; the caret is next", at: ago(19), run: "r1"),
+                        S(id: 1, text: "Found the gap: the composer remounts before the draft is copied", at: ago(23), run: "r1"),
+                        S(id: 0, text: "Reading how the tab hands its composer over", at: ago(26), run: "r1")],
             now: Step(id: 9, text: "swift test --filter TabHandoverTests", mono: true, at: ago(0.4)),
             recent: [Step(id: 8, text: "Edited ComposerCaret.swift", at: ago(1)),
                      Step(id: 7, text: "rg -n \"caretRange\" Sources/Fjord", mono: true, at: ago(2)),
-                     Step(id: 6, text: "Read TabHandover.swift", at: ago(3))])
+                     Step(id: 6, text: "Read TabHandover.swift", at: ago(3))],
+            run: "r2",
+            starts: ["r2": .asked("the caret still jumps to the end after the handover, can you keep it where it was?"),
+                     "r1": .asked("moving a tab to another window loses the draft in its composer, fix it")])
 
         let snapshot = RouterWork(
             summaries: [S(id: 2, text: "Restore by id passes; running the whole snapshot suite", at: ago(2)),
@@ -65,6 +72,30 @@ extension RouterDemo {
             changes.append(.upsert(t))
         }
         model.apply(.batch(changes))
+    }
+
+    /// Tab handover over three runs, read as a conversation (shot `v2-working-card-runs`): your ask about the caret, which
+    /// it is working on now; before it a run T3 woke when the background test run ended; and your first ask.
+    static func workingRuns(_ model: RouterModel) {
+        workingSummaries(model)
+        guard var t = model.thread(ID.tab) else { return }
+        let now = model.now
+        func ago(_ m: Double) -> Date { now.addingTimeInterval(-m * 60) }
+        typealias S = RouterWork.Summary
+        t.work.summaries = [
+            S(id: 6, text: "Putting the caret back where it was; two reviews running", at: ago(1), run: "r3"),
+            S(id: 5, text: "The caret jumps because the field is rebuilt, not moved", at: ago(4), run: "r3"),
+            S(id: 4, text: "Two handover tests failed on a slow window; fixed the wait", at: ago(11), run: "r2"),
+            S(id: 3, text: "All handover tests pass; nothing else broke", at: ago(13), run: "r2"),
+            S(id: 2, text: "The draft now survives the handover; tests running in the background", at: ago(19), run: "r1"),
+            S(id: 1, text: "Found the gap: the composer remounts before the draft is copied", at: ago(23), run: "r1"),
+        ]
+        t.work.run = "r3"
+        t.work.starts = ["r3": .asked("the caret still jumps to the end after the handover, can you keep it where it was?"),
+                         "r2": .woken,
+                         "r1": .asked("moving a tab to another window loses the draft in its composer, fix it")]
+        t.sentence = .init(text: t.work.summaries[0].text)
+        model.apply(.upsert(t))
     }
 
     /// The Router's model is writing the thread's next summary: the line sheens on the newest, which the card still leaves

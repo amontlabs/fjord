@@ -38,8 +38,18 @@ struct RouterWork: Equatable {
     var now: Step?
     /// The ones that ran before it, newest first: a few.
     var recent: [Step] = []
-    /// The run working now: its summaries are the current ones; an earlier run's are listed after a quiet break.
+    /// The run working now: its summaries are the current ones; an earlier run's are listed under what started it.
     var run: String?
+    /// What started each run, by its id: your message, or T3 waking the agent itself (a background task ending, a
+    /// timer). A run missing here started from something not known: the card shows nothing for it.
+    var starts: [String: Start] = [:]
+
+    enum Start: Equatable {
+        /// Your message that started the run: the card shows it, quiet, under the run's summaries.
+        case asked(String)
+        /// T3 woke the agent with no message of yours.
+        case woken
+    }
 
     /// Summaries of the run working now (a restarted thread's earlier runs aren't its current step).
     var current: Bool { summaries.first.map { $0.run == run } ?? false }
