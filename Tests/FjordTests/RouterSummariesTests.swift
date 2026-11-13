@@ -214,8 +214,13 @@ import Testing
         h.records.detail("t1", Self.detail(said: "Copy moved.", id: "m2"))
         let second = try #require(h.summaries.last)
         #expect(h.records.record("t1")?.sentence.phase == .reassessing)
+        // Sheening, the line still reads the newest: the card leaves it to the line. Streaming, it lists it.
+        #expect(h.records.record("t1")?.work.lineReadsNewest == true)
         h.records.summary("t1", fingerprint: second.fingerprint, .words("Copy mo", done: false))
+        #expect(h.records.record("t1")?.work.lineReadsNewest == false)
+        #expect(h.records.record("t1")?.work.listed.first?.text == "Moving the draft copy earlier")
         h.records.summary("t1", fingerprint: second.fingerprint, .failed)
+        #expect(h.records.record("t1")?.work.lineReadsNewest == true)
         let r = try #require(h.records.record("t1"))
         #expect(r.sentence.text == "Moving the draft copy earlier")
         #expect(r.sentence.phase == .settled)

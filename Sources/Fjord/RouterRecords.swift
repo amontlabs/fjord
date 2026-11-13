@@ -668,9 +668,13 @@ final class RouterRecords {
                 break
             case .words(let text, let done):
                 guard !text.isEmpty else { return }
-                if e.summaryWords == nil { e.stream += 1 }
+                let first = e.summaryWords == nil
+                if first { e.stream += 1 }
                 e.summaryWords = text
                 stream(id, text: text, done: done)
+                // Its first words: the record once (the card lists the summary the line no longer reads); the rest
+                // grow on the words alone.
+                if first { refresh(id) }
             case .done(let v):
                 let streamed = e.summaryWords
                 e.summarizing = false
@@ -804,7 +808,10 @@ final class RouterRecords {
             r.sentence = .init(text: words, phase: .streaming, stream: e.stream)
             return
         }
-        if let newest = r.work.summaries.first, newest.run == run { r.sentence = .init(text: newest.text, stream: e.stream) }
+        if let newest = r.work.summaries.first, newest.run == run {
+            r.sentence = .init(text: newest.text, stream: e.stream)
+            r.work.lineReadsNewest = true
+        }
         if e.summarizing { r.sentence.phase = .reassessing }
     }
 

@@ -54,7 +54,10 @@ extension RouterDemo {
         for (id, work) in work(at: now) {
             guard var t = model.thread(id), t.state == .working else { continue }
             t.work = work
-            if let summary = work.summaries.first { t.sentence = .init(text: summary.text) }
+            if let summary = work.summaries.first {
+                t.sentence = .init(text: summary.text)
+                t.work.lineReadsNewest = true
+            }
             if let a = activity[id] { t.activity = a }
             if id == ID.checkpoint {
                 t.steps = steps(["Build the boot image", "Boot the VM from the checkpoint", "Check the boot log"], running: 1)
@@ -62,5 +65,13 @@ extension RouterDemo {
             changes.append(.upsert(t))
         }
         model.apply(.batch(changes))
+    }
+
+    /// The Router's model is writing the thread's next summary: the line sheens on the newest, which the card still leaves
+    /// to it (as the records do until the new words stream in).
+    static func writingSummary(_ model: RouterModel, _ id: String) {
+        guard var t = model.thread(id) else { return }
+        t.sentence.phase = .reassessing
+        model.apply(.upsert(t))
     }
 }

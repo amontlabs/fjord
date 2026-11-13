@@ -31,6 +31,9 @@ struct RouterWork: Equatable {
 
     /// Newest first.
     var summaries: [Summary] = []
+    /// The line reads the newest summary now (not one streaming in, nor the code's words): the card lists the ones
+    /// before it. A flag, not the sentence, so the card doesn't redraw as words stream.
+    var lineReadsNewest = false
     /// The command or tool running now.
     var now: Step?
     /// The ones that ran before it, newest first: a few.

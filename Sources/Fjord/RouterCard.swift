@@ -100,12 +100,12 @@ struct RouterCard: View {
             // A thread started here: what it runs on, through its first run.
             if let launch = thread.launch { started(launch) }
             // What it has been doing, as the Router's model summed it up, newest first.
-            if summarized { RouterWorkTimeline(summaries: thread.work.summaries).prose() }
+            if summarized, !thread.work.listed.isEmpty { RouterWorkTimeline(work: thread.work) }
             // T3's to-do steps, when the thread has a list (Claude sends one only with T3's to-do setting on).
             if !thread.steps.isEmpty { steps.prose() }
             // Its subagents, background commands and waits, each with how long it has run.
             if !thread.activity.isEmpty {
-                RouterActivityRows(model: model, activity: thread.activity, compact: true).prose()
+                RouterActivityRows(model: model, activity: thread.activity, compact: true).agesColumn()
                     .transition(.opacity)
             }
         case .sent:

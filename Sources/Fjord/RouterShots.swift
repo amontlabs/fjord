@@ -158,6 +158,12 @@ enum RouterShots {
             RouterDemo.workingSummaries(model)
             model.select(.line(ID.tab))
         },
+        // A new summary being written: the line sheens on its last one, the card's timeline unchanged under it.
+        State(name: "v2-working-writing") { model in
+            RouterDemo.workingSummaries(model)
+            RouterDemo.writingSummary(model, ID.tab)
+            model.select(.line(ID.tab))
+        },
         // With a to-do list and waits: the timeline, then the steps, then what it waits on.
         State(name: "v2-working-card-steps") { model in
             RouterDemo.workingSummaries(model)

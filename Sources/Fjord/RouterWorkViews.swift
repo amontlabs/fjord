@@ -17,42 +17,52 @@ extension Router {
     }
 }
 
+extension RouterWork {
+    /// The summaries the card lists: all but the newest while the line reads it.
+    var listed: ArraySlice<Summary> { lineReadsNewest ? summaries.dropFirst() : summaries[...] }
+}
+
 extension RouterThread {
     /// A working line whose peek lists its raw detail: what runs now and before, or its subagents, commands and waits.
     var peeksWork: Bool { state == .working && (work.hasSteps || !activity.isEmpty) }
 }
 
 /// Each summary the model wrote of the run, newest first: a mark on a hairline rail in the glyph column (the steps' and
-/// the activity's), the words, and its clock time trailing at the prose's edge, where the activity's ages end.
+/// the activity's), the words at the prose's width, and its clock time trailing in the line's ages column. The newest
+/// isn't listed while the line above reads it (`RouterWork.lineReadsNewest`): the timeline is what came before.
 struct RouterWorkTimeline: View {
-    let summaries: [RouterWork.Summary]
+    let work: RouterWork
 
     private typealias W = Router.Work
     private var d: CDS.Density { .compact }
 
     var body: some View {
-        let shown = Array(summaries.prefix(W.timeline))
+        let all = work.listed
+        let shown = Array(all.prefix(W.timeline))
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { i, s in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(RouterInline.text(s.text, size: d.body.0))
-                        .cdsText(d.body, .regular, i == 0 ? CDS.Text.primary : CDS.Text.secondary)
+                        .cdsText(d.body, .regular, i == 0 && !work.lineReadsNewest ? CDS.Text.primary : CDS.Text.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, Router.Activity.glyphBox + 7)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
+                    Spacer(minLength: 8)
                     Text(RouterWorkTime.clock(s.at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
                         .fixedSize()
                 }
                 .padding(.bottom, i == shown.count - 1 ? 0 : 6)
-                .overlay(alignment: .topLeading) { mark(newest: i == 0, first: i == 0, last: i == shown.count - 1) }
+                .overlay(alignment: .topLeading) { mark(newest: i == 0 && !work.lineReadsNewest, first: i == 0, last: i == shown.count - 1) }
             }
-            if summaries.count > shown.count {
-                Text(verbatim: "\(summaries.count - shown.count) earlier").cdsText(d.footnote, .regular, CDS.Text.muted)
+            if all.count > shown.count {
+                Text(verbatim: "\(all.count - shown.count) earlier").cdsText(d.footnote, .regular, CDS.Text.muted)
                     .padding(.leading, Router.Activity.glyphBox + 7).padding(.top, 4)
             }
         }
+        .agesColumn()
         .accessibilityElement(children: .combine)
     }
+
 
     /// The row's mark on the rail: a hairline from the row above's mark into this one, and on from it to the row's end
     /// (where the next row's picks up), each stopping 3 pt clear of the mark.
@@ -68,6 +78,14 @@ struct RouterWorkTimeline: View {
         }
         .frame(width: Router.Activity.glyphBox)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+extension View {
+    /// Runs a card block out to the line's ages column (its times trailing where the line's age ends), past the card's
+    /// trailing inset, as the options' ground does.
+    func agesColumn() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, -(Router.Card.trailing - Router.Line.reach))
     }
 }
 
