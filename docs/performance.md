@@ -212,6 +212,7 @@ Gates (2.4), release build, 1617 × 1188, 2026-11-13. The machine was **not quie
 | Bodies per change | `RouterRenderTests` | 1 line body per upsert, 0 list; 2 per hover | as budgeted | green |
 | Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 % | green |
 | Idle, window closed | `scripts/idle-cpu.sh` (rest) | ≤ 0.1 % | 0.000 % | green |
+| Idle, window open on `agents` | `scripts/idle-cpu.sh` (open) | ≤ 0.1 % | 0.200 % (0.233 % on the commit before the deletion) | red, not new |
 | Open / Close | `morph-timings --scenario router --steps "open,close x10"` | p95 ≤ 325 ms | Open 316 / 320, Close 320 / 321 | green |
 | First flush | same | p95 ≤ 16 ms | Open 17 / 18, Close 10 / 8 | Open red by 1-2 ms |
 | Captures inside a morph | same | 0 | 0 | green |
