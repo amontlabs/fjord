@@ -69,6 +69,9 @@ struct RouterItem: Identifiable, Equatable {
     var state: State = .open
 
     var closing: Bool { if case .closing = state { true } else { false } }
+    /// What a read under way found, shown before it lands (with the id it lands with): not in the ledger yet, so it
+    /// has no Done.
+    var preview = false
     /// Still open: counted, ranked, walked.
     var live: Bool { !closing }
 }

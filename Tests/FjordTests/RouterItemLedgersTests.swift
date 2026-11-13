@@ -571,6 +571,34 @@ import Testing
         #expect(h.record?.section == .done)
     }
 
+    /// REVIEW-items 1.8: a read made before your Done that restates the item doesn't bring it back under a new id, and
+    /// Revert then makes no duplicate.
+    @Test func aReadUnderWayCantBringBackAnItemYouMarkedDone() throws {
+        let h = seeded()
+        h.records.put(Self.ended("r2"))
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Still: keep 0.3 or delete it?")]))
+        h.records.itemDone("t1", item: "i1", on: true)
+        h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "keep 0.3 or delete it? (asked again)", sameAs: "i1")]))
+        h.records.items.settle("t1")
+        #expect(h.saved?.items.map(\.id) == ["i2"])
+        #expect(h.ledger.items.map(\.id) == ["i2"])
+        h.records.itemDone("t1", item: "i1", on: false)
+        #expect(h.saved?.items.map(\.id) == ["i1", "i2"])
+    }
+
+    /// REVIEW-items 1.9: Done's Revert works after the thread's state in memory is gone (a relaunch, the thread leaving
+    /// T3's list and coming back).
+    @Test func doneRevertsAfterARelaunch() throws {
+        let h = seeded()
+        h.records.itemDone("t1", item: "i1", on: true)
+        h.records.items.settle("t1")
+        let again = Harness(saved: RouterVerdictFile.decode(try #require(RouterVerdictFile.encode(h.records.saved))))
+        again.records.put(Self.ended())
+        again.records.itemDone("t1", item: "i1", on: false)
+        #expect(again.saved?.items.map(\.id) == ["i1", "i2"])
+        #expect(again.ledger.items.map(\.id) == ["i1", "i2"])
+    }
+
     @Test func withTheRouterOffNothingIsRead() {
         let h = Harness()
         h.records.canAsk = { false }

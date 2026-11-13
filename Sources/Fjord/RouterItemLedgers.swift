@@ -97,6 +97,9 @@ struct RouterItemFacts: Equatable, Sendable {
         var sent: [Sent] = []
         /// What was open when the thread was settled, kept for the Settle's Revert until a new run starts.
         var settled: Stash?
+        /// Items you marked Done, newest last: their Revert puts them back where they were, and a read under way that
+        /// restates or closes one doesn't bring it back.
+        var done: [Done] = []
 
         init(items: [RouterItem] = [], next: Int = 1, read: [String] = [], line: String? = nil, lineRun: String? = nil,
              run: String? = nil, message: Date? = nil, pending: [Input] = []) {
@@ -110,7 +113,7 @@ struct RouterItemFacts: Equatable, Sendable {
             self.pending = pending
         }
 
-        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending, sent, settled }
+        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending, sent, settled, done }
 
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
@@ -124,8 +127,17 @@ struct RouterItemFacts: Equatable, Sendable {
             pending = try c.decodeIfPresent([Input].self, forKey: .pending) ?? []
             sent = try c.decodeIfPresent([Sent].self, forKey: .sent) ?? []
             settled = try c.decodeIfPresent(Stash.self, forKey: .settled)
+            done = try c.decodeIfPresent([Done].self, forKey: .done) ?? []
         }
     }
+
+    /// An item you marked Done, and where it was.
+    struct Done: Codable, Equatable {
+        var item: RouterItem
+        var index: Int
+    }
+
+    static let doneKept = 20
 
     /// A settled thread's ledger, as it was.
     struct Stash: Codable, Equatable {
@@ -239,8 +251,6 @@ struct RouterItemFacts: Equatable, Sendable {
         var pulse = 0
         /// A turn's line as it streams.
         var words: String?
-        /// Items you marked Done, for their Revert: the item and where it was.
-        var done: [String: (index: Int, item: RouterItem)] = [:]
         var settleToken = 0
         /// Your words sent from here in this run of Fjord, by key, and whether T3 took them: only taken words are read.
         var sending: [String: Bool] = [:]
@@ -582,6 +592,8 @@ struct RouterItemFacts: Equatable, Sendable {
         s.items.removeAll { a.close[$0.id] != nil }
         var added: [RouterItem] = []
         for f in a.found {
+            // Restating an item you marked Done while the read was under way: it stays done.
+            if let same = f.sameAs, s.done.contains(where: { $0.item.id == same }) { continue }
             if let same = f.sameAs, let i = s.items.firstIndex(where: { $0.id == same }) {
                 s.items[i].sentence = f.sentence
                 s.items[i].kind = f.kind
@@ -650,24 +662,29 @@ struct RouterItemFacts: Equatable, Sendable {
 
     // MARK: Your acts
 
-    /// Done on an item (`on`), or its Revert: it strikes "done by you" and goes; Revert puts it back where it was.
+    /// Done on an item (`on`), or its Revert: it strikes "done by you" and goes; Revert puts it back where it was. The
+    /// mark is kept in the file: a reset of the thread (a settle, a relaunch) still reverts, and a read under way that
+    /// restates the item doesn't bring it back.
     func done(_ id: String, item: String, on: Bool) {
         let l = entry(id)
         var s = load(id) ?? Saved()
         if on {
             guard let i = s.items.firstIndex(where: { $0.id == item }) else { return }
             var was = s.items.remove(at: i)
-            l.done[item] = (i, was)
+            s.done = Array((s.done.filter { $0.item.id != item } + [Done(item: was, index: i)]).suffix(Self.doneKept))
             store(id, s)
             was.state = .closing(Router.Items.Copy.doneByYou)
             l.closing.append((i, was))
             settleLater(id, l)
         } else {
-            guard let (i, was) = l.done.removeValue(forKey: item), !s.items.contains(where: { $0.id == item }) else { return }
+            guard let mark = s.done.last(where: { $0.item.id == item }) else { return }
+            s.done.removeAll { $0.item.id == item }
             l.closing.removeAll { $0.item.id == item }
-            var back = was
-            back.state = .open
-            s.items.insert(back, at: min(i, s.items.count))
+            if !s.items.contains(where: { $0.id == item }) {
+                var back = mark.item
+                back.state = .open
+                s.items.insert(back, at: min(mark.index, s.items.count))
+            }
             store(id, s)
         }
         changed(id)
@@ -735,8 +752,10 @@ struct RouterItemFacts: Equatable, Sendable {
             }
             // What the read under way found: restated items stay; new ones land lit (their ids as the commit gives them).
             var n = s.next
-            for f in l.found where f.sameAs == nil || !s.items.contains(where: { $0.id == f.sameAs }) {
-                items.append(RouterItem(id: "i\(n)", kind: f.kind, sentence: f.sentence, since: now(), options: f.options, state: .new))
+            for f in l.found where f.sameAs == nil || !s.items.contains(where: { $0.id == f.sameAs }) && !s.done.contains(where: { $0.item.id == f.sameAs }) {
+                var item = RouterItem(id: "i\(n)", kind: f.kind, sentence: f.sentence, since: now(), options: f.options, state: .new)
+                item.preview = true
+                items.append(item)
                 n += 1
             }
         }

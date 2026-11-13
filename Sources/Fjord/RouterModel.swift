@@ -661,7 +661,8 @@ final class RouterModel {
 
     /// Done on an item's card: it closes, struck "done by you", then folds away; Revert puts it back as it was.
     func itemDone(_ id: String, _ item: String) {
-        guard let t = thread(id), let was = t.ledger.items.first(where: { $0.id == item }) else { return }
+        // A struck item is already closed; a read's preview isn't in the ledger yet: neither has a Done.
+        guard let t = thread(id), let was = t.ledger.items.first(where: { $0.id == item }), was.live, !was.preview else { return }
         let next = t.ledger.live.filter { $0.id != item }
         animate(.fade) {
             update(id) { t in

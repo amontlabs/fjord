@@ -114,4 +114,20 @@ import Testing
         #expect(model.thread(ID.checkpoint)?.ledger.items.first { $0.id == Item.keep }?.state == .open)
         #expect(model.focus == Item.keep)
     }
+
+    /// REVIEW-items 1.8: a struck item (a read closed it) and a read's preview have no Done: no strike, no toast.
+    @Test func aStruckItemOrAPreviewHasNoDone() {
+        let model = model()
+        model.update(ID.checkpoint) { t in
+            t.ledger.items[0].state = .closing(Router.Items.Copy.answered)
+            var p = RouterItem(id: "i9", kind: .do, sentence: "found", since: .now, state: .new)
+            p.preview = true
+            t.ledger.items.append(p)
+        }
+        let first = model.thread(ID.checkpoint)?.ledger.items[0].id ?? ""
+        model.itemDone(ID.checkpoint, first)
+        model.itemDone(ID.checkpoint, "i9")
+        #expect(model.toast == nil)
+        #expect(model.thread(ID.checkpoint)?.ledger.items.last?.state == .new)
+    }
 }
