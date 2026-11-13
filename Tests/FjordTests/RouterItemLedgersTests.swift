@@ -449,6 +449,23 @@ import Testing
         #expect(reply == "Sign in to Silo, please.")
     }
 
+    /// REVIEW-items 2.1: an earlier run's line, read behind a wake, never streams as the latest turn's Done line.
+    @Test func anEarlierRunsLineIsNotTheLatestTurnsSentence() throws {
+        let h = Harness()
+        h.records.put(Self.running("ra"))
+        h.records.put(Self.running("rb"))
+        h.facts(RouterItemFacts(turns: ["ra": Self.turn("A did this."), "rb": Self.turn("", live: true)]))
+        #expect(h.reads.last?.fingerprint == "turn:ra")
+        h.records.put(Self.ended("rb"))
+        h.records.items("t1", key: "turn:ra", .words("a's line", done: false))
+        #expect(h.record?.sentence.text != "a's line")
+        h.answer(RouterItemsAnswer(line: "a's line"))
+        #expect(h.record?.sentence.text != "a's line")
+        h.facts(RouterItemFacts(turns: ["ra": Self.turn("A did this."), "rb": Self.turn("B did that.")]))
+        h.records.items("t1", key: "turn:rb", .words("b's line", done: false))
+        #expect(h.record?.sentence.text == "b's line")
+    }
+
     @Test func aWokenTurnSaysWhatWokeIt() throws {
         let h = Harness()
         h.records.put(Self.ended())

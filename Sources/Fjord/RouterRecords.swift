@@ -104,11 +104,13 @@ final class RouterRecords {
                 self.items.retry(id, context: self.itemsContext(t, e))
             }
         }
-        items.words = { [unowned self] id, text, done in
+        items.words = { [unowned self] id, run, text, done in
             self.operation {
-                guard let e = self.entries[id] else { return }
-                if e.itemWords == nil { e.stream += 1 }
+                // Only the latest run's line is Done's sentence: an earlier turn read behind a wake streams nowhere.
+                guard let e = self.entries[id], e.thread?.latestRunID == run else { return }
+                if e.itemWords == nil || e.itemWordsRun != run { e.stream += 1 }
                 e.itemWords = text
+                e.itemWordsRun = run
                 // Done's line streams when the line is the turn's (no open item stands in for it).
                 if self.shown[id]?.ledger.items.isEmpty == true, self.shown[id]?.state == .done { self.stream(id, text: text, done: done) }
             }
@@ -858,7 +860,7 @@ final class RouterRecords {
         r.ledger = items.ledger(id)
         if r.ledger.live.contains(where: { $0.kind == .know }) { r.worth = .look }
         if code.wants == .finished {
-            if let words = e.itemWords {
+            if let words = e.itemWords, e.itemWordsRun == t.latestRunID {
                 r.sentence = .init(text: words, phase: .streaming, stream: e.stream)
             } else if let line = items.line(id, run: t.latestRunID) {
                 r.sentence = .init(text: line, stream: e.stream)
@@ -1253,6 +1255,8 @@ extension RouterRecords {
         var nameFailed: String?
         /// A finished turn's line as its open-items read streams it.
         var itemWords: String?
+        /// The run whose turn `itemWords` is the line of.
+        var itemWordsRun: String?
         /// Its words so far.
         var words: String?
         /// The store's count of the model's lines for this thread.

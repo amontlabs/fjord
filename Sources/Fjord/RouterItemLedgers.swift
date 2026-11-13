@@ -223,8 +223,8 @@ struct RouterItemFacts: Equatable, Sendable {
     var fetch: ((_ thread: String, _ key: String) -> Void)?
     /// The thread's record should be composed again.
     var changed: (String) -> Void = { _ in }
-    /// A turn's line as it streams.
-    var words: (_ thread: String, _ text: String, _ done: Bool) -> Void = { _, _, _ in }
+    /// A turn's line as it streams, with its run.
+    var words: (_ thread: String, _ run: String, _ text: String, _ done: Bool) -> Void = { _, _, _, _ in }
     /// Items a read added that need you (banners).
     var added: (_ thread: String, _ items: [RouterItem], _ key: String) -> Void = { _, _, _ in }
     var now: () -> Date = Date.init
@@ -557,9 +557,9 @@ struct RouterItemFacts: Equatable, Sendable {
             l.found = found
             changed(id)
         case .words(let text, let done):
-            guard input.isTurn, !text.isEmpty else { return }
+            guard case .turn(let run) = input, !text.isEmpty else { return }
             l.words = text
-            words(id, text, done)
+            words(id, run, text, done)
         case .done(let answer):
             commit(id, l, input, answer)
             pump(id, context: context)
