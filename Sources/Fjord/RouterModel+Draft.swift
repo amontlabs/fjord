@@ -374,6 +374,7 @@ extension RouterModel {
             guard let t = thread(id) else { return }
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
+                lastSends[id] = (words, .words)
                 source?.send(RouterOutgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown))
             } else {
                 dispatch(words, to: t, kind: kind, read: shown)
@@ -387,6 +388,7 @@ extension RouterModel {
             t.sent = .init(words: words, status: .sending)
             t.launch = launch
             animate(.spatial) { threads.append(t) }
+            lastSends[id] = (words, .words)
             source?.start(id, words: words, project: project, launch: launch, read: shown)
         case .here:
             return
@@ -400,6 +402,7 @@ extension RouterModel {
         // Into a run only when one is under way: a line still Sent has no run yet, and the words go as a message.
         let steering = t.state == .working
         backups[id] = (t, picks[id], kind)
+        lastSends[id] = (words, kind)
         let next: RouterSelection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
         move(id) {
             update(id) {

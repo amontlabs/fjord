@@ -542,4 +542,18 @@ import Testing
         model.dispatch("faster", to: working, kind: .words)
         #expect(source.sends.last?.steering == true)
     }
+
+    // MARK: A refusal after the record moved still shows (FINAL-REVIEW #15)
+
+    @Test func aRefusalThatComesAfterTheRecordMovedStillShowsItsFailureLine() throws {
+        let (model, _) = recorded()
+        let guide = try #require(model.thread(ID.guide))
+        model.dispatch("merge it", to: guide, kind: .words)
+        // A shell event ends the pending send first: the record is back to Done, no Sent words on it.
+        model.apply(.upsert(guide))
+        #expect(model.thread(ID.guide)?.sent == nil)
+        model.apply(.refused(ID.guide, reason: "T3 isn't reachable", offline: false))
+        #expect(model.failures.map(\.words) == ["merge it"])
+        #expect(model.failures.first?.thread == ID.guide)
+    }
 }

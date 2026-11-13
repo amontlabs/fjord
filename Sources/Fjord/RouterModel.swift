@@ -230,6 +230,9 @@ final class RouterModel {
     /// The acts with a Revert, newest last: the toast they showed, the threads they hid, how to take them back.
     @ObservationIgnored var undos: [(toast: Int, threads: [String], undo: () -> Void)] = []
     @ObservationIgnored private var nextID = 0
+    /// Each thread's last send from here, its words and kind: a refusal that comes after T3's row already moved on still
+    /// has them for its failure line.
+    @ObservationIgnored var lastSends: [String: (words: String, kind: RouterOutgoing.Kind)] = [:]
     /// What a send in flight changed, to put back if it is refused, and what it was.
     @ObservationIgnored var backups: [String: (thread: RouterThread, picks: [Int: Int]?, kind: RouterOutgoing.Kind)] = [:]
     @ObservationIgnored var toastLife: Task<Void, Never>?
@@ -873,9 +876,10 @@ final class RouterModel {
 
     /// Your send is refused, or T3 drops: the line returns to the state and place it had, a failure line enters.
     private func sendRefused(_ id: String, reason: String, offline: Bool) {
-        guard let t = thread(id), let sent = t.sent else { return }
-        let failure = RouterFailure(id: fresh(), thread: id, words: sent.words, reason: reason,
-                                      kind: backups[id]?.kind ?? .words, offline: offline)
+        let last = lastSends.removeValue(forKey: id)
+        guard thread(id) != nil, let words = thread(id)?.sent?.words ?? last?.words else { return }
+        let failure = RouterFailure(id: fresh(), thread: id, words: words, reason: reason,
+                                      kind: backups[id]?.kind ?? last?.kind ?? .words, offline: offline)
         if let backup = backups[id] {
             move(id) {
                 update(id) { $0 = backup.thread }
