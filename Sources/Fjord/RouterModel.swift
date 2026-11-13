@@ -698,9 +698,18 @@ final class RouterModel {
     func answerWords(_ t: RouterThread) -> String? {
         let mine = picks[t.id] ?? [:]
         let options = t.numbered
-        if t.form.isEmpty { return mine[0].map { options[$0 - 1].label } }
-        let parts = t.form.indices.compactMap { q in typed[t.id]?[q] ?? mine[q].map { options[$0 - 1].label } }
+        // A pick the card no longer has (its ask changed under it) says nothing.
+        func label(_ n: Int) -> String? { options.indices.contains(n - 1) ? options[n - 1].label : nil }
+        if t.form.isEmpty { return mine[0].flatMap(label) }
+        let parts = t.form.indices.compactMap { q in typed[t.id]?[q] ?? mine[q].flatMap(label) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// The card's ask changed, or it asks nothing now: what you picked or typed for the old one goes.
+    private func dropAnswers(_ id: String) {
+        picks[id] = nil
+        typed[id] = nil
+        formAt[id] = nil
     }
 
     /// → / ←: opens or closes the card's long text (a plan, the last lines).
@@ -783,6 +792,7 @@ final class RouterModel {
         }
         if t.state != old.state { t.order = fresh() }
         guard t != old else { return }
+        if t.askID != old.askID || t.section != .needsYou || t.state == .stopped { dropAnswers(id) }
         // A send T3 took, or that ended: nothing is left to put back if it is refused.
         if t.state != .sent || t.sent?.status == .taken { backups[id] = nil }
         let leaves = t.section != old.section
@@ -819,6 +829,7 @@ final class RouterModel {
             settleFilters()
         }
         backups[id] = nil
+        dropAnswers(id)
     }
 
     /// A verdict's line as it lands: a new `stream` starts it (its words stream in over the sentence's place), the same

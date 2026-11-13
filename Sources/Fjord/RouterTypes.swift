@@ -374,6 +374,9 @@ struct RouterThread: Identifiable, Equatable {
     var activity = RouterActivity()
     /// What it was started with from here (a new thread's settings), through its first run.
     var launch: RouterLaunch?
+    /// Which ask the card answers (T3's request id, the plan's run, the step's fingerprint); nil when it asks nothing.
+    /// Picks and typed answers belong to one ask: a new one, or none, drops them.
+    var askID: String?
 
     var section: RouterSection {
         switch state {

@@ -403,4 +403,47 @@ import Testing
         #expect(RouterLaunch.Access(rawValue: "on-request").label == "On request")
         #expect(RouterLaunch.Effort(rawValue: "xhigh").label == "Extra high")
     }
+
+    // MARK: Picks belong to one ask (FINAL-REVIEW #1)
+
+    @Test func aPickKeptFromAnAskAnsweredElsewhereNeitherCrashesNorCarriesOver() throws {
+        let (model, _) = page()
+        var settings = try #require(model.thread(ID.settings))
+        settings.askID = "q1"
+        model.apply(.upsert(settings))
+        model.select(.line(ID.settings))
+        model.pick(2)
+        #expect(model.destination == .picked(thread: ID.settings, words: "One scrolling page"))
+        // Answered in T3 instead: the line works on, its options gone. The pick goes with the ask.
+        var working = settings
+        working.state = .working
+        working.options = []
+        working.askID = nil
+        model.apply(.upsert(working))
+        #expect(model.picks[ID.settings] == nil)
+        model.select(.line(ID.settings))
+        #expect(model.destination == nil)
+        // A second ask on the same card: nothing is picked for it.
+        var again = settings
+        again.askID = "q2"
+        again.options = ["Allow once"]
+        model.apply(.upsert(settings))
+        model.select(.line(ID.settings))
+        model.pick(3)
+        model.apply(.upsert(again))
+        #expect(model.picks[ID.settings] == nil)
+        #expect(model.destination == nil)
+        // A pick past the card's options (kept by any other path) reads as no pick, never an index out of range.
+        model.picks[ID.settings] = [0: 3]
+        #expect(model.answerWords(try #require(model.thread(ID.settings))) == nil)
+    }
+
+    @Test func aLineThatLeavesTakesItsPicksWithIt() throws {
+        let (model, _) = page()
+        model.select(.line(ID.settings))
+        model.pick(1)
+        model.apply(.remove(ID.settings))
+        #expect(model.picks[ID.settings] == nil)
+        #expect(model.typed[ID.settings] == nil)
+    }
 }

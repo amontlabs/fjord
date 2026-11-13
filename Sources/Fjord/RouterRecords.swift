@@ -539,6 +539,7 @@ final class RouterRecords {
         r.launch = e.launch
         if code.state == .stopped { r.stop = .init(error: t.lastError ?? code.line, lastStep: d?.lastStep ?? "") }
         if case .needsYou = code.state, let request = d?.request { card(&r, request) }
+        if case .needsYou = code.state { r.askID = t.pendingRequest?.id ?? "plan:" + (t.latestRunID ?? "") }
 
         // The verdict, when it is the current fingerprint's: its state as soon as it lands, its words as they stream.
         if code.wants != .nothing {
@@ -580,6 +581,7 @@ final class RouterRecords {
         let result = v.flatMap { $0.result.isEmpty ? nil : $0.result }
         if needsYou, !notForMe {
             r.state = .needsYou(.step)
+            r.askID = "step:" + (entries[r.id]?.fingerprint ?? "")
             r.question = v.flatMap { $0.ask.isEmpty ? nil : $0.ask }
             r.options = v?.options ?? []
             r.result = result
