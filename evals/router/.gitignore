@@ -10,3 +10,6 @@ heldout/
 gen/
 # T3 history benchmark (N1): moments hold message text, never commit.
 t3/data/
+
+# Router v2 eval outputs: per-case text, never commit
+w2/out/

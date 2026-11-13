@@ -11,3 +11,6 @@ docs/design/router-viz/demo/data/
 
 # Router v2 demo videos: recorded locally (scripts/record-window.sh), too big to commit
 docs/design/router-v2/*.mp4
+
+# A local test run's output
+test.log
