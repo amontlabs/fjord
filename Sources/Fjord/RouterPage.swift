@@ -36,6 +36,12 @@ struct RouterList: View {
                             .transition(.routerFold(reduce: reduce))
                     }
                 }
+                // A change of order with no row coming or going: every row is placed where it goes at once and glides
+                // there on Core Animation (`RouterGlides`). Animated here, the stack moved each row's container on
+                // every frame of the change's curve while its hosting view was held still inside it, and AppKit told
+                // every hosting view below that its place in the window had changed: each line laid out on every
+                // frame of every move. Rows that come or go keep the change's animation, for their fold.
+                .transaction { [came = model.rowsCameOrWent] in if !came { $0.animation = nil } }
                 .coordinateSpace(.named(Router.listSpace))
                 .padding(.leading, leading).padding(.trailing, trailing)
                 .padding(.bottom, 28)

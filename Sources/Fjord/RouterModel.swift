@@ -239,6 +239,9 @@ final class RouterModel {
 
     /// The list's rows, rewritten only when the order or a header's count changes.
     private(set) var layout: [RouterSlot] = [RouterSlot(id: RouterModel.firstRow, kind: .sentence(Router.Copy.nothingAtAll, clear: false))]
+    /// The layout's last change added or took a row: the list animates that change in SwiftUI (the rows' folds), and
+    /// any other change of order with no animation of its own (`RouterList`: the rows glide on Core Animation).
+    @ObservationIgnored private(set) var rowsCameOrWent = false
     /// The counts and the projects, stored with the layout.
     private(set) var tally = RouterTally()
     /// There is a thread: the filter bar shows.
@@ -998,7 +1001,10 @@ final class RouterModel {
     /// The layout and the counts from the records, written only when they changed.
     private func relayout() {
         let slots = slots()
-        if slots != layout { layout = slots }
+        if slots != layout {
+            rowsCameOrWent = slots.count != layout.count || Set(slots.map(\.id)) != Set(layout.map(\.id))
+            layout = slots
+        }
         var tally = RouterTally()
         var projects = Set<String>()
         for t in threads {
