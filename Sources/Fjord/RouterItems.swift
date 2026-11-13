@@ -126,8 +126,8 @@ extension Router {
         static let rowHeight: CGFloat = 28
         /// Items start under the header's name (its words, past the mark).
         static let indent: CGFloat = Line.nameLeading + Line.namePadX + Line.markBox + Line.markGap
-        /// The kind's word sits in a column this wide, so the sentences start on one edge.
-        static let kindWidth: CGFloat = 50
+        /// An item's mark sits under the name's words (`indent`), so its rows hang under the name.
+        static let markLeading: CGFloat = indent
         static let mark: CGFloat = 9.5
         /// How long a closed item strikes before it folds away, and how long a new one's highlight holds.
         static let strike: Double = 1.6
@@ -152,8 +152,9 @@ extension Router {
 
 // MARK: - The block's rows
 
-/// The header of a thread with two or more items: quiet. Its name in plain ink, the working dots and the newest summary
-/// while it runs, its project and age; Fjord's mark at the end of its words while a read is under way.
+/// The header of a thread with two or more items: its name as a one-item line's, with its most urgent item's mark and
+/// tint on the name's ground (so a block reads as one thing, its colour on its name), the working dots and the newest
+/// summary while it runs, its project and age; Fjord's mark at the end of its words while a read is under way.
 struct RouterBlockHeader: View {
     let model: RouterModel
     let thread: RouterThread
@@ -168,20 +169,19 @@ struct RouterBlockHeader: View {
         let running = thread.isRunning
         // The run working now's newest summary; an earlier run's is not what it does now (the code's line until it has one).
         let summary = running ? (thread.work.current ? thread.work.summaries.first?.text ?? thread.sentence.text : thread.sentence.text) : ""
+        let top = thread.ledger.top
+        let shape = RoundedRectangle(cornerRadius: M.nameRadius, style: .continuous)
         HStack(spacing: 0) {
             Color.clear.frame(width: CDS.Dot.size, height: CDS.Dot.size)
                 .padding(.leading, M.reach).padding(.trailing, M.dotGap)
-            HStack(spacing: M.markGap) {
-                ZStack {
-                    if running { RouterWorkingDots(tint: CDS.Text.muted, paused: thread.paused) }
-                }
-                .frame(width: M.markBox, height: M.markBox)
-                Text(thread.name).font(CDS.sans(14, .medium)).foregroundStyle(CDS.Text.primary).lineLimit(1)
-            }
-            .padding(.horizontal, M.namePadX).padding(.vertical, M.namePadY)
-            .routerTarget(model, .name(thread.id))
-            .layoutPriority(2)
+            name(top: top, running: running, shape: shape)
+                .routerTarget(model, .name(thread.id))
+                .layoutPriority(2)
             HStack(spacing: Router.Thinking.gap) {
+                // Running with its mark taken by an item's kind: the dots lead its summary.
+                if running, top != nil {
+                    RouterWorkingDots(tint: CDS.Text.muted, paused: thread.paused).frame(width: M.markBox, height: M.markBox)
+                }
                 Text(summary).font(CDS.sans(14)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
                 // Being re-checked: Fjord's mark, where the activity glyphs sit (the words don't move as it comes).
@@ -217,10 +217,30 @@ struct RouterBlockHeader: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(thread.name), \(thread.ledger.live.count) open")
     }
+
+    /// The name as a one-item line's: the top kind's mark, the name in its tint, on its ground.
+    private func name(top: RouterItem.Kind?, running: Bool, shape: RoundedRectangle) -> some View {
+        let tint: Color = top?.tint ?? CDS.Text.primary
+        let ground: Color = top.map { $0.tint.opacity(hot ? M.groundHover : M.ground) } ?? .clear
+        return HStack(spacing: M.markGap) {
+            if let top {
+                RouterMark(look: RouterThread.Look(symbol: top.symbol, tint: top.tint, ground: true, label: top.word))
+            } else {
+                ZStack {
+                    if running { RouterWorkingDots(tint: CDS.Text.muted, paused: thread.paused) }
+                }
+                .frame(width: M.markBox, height: M.markBox)
+            }
+            Text(thread.name).font(CDS.sans(14, .medium)).foregroundStyle(tint).lineLimit(1)
+        }
+        .padding(.horizontal, M.namePadX).padding(.vertical, M.namePadY)
+        .background { shape.fill(ground) }
+    }
 }
 
-/// An item's line in a block: its kind (mark and word, on its tint's ground), its sentence, its age. Sheening while a
-/// read may close it; struck through with how it closed; lit briefly as it lands.
+/// An item's line in a block: its kind's mark in its tint under the name's words (no ground: the colour that asks is the
+/// header's), its sentence, its age. Sheening while a read may close it; struck through with how it
+/// closed; lit briefly as it lands.
 struct RouterItemRow: View {
     let model: RouterModel
     let thread: String
@@ -237,7 +257,7 @@ struct RouterItemRow: View {
         let checking = item.state == .checking
         HStack(spacing: 0) {
             kind
-                .padding(.leading, I.indent - Router.Line.namePadX)
+                .padding(.leading, I.markLeading)
             ZStack(alignment: .leading) {
                 if case .closing(let how) = item.state {
                     HStack(spacing: 8) {
@@ -260,7 +280,7 @@ struct RouterItemRow: View {
                         .transition(.opacity)
                 }
             }
-            .padding(.leading, M.sentenceGap)
+            .padding(.leading, M.markGap)
             .frame(maxWidth: .infinity, alignment: .leading)
             RouterAge(model: model, since: item.since)
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
@@ -281,19 +301,12 @@ struct RouterItemRow: View {
         .accessibilityLabel("\(item.kind.word): \(item.sentence)")
     }
 
-    /// The kind's mark and word on its tint's ground (a name that asks something of you), the word in a fixed column.
+    /// The kind's mark, quiet: its tint, no ground, no word (the accessibility label says it).
     private var kind: some View {
-        let shape = RoundedRectangle(cornerRadius: M.nameRadius, style: .continuous)
-        let faded = item.closing
-        return HStack(spacing: M.markGap) {
-            Image(systemName: item.kind.symbol).font(.system(size: I.mark, weight: .semibold)).foregroundStyle(item.kind.tint)
-                .frame(width: M.markBox, height: M.markBox)
-            Text(item.kind.word).font(CDS.sans(13, .medium)).foregroundStyle(item.kind.tint).lineLimit(1).fixedSize()
-        }
-        .padding(.horizontal, M.namePadX).padding(.vertical, M.namePadY)
-        .background { shape.fill(item.kind.tint.opacity(hot && !selected ? M.groundHover : M.ground)) }
-        .opacity(faded ? 0.45 : 1)
-        .frame(width: I.kindWidth + M.markBox + M.markGap + 2 * M.namePadX, alignment: .leading)
+        Image(systemName: item.kind.symbol).font(.system(size: I.mark, weight: .semibold)).foregroundStyle(item.kind.tint)
+            .frame(width: M.markBox, height: M.markBox)
+            .opacity(item.closing ? 0.45 : 1)
+            .accessibilityHidden(true)
     }
 }
 
