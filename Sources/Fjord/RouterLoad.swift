@@ -12,7 +12,9 @@ import SwiftUI
 //
 // `--router-v2-load real`: the shape of the owner's T3 day instead of the stress above. Twenty lines, two of them
 // streaming a verdict's words, a record about every second (one in ten moves its line), for thirty seconds, no reply
-// growing. The synthetic load stays the gate's target; this one must be comfortably green.
+// growing; and each working line's summary at the engine's rate, one a minute per line spread over the minute: its line
+// sheens for the call, its words stream, it lands on the card's timeline. The synthetic load stays the gate's target;
+// this one must be comfortably green. `FJORD_LOAD_OFF=summaries` leaves the summaries out.
 
 @MainActor
 enum RouterLoad {
@@ -90,6 +92,9 @@ enum RouterLoad {
                     group.addTask { @MainActor in await stream(model, id, offset: n, until: end) }
                 }
                 if !off.contains("records") { group.addTask { @MainActor in await records(model, until: end) } }
+                if isReal, !off.contains("summaries") {
+                    group.addTask { @MainActor in await summaries(model, until: end) }
+                }
                 if let first = working.first, !off.contains("reply"), !isReal {
                     group.addTask { @MainActor in await reply(model, first, until: end) }
                 }
@@ -140,6 +145,43 @@ enum RouterLoad {
                 RouterSignposts.end(event, afterCommit: true)
             }
             try? await Task.sleep(for: .milliseconds(recordPause(n)))
+        }
+    }
+
+    /// Working summaries as the records hand them on: one working line after another, each once a minute, the line sheening
+    /// for a call's length (4 s, Haiku's p50), its words streaming a word every 40 ms, then the record with the summary on
+    /// top of its timeline.
+    private static func summaries(_ model: RouterModel, until end: Date) async {
+        var n = 0
+        while Date() < end {
+            let working = model.threads.filter { $0.state == .working }.map(\.id)
+            guard !working.isEmpty else { return }
+            let id = working[n % working.count]
+            n += 1
+            try? await Task.sleep(for: .seconds(60 / Double(working.count)))
+            guard Date() < end, var t = model.thread(id), t.state == .working else { continue }
+            t.sentence.phase = .reassessing
+            model.apply(.upsert(t))
+            try? await Task.sleep(for: .seconds(4))
+            guard var t = model.thread(id), t.state == .working else { continue }
+            let line = Array(words.dropFirst(n % 6).prefix(9))
+            let stream = t.sentence.stream + 1
+            t.work.lineReadsNewest = false
+            model.apply(.upsert(t))
+            for k in 1...line.count {
+                model.post(.words(id, stream: stream, text: line.prefix(k).joined(separator: " "), done: k == line.count))
+                try? await Task.sleep(for: .milliseconds(40))
+            }
+            guard var t = model.thread(id) else { continue }
+            let text = line.joined(separator: " ")
+            t.work.summaries.insert(.init(id: (t.work.summaries.first?.id ?? -1) + 1, text: text, at: Date()), at: 0)
+            t.work.summaries = Array(t.work.summaries.prefix(20))
+            t.work.lineReadsNewest = true
+            t.sentence = .init(text: text, stream: stream)
+            let event = RouterSignposts.begin("T3 event"), work = RouterSignposts.begin("T3 event work")
+            model.apply(.upsert(t))
+            RouterSignposts.end(work)
+            RouterSignposts.end(event, afterCommit: true)
         }
     }
 

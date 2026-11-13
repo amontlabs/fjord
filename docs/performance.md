@@ -196,6 +196,12 @@ fast:
 - **Ticks on Core Animation** (`RouterTicks`): ages, section and filter counts and a state's mark roll as pictures, so a
   roll costs SwiftUI nothing per frame.
 - **Verdicts only when they can come**: with the Router off nothing is asked and nothing sheens waiting.
+- **Working summaries without polling** (R6, `RouterRecords.summarizeIfNeeded`): a summary is weighed only in the record's
+  own refresh (a string of the latest message id and the running step, compared), asked through the verdicts' queue and
+  cap, at most one a minute per thread; a trigger inside the minute sets the record store's one boundary timer, nothing
+  ticks. The line sheens on its record, its words stream through `.words`, and the record is handed on twice per summary
+  (its first words, its end); the card doesn't read the sentence (`RouterWork.lineReadsNewest`). The prompt's input is
+  built off the main actor with the verdicts'.
 
 Gates (2.4), release build, 1617 × 1188, 2026-11-13, at `c889736e`: three runs each, interleaved with the build before
 it (`5abf8131`); load average 4-12 throughout (a browser tab and WindowServer busy), so p95s move several ms between
@@ -213,8 +219,9 @@ identical runs. Before → after where it moved.
 | Send | same | p95 ≤ 8 ms | 49 / 49 / 53 → 62 / 49 / 52 (p50 33-34 → 27-33) | red |
 | Select | demo, speed 4 / `--router-v2-load select` | p95 ≤ 8 ms | 31 / 29 / 31 → 29 / 28 / 30; select load 27 / 27 / 24 → 27 / 28 / 27 | red |
 | Select work | same | — | demo 12 / 13 / 12 → 7 / 7 / 7; select load 3 / 3 / 3 (max 15-17) → 0 / 0 / 0 (max 1) | |
+| Working summaries, real day | `--router-v2-load real` (now with each working line's summary once a minute), release, 3 runs interleaved with `2aaf1beb`, load average 16-30 | no regression | T3 event p95 7 / 12 / 12 → 10 / 6 / 9 ms, max 12-18 → 12-16; work ≤ 1 ms both; Flush p95 3-4 → 4 ms; a summary landing 3 ms to commit (`FJORD_LOAD_OFF=records`) | as before |
 | Bodies per change | `RouterRenderTests` | 1 line body per upsert, 0 list; 2 per hover | as budgeted (counted per page since `0ed63fcc`) | green |
-| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 % (not re-measured) | green |
+| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 %; 0.200 % → 0.133 % with working summaries (2026-11-13) | green |
 | Open / Close | `morph-timings --scenario router --steps "open,close x10"` | p95 ≤ 325 ms | Open 314 / 318 / 315, Close 317 / 318 / 319 | green |
 | First flush | same | p95 ≤ 16 ms | Open 16 / 21 / 18 (before 20 / 16 / 18), Close 10 / 8 / 8 | Open red by 0-5 ms |
 | Captures inside a morph | same | 0 | 0 | green |
