@@ -114,7 +114,7 @@ enum RouterVerdictPrompt {
     made for them, something that went wrong) or when `state` is "needs_you"; "quiet" when it is routine or nothing new.
     """ + "\n" + nameRule(whole: true) + "\n" + """
     `line`: at most 12 words, starting in lower case, short clauses joined by semicolons. For "done": what the turn \
-    did and where it stands ("briefs moved into NoteLog; tests pass; PR #59"). For "needs_you": the step that waits \
+    did and where it stands ("briefs moved into BriefLog; tests pass; PR #59"). For "needs_you": the step that waits \
     on the user ("PR #2049 is open: read the diff, then merge it", "the build fails: cannot find RestoreToken; it \
     stopped there").
     `ask`: for "needs_you", what the user should do or decide, one or two plain sentences; else empty.
@@ -130,7 +130,7 @@ enum RouterVerdictPrompt {
     """ + "\n" + nameRule() + "\n" + """
     `line`: what it asks, at most 12 words, starting in lower case, as the user would say it ("wants to remove the old \
     checkpoint worktree, with --force", "asks which layout to keep: one page or tabs"); for a plan, what the plan is \
-    for ("plan ready: move the briefs into NoteLog").
+    for ("plan ready: move the briefs into BriefLog").
     """
 
     /// A name alone.
