@@ -83,7 +83,11 @@ struct RouterScreen: View {
             topBar
             // The Router off, or Claude Code missing: one line under the title, with its button.
             if let store, let text { RouterSetupNotice(store: store, model: text, edges: edges) }
-            if let wide {
+            if width == 0 {
+                // Before the page knows its width: neither layout, so the composer (and its keyboard and caret) is made
+                // once, in the layout the width calls for, not in the narrow one and again in the wide one.
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let wide {
                 RouterWidePage(model: model, layout: wide.layout, frame: wide.frame, page: width)
             } else {
                 RouterList(model: model, edges: edges)
