@@ -302,7 +302,8 @@ final class RouterDemoScript {
 
     private func key(_ caps: [String], code: Int, flags: NSEvent.ModifierFlags = [], characters: String? = nil) {
         show(caps)
-        _ = RouterKeys.handle(RouterKey(code: code, flags: flags, characters: characters), model: model, inField: false)
+        // Timed as a real key is (`RouterKeys.key`): "Key" and "Key work".
+        _ = RouterSignposts.key { RouterKeys.handle(RouterKey(code: code, flags: flags, characters: characters), model: model, inField: false) }
     }
 
     private func digit(_ n: Int) { key(["shift", "\(n)"], code: RouterKeys.digits[n - 1], flags: .shift, characters: "\(n)") }
@@ -315,7 +316,7 @@ final class RouterDemoScript {
     private func type(_ text: String) async {
         for ch in text {
             let code = ch == " " ? kVK_Space : ch.wholeNumberValue.flatMap { $0 >= 1 ? RouterKeys.digits[$0 - 1] : nil } ?? -1
-            _ = RouterKeys.handle(RouterKey(code: code, characters: String(ch)), model: model, inField: false)
+            _ = RouterSignposts.key { RouterKeys.handle(RouterKey(code: code, characters: String(ch)), model: model, inField: false) }
             await pause(1.0 / 22)
         }
     }

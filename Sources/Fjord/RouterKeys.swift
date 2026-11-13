@@ -3,8 +3,8 @@ import Carbon
 
 // Router v2's keyboard map (docs/design/router-v2/DESIGN.md 5), AZERTY-safe: digits and ⌘digits are read by key
 // position, ⌘-letter chords by character, and no bare letter does anything but type. A new thread's settings are reached
-// with Tab and changed with the arrows. Real keys reach `key(_:model:)`
-// from the window's monitor; the demo's script calls `handle` with the same keys.
+// with Tab and changed with the arrows. Real keys reach `key(_:model:)` from the window's monitor; the demo's script calls
+// `handle` with the same keys, timed as they are (`RouterSignposts.key`).
 
 /// A key press, as the map reads it.
 struct RouterKey {

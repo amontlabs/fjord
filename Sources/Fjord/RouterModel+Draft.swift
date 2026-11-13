@@ -309,6 +309,9 @@ extension RouterModel {
     /// Return (⌥Return: `queue`): sends what the destination row shows. With no row: Send again on a focused failure
     /// line, otherwise nothing. It never settles.
     func send(queue: Bool = false) {
+        // Return to the commit of what it changed (the Sent line, the counts, the next card).
+        let interval = RouterSignposts.begin("Send")
+        defer { RouterSignposts.end(interval, afterCommit: true) }
         guard let destination else {
             if case .failure(let id)? = selection, !connectionLost { sendAgain(id) }
             return
