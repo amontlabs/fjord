@@ -189,14 +189,32 @@ import Testing
         func stop(_ thread: String) { calls.append(.stop(thread)) }
         func visit(_ thread: String) { calls.append(.visit(thread)) }
         func open(_ thread: String) { calls.append(.open(thread)) }
-        func settle(_ threads: [String], on: Bool) { calls.append(.settle(threads, on: on)) }
-        func snooze(_ thread: String, until: Date?) { calls.append(.snooze(thread, until: until)) }
-        func notForMe(_ thread: String, on: Bool) { calls.append(.notForMe(thread, on: on)) }
+        func settle(_ threads: [String], on: Bool) {
+            calls.append(.settle(threads, on: on))
+            if !on { threads.forEach(putBack) }
+        }
+        func snooze(_ thread: String, until: Date?) {
+            calls.append(.snooze(thread, until: until))
+            if until == nil { putBack(thread) }
+        }
+        func notForMe(_ thread: String, on: Bool) {
+            calls.append(.notForMe(thread, on: on))
+            if !on { putBack(thread) }
+        }
+
+        /// A store that still has the thread: its record comes back on a Revert (`gone`: it has none).
+        weak var model: RouterModel?
+        var gone: Set<String> = []
+        private func putBack(_ id: String) {
+            guard !gone.contains(id), let model, let t = model.parked[id] else { return }
+            model.apply(.upsert(t))
+        }
     }
 
     private func recorded() -> (RouterModel, Recorder) {
         let model = RouterDemo.records()
         let source = Recorder()
+        source.model = model
         model.source = source
         return (model, source)
     }
@@ -483,5 +501,28 @@ import Testing
         #expect(model.holdReason(working) != nil)
         // A step Fjord found, a Done line: free to go.
         #expect(model.holdReason(try #require(model.thread(ID.valCenis))) == nil)
+    }
+
+    // MARK: A Revert goes through the store, ⌘Z only while its toast is up (FINAL-REVIEW #13)
+
+    @Test func aRevertOfAThreadTheStoreNoLongerHasBringsNoGhostLine() {
+        let (model, source) = recorded()
+        source.gone = [ID.guide]
+        model.settle(ID.guide)
+        model.undo()
+        #expect(source.calls.last == .settle([ID.guide], on: false))
+        #expect(model.thread(ID.guide) == nil)
+        #expect(model.threads.filter { $0.id == ID.guide }.isEmpty)
+    }
+
+    @Test func cmdZReachesOnlyTheActWhoseToastIsUp() {
+        let (model, source) = recorded()
+        model.settle(ID.guide)
+        #expect(model.canUndo)
+        model.dismissToast()
+        #expect(!model.canUndo)
+        model.undo()
+        #expect(source.calls == [.settle([ID.guide], on: true)])
+        #expect(model.thread(ID.guide) == nil)
     }
 }

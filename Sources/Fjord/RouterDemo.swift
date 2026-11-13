@@ -446,9 +446,14 @@ final class RouterDemoSource: RouterSource {
     func visit(_ thread: String) {}
     func open(_ thread: String) {}
     // T3 answers these at once: the page has already changed.
-    func settle(_ threads: [String], on: Bool) {}
-    func snooze(_ thread: String, until: Date?) {}
-    func notForMe(_ thread: String, on: Bool) {}
+    func settle(_ threads: [String], on: Bool) { if !on { threads.forEach(putBack) } }
+    func snooze(_ thread: String, until: Date?) { if until == nil { putBack(thread) } }
+    func notForMe(_ thread: String, on: Bool) { if !on { putBack(thread) } }
+
+    /// A Revert: the demo's store has the line as it was when the act took it.
+    private func putBack(_ id: String) {
+        if let t = model.parked[id] { model.apply(.upsert(t)) }
+    }
 
     // MARK: Scripted T3 events
 

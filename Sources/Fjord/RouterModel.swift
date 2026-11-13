@@ -224,6 +224,9 @@ final class RouterModel {
     /// Inside a `.batch`: nothing animates.
     @ObservationIgnored private var unanimated = 0
 
+    /// The lines an act with a Revert took off the page, as they were: the demo's store puts them back from here on a
+    /// Revert (the real one from its records).
+    @ObservationIgnored var parked: [String: RouterThread] = [:]
     /// The acts with a Revert, newest last: the toast they showed, the threads they hid, how to take them back.
     @ObservationIgnored var undos: [(toast: Int, threads: [String], undo: () -> Void)] = []
     @ObservationIgnored private var nextID = 0

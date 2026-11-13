@@ -55,13 +55,16 @@ extension RouterModel {
         animate(.fade) { toast = nil }
     }
 
-    /// ⌘Z or Revert: the newest act, undone.
+    /// ⌘Z: the act whose toast is up, undone; nothing once its toast has gone (Revert in History reaches older ones).
     func undo() {
-        guard let last = undos.last else { return }
+        guard canUndo, let last = undos.last else { return }
         revert(last.toast)
     }
 
-    var canUndo: Bool { !undos.isEmpty }
+    var canUndo: Bool {
+        guard let toast, toast.revertible else { return false }
+        return undos.last?.toast == toast.id
+    }
 
     func revert(_ id: Int) {
         guard let i = undos.firstIndex(where: { $0.toast == id }) else {
@@ -147,10 +150,12 @@ extension RouterModel {
         }
     }
 
-    /// `reverted`: what the Revert tells the source, after the line is back.
+    /// `reverted`: what the Revert tells the source; the line comes back through the store's record (none: the thread is
+    /// gone meanwhile, and so is its line), selected, with what you had picked.
     private func remove(_ t: RouterThread, toast: RouterToast, reverted: @escaping () -> Void) {
         let next = selection == .line(t.id) ? neighbour(of: t.id) : selection
         let kept = (picks[t.id], typed[t.id])
+        parked[t.id] = t
         animate(.spatial) {
             threads.removeAll { $0.id == t.id }
             selection = next
@@ -160,15 +165,15 @@ extension RouterModel {
         advanced(to: next)
         act(toast, threads: [t.id]) { [weak self] in
             guard let self else { return }
-            // It grows back where it was, selected.
+            reverted()
+            self.parked[t.id] = nil
+            guard self.thread(t.id) != nil else { return }
             self.animate(.spatial) {
-                self.threads.append(t)
                 self.picks[t.id] = kept.0
                 self.typed[t.id] = kept.1
                 self.selection = .line(t.id)
             }
             self.show(t.id)
-            reverted()
         }
     }
 
@@ -201,6 +206,7 @@ extension RouterModel {
     func notForMe(_ id: String) {
         guard let t = thread(id), t.state == .needsYou(.step) else { return }
         let next = selection == .line(id) ? neighbour(of: id) : selection
+        parked[id] = t
         move(id) {
             update(id) {
                 $0.state = .done
@@ -217,11 +223,11 @@ extension RouterModel {
         advanced(to: next)
         act(RouterToast(id: fresh(), before: "Moved", name: t.name, after: "to Done"), threads: [id]) { [weak self] in
             guard let self else { return }
-            self.move(id) {
-                self.update(id) { $0 = t }
-                self.selection = .line(id)
-            }
+            // The store's record says what it is now (its ask again, unless T3 moved on).
             self.source?.notForMe(id, on: false)
+            self.parked[id] = nil
+            guard self.thread(id) != nil else { return }
+            self.animate(.spatial) { self.selection = .line(id) }
         }
         source?.notForMe(id, on: true)
     }
