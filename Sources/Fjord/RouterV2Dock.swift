@@ -153,7 +153,7 @@ struct RouterV2WaitingLine: View {
 
 // MARK: - Composer
 
-/// The Router's composer card, as `RouterComposer` draws it, with no strip above it: the placeholder names what Return
+/// The Router's composer card: the placeholder names what Return
 /// does, the destination row says where the words go. A Return that came before the read holds the words: they dim,
 /// the send button stays pressed with its glyph in the accent, until the read lands (or you type again).
 struct RouterV2Composer: View {
@@ -266,14 +266,36 @@ struct RouterV2Composer: View {
                             onFocus: { now in
                                 fieldFocused = now
                                 host.text.composerFocused = now
+                                if now { placeCaret(host) }
                             },
                             label: "Message",
                             hint: "Return sends, Option Return queues after the turn, Shift Return starts a new line, @ names a thread or a project",
-                            onSelection: { mentionAt = Self.mentionPoint($0) },
+                            onSelection: { view in
+                                // The @ list follows the caret wherever it is in the text: only while the field edits (ending
+                                // its editing, when it loses the keyboard, moves its selection; that isn't the caret moving).
+                                if view.window?.firstResponder === view { host.text.followCaret(view) }
+                                mentionAt = Self.mentionPoint(view)
+                            },
                             onEdit: { text, pointers in model.edit(text, marks: RouterV2Mentions.marks(text, pointers: pointers, name: host.store.pointerName),
                                                                   projectName: { RouteTarget.projectName($0, store: host.store) }) })
             .opacity(model.held ? 0.55 : 1)
             .accessibilityLabel("Message")
+            .onChange(of: host.text.caretRequest) { _, request in
+                // After the field has the new text.
+                if request != nil { DispatchQueue.main.async { placeCaret(host) } }
+            }
+    }
+
+    /// Puts the caret where the text model asked (`caretRequest`, after a pick or a prefill) once the field has the keyboard:
+    /// at once when it has it, else as it takes it (an "Open in Router" made before the page showed).
+    private func placeCaret(_ host: RouterV2ComposerHost) {
+        guard let request = host.text.caretRequest, let editor = host.text.editor, editor.window?.firstResponder === editor,
+              // While an input method composes, the field places it once the composition ends (`MentionField`).
+              !editor.hasMarkedText() else { return }
+        host.text.caretRequest = nil
+        editor.setSelectedRange(NSRange(location: min(request, (editor.string as NSString).length), length: 0))
+        host.text.followCaret(editor)
+        mentionAt = Self.mentionPoint(editor)
     }
 
     /// The @ list over the caret, as the old composer hung it.
