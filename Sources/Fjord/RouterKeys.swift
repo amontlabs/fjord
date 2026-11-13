@@ -72,7 +72,8 @@ enum RouterKeys {
         let flags = key.flags
         let letter = key.characters?.lowercased()
         let isReturn = code == kVK_Return || code == kVK_ANSI_KeypadEnter
-        let empty = model.draft.isEmpty
+        // Answer pills alone are no words: the arrows walk and the digits pick (`RouterAnswerPills`).
+        let empty = model.draftEmpty
         // Your first key after your own act or a walk opened a card: its "new" dot goes now. Not an arrow: the walk goes on.
         // Written once the key's act is made, in its transaction (`markSeen`).
         let seen = code != kVK_UpArrow && code != kVK_DownArrow ? model.takeSeen() : nil

@@ -202,7 +202,7 @@ struct RouterComposer: View {
         // The @ list hangs over the card, so it never pushes the dock about.
         .overlay(alignment: .topLeading) { mentionList }
         .overlay(alignment: .topLeading) { scriptedList }
-        .onAppear { host?.text.settingRows = { [model] in model.settingRows($0) } }
+        .onAppear { host?.text.settingRows = { [model] in model.settingRows($0) + model.itemRows($0) } }
         .onDisappear { host?.text.settingRows = nil }
         .zIndex(1)
         .modifier(RouterPills(model: model, host: viewHost))
@@ -281,6 +281,7 @@ struct RouterComposer: View {
                                 if view.window?.firstResponder === view { host.text.followCaret(view) }
                                 mentionAt = Self.mentionPoint(view)
                             },
+                            onPill: { model.openPill($0) },
                             onEdit: { text, pointers in model.edit(text, marks: RouterMentions.marks(text, pointers: pointers, name: host.store.pointerName),
                                                                   projectName: { RouteTarget.projectName($0, store: host.store) }) })
             .opacity(model.held ? 0.55 : 1)
@@ -313,6 +314,7 @@ struct RouterComposer: View {
                 MentionList(suggestions: suggestions, index: host.text.mentionIndex, width: place.width, store: host.store,
                             hover: { host.text.mentionIndex = $0 }) { host.text.pickMention($0) }
                     .fixedSize()
+                    .modifier(RouterAtLight(model: model, lit: Self.litPointer(suggestions, host.text.mentionIndex)))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
                     .offset(x: place.x, y: at.y - C.mentionOffset - listHeight)
                     .transition(.opacity)
@@ -328,11 +330,18 @@ struct RouterComposer: View {
             let place = MentionList.place(caretX: x, available: cardWidth)
             MentionList(suggestions: rows, index: model.scriptedMentionIndex, width: place.width, store: nil, hover: nil) { _ in }
                 .fixedSize()
+                .modifier(RouterAtLight(model: model, lit: Self.litPointer(rows, model.scriptedMentionIndex)))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
                 .offset(x: place.x, y: C.pad + (C.row - 20) / 2 - C.mentionOffset - listHeight)
                 .allowsHitTesting(false)
                 .transition(.opacity)
         }
+    }
+
+    /// The pointer of the @ list's lit row.
+    static func litPointer(_ rows: [MentionSuggestion], _ index: Int) -> RouterPointer? {
+        guard rows.indices.contains(index), case .pointer(let p) = rows[index].pick else { return nil }
+        return p
     }
 
     /// The draft as the drawn composer shows it: its words, and each pill as the field draws it (a settings pill quiet, with
@@ -381,6 +390,12 @@ struct RouterComposer: View {
 
     private static func look(_ mention: RouterMention) -> MentionLook {
         if case .setting(let s) = mention.pointer { return s.look }
+        // An item's and an answer's as the page's model last made them (`RouterPillLooks`).
+        if let look = RouterPillLooks.looks[mention.pointer] { return look }
+        switch mention.pointer {
+        case .item, .answer: return .fallback(mention.pointer, name: mention.name)
+        default: break
+        }
         return MentionLook(label: mention.name, symbol: nil, tint: nil)
     }
 
@@ -439,6 +454,18 @@ struct RouterComposer: View {
     }
 }
 
+/// The item the @ list lights, lit on the page too (`RouterModel.lightAt`); none once the list goes.
+private struct RouterAtLight: ViewModifier {
+    let model: RouterModel
+    let lit: RouterPointer?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: lit, initial: true) { _, now in model.lightAt(now) }
+            .onDisappear { model.lightAt(nil) }
+    }
+}
+
 /// Keeps the page's draft and the @ field's text the one text. Typing reaches the page in the keystroke's own turn
 /// (`MentionField.onEdit`); this carries what the field's model gets some other way (a pick from the @ list, an
 /// "Open in Router" prefill) to the page, and what the page does to its draft (Return empties it, a failed send or a
@@ -466,9 +493,15 @@ private struct RouterPills: ViewModifier {
 
     private func pull() {
         guard let host, host.text.draft != model.draft else { return }
-        // Words from the page carry no pills.
-        host.text.pointers = []
-        host.text.draft = model.draft.replacingOccurrences(of: MentionText.markString, with: "")
+        // The page's own pills (an item ⌘-clicked, a card's answer) come with its words, one for each mark; words from
+        // the page with no pill for each mark carry none.
+        if model.mentions.count == model.draft.filter({ $0 == MentionText.mark }).count {
+            host.text.pointers = model.mentions.map(\.pointer)
+            host.text.draft = model.draft
+        } else {
+            host.text.pointers = []
+            host.text.draft = model.draft.replacingOccurrences(of: MentionText.markString, with: "")
+        }
     }
 }
 

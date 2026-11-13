@@ -40,9 +40,9 @@ enum RouterSplitShots {
         }),
     ]
 
-    /// Two answer pills at the start of the draft: Settings layout's and Val Cenis booking's picked options.
+    /// Two answer pills at the start of the draft: Settings layout's and Val Cenis booking's picked options, by whose they are.
     private static let pills = MentionText.markString + " " + MentionText.markString + " "
-    private static let answers = ["One scrolling page", "Reserve for five (+€62)"]
+    private static let answers = [ID.settings, ID.valCenis]
 
     /// A draft with nothing selected, and the read that split it.
     private static func draft(_ model: RouterModel, _ text: String, answers: [String] = [], sends: [RouterSend]) {
@@ -50,9 +50,12 @@ enum RouterSplitShots {
         if answers.isEmpty {
             model.setDraft(text)
         } else {
-            var names = answers.makeIterator()
-            let pointers = answers.indices.map { RouterPointer.notification("answer:\($0)") }
-            model.edit(text, marks: RouterMentions.marks(text, pointers: pointers, name: { _ in names.next() ?? "" }))
+            // The cards' own answer pills (`RouterAnswerPills`): picked on Settings layout's ask and Val Cenis's Decide,
+            // they lead the draft as `? Settings layout → one scrolling page`; the free words follow.
+            model.picks[ID.settings] = [0: 2]
+            model.picks[RouterModel.itemKey(ID.valCenis, "i1")] = [0: 1]
+            let words = text.replacingOccurrences(of: pills, with: "")
+            model.edit(model.draft + words, marks: model.mentions)
         }
         model.apply(.read(RouterRead(draft: model.plainDraft, places: sends.first.map { [$0.place] } ?? [], sure: false,
                                      sends: sends)))

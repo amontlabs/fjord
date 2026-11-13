@@ -10,6 +10,7 @@ import SwiftUI
 enum RouterMentionShot {
     static var catalog: [AppWindowShots.Shot] {
         [shot("v2-mention", .aqua), shot("v2-mention-dark", .darkAqua), waiting("v2-waiting", .aqua), waiting("v2-waiting-dark", .darkAqua)]
+            + RouterPillShots.catalog
     }
 
     /// An unattended action's words waiting for a place, in the dock's status stack.

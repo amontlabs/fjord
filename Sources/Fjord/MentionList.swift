@@ -49,6 +49,12 @@ struct MentionList: View {
                         .padding(.horizontal, d.pad.md).padding(.top, i == 0 ? 2 : 6).padding(.bottom, 2)
                         .accessibilityAddTraits(.isHeader)
                 }
+                // A thread's name over its items: a run of rows of one group, under one name.
+                if let group = row.group, i == 0 || suggestions[i - 1].group != group || suggestions[i - 1].section != row.section {
+                    Text(group).font(CDS.sans(d.caption.0)).foregroundStyle(CDS.Text.secondary).lineLimit(1)
+                        .padding(.leading, d.pad.md).padding(.top, 3).padding(.bottom, 1)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 Group {
                     Button { pick(row) } label: {
                         HStack(spacing: d.gap.xs) {
@@ -58,7 +64,8 @@ struct MentionList: View {
                             rowText(row, density: d)
                             Spacer(minLength: 0)
                         }
-                        .padding(.leading, d.pad.md)
+                        // An item's row hangs under its thread's name.
+                        .padding(.leading, d.pad.md + (row.group == nil ? 0 : 8))
                         .frame(maxWidth: .infinity)
                         .frame(height: d.control)
                         .background(RoundedRectangle(cornerRadius: d.radius, style: .continuous)

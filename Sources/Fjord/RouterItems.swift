@@ -62,6 +62,9 @@ struct RouterItem: Identifiable, Equatable {
     var kind: Kind
     /// What is open, in a short sentence (the model's).
     var sentence: String
+    /// The item in two or three words ("trial build"), for its pill in the composer (`RouterAnswerPills`); nil: the
+    /// sentence's first words.
+    var short: String? = nil
     /// Since it was opened, or last restated (a merge resets it).
     var since: Date
     /// A choice's options, when the agent gave some: the item's card lists them.
@@ -409,7 +412,7 @@ struct RouterItemRow: View {
             .padding(.leading, I.markLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             RouterAge(model: model, since: item.since)
-                .itemDone(model, thread: thread, item: item, rowHot: hot && !selected)
+                .itemDone(model, thread: thread, item: item, rowHot: hot && !selected && model.atLit == nil)
                 .frame(height: I.lineHeight)
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .opacity(closing ? 0 : 1)

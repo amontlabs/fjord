@@ -235,7 +235,8 @@ import Testing
         model.select(.line(ID.updater))
         model.pick(1)
         model.setDraft("beta, but only on my machine")
-        model.apply(.read(RouterRead(draft: model.draft, places: [.thread(ID.updater)], sure: true)))
+        // The read is of the words: the answer's pill leading them is the card's picks, not words.
+        model.apply(.read(RouterRead(draft: model.plainDraft, places: [.thread(ID.updater)], sure: true)))
         model.send()
         model.send()
         #expect(source.sends == [RouterOutgoing(thread: ID.updater, words: "Silently · beta, but only on my machine",

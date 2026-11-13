@@ -314,6 +314,12 @@ struct RouterOptions: View {
     /// The rows' ground past the column, at the leading edge.
     var reach: CGFloat = Router.Card.optionReach
 
+    /// The form's question these options are of (0 for a single question or an item).
+    private var question: Int {
+        guard let t = model.thread(key), !t.form.isEmpty, t.numbered.indices.contains(from) else { return 0 }
+        return t.numbered[from].question
+    }
+
     var body: some View {
         let picked = Set((model.picks[key] ?? [:]).values)
         // With a draft, digits are words and Return sends the words: the rows show they are not what goes.
@@ -329,10 +335,64 @@ struct RouterOptions: View {
                 .accessibilityAddTraits(picked.contains(number) ? .isSelected : [])
                 .accessibilityHint("Option \(number)")
             }
+            // Every Decide and form has its own words too: typed here, they are the answer, live in its pill.
+            RouterOtherRow(model: model, key: key, question: question, reach: reach)
         }
         // The radios hang left of the column; the labels start on it.
         .padding(.leading, -(reach + Router.Card.radioHang))
         .padding(.trailing, -Router.Card.optionReach)
+    }
+}
+
+/// A card's Other: an option row whose label is a field. Typed, its radio is on and its ground chosen, as a picked
+/// option's; the words are the card's answer and show live in its pill in the composer (`RouterAnswerPills`).
+struct RouterOtherRow: View {
+    let model: RouterModel
+    let key: String
+    let question: Int
+    var reach: CGFloat = Router.Card.optionReach
+    @FocusState private var focused: Bool
+    @State private var hot = false
+    @Environment(\.routerStill) private var still
+
+    static let placeholder = "Other"
+
+    var body: some View {
+        let words = model.typed[key]?[question] ?? ""
+        let on = !words.isEmpty
+        let d = CDS.Density.compact
+        HStack(spacing: Router.Card.radioGap) {
+            ZStack {
+                Circle().fill(on ? CDS.Fill.accent : .clear)
+                if on { Circle().fill(.white).frame(width: 6, height: 6) } else { Circle().strokeBorder(CDS.borderStrong, lineWidth: 1) }
+            }
+            .frame(width: Router.Card.radio, height: Router.Card.radio)
+            Group {
+                if still {
+                    // A still draws the words (a field there would draw its own focus).
+                    Text(on ? words : Self.placeholder).foregroundStyle(on ? CDS.Text.primary : CDS.Text.muted)
+                } else {
+                    TextField("", text: Binding(get: { words }, set: { model.typeOther(key, question: question, $0) }),
+                              prompt: Text(Self.placeholder).foregroundColor(CDS.Text.muted))
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(CDS.Text.primary)
+                        .focused($focused)
+                }
+            }
+            .font(CDS.sans(d.prose.0))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 7).padding(.leading, reach).padding(.trailing, Router.Card.optionTrailing)
+        .background {
+            let s = Router.Surface.self
+            RoundedRectangle(cornerRadius: s.row, style: .continuous)
+                .fill(on ? (hot ? s.chosenHover : s.chosen) : hot || focused ? s.hover : .clear)
+        }
+        .contentShape(Rectangle())
+        .onHover { hot = $0 }
+        .onTapGesture { focused = true }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(on ? "Other: \(words)" : "Other answer")
     }
 }
 

@@ -17,7 +17,7 @@ enum MentionText {
         var next = pointers.makeIterator()
         var out = ""
         for c in draft {
-            if c == mark, let pointer = next.next() { out += "@" + name(pointer) } else { out.append(c) }
+            if c == mark, let pointer = next.next() { out += pointer.said(name(pointer)) } else { out.append(c) }
         }
         return out
     }
@@ -70,6 +70,8 @@ final class MentionAttachment: NSTextAttachment {
 /// suggestions: pasted code's `@cache` stays the decorator it is), and its focus is told.
 final class MentionTextView: NSTextView {
     var onFocus: (Bool) -> Void = { _ in }
+    /// A click on a pill that opens something (an item's, an answer's: their card). Nil: a pill is clicked as text.
+    var onPill: ((RouterPointer) -> Void)?
     var makePill: (RouterPointer) -> MentionAttachment? = { _ in nil }
     var name: (RouterPointer) -> String = { _ in "" }
     var base: [NSAttributedString.Key: Any] = [:]
@@ -83,6 +85,29 @@ final class MentionTextView: NSTextView {
         let ok = super.resignFirstResponder()
         if ok { onFocus(false) }
         return ok
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let onPill, let pointer = pill(at: convert(event.locationInWindow, from: nil)) {
+            switch pointer {
+            case .item, .answer:
+                onPill(pointer)
+                return
+            default: break
+            }
+        }
+        super.mouseDown(with: event)
+    }
+
+    /// The pill drawn under a point of the view, if any.
+    private func pill(at point: NSPoint) -> RouterPointer? {
+        guard let layout = layoutManager, let container = textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let inText = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let glyph = layout.glyphIndex(for: inText, in: container)
+        guard layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(inText) else { return nil }
+        let char = layout.characterIndexForGlyph(at: glyph)
+        guard char < storage.length else { return nil }
+        return (storage.attribute(.attachment, at: char, effectiveRange: nil) as? MentionAttachment)?.pointer
     }
 
     /// The selection as text, each pill as "@name".
@@ -173,6 +198,8 @@ struct MentionField: NSViewRepresentable {
     var onCommand: ((Selector) -> Bool)? = nil
     /// The selection moved (the caret, for the @ suggestions), with the text view.
     var onSelection: ((NSTextView) -> Void)? = nil
+    /// A click on an item's or an answer's pill.
+    var onPill: ((RouterPointer) -> Void)? = nil
     /// The text changed by the owner's typing, a pick or an undo (not by the model): the draft with a mark for each pill, and
     /// what the pills point to. Called in the same turn as the edit, after the model has it.
     var onEdit: ((String, [RouterPointer]) -> Void)? = nil
@@ -246,6 +273,7 @@ struct MentionField: NSViewRepresentable {
             view.makePill = { [store] pointer in MentionAttachment(pointer: pointer, look: store.pointerLook(pointer), font: font) }
         }
         view.onFocus = onFocus
+        view.onPill = onPill
         c.view = view
         c.follow(model)
         if c.focusTick != focusTick {

@@ -22,18 +22,36 @@ enum RouterPointer: Hashable, Codable {
     /// In the Router v2 composer: a setting of the new thread the message starts (its model, effort, access or mode), picked from
     /// the @ list. It is not part of the message: it sets the destination row's chip while it stands in the draft.
     case setting(RouterSetting)
+    /// In the Router v2 composer: an open item of a thread (`RouterModel.itemKey`, "thread#item"), picked from the @ list or
+    /// ⌘-clicked on the page. It goes in the words as "@<its short words>".
+    case item(String)
+    /// In the Router v2 composer: a card's answer (its picks' key, `RouterModel.picks`), mirrored from the card
+    /// (`RouterAnswerPills`). It leads the draft; taking it out unticks the card.
+    case answer(String)
 
     /// Whether it says where the message goes (a T3 place): such a pill is taken out of your words where they start
     /// with it, as an address (`RouterContext.pills`). A local project, a notification or a category is what you talk about,
     /// and stays.
-    var addresses: Bool {
+    /// How the pill reads as words: "@name" for a place or a thing; an item's short words and an answer's
+    /// "item → answer" as they are (neither is a place, and an answer is no name).
+    func said(_ name: String) -> String {
         switch self {
-        case .t3: true
-        case .project, .notification, .category, .thisItem, .setting: false
+        case .item, .answer: name
+        default: "@" + name
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem, setting }
+    /// An answer's pill (`RouterAnswerPills`): the card's picks, not words.
+    var isAnswer: Bool { if case .answer = self { true } else { false } }
+
+    var addresses: Bool {
+        switch self {
+        case .t3: true
+        case .project, .notification, .category, .thisItem, .setting, .item, .answer: false
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem, setting, item, answer }
 
     /// `{"project": "/code/lookout"}` and so on; a bare string, a project's folder (as the pills were kept before there
     /// were other kinds), is a project.
@@ -49,6 +67,8 @@ enum RouterPointer: Hashable, Codable {
         else if let v = try c.decodeIfPresent(UUID.self, forKey: .category) { self = .category(v) }
         else if c.contains(.thisItem) { self = .thisItem }
         else if let v = try c.decodeIfPresent(RouterSetting.self, forKey: .setting) { self = .setting(v) }
+        else if let v = try c.decodeIfPresent(String.self, forKey: .item) { self = .item(v) }
+        else if let v = try c.decodeIfPresent(String.self, forKey: .answer) { self = .answer(v) }
         else { throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "Not a pointer")) }
     }
 
@@ -61,6 +81,8 @@ enum RouterPointer: Hashable, Codable {
         case .category(let id): try c.encode(id, forKey: .category)
         case .thisItem: try c.encode(true, forKey: .thisItem)
         case .setting(let v): try c.encode(v, forKey: .setting)
+        case .item(let v): try c.encode(v, forKey: .item)
+        case .answer(let v): try c.encode(v, forKey: .answer)
         }
     }
 }
@@ -87,6 +109,23 @@ struct MentionLook: Equatable {
     var tint: Color?
     /// A setting's pill (Router v2): drawn quieter than a thread's, with no "@", on the quiet fill.
     var setting = false
+    /// An item's pill (Router v2): its kind's mark and its short words on its kind's tint, as its name sits on the page; no "@".
+    var item = false
+    /// An answer's pill (Router v2): after the label (the item's short words), an arrow and this, your answer; on the accent's
+    /// tint (it came from you), the kind's mark first.
+    var answer: String? = nil
+}
+
+extension MentionLook {
+    /// An item's or an answer's look when the page's model hasn't noted one (`RouterPillLooks`): read from its name, an
+    /// answer's split at its arrow, so it never draws as "@answer".
+    static func fallback(_ pointer: RouterPointer, name: String) -> MentionLook {
+        if case .answer = pointer, let cut = name.range(of: " → ") {
+            return MentionLook(label: String(name[..<cut.lowerBound]), symbol: "questionmark.circle.fill", tint: CDS.Text.accent,
+                               answer: String(name[cut.upperBound...]))
+        }
+        return MentionLook(label: name, symbol: "circle.fill", tint: CDS.Text.muted, item: true)
+    }
 }
 
 // MARK: - Names and looks
@@ -109,6 +148,8 @@ extension Store {
             return ActionPrompt.thisItemName
         case .setting(let setting):
             return setting.label
+        case .item, .answer:
+            return RouterPillLooks.names[pointer] ?? "item"
         }
     }
 
@@ -136,6 +177,8 @@ extension Store {
             return MentionLook(label: ActionPrompt.thisItemName, symbol: "bell", tint: CDS.Text.accent)
         case .setting(let setting):
             return setting.look
+        case .item, .answer:
+            return RouterPillLooks.looks[pointer] ?? MentionLook.fallback(pointer, name: name ?? "item")
         }
     }
 
@@ -304,7 +347,7 @@ enum RouterPointers {
                 let open = store.entries(in: c.id)
                 blocks.append(category(name: m.name, rules: RuleWords(store: store).summary(c), open: open.count,
                                        unread: open.filter(\.isUnread).count))
-            case .project, .t3, .thisItem, .setting:
+            case .project, .t3, .thisItem, .setting, .item, .answer:
                 continue
             }
         }
@@ -368,6 +411,8 @@ struct MentionSuggestion: Identifiable, Equatable {
     /// The list's sections, in order.
     enum Section: Int, CaseIterable, Comparable {
         case projects
+        /// Threads' open items (Router v2), each under its thread's name.
+        case items
         /// A new thread's settings (Router v2): its model, effort, access and mode.
         case settings
         case notifications, categories
@@ -377,6 +422,7 @@ struct MentionSuggestion: Identifiable, Equatable {
         var title: String {
             switch self {
             case .projects: "Projects"
+            case .items: "Items"
             case .settings: "Settings"
             case .notifications: "Notifications"
             case .categories: "Categories"
@@ -404,6 +450,8 @@ struct MentionSuggestion: Identifiable, Equatable {
     var keys: [String]
     /// The snippet a row inserts: its id is the row's (two snippets can have the same name and text).
     var snippet: UUID? = nil
+    /// The heading a row sits under inside its section (an item's thread's name): drawn once over the first row of each run.
+    var group: String? = nil
 
     var id: String {
         switch pick {
@@ -413,12 +461,17 @@ struct MentionSuggestion: Identifiable, Equatable {
         case .pointer(.category(let v)): "category:" + v.uuidString
         case .pointer(.thisItem): "this"
         case .pointer(.setting(let v)): "setting:" + v.kind.rawValue + ":" + v.value
+        case .pointer(.item(let v)): "item:" + v
+        case .pointer(.answer(let v)): "answer:" + v
         case .text(let v): snippet.map { "snippet:" + $0.uuidString } ?? "text:\(section.rawValue):" + name + ":" + String(v.hashValue)
         }
     }
 
     /// What the row says first: a name, after an "@" for a pill of a place or a thing.
-    var rowName: String { insertsText || isSetting ? name : "@" + name }
+    var rowName: String { insertsText || isSetting || isItem ? name : "@" + name }
+
+    /// Whether it is an item's row (it reads as its sentence, with no "@", under its thread's name).
+    var isItem: Bool { if case .pointer(.item) = pick { true } else { false } }
 
     /// Whether it is a setting's row (it reads as a name, with no "@").
     var isSetting: Bool { if case .pointer(.setting) = pick { true } else { false } }
@@ -598,54 +651,85 @@ enum MentionPill {
     static let height: CGFloat = 18
 
     /// The pill: "@label" on a rounded fill, after its symbol in its tint (or its tint's dot), in `font` a point smaller.
+    /// A setting's and an item's have no "@" (neither is a place in the message); an answer's adds an arrow and the answer.
     static func image(_ look: MentionLook, font: NSFont, dark: Bool? = nil) -> NSImage {
-        // A setting's pill has no "@": it is not a place in the message.
-        let label = (look.setting ? "" : "@") + look.label
+        let label = (look.setting || look.item || look.answer != nil ? "" : "@") + look.label
         let pillFont = NSFont(descriptor: font.fontDescriptor, size: font.pointSize - 1) ?? font
-        let ink = NSAttributedString(string: label, attributes: [.font: pillFont, .foregroundColor: NSColor(CDS.Text.primary)])
+        // An answer's item words are a step quieter than the answer, which is what you said.
+        let labelInk = look.answer != nil ? NSColor(CDS.Text.secondary) : NSColor(CDS.Text.primary)
+        let ink = NSAttributedString(string: label, attributes: [.font: pillFont, .foregroundColor: labelInk])
+        let answerFont = NSFont(descriptor: pillFont.fontDescriptor.addingAttributes(
+            [.traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.medium]]), size: pillFont.pointSize) ?? pillFont
+        let answer = look.answer.map {
+            NSAttributedString(string: $0, attributes: [.font: answerFont, .foregroundColor: NSColor(CDS.Text.primary)])
+        }
+        let arrow = answer == nil ? nil : symbol("arrow.right", size: 8, weight: .semibold, color: NSColor(CDS.Text.muted))
         let textWidth = ceil(ink.size().width)
+        let answerWidth = answer.map { ceil($0.size().width) } ?? 0
         let tint = look.tint.map(NSColor.init)
-        let glyph = look.symbol.flatMap { name -> NSImage? in
-            let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .medium)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [tint ?? NSColor(CDS.Text.secondary)]))
-            return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        // An item's or an answer's kind mark as the page draws it: a filled circle's glyph in white on its tint.
+        let marked = (look.item || look.answer != nil) && look.symbol?.hasSuffix(".fill") == true
+        let glyph = look.symbol.flatMap {
+            symbol($0, size: marked ? 10 : 9, weight: .medium, color: tint ?? NSColor(CDS.Text.secondary), on: marked)
         }
         let dot: CGFloat = glyph == nil && tint != nil ? 6 : 0
         let lead: CGFloat = glyph.map { ceil($0.size.width) } ?? dot
-        let width = 6 + (lead > 0 ? lead + 4 : 0) + textWidth + 6
+        let tail: CGFloat = arrow.map { 4 + ceil($0.size.width) + 4 + answerWidth } ?? 0
+        let width = 6 + (lead > 0 ? lead + 4 : 0) + textWidth + tail + 6
         let height = Self.height
         return NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             // `dark`: drawn for that appearance, where the picture is shown by SwiftUI's text (it draws with the process's own).
+            let paint = {
+                Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink, arrow: arrow, answer: answer)
+            }
             let appearance = dark.flatMap { NSAppearance(named: $0 ? .darkAqua : .aqua) }
-            appearance.map { $0.performAsCurrentDrawingAppearance { Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink) } }
-                ?? Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink)
+            appearance.map { $0.performAsCurrentDrawingAppearance(paint) } ?? paint()
             return true
         }
     }
 
+    private static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight, color: NSColor, on: Bool = false) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: weight)
+            .applying(NSImage.SymbolConfiguration(paletteColors: on ? [.white, color] : [color]))
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+    }
+
     private static func paint(_ look: MentionLook, rect: NSRect, glyph: NSImage?, lead: CGFloat, dot: CGFloat, tint: NSColor?,
-                              ink: NSAttributedString) {
+                              ink: NSAttributedString, arrow: NSImage?, answer: NSAttributedString?) {
         let height = Self.height
-        do {
-            if look.setting {
-                // The Surfaces system's quiet ground at a token's radius, no outline (Router v2 DESIGN 1.0): a setting
-                // reads apart from a thread's pill by its lighter ground and its glyph.
-                NSColor(Router.Surface.quiet).setFill()
-                NSBezierPath(roundedRect: rect, xRadius: Router.Surface.token, yRadius: Router.Surface.token).fill()
-            } else {
-                NSColor(CDS.Fill.secondary).setFill()
-                NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6).fill()
-            }
-            var x: CGFloat = 6
-            if let glyph {
-                glyph.draw(in: NSRect(x: x, y: (height - glyph.size.height) / 2, width: glyph.size.width, height: glyph.size.height))
-                x += lead + 4
-            } else if dot > 0, let tint {
-                tint.setFill()
-                NSBezierPath(ovalIn: NSRect(x: x, y: (height - dot) / 2, width: dot, height: dot)).fill()
-                x += dot + 4
-            }
-            ink.draw(at: NSPoint(x: x, y: (height - ink.size().height) / 2))
+        // The Surfaces system's grounds at a token's radius, no outline (Router v2 DESIGN 1.0): a setting on the quiet
+        // fill; an item on its kind's tint at 12 %, as its name sits on the page; an answer on the accent's tint at 12 %
+        // (it came from you). A thread's pill keeps its chosen fill.
+        let token = Router.Surface.token
+        if look.answer != nil {
+            NSColor(CDS.Text.accent).withAlphaComponent(Router.Surface.tint).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: token, yRadius: token).fill()
+        } else if look.item {
+            (tint ?? NSColor(CDS.Text.secondary)).withAlphaComponent(Router.Surface.tint).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: token, yRadius: token).fill()
+        } else if look.setting {
+            NSColor(Router.Surface.quiet).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: token, yRadius: token).fill()
+        } else {
+            NSColor(CDS.Fill.secondary).setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6).fill()
+        }
+        var x: CGFloat = 6
+        if let glyph {
+            glyph.draw(in: NSRect(x: x, y: (height - glyph.size.height) / 2, width: glyph.size.width, height: glyph.size.height))
+            x += lead + 4
+        } else if dot > 0, let tint {
+            tint.setFill()
+            NSBezierPath(ovalIn: NSRect(x: x, y: (height - dot) / 2, width: dot, height: dot)).fill()
+            x += dot + 4
+        }
+        ink.draw(at: NSPoint(x: x, y: (height - ink.size().height) / 2))
+        x += ceil(ink.size().width)
+        if let arrow, let answer {
+            x += 4
+            arrow.draw(in: NSRect(x: x, y: (height - arrow.size.height) / 2, width: arrow.size.width, height: arrow.size.height))
+            x += ceil(arrow.size.width) + 4
+            answer.draw(at: NSPoint(x: x, y: (height - answer.size().height) / 2))
         }
     }
 }

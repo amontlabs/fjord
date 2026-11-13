@@ -144,13 +144,15 @@ final class RouterModel {
     @ObservationIgnored var typeAhead = ""
 
     /// Written through `setDraft`.
-    var draft = "" { didSet { if draft.isEmpty != draftEmpty { draftEmpty = draft.isEmpty } } }
-    /// No draft: what reads only that doesn't redraw on each key.
+    var draft = "" { didSet { let empty = wordless; if empty != draftEmpty { draftEmpty = empty } } }
+    /// No words in the draft (nothing, or only answer pills: `RouterAnswerPills`): what reads only that doesn't redraw on
+    /// each key. Digits pick and Return sends the picks while it holds.
     private(set) var draftEmpty = true
     /// The picked options: per thread, per question (0 for a single question), the option's number through the card.
-    var picks: [String: [Int: Int]] = [:]
-    /// A form's typed answers, per question.
-    var typed: [String: [Int: String]] = [:]
+    /// Each card's answer is a pill in the draft (`RouterAnswerPills`).
+    var picks: [String: [Int: Int]] = [:] { didSet { if picks != oldValue { answersChanged() } } }
+    /// A form's typed answers, per question; a card's Other.
+    var typed: [String: [Int: String]] = [:] { didSet { if typed != oldValue { answersChanged() } } }
     /// A form's current question.
     var formAt: [String: Int] = [:]
     /// The cards whose long text (plan, last lines) is open.
@@ -175,7 +177,9 @@ final class RouterModel {
     /// The Router's model is reading the draft: Fjord's mark is in the row's arrow slot.
     var reading = false
     /// The composer's @ pills: they go with each read of the draft.
-    @ObservationIgnored var mentions: [RouterMention] = []
+    @ObservationIgnored var mentions: [RouterMention] = [] { didSet { if mentions != oldValue { pillsChanged(from: oldValue) } } }
+    /// The draft's answer pills are being written from the picks (or the picks from them): neither follows the other.
+    @ObservationIgnored var syncingAnswers = false
 
     // A new thread's settings (RouterLaunch.swift): T3's default and models, what you set by hand, where the keyboard
     // is in the row, the chip whose menu is open.
@@ -202,6 +206,8 @@ final class RouterModel {
     var hoverName: String? { didSet { if hoverName != oldValue { hotChanged(oldValue.map(RouterHit.name), hoverName.map(RouterHit.name)) } } }
     var hoverControl: RouterHit? { didSet { if hoverControl != oldValue { hotChanged(oldValue, hoverControl) } } }
     var pressed: RouterHit? { didSet { if pressed != oldValue { pressedChanged(from: oldValue) } } }
+    /// The item the composer's @ list has lit: its row on the page lights as the pointer would light it (`RouterAnswerPills`).
+    var atLit: RouterHit? { didSet { if atLit != oldValue { hotChanged(oldValue, atLit) } } }
 
     /// The lines changing section now: drawn over their neighbours.
     var moving: Set<String> = [] { didSet { if moving != oldValue { movingChanged(from: oldValue) } } }
@@ -671,6 +677,8 @@ final class RouterModel {
     /// A click on an item's line: its card, or none if it was the open one (not the header's: a click never opens a row
     /// other than the one clicked).
     func click(item: String, of id: String) {
+        // ⌘-click: the item as a pill in the composer, its card left as it is.
+        if NSEvent.modifierFlags.contains(.command), pillItem(item, of: id) { return }
         if selection == .line(id), focus == item {
             select(nil)
         } else {
@@ -821,12 +829,14 @@ final class RouterModel {
     /// A digit on the open card: picks that option (again: unpicks). Never sends.
     func pick(_ number: Int) {
         if let (t, item) = selectedItem {
-            guard draft.isEmpty, number >= 1, number <= item.options.count else { return }
+            guard draftEmpty, number >= 1, number <= item.options.count else { return }
             let key = Self.itemKey(t.id, item.id)
             picks[key] = picks[key]?[0] == number ? nil : [0: number]
+            // An option picked is the answer: what was typed in Other goes.
+            if picks[key] != nil { typed[key] = nil }
             return
         }
-        guard let t = selectedThread, draft.isEmpty else { return }
+        guard let t = selectedThread, draftEmpty else { return }
         let options = t.numbered
         guard number >= 1, number <= options.count else { return }
         let q = options[number - 1].question
@@ -1146,6 +1156,7 @@ final class RouterModel {
                 if box.take(t) { moved = true }
             } else {
                 let box = RouterLineBox(t)
+                box.filter = section
                 box.selected = selection == .line(t.id)
                 box.built = box.selected
                 box.moving = moving.contains(t.id)
@@ -1154,7 +1165,6 @@ final class RouterModel {
                 moved = true
             }
         }
-                box.filter = section
         if boxes.count != threads.count {
             let ids = Set(threads.map(\.id))
             // What read a thread that left hears it once more (`thread(id)` follows its box).
@@ -1187,6 +1197,11 @@ final class RouterModel {
                 continue
             }
             tally.all[t.section, default: 0] += 1
+            // Under a state token a thread counts once for each state it has something in.
+            for s in RouterSection.allCases where RouterFilter.matches(t, state: s) {
+                tally.seen[s, default: 0] += 1
+                if let p = t.project { tally.seenByProject[p, default: [:]][s, default: 0] += 1 }
+            }
             // Running, but shown in another section with what it has open: the Working header counts it faintly.
             if t.isRunning, t.section != .working { tally.runningElsewhere[t.project ?? "", default: 0] += 1 }
             if let p = t.project { tally.byProject[p, default: [:]][t.section, default: 0] += 1 }
@@ -1195,11 +1210,6 @@ final class RouterModel {
         tally.projects = projects.sorted()
         if tally != self.tally { self.tally = tally }
     }
-            // Under a state token a thread counts once for each state it has something in.
-            for s in RouterSection.allCases where RouterFilter.matches(t, state: s) {
-                tally.seen[s, default: 0] += 1
-                if let p = t.project { tally.seenByProject[p, default: [:]][s, default: 0] += 1 }
-            }
 
     private func focusChanged() {
         if case .line(let id)? = selection { boxes[id]?.focus(focus, curve: glides.current?.curve) }

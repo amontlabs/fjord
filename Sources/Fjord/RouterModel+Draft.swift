@@ -12,8 +12,12 @@ extension RouterModel {
         let grew = text.count > draft.count
         // Typing again takes the words back from a held Return.
         unhold()
+        // The page's own writes (Return emptying the composer, a prefill) never untick a card: only a pill you take out
+        // does (`RouterAnswerPills`).
         if text.isEmpty {
+            syncingAnswers = true
             mentions = []
+            syncingAnswers = false
             // The draft empties in the same transaction as the row's reset: written apart (no animation, then the
             // spring), SwiftUI updated the page synchronously between the two, inside the key's handler.
             animate(.spatial) {
@@ -25,8 +29,17 @@ extension RouterModel {
             }
             return
         }
+        // Words from the page with no pill for each mark carry none; the cards' answers come back as their pills.
+        if mentions.count != text.filter({ $0 == MentionText.mark }).count {
+            syncingAnswers = true
+            mentions = []
+            syncingAnswers = false
+        }
         draft = text
         if scripted || still { updateScriptedMention() }
+        // The answers' pills put back lead the words: that write read the draft.
+        answersChanged()
+        if draft != text { return }
         if wasEmpty { animate(.spatial) { read = nil } }
         // More words: a guess waved off is asked again.
         if grew, waved { waved = false }
@@ -42,7 +55,8 @@ extension RouterModel {
     /// The Router's model reads the draft: its mark shows in the row until the read lands. A thread pill is an explicit
     /// place (1.5): nothing is read for it.
     private func startRead() {
-        if pilled { return }
+        // Answer pills alone go to their threads as picks: nothing to read.
+        if pilled || draftEmpty { reading = false; return }
         reading = true
         let plain = RouterMentions.plain(draft, marks: mentions)
         source?.read(plain.text, selected: selectedThread?.id, mentions: plain.mentions)
@@ -164,7 +178,7 @@ extension RouterModel {
 
     /// What the destination row shows; nil when Return would send nothing.
     var destination: RouterDestination? {
-        if draft.isEmpty {
+        if draftEmpty {
             guard let t = selectedThread else { return nil }
             // An item's card: its picked option goes to the thread as words.
             if let (_, item) = selectedItem, let n = picks[RouterModel.itemKey(t.id, item.id)]?[0], n <= item.options.count {
@@ -227,7 +241,8 @@ extension RouterModel {
 
     /// The line the draft goes to, when it isn't the selected one: its name is outlined, dashed.
     var marked: String? {
-        guard !draft.isEmpty, let id = destinationThread, selection != .line(id) else { return nil }
+        // A split message marks its targets itself (`pendingTargets`).
+        guard !draft.isEmpty, split == nil, let id = destinationThread, selection != .line(id) else { return nil }
         return id
     }
 
@@ -519,14 +534,15 @@ extension RouterMentions {
                 skipSpace = true
                 continue
             }
-            // A setting's pill is for the row's chips, not the message: it goes, with the space after it.
-            if mark.pointer.isSetting {
+            // A setting's pill is for the row's chips, not the message, and an answer's goes as the card's picks
+            // (`RouterAnswerPills`): either goes, with the space after it.
+            if mark.pointer.isSetting || mark.pointer.isAnswer {
                 skipSpace = true
                 dropped = true
                 continue
             }
             leading = false
-            let text = "@" + mark.name
+            let text = mark.pointer.said(mark.name)
             kept.append(RouterMention(range: count..<(count + text.count), pointer: mark.pointer, name: mark.name))
             out += text
             count += text.count

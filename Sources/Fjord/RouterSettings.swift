@@ -69,7 +69,7 @@ extension RouterModel {
     var scriptedRows: [MentionSuggestion] {
         guard let query = scriptedMention else { return [] }
         let taken = Set(mentions.map(\.pointer))
-        let rows = settingRows(query).filter { if case .pointer(let p) = $0.pick { !taken.contains(p) } else { true } }
+        let rows = (settingRows(query) + itemRows(query)).filter { if case .pointer(let p) = $0.pick { !taken.contains(p) } else { true } }
         return RouterMentions.suggest(rows, query: query)
     }
 
@@ -83,8 +83,10 @@ extension RouterModel {
         // The new pill is the last one: the demo types the @ word at the end.
         let pointers = mentions.map(\.pointer) + [pointer]
         scriptedMention = nil
+        if case .item(let key) = pointer, let look = itemPillLook(key) { RouterPillLooks.note(pointer, look, name: look.label) }
+        let names = Dictionary(mentions.map { ($0.pointer, $0.name) }, uniquingKeysWith: { a, _ in a })
         edit(text, marks: RouterMentions.marks(text, pointers: pointers, name: { p in
-            if case .setting(let s) = p { s.label } else { "" }
+            if case .setting(let s) = p { s.label } else { RouterPillLooks.names[p] ?? names[p] ?? "" }
         }))
     }
 }

@@ -116,6 +116,8 @@ struct ActionPrompt: Hashable, ExpressibleByStringLiteral {
         case .notification(let id): id
         case .category: "a category"
         case .setting(let s): s.label
+        case .item: "an item"
+        case .answer: "an answer"
         }
     }
 }

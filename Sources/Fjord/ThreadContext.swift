@@ -42,7 +42,7 @@ extension RouterPointers {
             switch m.pointer {
             case .notification: kind = notificationKind
             case .category: kind = categoryKind
-            case .project, .t3, .thisItem, .setting: continue
+            case .project, .t3, .thisItem, .setting, .item, .answer: continue
             }
             let label = String(chars[first...last])
             let id: String
@@ -128,7 +128,7 @@ extension RouterPointers {
             return ["source": "Fjord's Triage inbox", "name": .string(UntrustedText.clean(c.title, limit: 80)),
                     "open": .number(Double(open.count)), "unread": .number(Double(open.filter(\.isUnread).count)),
                     "rules": .array(RuleWords(store: store).summary(c).prefix(20).map { .string(UntrustedText.clean($0, limit: 300)) })]
-        case .project, .t3, .thisItem, .setting:
+        case .project, .t3, .thisItem, .setting, .item, .answer:
             return [:]
         }
     }
