@@ -159,7 +159,8 @@ struct RouterBlockHeader: View {
 
     var body: some View {
         let running = thread.isRunning
-        let summary = running ? (thread.work.summaries.first?.text ?? thread.sentence.text) : ""
+        // The run working now's newest summary; an earlier run's is not what it does now (the code's line until it has one).
+        let summary = running ? (thread.work.current ? thread.work.summaries.first?.text ?? thread.sentence.text : thread.sentence.text) : ""
         HStack(spacing: 0) {
             Color.clear.frame(width: CDS.Dot.size, height: CDS.Dot.size)
                 .padding(.leading, M.reach).padding(.trailing, M.dotGap)
