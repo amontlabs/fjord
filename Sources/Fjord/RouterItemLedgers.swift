@@ -21,6 +21,8 @@ struct RouterItemFacts: Equatable, Sendable {
     }
 
     struct Message: Equatable, Sendable {
+        /// T3's id for the message: the input's key.
+        var id: String = ""
         var at: Date
         var text: String
         var before: String?
@@ -53,16 +55,16 @@ struct RouterItemFacts: Equatable, Sendable {
         for m in ordered {
             if m.role == "assistant", !m.text.isEmpty { before = m.text }
             if m.role == "user", m.createdBy == "user", !m.text.isEmpty, let at = m.createdAt?.date {
-                mine.append(Message(at: at, text: m.text, before: before))
+                mine.append(Message(id: m.id, at: at, text: m.text, before: before))
             }
         }
         f.messages = Array(mine.suffix(kept))
         return f
     }
 
-    /// The message of yours T3 stamped at `at`: the one at that time, else the latest before it.
-    func message(at: Date) -> Message? {
-        messages.first { abs($0.at.timeIntervalSince(at)) < 2 } ?? messages.last { $0.at <= at.addingTimeInterval(2) }
+    /// Your messages T3 stamped after `after` and up to `upTo` (its `latestUserAuthoredMessageAt`), oldest first.
+    func messages(after: Date?, upTo: Date) -> [Message] {
+        messages.filter { $0.at > (after ?? .distantPast) && $0.at <= upTo.addingTimeInterval(2) }
     }
 }
 
@@ -85,6 +87,8 @@ struct RouterItemFacts: Equatable, Sendable {
         /// relaunch, a crash or the thread leaving the page never loses one. The head is the one being read; it leaves
         /// only when its read is applied.
         var pending: [Input] = []
+        /// Your latest words sent from here: T3's copy of one of them is the same message, not read again.
+        var sent: [Sent] = []
 
         init(items: [RouterItem] = [], next: Int = 1, read: [String] = [], line: String? = nil, lineRun: String? = nil,
              run: String? = nil, message: Date? = nil, pending: [Input] = []) {
@@ -98,7 +102,7 @@ struct RouterItemFacts: Equatable, Sendable {
             self.pending = pending
         }
 
-        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending }
+        private enum CodingKeys: String, CodingKey { case items, next, read, line, lineRun, run, message, pending, sent }
 
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
@@ -110,23 +114,53 @@ struct RouterItemFacts: Equatable, Sendable {
             run = try c.decodeIfPresent(String.self, forKey: .run)
             message = try c.decodeIfPresent(Date.self, forKey: .message)
             pending = try c.decodeIfPresent([Input].self, forKey: .pending) ?? []
+            sent = try c.decodeIfPresent([Sent].self, forKey: .sent) ?? []
+        }
+    }
+
+    /// Words you sent from here, until T3's copy of them is seen.
+    struct Sent: Codable, Equatable {
+        var at: Date
+        var words: String
+
+        /// T3's message is this one: the same words, stamped from a little before to a minute after.
+        func matches(_ m: RouterItemFacts.Message) -> Bool {
+            m.at >= at.addingTimeInterval(-5) && m.at <= at.addingTimeInterval(60)
+                && RouterVerdictReading.flat(m.text) == RouterVerdictReading.flat(words)
         }
     }
 
     /// One input, read once.
     enum Input: Equatable, Codable {
         case turn(run: String)
-        /// `words`: known when you wrote them here (they show in the block at once); else read from T3.
-        case message(at: Date, words: String?)
+        /// T3 says you wrote to the thread after `after`, up to `upTo`: the projection lists each message, and each is an
+        /// input of its own (`message`).
+        case messages(after: Date?, upTo: Date)
+        /// One message of yours, by T3's id, with its words and the reply it answers.
+        case message(id: String, at: Date, words: String, before: String?)
+        /// Your words sent from here: they show in the block at once.
+        case sent(at: Date, words: String)
 
         var key: String {
             switch self {
             case .turn(let run): "turn:" + run
-            case .message(let at, _): "msg:" + String(Int64(at.timeIntervalSince1970 * 1000))
+            case .messages(_, let upTo): "msgs:" + Self.ms(upTo)
+            case .message(let id, _, _, _): "msg:" + id
+            case .sent(let at, _): "sent:" + Self.ms(at)
             }
         }
 
+        private static func ms(_ d: Date) -> String { String(Int64(d.timeIntervalSince1970 * 1000)) }
+
         var isTurn: Bool { if case .turn = self { true } else { false } }
+
+        /// Your words, when the input is a message whose words are known.
+        var words: String? {
+            switch self {
+            case .message(_, _, let words, _), .sent(_, let words): words
+            case .turn, .messages: nil
+            }
+        }
     }
 
     /// What a thread's read needs from the records: its title, project, first ask and PRs, as a read's base.
@@ -140,6 +174,7 @@ struct RouterItemFacts: Equatable, Sendable {
     }
 
     static let readKept = 40
+    static let sentKept = 8
 
     // MARK: Wiring
 
@@ -168,8 +203,13 @@ struct RouterItemFacts: Equatable, Sendable {
         /// The pending head whose read is under way.
         var reading: Input?
         var facts: RouterItemFacts?
+        /// The input the facts were read for: your messages are listed only from facts read after T3 stamped them.
+        var factsFor: String?
         var fetching: String?
         var factsFailed: String?
+        /// Projection reads that missed, per input: bounded, then the input is read with what is known.
+        var misses: [String: Int] = [:]
+        var missToken = 0
         /// Items a read (or your Done) closed, striking until the ledger settles, at their place.
         var closing: [(index: Int, item: RouterItem)] = []
         /// What the read under way says so far: what it closes, what it finds.
@@ -223,12 +263,13 @@ struct RouterItemFacts: Equatable, Sendable {
         s.run = run
         if let run, over { enqueue(l, &s, .turn(run: run)) }
         if let at = t.lastAuthoredAt, at > (s.message ?? .distantPast) {
+            // You wrote since: every message after the last one seen is listed from the projection, one input each.
+            let after = s.message
             s.message = at
-            // Your words sent here are already in (with their words); T3 stamping them is the same message.
-            if let sent = l.sentAt, at >= sent.addingTimeInterval(-5) {
-                l.sentAt = nil
+            if let i = s.pending.indices.last, case .messages(let from, _) = s.pending[i], l.reading?.key != s.pending[i].key {
+                s.pending[i] = .messages(after: from, upTo: at)
             } else {
-                enqueue(l, &s, .message(at: at, words: nil))
+                enqueue(l, &s, .messages(after: after, upTo: at))
             }
         }
         // The inputs and their triggers seen, in one write.
@@ -241,8 +282,8 @@ struct RouterItemFacts: Equatable, Sendable {
         let l = entry(id)
         var s = load(id) ?? Saved()
         guard !s.items.isEmpty else { return }
-        l.sentAt = at
-        enqueue(l, &s, .message(at: at, words: words))
+        s.sent = Array((s.sent + [Sent(at: at, words: words)]).suffix(Self.sentKept))
+        enqueue(l, &s, .sent(at: at, words: words))
         store(id, s)
         changed(id)
         pump(id, context: context)
@@ -264,8 +305,9 @@ struct RouterItemFacts: Equatable, Sendable {
 
     /// A failed read's wait is over: it is made again (`pump` on the next `observe`, or here).
     func retry(_ id: String, context: @autoclosure () -> Context) {
-        guard let l = live[id], l.held else { return }
+        guard let l = live[id], l.held || l.factsFailed != nil else { return }
         l.held = false
+        l.factsFailed = nil
         changed(id)
         pump(id, context: context)
     }
@@ -277,15 +319,45 @@ struct RouterItemFacts: Equatable, Sendable {
     func facts(_ id: String, key: String, _ f: RouterItemFacts?, context: @autoclosure () -> Context) {
         guard let l = live[id] else { return }
         if l.fetching == key { l.fetching = nil }
-        if let f { l.facts = f }
-        if f == nil || load(id)?.pending.first.map({ $0.key == key && !has(l, $0) }) == true { l.factsFailed = key }
+        if let f {
+            l.facts = f
+            l.factsFor = key
+        }
+        if f == nil || load(id)?.pending.first.map({ $0.key == key && !has(l, $0) }) == true { missed(id, l, key) }
         pump(id, context: context)
     }
+
+    /// How many projection reads an input gets before it is read with what is known, and the wait before the next one.
+    static let maxMisses = 5
+    var missAfter: (Int) -> TimeInterval = { n in min(pow(2, Double(n)), 30) }
+
+    /// A projection read failed, or didn't have the input yet (T3's projection behind its shell): read again after a
+    /// wait, a few times; then the input goes on with what is known, so it never holds the ones behind it.
+    private func missed(_ id: String, _ l: Live, _ key: String) {
+        let n = (l.misses[key] ?? 0) + 1
+        l.misses[key] = n
+        guard n < Self.maxMisses else { return }
+        l.factsFailed = key
+        l.missToken &+= 1
+        let token = l.missToken, wait = missAfter(n)
+        guard wait > 0 else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self, let l = self.live[id], l.factsFailed == key, l.missToken == token else { return }
+            self.retried(id)
+        }
+    }
+
+    /// The input's projection reads are spent: it is read with what is known.
+    private func spent(_ l: Live, _ key: String) -> Bool { (l.misses[key] ?? 0) >= Self.maxMisses }
 
     private func has(_ l: Live, _ input: Input) -> Bool {
         switch input {
         case .turn(let run): l.facts?.turns[run].map { !$0.live } ?? false
-        case .message(let at, let words): words != nil || l.facts?.message(at: at) != nil
+        case .messages(_, let upTo):
+            // Facts read for it that list the message T3 stamped (the projection may lag the shell).
+            spent(l, input.key) || l.factsFor == input.key && l.facts?.messages.contains { $0.at >= upTo.addingTimeInterval(-2) } == true
+        case .message, .sent: true
         }
     }
 
@@ -295,7 +367,7 @@ struct RouterItemFacts: Equatable, Sendable {
         let l = entry(id)
         guard l.reading == nil, !l.held else { return }
         while var s = load(id), let input = s.pending.first {
-            if case .message = input {
+            if !input.isTurn {
                 // Nothing open: your words can't close anything. A turn after them in the queue reads them too.
                 if s.items.isEmpty || s.pending.dropFirst().contains(where: \.isTurn) {
                     markRead(&s, input.key)
@@ -309,6 +381,23 @@ struct RouterItemFacts: Equatable, Sendable {
                 l.fetching = input.key
                 fetch(id, input.key)
                 return
+            }
+            if case .messages(let after, let upTo) = input {
+                let f = l.factsFor == input.key ? l.facts ?? RouterItemFacts() : RouterItemFacts()
+                // Each message of yours in it, by its id, oldest first; T3's copy of words sent from here is not read again.
+                var inputs: [Input] = []
+                for m in f.messages(after: after, upTo: upTo) {
+                    if let i = s.sent.firstIndex(where: { $0.matches(m) }) {
+                        s.sent.remove(at: i)
+                        continue
+                    }
+                    inputs.append(.message(id: m.id, at: m.at, words: m.text, before: m.before))
+                }
+                markRead(&s, input.key)
+                let fresh = inputs.filter { x in !s.read.contains(x.key) && !s.pending.contains { $0.key == x.key } }
+                s.pending.insert(contentsOf: fresh, at: 0)
+                store(id, s)
+                continue
             }
             let open = s.items.map {
                 RouterItemsInput.Open(id: $0.id, kind: $0.kind, sentence: $0.sentence, options: $0.options,
@@ -327,9 +416,12 @@ struct RouterItemFacts: Equatable, Sendable {
                     continue
                 }
                 x.input = .turn(reply: turn.reply, yourWords: turn.yourWords, woke: turn.woke, status: turn.status)
-            case .message(let at, let words):
-                let m = l.facts?.message(at: at)
-                x.input = .message(words: words ?? m?.text ?? "", replyBefore: m?.before ?? context.lastReply)
+            case .message(_, _, let words, let before):
+                x.input = .message(words: words, replyBefore: before ?? context.lastReply)
+            case .sent(_, let words):
+                x.input = .message(words: words, replyBefore: context.lastReply)
+            case .messages:
+                return
             }
             l.reading = input
             // What the last read added is no longer just in: it is checked like the rest.
@@ -546,12 +638,7 @@ struct RouterItemFacts: Equatable, Sendable {
         var ledger = RouterLedger(items: items)
         ledger.pulse = l?.pulse ?? 0
         if busy, !s.items.isEmpty, let l {
-            switch l.reading ?? s.pending.first {
-            case .message(let at, let words)?:
-                if let words = words ?? l.facts?.message(at: at)?.text { ledger.read = .message(words) } else { ledger.read = .turn }
-            case .turn?: ledger.read = .turn
-            case nil: break
-            }
+            if let input = l.reading ?? s.pending.first { ledger.read = input.words.map { .message($0) } ?? .turn }
         }
         return ledger
     }

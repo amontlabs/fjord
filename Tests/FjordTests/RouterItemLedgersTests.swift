@@ -163,10 +163,13 @@ import Testing
         #expect(words == "keep 0.3")
         h.answer(RouterItemsAnswer(close: ["i1": .answered]))
         #expect(h.ledger.items.first?.state == .closing(Router.Items.Copy.answered))
-        // T3 stamps your message: the same one, not read again.
+        h.records.items.settle("t1")
+        // T3 stamps your message: its copy is the same one, not read again.
         t.lastAuthoredAt = h.clock.addingTimeInterval(1)
         h.records.put(t)
+        h.facts(RouterItemFacts(messages: [.init(id: "m9", at: h.clock.addingTimeInterval(1), text: "keep 0.3", before: nil)]))
         #expect(h.reads.count == 2)
+        #expect(h.saved?.pending.isEmpty == true && h.saved?.sent.isEmpty == true)
     }
 
     @Test func yourWordsFromT3AreReadAgainstWhatIsOpenAndOnlyThen() {
@@ -180,7 +183,7 @@ import Testing
         t.lastAuthoredAt = h.clock
         h.records.put(t)
         #expect(h.reads.count == 1)
-        #expect(h.saved?.read.contains { $0.hasPrefix("msg:") } == true)
+        #expect(h.saved?.read.contains { $0.hasPrefix("msgs:") } == true)
     }
 
     @Test func aMessageFromThePhoneIsReadWithItsWordsFromT3() throws {
@@ -189,12 +192,87 @@ import Testing
         t.lastAuthoredAt = h.clock
         h.records.put(t)
         let key = try #require(h.fetched.last?.1)
-        #expect(key.hasPrefix("msg:"))
-        h.records.itemFacts("t1", key: key, RouterItemFacts(messages: [.init(at: h.clock, text: "delete it", before: "Keep 0.3 or delete it?")]))
+        #expect(key.hasPrefix("msgs:"))
+        h.records.itemFacts("t1", key: key, RouterItemFacts(messages: [.init(id: "m1", at: h.clock, text: "delete it", before: "Keep 0.3 or delete it?")]))
         let read = try #require(h.reads.last)
+        #expect(read.fingerprint == "msg:m1")
         guard case .message(let words, let before)? = read.items?.input else { Issue.record("not a message"); return }
         #expect(words == "delete it" && before == "Keep 0.3 or delete it?")
         #expect(h.ledger.read == .message("delete it"))
+    }
+
+    /// REVIEW-items 1.1: a new message from the phone is never read with an older message's words from facts read
+    /// before it: the projection is read again, and the message is the one with its own id.
+    @Test func aPhoneMessageIsReadWithItsOwnWordsNotAnEarlierMessages() throws {
+        let h = seeded()
+        // You answer from the phone (m1), and the turn it started (r2) ends; its facts carry m1.
+        let m1 = RouterItemFacts.Message(id: "m1", at: h.clock, text: "keep 0.3", before: "Keep 0.3 or delete it?")
+        var t = Self.ended()
+        t.lastAuthoredAt = m1.at
+        h.records.put(t)
+        h.facts(RouterItemFacts(messages: [m1]))
+        #expect(h.reads.last?.fingerprint == "msg:m1")
+        h.answer(RouterItemsAnswer())
+        t.latestRunID = "r2"
+        h.records.put(t)
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Kept 0.3. Which port, 80 or 8080?")], messages: [m1]))
+        h.answer(RouterItemsAnswer(close: ["i1": .answered], found: [.init(kind: .decide, sentence: "port 80 or 8080?")]))
+        h.records.items.settle("t1")
+        // Then M2 from the phone: read from a new projection read, with its own words.
+        h.clock = h.clock.addingTimeInterval(60)
+        t.lastAuthoredAt = h.clock
+        h.records.put(t)
+        #expect(h.fetched.last?.1.hasPrefix("msgs:") == true)
+        #expect(h.reads.count == 3)
+        h.facts(RouterItemFacts(messages: [m1, .init(id: "m2", at: h.clock, text: "use 8080", before: "Which port, 80 or 8080?")]))
+        let read = try #require(h.reads.last)
+        #expect(read.fingerprint == "msg:m2")
+        guard case .message(let words, let before)? = read.items?.input else { Issue.record("not a message"); return }
+        #expect(words == "use 8080" && before == "Which port, 80 or 8080?")
+        #expect(h.ledger.read == .message("use 8080"))
+        h.answer(RouterItemsAnswer(close: ["i3": .answered]))
+        #expect(h.saved?.read.filter { $0.hasPrefix("msg:") } == ["msg:m1", "msg:m2"])
+    }
+
+    /// REVIEW-items 1.1: a projection read before T3's copy of the message is in (it lags the shell) reads again, and
+    /// after a few misses the input goes on with what is known, not held for good.
+    @Test func aProjectionWithoutTheNewMessageIsReadAgain() throws {
+        let h = seeded()
+        h.records.items.missAfter = { _ in 0 }
+        var t = Self.ended()
+        t.lastAuthoredAt = h.clock
+        h.records.put(t)
+        h.facts(RouterItemFacts())
+        #expect(h.reads.count == 1 && h.saved?.pending.count == 1)
+        h.records.items.retried("t1")
+        #expect(h.fetched.count == 3)
+        h.facts(RouterItemFacts(messages: [.init(id: "m1", at: h.clock, text: "delete it", before: nil)]))
+        #expect(h.reads.last?.fingerprint == "msg:m1")
+        h.answer(RouterItemsAnswer())
+        // Never there: after the last miss, it goes on (nothing to read), and the next input isn't held.
+        t.lastAuthoredAt = h.clock.addingTimeInterval(30)
+        h.records.put(t)
+        for _ in 0..<RouterItemLedgers.maxMisses {
+            h.facts(RouterItemFacts())
+            h.records.items.retried("t1")
+        }
+        #expect(h.saved?.pending.isEmpty == true)
+    }
+
+    /// REVIEW-items 2.2: two messages in one T3 update, or written while the thread was off the page, are each read.
+    @Test func everyMessageSinceTheLastSeenIsReadOneByOne() throws {
+        let h = seeded()
+        var t = Self.ended()
+        t.lastAuthoredAt = h.clock.addingTimeInterval(20)
+        h.records.put(t)
+        h.facts(RouterItemFacts(messages: [.init(id: "a", at: h.clock.addingTimeInterval(10), text: "keep it", before: nil),
+                                           .init(id: "b", at: h.clock.addingTimeInterval(20), text: "and push", before: nil)]))
+        #expect(h.reads.last?.fingerprint == "msg:a")
+        h.answer(RouterItemsAnswer())
+        #expect(h.reads.last?.fingerprint == "msg:b")
+        h.answer(RouterItemsAnswer())
+        #expect(h.saved?.pending.isEmpty == true)
+        #expect(h.saved?.read.suffix(2) == ["msg:a", "msg:b"])
     }
 
     // MARK: Order, once, wakes
@@ -213,7 +291,7 @@ import Testing
         let second = try #require(h.reads.last)
         #expect(second.fingerprint == "turn:r2")
         #expect(second.items?.open.map(\.id) == ["i2"])
-        #expect(first.fingerprint.hasPrefix("msg:"))
+        #expect(first.fingerprint.hasPrefix("sent:"))
     }
 
     @Test func aTurnThatEndsAndIsWokenAtOnceIsStillReadAndARestartNeverCancelsIt() throws {
