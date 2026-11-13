@@ -77,7 +77,7 @@ struct RouterBlockRowView: View {
         switch row {
         case .header:
             RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                RouterBlockHeader(model: model, thread: thread, hot: hot)
+                RouterBlockHeader(model: model, thread: thread, hot: hot, sentence: box.sentence)
             }
             .background {
                 RoundedRectangle(cornerRadius: M.radius, style: .continuous)

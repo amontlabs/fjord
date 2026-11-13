@@ -192,7 +192,7 @@ enum RouterShots {
             model.select(.line(ID.checkpoint))
         },
         // Open items per thread (OPEN-ITEMS.md): Checkpoint boot's block (Stuck, Decide, Know while it runs), Bar count's
-        // one item as its line; an item's card; right after your words (sheen, Fjord's mark, your line); the read landed.
+        // one item listed under its line as well; an item's card; right after your words (sheen, Fjord's mark, your line); the read landed.
         State(name: "v2-items") { model in
             model.select(nil)
             RouterDemo.items(model)
@@ -230,8 +230,7 @@ enum RouterShots {
             model.select(nil)
             RouterDemo.itemsLook(model)
         }, pointer: { model in
-            model.hoverRow = ID.transcriptGap
-            model.hoverName = ID.transcriptGap
+            model.hoverRow = RouterModel.itemKey(ID.transcriptGap, RouterDemo.Item.update)
         }),
         State(name: "v2-item-peek-row", make: { model in
             model.select(nil)
@@ -239,8 +238,8 @@ enum RouterShots {
         }, pointer: { model in
             model.hoverRow = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.smaller)
         }),
-        // The pointer on an item's row: its age gives way to a quiet Done (here under the pointer, lit), and on a line
-        // that is its one item the same; neither moves the row.
+        // The pointer on an item's row: its age gives way to a quiet Done (here under the pointer, lit); it doesn't move
+        // the row.
         State(name: "v2-item-hover-done", make: { model in
             model.select(nil)
             RouterDemo.itemsLook(model)
@@ -249,15 +248,18 @@ enum RouterShots {
             model.hoverRow = key
             model.hoverControl = .itemDone(key)
         }),
-        State(name: "v2-item-hover-done-line", make: { model in
+        // A thread with one item is the list shape too: its line with its Done outcome, the item on a row under it; the
+        // pointer on the item's row gives its Done, as on any item.
+        State(name: "v2-item-single", make: { model in
             model.select(nil)
             RouterDemo.itemsLook(model)
         }, pointer: { model in
-            model.hoverRow = ID.transcriptGap
+            model.hoverRow = RouterModel.itemKey(ID.transcriptGap, RouterDemo.Item.update)
         }),
         State(name: "v2-item-card") { model in
             RouterDemo.itemsLook(model)
             model.select(.line(ID.transcriptGap))
+            model.focusItem(RouterDemo.Item.update)
         },
         State(name: "v2-item-card-block") { model in
             RouterDemo.itemsLook(model)

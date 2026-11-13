@@ -10,11 +10,9 @@ struct RouterCard: View {
     /// Its line's box: the card redraws when the record does, not as the reply grows (`RouterLastLines` does).
     let box: RouterLineBox
 
-    /// The open item's card, in a block (its focused item) or on a thread whose one item is the line.
+    /// The open item's card: the block's focused item.
     private var item: RouterItem? {
-        let thread = box.head
-        if let focus = box.item { return thread.ledger.items.first { $0.id == focus } }
-        return thread.ledger.single
+        box.item.flatMap { focus in box.head.ledger.items.first { $0.id == focus } }
     }
 
     var body: some View {

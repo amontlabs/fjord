@@ -3,8 +3,8 @@ import Foundation
 // The demo's layers (docs/design/router-v2/DESIGN.md R10; shots `v2-layer-*`): one structure for every thread and item,
 // the hover the line plus more, the card the hover plus more. Install guide is Done (its outcome, why it is worth a
 // look, its PR, diff and checks, the agent's last message, its history); Tab handover is Working (its summary, what runs
-// beside it, its history as the source); Val Cenis booking is a line that is its one item (Needs you: the item, why,
-// the agent's words, its options, the thread's history under them).
+// beside it, its history as the source); Val Cenis booking is a thread with one item listed under its line (Needs you:
+// the item, why, the agent's words, its options, the thread's history under them).
 
 extension RouterDemo {
     /// The threads' histories as the records keep them, from their summaries and runs' starts (and any `extra` events: items

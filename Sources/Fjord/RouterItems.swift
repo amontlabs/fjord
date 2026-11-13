@@ -1,8 +1,8 @@
 import SwiftUI
 
 // Open items per thread (docs/design/router-v2/OPEN-ITEMS.md, DESIGN.md 1.15): each thread keeps a ledger of what is
-// open with you (Stuck, Decide, Do, Know). The page shows one block per thread, in the section of its most urgent item;
-// one item is the line itself, two or more make the thread's line a quiet header with an indented line per item. The
+// open with you (Stuck, Decide, Do, Know). The page shows one block per thread, in the section of its most urgent item:
+// the thread's line (its own sentence) with its items listed under it, one a row, even when there is one. The
 // demo's store fills the ledger today (RouterDemoItems.swift); the real engine fills the same type later: one read per
 // turn end and per owner message, each item kept, closed (with how), merged (its age reset) or added.
 
@@ -139,13 +139,8 @@ struct RouterLedger: Equatable {
     /// The most urgent open item's kind.
     var top: RouterItem.Kind? { live.min { $0.kind.rank < $1.kind.rank }?.kind }
 
-    /// The thread shows as a block (a header with its items under it), not as one line: two or more items. One item stays
-    /// the line through a read (REVIEW-items 5.1): it sheens on the line, your words follow it there, so a read doesn't
-    /// turn the line into a block and back.
-    var block: Bool { items.count >= 2 }
-
-    /// The one item that is the line itself (a thread with one item and nothing else to show).
-    var single: RouterItem? { !block && items.count == 1 ? items.first : nil }
+    /// The thread shows as a block (its line, then its items under it, one a row): any open item, even one.
+    var block: Bool { !items.isEmpty }
 
     /// What the page counts as the block's rows: items, the sent line, the placeholder (their coming and going moves the
     /// lines under the block).
@@ -183,6 +178,9 @@ extension Router {
         static let indent: CGFloat = Line.nameLeading + Line.namePadX + Line.markBox + Line.markGap
         /// An item's mark sits under the name's words (`indent`), so its rows hang under the name.
         static let markLeading: CGFloat = indent
+        /// An item's grounds (under the pointer, its open card's) start this far in: as far before its mark as a
+        /// line's ground starts before the line's mark, so its card's inset matches every other card's.
+        static let groundLeading: CGFloat = markLeading - (Line.nameLeading + Line.namePadX)
         static let mark: CGFloat = 9.5
         /// How long a closed item strikes before it folds away, and how long a new one's highlight holds.
         static let strike: Double = 1.6
@@ -241,45 +239,74 @@ extension VerticalAlignment {
     static let routerFirstLine = VerticalAlignment(RouterFirstLine.self)
 }
 
-/// The header of a thread with two or more items: its name as a one-item line's, with its most urgent item's mark and
-/// tint on the name's ground (so a block reads as one thing, its colour on its name), the working dots and the newest
-/// summary while it runs, its project and age; Fjord's mark at the end of its words while a read is under way.
+/// A thread's line once it has open items (any, even one): its name with its most urgent item's mark and tint on the
+/// name's ground (so a block reads as one thing, its colour on its name), then the thread's own sentence (its Done
+/// outcome, or the newest summary of the run working now after the working dots; nothing until it has one), flowing
+/// from after the name and wrapping under it as a line's does, never cut; its project and age on its first line;
+/// Fjord's mark at the end of its words while a read is under way.
 struct RouterBlockHeader: View {
     let model: RouterModel
     let thread: RouterThread
     let hot: Bool
+    /// The line's sentence as its box has it (the record's own is blanked there, `RouterLineBox.head`).
+    var sentence: RouterThread.Sentence? = nil
     @State private var pulse: Double = 0
+    @State private var headWidth: CGFloat = 0
+    /// The row's width: the name takes up to its share of it, as on a line (`Router.Line.nameShare`).
+    @State private var rowWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.routerStill) private var still
 
     private typealias M = Router.Line
 
+    /// The thread's own words: the run working now's newest summary (an earlier run's is not what it does now: the
+    /// code's line until it has one); a finished or stopped turn's line; nothing while it waits on you (the items say it).
+    static func words(_ thread: RouterThread, sentence: RouterThread.Sentence? = nil) -> String {
+        let line = (sentence ?? thread.sentence).text
+        if thread.isRunning {
+            return thread.work.current ? thread.work.summaries.first?.text ?? line : line
+        }
+        switch thread.state {
+        case .done where !thread.judging, .stopped: return line
+        default: return ""
+        }
+    }
+
     var body: some View {
         let running = thread.isRunning
-        // The run working now's newest summary; an earlier run's is not what it does now (the code's line until it has one).
-        let summary = running ? (thread.work.current ? thread.work.summaries.first?.text ?? thread.sentence.text : thread.sentence.text) : ""
+        let summary = Self.words(thread, sentence: sentence)
         let top = thread.ledger.top
         let shape = RoundedRectangle(cornerRadius: M.nameRadius, style: .continuous)
-        HStack(spacing: 0) {
+        // Running with its mark taken by an item's kind: the dots lead its summary.
+        let dots = running && top != nil
+        let lines = Router.Items.sentenceLines
+        HStack(alignment: .routerFirstLine, spacing: 0) {
             Color.clear.frame(width: CDS.Dot.size, height: CDS.Dot.size)
                 .padding(.leading, M.dotLeading).padding(.trailing, M.dotGap)
-            name(top: top, running: running, shape: shape)
-                .routerTarget(model, .name(thread.id))
-                .layoutPriority(2)
-            HStack(spacing: Router.Thinking.gap) {
-                // Running with its mark taken by an item's kind: the dots lead its summary.
-                if running, top != nil {
-                    RouterWorkingDots(tint: CDS.Text.muted, paused: thread.paused).frame(width: M.markBox, height: M.markBox)
+            ZStack(alignment: .topLeading) {
+                // The words flow as text from after the name (and the dots), a line they wrap to starting under the
+                // name's ground (`RouterFlow`), as a line's sentence does.
+                let lead = headWidth > 0 ? headWidth + (dots ? Router.Thinking.gap : M.sentenceGap) : 0
+                (RouterFlow.lead(lead) + Text(summary) + RouterFlow.end).font(CDS.sans(14))
+                    .foregroundStyle(thread.sentenceTint)
+                    .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, M.namePadY)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: M.sentenceGap) {
+                    name(top: top, running: running, shape: shape)
+                        .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
+                        .routerTarget(model, .name(thread.id))
+                    if dots {
+                        RouterWorkingDots(tint: CDS.Text.muted, paused: thread.paused).frame(width: M.markBox, height: M.markBox)
+                    }
                 }
-                Text(summary).font(CDS.sans(14)).foregroundStyle(CDS.Text.muted).lineLimit(1).truncationMode(.tail)
-                Spacer(minLength: 0)
-                // Being re-checked: Fjord's mark, where the activity glyphs sit (the words don't move as it comes).
-                if thread.ledger.read != nil {
-                    RouterThinking(label: "Fjord is checking what is open").transition(.opacity)
-                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { headWidth = $0 }
             }
-            .padding(.leading, M.sentenceGap)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .alignmentGuide(.routerFirstLine) { _ in M.namePadY + Router.Items.lineHeight / 2 }
+            // Being re-checked: Fjord's mark, where the activity glyphs sit (the words don't move as it comes).
+            if thread.ledger.read != nil {
+                RouterThinking(label: "Fjord is checking what is open").padding(.leading, Router.Thinking.gap).transition(.opacity)
+            }
             if let project = thread.project {
                 RouterProjectPill(model: model, thread: thread.id, project: project)
                     .padding(.leading, M.pillGap)
@@ -290,6 +317,9 @@ struct RouterBlockHeader: View {
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .layoutPriority(1)
         }
+        // As much air over and under the name's ground as a one-line row has, when the words wrap.
+        .padding(.vertical, (M.minHeight - Router.Items.lineHeight - 2 * M.namePadY) / 2)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         .frame(minHeight: M.minHeight)
         // A new turn: the header's ground lights once and fades.
         .background {
@@ -396,6 +426,7 @@ struct RouterItemRow: View {
                 shape.fill(selected ? .clear : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
                     .transaction { $0.animation = nil }
             }
+            .padding(.leading, I.groundLeading)
         }
         .motion(.fade, value: item.state)
         .accessibilityElement(children: .combine)
@@ -411,7 +442,7 @@ struct RouterItemRow: View {
     }
 }
 
-/// The pointer on an item's row (a block's row, or a line that is its thread's one item): its age gives way to a quiet
+/// The pointer on an item's row: its age gives way to a quiet
 /// Done, the card's own act (struck "done by you", Revert in the toast), without opening the card. Drawn over the age,
 /// so the row doesn't move; it arms on a pointer move over it, so a row sliding under a still pointer isn't done by it.
 /// None on a struck item, a read's preview or a row whose card is open (the card has its Done).

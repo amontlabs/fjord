@@ -20,7 +20,9 @@ import Testing
         #expect(t.section == .working)
         t.ledger.items = [RouterItem(id: "k", kind: .know, sentence: "k", since: .now)]
         #expect(t.section == .done)
-        #expect(t.ledger.single?.id == "k")
+        // One item is the list shape already: the line, its item under it.
+        #expect(t.ledger.block)
+        #expect(RouterBlockLayout.rows(t).map(\.id) == ["header", "k"])
         t.ledger.items.append(RouterItem(id: "s", kind: .stuck, sentence: "s", since: .now))
         #expect(t.section == .needsYou)
         #expect(t.ledger.block)
@@ -68,10 +70,14 @@ import Testing
         #expect(model.selectedItem?.item.id == Item.keep)
         model.step(down: true)
         model.step(down: true)
-        // Past the block: the next line (Bar count, whose one item is its line and its card).
+        // Past the block: the next line (Bar count), its header first, then its one item, as any block's.
         #expect(model.selection == .line(ID.bar))
         #expect(model.focus == nil)
+        #expect(model.selectedItem == nil)
+        model.step(down: true)
+        #expect(model.focus == Item.push)
         #expect(model.selectedItem?.item.id == Item.push)
+        model.step(down: false)
         model.step(down: false)
         #expect(model.selection == .line(ID.checkpoint))
         #expect(model.focus == Item.smaller)
@@ -153,14 +159,37 @@ import Testing
         #expect(model.thread(ID.checkpoint)?.ledger.items.last?.state == .new)
     }
 
-    /// REVIEW-items 5.1: a one-item thread stays one line through a read (your words, a new turn): no block and back.
-    @Test func aOneItemThreadStaysALineThroughARead() {
+    /// Always the list shape: a thread with one item is a block through a read too (your words, a new turn), its
+    /// words and the placeholder rows under the item, so nothing turns from a line into a block and back.
+    @Test func aOneItemThreadIsABlockThroughARead() {
         var ledger = RouterLedger(items: [RouterItem(id: "i1", kind: .decide, sentence: "keep it?", since: .now)])
-        ledger.sent("keep it")
-        #expect(!ledger.block && ledger.single?.id == "i1" && ledger.read == .message("keep it"))
-        ledger.read = .turn
-        #expect(!ledger.block && ledger.single != nil)
-        ledger.items.append(RouterItem(id: "i2", kind: .know, sentence: "k", since: .now))
         #expect(ledger.block)
+        ledger.sent("keep it")
+        #expect(ledger.block && ledger.rows == ["i1", "sent"] && ledger.read == .message("keep it"))
+        ledger.read = .turn
+        #expect(ledger.block && ledger.rows == ["i1", "reading"])
+        ledger.items = []
+        #expect(!ledger.block)
+    }
+
+    /// A thread's line in the list shape says the thread's own sentence: Done's outcome, the run's newest summary, or
+    /// nothing while it waits on you (its items say it).
+    @Test func theHeaderSaysTheThreadsOwnSentence() {
+        var t = RouterThread(id: "t", name: "T", title: "T", project: nil, state: .done, sentence: .init(text: "released"), since: .now)
+        t.ledger.items = [RouterItem(id: "d", kind: .do, sentence: "install it", since: .now)]
+        #expect(RouterBlockHeader.words(t) == "released")
+        t.judging = true
+        #expect(RouterBlockHeader.words(t) == "")
+        t.judging = false
+        t.state = .needsYou(.question)
+        #expect(RouterBlockHeader.words(t) == "")
+    }
+
+    /// Done's check is grey; blue is for Know and for a line worth a look.
+    @Test func doneIsGreyUnlessWorthALook() {
+        var t = RouterThread(id: "t", name: "T", title: "T", project: nil, state: .done, sentence: .init(text: "x"), since: .now)
+        #expect(t.look.tint == CDS.Text.muted && RouterSection.done.tint == CDS.Text.muted)
+        t.worth = .look
+        #expect(t.look.tint == CDS.Text.accent)
     }
 }

@@ -20,7 +20,7 @@ struct RouterSummaryView: View {
 
     let model: RouterModel
     let thread: RouterThread
-    /// The item the view is about: an item's row in a block, or a line that is its one item.
+    /// The item the view is about: an item's row in a block.
     var item: RouterItem?
     let layer: Layer
 

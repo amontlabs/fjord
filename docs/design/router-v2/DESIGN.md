@@ -348,8 +348,7 @@ Kind blocks:
   · its model as a person says it ("Opus 5.5"; T3's string when it isn't a Claude id) · its age; a background command
   in `CDS.mono(12)` · its age; a wait: what (a thread wait by the waited thread's page name, a command in mono) · its
   age. Ages are from T3's start, else from when Fjord first saw it. Subagents first, then commands, then waits.
-- **R8.** An item's peek (the pointer on the name of a line that is its thread's one item, or anywhere on an item's row
-  in a block, unless its card is open; hung from the row's words): only what the line doesn't already say. The item's
+- **R8.** An item's peek (the pointer anywhere on an item's row, unless its card is open; hung from the row's words): only what the line doesn't already say. The item's
   detail (body `Text.primary`) when it adds something, then the exact lines of the agent's message behind it, body
   `Text.secondary` behind the card's rail, cut by whole lines at 4 with a bottom fade; each bare link in it shown as its
   address without the scheme (never cut after `https://`). The cut never ends on the blank line between two
@@ -626,14 +625,19 @@ checking, closing with how, new).
 | Do | `checklist` | `Text.warning` | Needs you |
 | Know | `info.circle.fill` | `Text.accent` | Done (worth a look) |
 
-- **One block per thread**, in the section of its most urgent open item (a real stop stays Stopped). One item and nothing
-  else to show: the line is the item (its mark and tint on the name's ground, its sentence, its age); its card is the
-  item's.
-- **Two or more**: the line becomes the block's header, its name drawn as a one-item line's: the most urgent item's
-  mark and tint on the name's ground (so a block reads as one thing, its colour on its name, consistent with one-item
-  lines); while it runs, the working dots lead the newest summary (`Text.muted`); project pill, age. Under it, one 28 pt
+- **One block per thread**, in the section of its most urgent open item (a real stop stays Stopped). **Always the list
+  shape** (owner, 2026-11-13): a thread with any open item, even one, is its own line with its items listed under it,
+  one a row; there is no line that is its one item. The line (the block's header): its name with the most urgent
+  item's mark and tint on the name's ground (so a block reads as one thing, its colour on its name), then the thread's
+  own sentence, flowing and wrapping as a line's (never cut): Done's outcome (`Text.secondary`), or while it runs the
+  working dots and the newest summary (`Text.muted`), or nothing while it waits on you or is being read
+  (`RouterBlockHeader.words`); project pill, age. A thread's first item swaps its line for the header in place, at the
+  same height (no crossfade), and only the item's row folds in; its last going does the reverse. Under it, one 28 pt
   row per item: the kind's mark alone in its tint (no ground, no word; the accessibility label says the kind) under the
   name's words, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of air under it.
+- **Done's mark is grey** (owner, 2026-11-13): a Done line's check, the Done filter token and section title, and the
+  finished-earlier peek's checks are `Text.muted`; blue (`Text.accent`) is only Know's and a line the model marks worth
+  a look (with its ground). The history's finished rows were already muted.
 - **Working counts it faintly**: "Working 3 +1", the `+1` in `Text.disabled`, for running threads shown in another section.
 - **R8. The whole sentence.** An item's sentence is never cut (at most 3 lines, a guard): it flows as text. On the line
   the name is its highlight at its start, and a line it wraps to starts at the name's ground's left edge and runs to the
@@ -644,9 +648,11 @@ checking, closing with how, new).
   item, as the card's last lines: rail, 4 lines, fade, Show all `→`), links the quote doesn't show (in the detail) as quiet buttons; a link in the quote is clickable there, never doubled (22 tall,
   radius 6, the `quiet` fill, `chosen` under the pointer; `↗` and the address without its scheme, footnote 12
   `Text.secondary`, middle truncation), the options, then `Done ⌘⌫` · `Open in T3 ⌘O`. Never empty: an item with no
-  detail, quote or options quotes the thread's last lines. The line's own item's card starts under the name as every
-  card; a block item's under its row's sentence. Shots `v2-item-line-wrap`, `v2-item-peek`, `v2-item-peek-row`,
-  `v2-item-card`, `v2-item-card-block`. The read fills them (`RouterItem.detail`, `.quote`, saved with the item): each
+  detail, quote or options quotes the thread's last lines. An item's card hugs its row: its ground (as its row's
+  pointer ground) starts at the item's mark gutter, as far before the item's mark as a line's ground starts before the
+  line's mark (`Router.Items.groundLeading`), and its content column is the item's words' column. The header's card
+  keeps the whole line's ground. Shots `v2-item-line-wrap`, `v2-item-peek`, `v2-item-peek-row`, `v2-item-card` (a
+  one-item thread's item), `v2-item-card-block`, `v2-item-single`. The read fills them (`RouterItem.detail`, `.quote`, saved with the item): each
   found item has its `sentence` (key fact first), a `detail` (the whole item, at most about 280 characters, only when it
   adds something) and a `quote` (the agent's exact lines), kept only when it is word for word in the reply or message
   read, else dropped (`RouterItemsReading.quote`). Items saved before have neither and quote the thread's last lines.
@@ -663,12 +669,12 @@ checking, closing with how, new).
   options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
   T3 ⌘O`. Done strikes the item "done by you", folds it after 1.6 s, and the toast offers Revert. The open card's ground
   is under its own row only.
-- **Done on hover** (2026-11-13). The pointer on an item's row (a block's row, or a line that is its one item) swaps its
+- **Done on hover** (2026-11-13). The pointer on an item's row swaps its
   age for a quiet `Done` (footnote 12 `Text.muted`, its last letter where the age ends; under the pointer
   `Text.primary` on the `chosen` ground, radius 4), `Motion.fade`, drawn over the age so nothing moves. The card's
   own act: struck "done by you", Revert in the toast. It arms on a pointer move over it (a row sliding under a still
   pointer isn't done by it). None on a struck item, a read's preview, or a row whose card is open. Shots
-  `v2-item-hover-done` (a block's row, the pointer on Done) and `v2-item-hover-done-line`.
+  `v2-item-hover-done` (the pointer on Done) and `v2-item-single` (a one-item thread's row under the pointer).
 - **Your words to a block** (Return): in the same frame `↑ "…" · sent` (13, the arrow in the accent) under the items,
   every open item sheens (`Text.muted` + the sheen), and Fjord's mark sits at the end of the header's words, where the
   activity glyphs are, so nothing moves. Nothing reads settled until the read lands.
@@ -707,8 +713,8 @@ checking, closing with how, new).
   reads its latest input, however old, paced by the queues (four projection reads and four model calls at once). A new
   Stuck, Decide or Do item is told once as a banner, only for an input this run of Fjord saw happen (not one that ended
   before the launch, nor one left pending by the last run), while fresh and unseen (a mid-run question: as it lands);
-  a banner names the thread by its page name, never T3's title. A one-item thread stays one line through a read (its sheen, your words after it,
-  Fjord's mark). No legacy: a finished turn has no verdict of its own.
+  a banner names the thread by its page name, never T3's title. A one-item thread is a block through a read too (your words and the placeholder
+  under its item). No legacy: a finished turn has no verdict of its own.
 - **Motion.** A block moves as lines do, on `Motion.spatial`, with nothing at once and no whole-block fade. Its rows
   under the open card are on a layer of their own that glides with the card's mask and the lines under the block
   (`RouterBlockTail`, `RouterGlides`), so a card opening or shutting between its rows rolls in place, at full opacity,

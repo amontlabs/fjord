@@ -18,7 +18,7 @@
 
 ## Page
 - One block per thread, never twice; placed in the section of its most urgent open item (Stuck > Decide/Do > Know > Working); its other items travel with it.
-- One item: the line is the item (as today). Two or more: the thread's line becomes a quiet header (name, working dots + summary if running, project, age) and each item is its own indented line (kind mark, kind word, sentence, age). All readable without hover.
+- Always the list shape (owner, 2026-11-13, replacing "one item: the line is the item"): any item, even one, makes the thread's line a header (name, working dots + summary if running, project, age) and each item is its own indented line (kind mark, kind word, sentence, age). All readable without hover.
 - ↑/↓ walks threads and items. An item's card: its options, Done (Revert). The thread's card: working summary timeline.
 - Working count includes threads shown elsewhere, faintly, so counts add up.
 

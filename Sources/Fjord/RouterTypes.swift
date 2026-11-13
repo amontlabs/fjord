@@ -274,7 +274,8 @@ enum RouterSection: Int, CaseIterable, Hashable {
     var tint: Color {
         switch self {
         case .needsYou: CDS.Text.warning
-        case .done: CDS.Text.accent
+        // Grey: blue is for Know items and lines worth a look.
+        case .done: CDS.Text.muted
         case .working: CDS.Text.muted
         }
     }
@@ -454,9 +455,7 @@ extension RouterThread {
     }
 
     var look: Look {
-        // One open item: the line is the item.
-        if let item = ledger.single { return item.look }
-        return switch state {
+        switch state {
         case .needsYou(.question), .needsYou(.form):
             Look(symbol: "questionmark.circle.fill", tint: CDS.Text.warning, ground: true, label: "Asks you")
         case .needsYou(.plan): Look(symbol: "list.bullet.clipboard.fill", tint: CDS.Text.warning, ground: true, label: "Plan to approve")
@@ -466,12 +465,14 @@ extension RouterThread {
         case .working: Look(symbol: nil, tint: CDS.Text.muted, ground: false, label: "Working")
         // Being read: no check yet, it isn't known to be done with you.
         case .done where judging: Look(symbol: "circle.dashed", tint: CDS.Text.muted, ground: false, label: "Being read")
-        case .done: Look(symbol: "checkmark.circle.fill", tint: CDS.Text.accent, ground: worth == .look, label: "Done")
+        // Grey; blue only on a line the model marks worth a look (blue is Know's and worth a look's colour).
+        case .done: Look(symbol: "checkmark.circle.fill", tint: worth == .look ? CDS.Text.accent : CDS.Text.muted,
+                         ground: worth == .look, label: "Done")
         }
     }
 
     /// The sentence's colour once settled.
-    var sentenceTint: Color { isRunning && ledger.single == nil ? CDS.Text.muted : CDS.Text.secondary }
+    var sentenceTint: Color { isRunning ? CDS.Text.muted : CDS.Text.secondary }
 }
 
 /// One layout for what matters on a thread or an item, in layers: the sentence (what matters now, never cut), its

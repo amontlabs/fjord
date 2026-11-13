@@ -164,7 +164,7 @@ struct RouterLineView: View {
     @State private var shown: Double = 1
     /// The row's width: a name takes up to its share of it (`M.nameShare`).
     @State private var rowWidth: CGFloat = 0
-    /// The name's width, as laid out: a line that is its one item's leaves it blank at its sentence's start.
+    /// The name's width, as laid out: the line leaves it blank at its sentence's start.
     @State private var nameWidth: CGFloat = 0
     /// In a block: the height of the row whose card is open (its ground starts at that row's top).
     @State private var focusRowHeight: CGFloat = 0
@@ -196,11 +196,14 @@ struct RouterLineView: View {
         let leave = block ? RouterBlockLeave.Place(box.leaving, rows: rows, cut: cut) : nil
         VStack(alignment: .leading, spacing: 0) {
           if block {
-            // A thread with two or more open items: a quiet header, then a line per item; the open card under its row,
+            // A thread with open items (any): its line, then a row per item; the open card under its row,
             // the rows after it under the card (RouterItems.swift).
             blockHead(thread, open: open, hot: hot, pressed: pressed)
                 // Over the open card's ground, which reaches up behind the open row from the card's place.
                 .zIndex(1)
+                // A line taking its first item (or losing its last): its row swaps for the header in place, at the
+                // same height, and only the item's row folds in or out; crossfaded, the two rows' words doubled.
+                .transition(.identity)
           } else {
             RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
                 row(thread, hot: hot)
@@ -213,6 +216,7 @@ struct RouterLineView: View {
             }
             // Its height, for the list's slot (`RouterHostedLine`).
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { box.rowHeight = $0 }
+            .transition(.identity)
             // A line changing section glides there as itself: no plate, no edge, no shadow. What it passes fades out
             // under it and back behind it (the veil), there from the frame it takes off and gone once it has landed in
             // the gap the rows opened for it.
@@ -264,7 +268,11 @@ struct RouterLineView: View {
                     // mask ends it, with its corners, where the rows under the card are (`placeTail`), so a card shutting
                     // or changing rows keeps its ground down to them.
                     if block {
+                        // An item's hugs its row: from its mark's gutter, as a line's ground is from its mark (the
+                        // header's is the whole line's).
                         RoundedRectangle(cornerRadius: M.selectedRadius, style: .continuous).fill(Router.Surface.quiet)
+                            .padding(.leading, box.item == nil ? 0 : Router.Items.groundLeading)
+                            .motion(.spatial, value: box.item == nil)
                             .frame(height: max(0, focusRowHeight + cardHeight + RouterLineSlotView.roomStep))
                             .offset(y: -focusRowHeight)
                             .modifier(RouterBlockLeave.Shift(leave: leave, index: leave.map { _ in cut } ?? 0))
@@ -380,7 +388,6 @@ struct RouterLineView: View {
         // The sentence is never cut: it flows as text from after the name and wraps under it; the rest keeps to its first
         // line. (A Sent line keeps to one: your words in quotes, then their status.)
         let flows = thread.sent == nil
-        let single = thread.ledger.single != nil && flows
         return HStack(alignment: .routerFirstLine, spacing: 0) {
             ZStack {
                 Circle().fill(CDS.Fill.accent).opacity(thread.isNew && !marked ? 1 : 0)
@@ -403,7 +410,7 @@ struct RouterLineView: View {
                     RouterSentenceView(model: model, box: box, lead: nameWidth > 0 ? nameWidth + M.sentenceGap : 0)
                         .routerActivity(model, thread)
                         // A command (mono 12) has a shorter line than the name's 14: dropped onto the name's baseline.
-                        .padding(.top, M.namePadY + (thread.sentence.mono && thread.ledger.single == nil ? M.monoDrop : 0))
+                        .padding(.top, M.namePadY + (thread.sentence.mono ? M.monoDrop : 0))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     RouterName(model: model, thread: thread, rowHot: hot)
                         .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * M.nameShare : .infinity))
@@ -427,13 +434,7 @@ struct RouterLineView: View {
                     .allowsHitTesting(model.project == nil)
                     .layoutPriority(1)
             }
-            Group {
-                if single, let item = thread.ledger.single {
-                    RouterAge(model: model, since: item.since).itemDone(model, thread: thread.id, item: item, rowHot: hot && !box.selected)
-                } else {
-                    RouterAge(model: model, since: thread.ledger.single?.since ?? thread.since)
-                }
-            }
+            RouterAge(model: model, since: thread.since)
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .layoutPriority(1)
         }
@@ -553,7 +554,7 @@ struct RouterSentenceView: View {
     let model: RouterModel
     /// Its line's box: streamed words redraw this view only.
     let box: RouterLineBox
-    /// A line that is its one item: the blank its sentence starts with, where the name sits over it.
+    /// The blank its sentence starts with, where the name sits over it.
     var lead: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -578,39 +579,6 @@ struct RouterSentenceView: View {
                             .padding(.leading, 2)
                     }
                 }
-                .transition(.routerSwap)
-            } else if let item = thread.ledger.single {
-                // The line is its one open item: its sentence, sheening while a read may close it; your words sent
-                // against it follow it on the line (`↑ "…" · sent`), and a new turn being read shows Fjord's mark.
-                // The whole sentence, never cut mid-fact: it wraps as text, a next line starting under the name (the
-                // row keeps its name, pill and age on the first line, `routerFirstLine`).
-                let text = (RouterFlow.lead(lead) + Text(item.sentence).strikethrough(item.closing, color: CDS.Text.muted) + RouterFlow.end)
-                    .font(CDS.sans(14))
-                let lines = Router.Items.sentenceLines
-                HStack(alignment: .top, spacing: Router.Thinking.gap) {
-                    text.foregroundStyle(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
-                        .lineLimit(lines).fixedSize(horizontal: false, vertical: true)
-                        .overlay(alignment: .topLeading) {
-                            if item.state == .checking {
-                                RouterSheen().mask(alignment: .topLeading) {
-                                    text.lineLimit(lines).fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
-                    switch thread.ledger.read {
-                    case .message(let words)?:
-                        Text("↑ “\(words)” · \(Router.Items.Copy.sent)").font(CDS.sans(14)).foregroundStyle(CDS.Text.muted)
-                            .lineLimit(1).truncationMode(.middle)
-                            .frame(minWidth: 120, alignment: .leading)
-                            .layoutPriority(-1)
-                            .transition(.opacity)
-                    case .turn?:
-                        RouterThinking().frame(height: Router.Items.lineHeight).transition(.opacity)
-                    case nil:
-                        EmptyView()
-                    }
-                }
-                .id(item.id)
                 .transition(.routerSwap)
             } else {
                 let s = sentence
@@ -770,7 +738,7 @@ struct RouterOlderPeek: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(older) { o in
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(CDS.Text.accent)
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(CDS.Text.muted)
                     Text(o.name).cdsText(CDS.Density.compact.body, .regular, CDS.Text.primary).lineLimit(1)
                     Spacer(minLength: 8)
                     if let project = o.project { RouterProjectBadge(project: project) }

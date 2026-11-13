@@ -24,7 +24,7 @@ extension RouterModel {
     /// than the line. A working line's shows from anywhere on its row (`peeked`).
     var activityPeeked: String? {
         guard case .activity(let id)? = hoverControl, selection != .line(id), let t = thread(id), !t.activity.isEmpty,
-              !t.peeksWork, RouterSummaryView.peeks(t, t.ledger.single) else { return nil }
+              !t.peeksWork, RouterSummaryView.peeks(t, nil) else { return nil }
         return id
     }
 }

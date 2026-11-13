@@ -574,8 +574,7 @@ final class RouterModel {
         return nil
     }
 
-    /// The item whose peek shows: the pointer on an item's row in a block, unless its card is open. (A line that is its
-    /// thread's one item peeks from its name, `peeked`.)
+    /// The item whose peek shows: the pointer on an item's row in a block, unless its card is open.
     var peekedItem: (thread: RouterThread, item: RouterItem)? {
         guard let key = hoverRow, hoverName == nil else { return nil }
         for t in threads where t.ledger.block && key.hasPrefix(t.id + "#") {
@@ -683,11 +682,10 @@ final class RouterModel {
     /// Picks and hits of an item's card: its thread and its id.
     static func itemKey(_ thread: String, _ item: String) -> String { thread + "#" + item }
 
-    /// The item whose card is open: the focused one in a block, or a thread's one item.
+    /// The item whose card is open: the block's focused one.
     var selectedItem: (thread: RouterThread, item: RouterItem)? {
         guard let t = selectedThread else { return nil }
         if let focus, let item = t.ledger.items.first(where: { $0.id == focus }) { return (t, item) }
-        if let item = t.ledger.single { return (t, item) }
         return nil
     }
 

@@ -444,10 +444,10 @@ struct RouterFloating: View {
         let frames = model.targets.frames
         ZStack(alignment: .topLeading) {
             if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)],
-               RouterSummaryView.peeks(thread, thread.ledger.single) {
-                // The line's hover (a line that is its one item: the item's), hung from its name.
+               RouterSummaryView.peeks(thread, nil) {
+                // The line's hover, hung from its name.
                 hung(from: blockFrame(thread, name: frame, frames: frames), width: Router.Peek.width) {
-                    RouterSummaryView(model: model, thread: thread, item: thread.ledger.single, layer: .hover)
+                    RouterSummaryView(model: model, thread: thread, item: nil, layer: .hover)
                 }
                     .id("peek-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
@@ -468,7 +468,7 @@ struct RouterFloating: View {
             if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {
                 // The glyphs sit at the line's end: the line's hover hangs back from their trailing edge, inside the page.
                 hung(from: frame, width: Router.Peek.width, trailing: true) {
-                    RouterSummaryView(model: model, thread: thread, item: thread.ledger.single, layer: .hover)
+                    RouterSummaryView(model: model, thread: thread, item: nil, layer: .hover)
                 }
                     .id("activity-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
