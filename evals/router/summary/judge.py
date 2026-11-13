@@ -27,9 +27,14 @@ SCHEMA = {"type": "object", "properties": {"accurate": {"type": "boolean"}, "use
 
 
 def facts(c, line):
+    # Redacted by the app's rules (the SummaryEvalDump test writes judge/<id>.json): no raw command or token goes to Opus.
+    f = D / "judge" / f"{c['id']}.json"
+    if not f.exists():
+        sys.exit(f"{f} is missing: run the SummaryEvalDump test first (it redacts the judge's facts)")
+    j = json.load(open(f))
     out = [f"Thread title: {c['title']}", f"Project: {c.get('project')}",
-           "What the owner asked (clipped):\n" + (c.get("yourWords") or "")[:1200],
-           "What the run did around the moment:\n" + "\n".join(c.get("around") or [])]
+           "What the owner asked (clipped):\n" + (j.get("yourWords") or "")[:1200],
+           "What the run did around the moment:\n" + "\n".join(j.get("around") or [])]
     return "<facts>\n" + "\n\n".join(out) + "\n</facts>\n\nThe line to grade: " + json.dumps(line)
 
 

@@ -6,12 +6,15 @@ import Testing
 /// exported by `evals/router/summary/export.py`), it writes the exact system prompt and schema a working summary call
 /// sends, and each moment's input as the app builds it (redacted, fenced) to `inputs/<id>.txt`, without the previous line:
 /// `evals/router/summary/run.py` appends that line the way `RouterSummaryPrompt.text` does, from the earlier moment's answer.
+/// The judge's facts (what the run did around the moment, your words) go through the same redaction to `judge/<id>.json`:
+/// `judge.py` reads only those, so no raw command or token reaches it.
 @MainActor @Suite struct SummaryEvalDump {
     private struct Case: Decodable {
         struct Tool: Decodable { var text: String }
         struct Step: Decodable { var text: String, status: String }
         var id: String, title: String
         var project: String?, yourWords: String?, said: String?
+        var around: [String]?
         var now: Tool?
         var recent: [Tool]
         var steps: [Step]
@@ -32,6 +35,13 @@ import Testing
         func write(_ url: URL, _ s: String) throws { try s.write(to: url, atomically: true, encoding: .utf8) }
         try write(root.appendingPathComponent("system.txt"), RouterSummaryPrompt.system)
         try write(root.appendingPathComponent("schema.json"), RouterSummaryPrompt.schema)
-        for c in cases { try write(inputs.appendingPathComponent("\(c.id).txt"), RouterSummaryPrompt.text(c.input)) }
+        let judge = root.appendingPathComponent("judge")
+        try FileManager.default.createDirectory(at: judge, withIntermediateDirectories: true)
+        for c in cases {
+            try write(inputs.appendingPathComponent("\(c.id).txt"), RouterSummaryPrompt.text(c.input))
+            let facts: [String: Any] = ["yourWords": c.yourWords.map(RouterTools.redacted) ?? "",
+                                        "around": (c.around ?? []).map(RouterTools.redacted)]
+            try JSONSerialization.data(withJSONObject: facts, options: [.prettyPrinted]).write(to: judge.appendingPathComponent("\(c.id).json"))
+        }
     }
 }
