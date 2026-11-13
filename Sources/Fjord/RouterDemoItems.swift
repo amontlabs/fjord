@@ -82,9 +82,11 @@ extension RouterDemo {
         - Install: the app's update panel offers 0.8.13; accept it there. The installed app is still 0.8.12, so the fix isn't live until you do.
         """
 
-    /// The lines of that message the Do comes from.
+    /// The lines of that message the Do comes from, a blank line between its paragraphs as the owner's real quote had:
+    /// the peek's cut falls on that blank line and ends with the words above it.
     static let lastdropInstall = """
         The fix is committed, pushed to `main` (d24947a), and released as lastdrop 0.8.13: https://github.com/amontlabs/lastdrop/releases/tag/v0.8.13
+
         - Install: the app's update panel offers 0.8.13; accept it there. The installed app is still 0.8.12, so the fix isn't live until you do.
         """
 

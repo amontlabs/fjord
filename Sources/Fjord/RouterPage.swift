@@ -448,7 +448,7 @@ struct RouterFloating: View {
                     } else if let item = thread.ledger.single {
                         // The line is its one item: what the line doesn't say.
                         if RouterItemPeek.has(thread, item) { RouterItemPeek(thread: thread, item: item) }
-                    } else {
+                    } else if RouterPeek.has(thread) {
                         RouterPeek(thread: thread)
                     }
                 }

@@ -200,7 +200,6 @@ extension Router {
             static let obsolete = "no longer open"
             static let doneByYou = "done by you"
             static let done = "Done"
-            static let more = "Click for its card"
             /// A turn or message Fjord couldn't read (T3 never had it): kept as a Know, so what it said isn't silently lost.
             static let unread = "a turn couldn't be read: open the thread to see what it said"
             static let unreadMessage = "a message of yours couldn't be read: open the thread to check it was answered"
@@ -567,7 +566,8 @@ struct RouterItemQuote: View {
     var body: some View {
         let d = CDS.Density.compact
         let open = model.expanded.contains(thread)
-        let words = Text(RouterInline.text(RouterItem.quoted(text), size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
+        let quoted = RouterItem.quoted(text)
+        let words = Text(RouterInline.text(quoted, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
         RouterQuoteCut(open: open) {
             words.fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
@@ -584,6 +584,7 @@ struct RouterItemQuote: View {
             RouterShowAll(model: model, id: thread, open: open)
                 .frame(minWidth: 0, minHeight: 0, alignment: .topLeading)
                 .clipped()
+            RouterQuoteStops.views(quoted)
         }
         .compositingGroup()
     }
@@ -593,8 +594,8 @@ struct RouterItemQuote: View {
 
 /// The pointer on an item (a line that is its thread's one item, or an item's row in a block): what the line doesn't
 /// already say. Its detail when it adds something, then the agent's words it comes from, behind a rail, cut by whole
-/// lines with a fade. "Click for its card" only when the card has more: the words go on past the cut, or it has links
-/// or options. With neither detail nor words, the thread's last lines.
+/// lines with a fade (never on the blank line between two paragraphs). With neither detail nor words, the thread's last
+/// lines.
 struct RouterItemPeek: View {
     let thread: RouterThread
     let item: RouterItem
@@ -603,17 +604,15 @@ struct RouterItemPeek: View {
         let d = CDS.Density.compact
         let detail = item.extra
         let quote = item.quote ?? (detail == nil ? (thread.lastLines.isEmpty ? nil : thread.lastLines) : nil)
-        let more = !item.links.isEmpty || !item.options.isEmpty
-        let caption = Text(Router.Items.Copy.more).cdsText(d.caption, .regular, CDS.Text.muted)
         VStack(alignment: .leading, spacing: 8) {
             if let detail {
                 Text(RouterInline.text(detail, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let quote {
-                let words = Text(RouterInline.text(RouterItem.quoted(quote), size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
-                // The caption rides the cut: it shows when the words go on past it (the card has them whole).
-                RouterQuoteCut(open: false, buttonGap: 8, shows: more ? true : nil) {
+                let quoted = RouterItem.quoted(quote)
+                let words = Text(RouterInline.text(quoted, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
+                RouterQuoteCut(open: false, button: false) {
                     words.fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
                         .clipped()
@@ -623,11 +622,9 @@ struct RouterItemPeek: View {
                     LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
                         .blendMode(.destinationOut)
                     Rectangle().fill(CDS.Settings.railLine)
-                    caption.frame(minWidth: 0, minHeight: 0, alignment: .topLeading).clipped()
+                    RouterQuoteStops.views(quoted)
                 }
                 .compositingGroup()
-            } else if more {
-                caption
             }
         }
         .routerPeekShell()
@@ -635,7 +632,7 @@ struct RouterItemPeek: View {
 
     /// Whether it has anything to say: an item whose line says it all has no peek.
     static func has(_ thread: RouterThread, _ item: RouterItem) -> Bool {
-        item.extra != nil || item.quote != nil || !thread.lastLines.isEmpty || !item.links.isEmpty || !item.options.isEmpty
+        item.extra != nil || item.quote != nil || !thread.lastLines.isEmpty
     }
 }
 

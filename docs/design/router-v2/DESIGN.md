@@ -309,7 +309,8 @@ Kind blocks:
   enters with `scaleFade` 0.98.
 - Content: last lines (4, body secondary); then by kind, as plain text: the options
   numbered "1 A sidebar with sections"; a plan's first 4 lines; a permission's command; a stop's error line; PR badges
-  for Done. Last row, caption `Text.muted`: "Click for its card" (**R3**).
+  for Done. No caption under it (2026-11-13: "Click for its card" went from every peek); a line with none of these has
+  no peek.
 - **R5.** The activity glyphs' peek (pointer on the glyphs, not on a selected line, whose card lists the same): the
   same shell, 360 wide, hung from the glyphs. One row per item, 6 apart: its glyph (10 pt muted, a 14 pt column), the
   words (body `Text.primary`, one line, tail truncation), then trailing, caption 12 muted mono digits: a subagent's name
@@ -320,9 +321,9 @@ Kind blocks:
   in a block, unless its card is open; hung from the row's words): only what the line doesn't already say. The item's
   detail (body `Text.primary`) when it adds something, then the exact lines of the agent's message behind it, body
   `Text.secondary` behind the card's rail, cut by whole lines at 4 with a bottom fade; each bare link in it shown as its
-  address without the scheme (never cut after `https://`). "Click for its card" (caption muted) only when the card has
-  more: the words go on past the cut, or it has links or options. An item with neither detail nor words quotes the
-  thread's last lines; with nothing at all, no peek.
+  address without the scheme (never cut after `https://`). The cut never ends on the blank line between two
+  paragraphs: it ends with the paragraph above it, so the rail ends with the words (`RouterQuoteStops`). No caption.
+  An item with neither detail nor words quotes the thread's last lines; with nothing at all, no peek.
 - **R6.** A working line's peek replaces both the name's and the glyphs' there: the pointer anywhere on the row. 400
   wide, the same shell, hung from the name. The command or tool running now (the working dots in the 14 pt
   glyph column, the words in `Text.primary`, a command in `CDS.mono(12)`, middle truncation) and up to three before it

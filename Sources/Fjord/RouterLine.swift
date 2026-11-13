@@ -740,7 +740,8 @@ struct RouterTextButton: View {
 
 // MARK: - Peek
 
-/// The hover peek: read-only, floating by the name. The last lines, then by kind as plain text.
+/// The hover peek: read-only, floating by the name. The last lines, then by kind as plain text; none when neither has
+/// anything to say.
 struct RouterPeek: View {
     let thread: RouterThread
 
@@ -752,9 +753,21 @@ struct RouterPeek: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             kind
-            Text(Router.Copy.clickToOpen).cdsText(d.caption, .regular, CDS.Text.muted)
         }
         .modifier(RouterPeekShell())
+    }
+
+    /// Whether it has anything to say: no empty shell under the pointer.
+    static func has(_ thread: RouterThread) -> Bool {
+        if !thread.lastLines.isEmpty { return true }
+        switch thread.state {
+        case .needsYou(.plan): return !thread.plan.isEmpty
+        case .needsYou(.permission): return thread.permission != nil
+        case .needsYou: return thread.question != nil || !thread.form.isEmpty || !thread.options.isEmpty
+        case .stopped: return thread.stop != nil
+        case .done: return !thread.prs.isEmpty
+        case .working, .sent: return false
+        }
     }
 
     @ViewBuilder private var kind: some View {

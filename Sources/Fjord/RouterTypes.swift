@@ -214,7 +214,6 @@ enum Router {
         /// In the destination row while T3 is away: Return keeps the words.
         static let unreachableRow = "T3 Code isn't reachable"
         static let reconnecting = "T3 Code isn't reachable. Reconnecting…"
-        static let clickToOpen = "Click for its card"
         /// A request T3 can no longer answer (after a T3 restart): its options give way to Open in T3.
         static let notLive = "T3 can no longer take an answer to this from here."
         static let snooze = "Snooze"

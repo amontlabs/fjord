@@ -408,14 +408,18 @@ struct RouterShowAll: View {
 }
 
 /// A quote's views in one layout: its words (all of them, clipped to what they are offered), its first lines (not drawn,
-/// for the cut), the fade over the cut's bottom, the rail beside the words and the button under them. Cut while shut and
-/// longer than its first lines; the fade and the button only then (the button stays, as "Show less", while open).
+/// for the cut), the fade over the cut's bottom, the rail beside the words and the button under them (none with
+/// `button: false`). Cut while shut and longer than its first lines; the fade and the button only then (the button
+/// stays, as "Show less", while open). Then, optionally, `RouterQuoteStops`: the cut never ends on the blank line
+/// between two paragraphs (the rail and the fade ran a line past the words, over nothing).
 struct RouterQuoteCut: Layout {
     var open: Bool
     /// Between the words and the button.
     var buttonGap: CGFloat = 4
     /// Whether the button shows: by default only when the words go on past their first lines.
     var shows: Bool? = nil
+    /// Whether there is a button view.
+    var button = true
     private typealias M = Router.Card
 
     struct Cache {
@@ -429,16 +433,26 @@ struct RouterQuoteCut: Layout {
 
     func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
 
+    private var core: Int { button ? 5 : 4 }
+
     private func measure(_ width: CGFloat, _ subviews: Subviews, _ cache: inout Cache) {
-        guard cache.width != width, subviews.count == 5 else { return }
+        guard cache.width != width, subviews.count >= core else { return }
         let words = ProposedViewSize(width: max(0, width - M.railInset), height: nil)
-        cache = Cache(width: width, all: subviews[0].sizeThatFits(words).height, first: subviews[1].sizeThatFits(words).height,
-                      button: subviews[4].sizeThatFits(.unspecified).height)
+        let all = subviews[0].sizeThatFits(words).height
+        var first = subviews[1].sizeThatFits(words).height
+        // The stops: two lines' height, then each paragraph's end. A cut less than a line and a half past a paragraph's
+        // end holds only the blank line after it: it ends with that paragraph.
+        if all > first + 1, subviews.count > core + 1 {
+            let lines = subviews[core].sizeThatFits(words).height
+            let ends = subviews.dropFirst(core + 1).map { $0.sizeThatFits(words).height }
+            if let end = ends.filter({ $0 < first - 1 && first - $0 < lines * 0.75 }).max() { first = end }
+        }
+        cache = Cache(width: width, all: all, first: first, button: button ? subviews[4].sizeThatFits(.unspecified).height : 0)
     }
 
     private func more(_ cache: Cache) -> Bool { cache.all > cache.first + 1 }
 
-    private func showsButton(_ cache: Cache) -> Bool { shows ?? more(cache) }
+    private func showsButton(_ cache: Cache) -> Bool { button && (shows ?? more(cache)) }
 
     /// The words' shown height.
     private func shown(_ cache: Cache) -> CGFloat { more(cache) && !open ? cache.first : cache.all }
@@ -451,7 +465,7 @@ struct RouterQuoteCut: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
-        guard subviews.count == 5 else { return }
+        guard subviews.count >= core else { return }
         measure(bounds.width, subviews, &cache)
         let height = shown(cache)
         let words = max(0, bounds.width - M.railInset)
@@ -464,9 +478,33 @@ struct RouterQuoteCut: Layout {
         subviews[2].place(at: CGPoint(x: origin.x, y: bounds.minY + height - fade), anchor: .topLeading,
                           proposal: ProposedViewSize(width: cut ? words : 0, height: fade))
         subviews[3].place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: 1, height: height))
-        let button = showsButton(cache) ? cache.button : 0
-        subviews[4].place(at: CGPoint(x: origin.x, y: bounds.minY + height + buttonGap), anchor: .topLeading,
-                          proposal: ProposedViewSize(width: showsButton(cache) ? nil : 0, height: button))
+        if button {
+            let shown = showsButton(cache)
+            subviews[4].place(at: CGPoint(x: origin.x, y: bounds.minY + height + buttonGap), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: shown ? nil : 0, height: shown ? cache.button : 0))
+        }
+        // The stops are never drawn: they are hidden, placed at the origin with no room.
+        for stop in subviews.dropFirst(core) { stop.place(at: origin, anchor: .topLeading, proposal: .zero) }
+    }
+}
+
+/// The views `RouterQuoteCut` measures its stops by (not drawn): two lines of the words' style, then the words up to
+/// each paragraph's end but the last.
+enum RouterQuoteStops {
+    /// A blank line: the break between two paragraphs.
+    nonisolated(unsafe) private static let paragraphBreak = try! Regex("\\n[ \\t]*\\n")
+
+    @ViewBuilder static func views(_ markdown: String) -> some View {
+        let d = CDS.Density.compact
+        let ends = markdown.ranges(of: paragraphBreak).map { markdown[..<$0.lowerBound] }.prefix(8)
+        if !ends.isEmpty {
+            Text(verbatim: "x\nx").cdsText(d.body, .regular, CDS.Text.secondary)
+                .fixedSize(horizontal: false, vertical: true).hidden()
+            ForEach(Array(ends.enumerated()), id: \.offset) { _, end in
+                Text(RouterInline.text(String(end), size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
+                    .fixedSize(horizontal: false, vertical: true).hidden()
+            }
+        }
     }
 }
 
