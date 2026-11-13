@@ -1008,10 +1008,10 @@ final class RouterModel {
         }
         // What is the model's own: the order among lines that entered their state at once (a fresh one only when the
         // state changes), and the count of the model's lines (it never goes back). A line whose words are still
-        // Its request is its item before the move is judged (the section follows the items).
-        t.syncRequest()
         // streaming in keeps streaming when the record says they are all there.
         var t = new
+        // Its request is its item before the move is judged (the section follows the items).
+        t.syncRequest()
         t.order = old.order
         t.sentence.stream = max(old.sentence.stream, new.sentence.stream)
         if old.sentence.phase == .streaming, new.sentence.phase == .settled, new.sentence.text == old.sentence.text {
