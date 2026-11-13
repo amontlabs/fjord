@@ -10,6 +10,11 @@ the eval judges blind. The output holds message text: it lives in the gitignored
 
     python3 evals/router/items/export.py                  # last 7 days (widens to 14, then 21, if quotas fail)
     python3 evals/router/items/export.py --days 14 --seed 2
+    python3 evals/router/items/export.py --said --seed 7 --days 10 --out data/held-said/cases.json --exclude ...
+
+`--said` also cuts `said` steps: whole messages the agent posted while its run went on, coalesced as the app reads them
+(`RouterItemLedgers.saidGap`: at most one per 60 s per thread, the newest waiting one read at the gap's end or when the
+run ends), and samples windows with at least one, biased to those that ask something mid-run.
 """
 import argparse, collections, json, pathlib, random, re, sqlite3, sys
 from datetime import datetime, timedelta, timezone
@@ -62,7 +67,30 @@ def load(days):
     return since, threads, msgs, runs
 
 
-def steps_of(tid, msgs, runs):
+SAID_GAP = 60
+
+
+def said_of(r, ms):
+    """The run's mid-run messages the app reads (not its last: the turn's read has it), coalesced by SAID_GAP."""
+    own = sorted((m for m in ms if m["run"] == r["run"] and m["role"] == "assistant" and m["text"].strip()), key=lambda m: m["at"])
+    mid, out, last, waiting = own[:-1], [], None, None
+    for m in mid:
+        if waiting and last and (m["at"] - last).total_seconds() >= SAID_GAP:
+            last = last + timedelta(seconds=SAID_GAP)
+            out.append((last, waiting))
+            waiting = None
+        if last is None or (m["at"] - last).total_seconds() >= SAID_GAP:
+            last = m["at"]
+            out.append((m["at"], m))
+            waiting = None
+        else:
+            waiting = m
+    if waiting:
+        out.append((min(last + timedelta(seconds=SAID_GAP), r["end"]), waiting))
+    return out
+
+
+def steps_of(tid, msgs, runs, said=False):
     ms = msgs[tid]
     by_id = {m["id"]: m for m in ms}
     starter = {r["umid"] for r in runs[tid]}
@@ -78,6 +106,13 @@ def steps_of(tid, msgs, runs):
         woke = own["text"][:600] if own and not by_user else None
         out.append(dict(kind="turn", run=r["run"], status=r["status"], at=r["end"].isoformat().replace("+00:00", "Z"), _t=r["end"],
                         _req=r["req"], reply=reply, started=own["text"] if by_user else None, woke=woke, wake=woke is not None))
+        if said:
+            words = own["text"] if by_user else next((m["text"] for m in reversed(ms) if m["role"] == "user" and m["by"] == "user"
+                                                       and m["text"].strip() and m["at"] <= r["req"]), None)
+            for at, m in said_of(r, ms):
+                # Before the turn's own step at the same instant (a waiting one read as the run ends).
+                out.append(dict(kind="said", id=m["id"], run=r["run"], at=at.isoformat().replace("+00:00", "Z"),
+                                _t=at - timedelta(microseconds=1), text=m["text"], started=(words or "")[:1000] or None))
     for m in ms:
         if m["role"] != "user" or m["by"] != "user" or not m["text"].strip():
             continue
@@ -87,6 +122,28 @@ def steps_of(tid, msgs, runs):
                         during=during, replyBefore=before[-1500:]))
     out.sort(key=lambda s: (s["_t"], s["kind"] == "turn"))
     return out
+
+
+def waits(st, runs_of):
+    """Turns that ended while the agent's background work went on (the next run is a wake, over 30 s later): T3 showed the
+    thread working, so before 2026-11-13 the app never read them. Marked `waiting` on the step."""
+    nxt = {r["run"]: runs_of[i + 1] for i, r in enumerate(runs_of[:-1])}
+    for s in st:
+        n = nxt.get(s.get("run")) if s["kind"] == "turn" else None
+        s["waiting"] = bool(n and n["req"] and n["_woke"] and (n["req"] - s["_t"]).total_seconds() > 30)
+
+
+def said_tags(w):
+    tags = tags_of([s for s in w if s["kind"] != "said"])
+    for s in w:
+        if s.get("waiting") and asks(s["reply"]):
+            tags.add("waitask")
+    for s in w:
+        if s["kind"] == "said":
+            tags.add("said")
+            if asks(s["text"]):
+                tags.add("midask")
+    return tags
 
 
 def tags_of(w):
@@ -125,7 +182,7 @@ def select(cands, seed):
             pool = [c for c in cands if tag in c["tags"] and free(c)]
             if not pool:
                 break
-            need = lambda c: sum(counts[t] < QUOTAS[t] for t in c["tags"])
+            need = lambda c: sum(counts[t] < QUOTAS[t] for t in c["tags"] if t in QUOTAS)
             best = max(need(c) for c in pool)
             take(rnd.choice([c for c in pool if need(c) == best]))
     rest = [c for c in cands if free(c)]
@@ -144,14 +201,21 @@ def main():
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", help="another cases file (a held-out set)")
-    ap.add_argument("--exclude", help="a cases file whose steps (runs, messages) no window may contain")
+    ap.add_argument("--exclude", nargs="*", help="cases files whose steps (runs, messages) no window may contain")
+    ap.add_argument("--said", action="store_true", help="mid-run messages too; windows with one (EVAL-items.md)")
+    ap.add_argument("--waiting", action="store_true", help="windows with a turn that asks and ended while its background work went on")
     a = ap.parse_args()
+    global QUOTAS, MIN_SEQ
+    if a.said:
+        QUOTAS, MIN_SEQ = dict(midask=8, said=15), 15
+    if a.waiting:
+        QUOTAS, MIN_SEQ = dict(waitask=10, midask=1), 10
     global OUT
     if a.out:
         OUT = pathlib.Path(a.out)
     seen = set()
-    if a.exclude:
-        for c in json.load(open(a.exclude)):
+    for path in a.exclude or []:
+        for c in json.load(open(path)):
             for s in c["steps"]:
                 seen.add(s.get("run") or s.get("id"))
     for days in sorted({a.days, 14, 21} if a.days <= 21 else {a.days}):
@@ -160,13 +224,19 @@ def main():
         since, threads, msgs, runs = load(days)
         cands = []
         for tid in threads:
-            st = [s for s in steps_of(tid, msgs, runs) if s["_t"] >= since]
+            for r in runs[tid]:
+                own = next((m for m in msgs[tid] if m["id"] == r["umid"]), None)
+                r["_woke"] = bool(own and own["by"] != "user")
+            st = [s for s in steps_of(tid, msgs, runs, said=a.said) if s["_t"] >= since]
+            waits(st, runs[tid])
             for lo in range(len(st)):
                 for n in range(MIN_STEPS, MAX_STEPS + 1):
                     w = st[lo:lo + n]
                     if len(w) == n and sum(s["kind"] == "turn" for s in w) >= 2 \
-                            and not any((s.get("run") or s.get("id")) in seen for s in w):
-                        cands.append(dict(tid=tid, lo=lo, hi=lo + n, w=w, tags=tags_of(w)))
+                            and not any((s.get("run") or s.get("id")) in seen for s in w) \
+                            and (a.waiting or not a.said or any(s["kind"] == "said" for s in w)) \
+                            and (not a.waiting or any(s.get("waiting") and asks(s["reply"]) for s in w)):
+                        cands.append(dict(tid=tid, lo=lo, hi=lo + n, w=w, tags=said_tags(w) if a.said or a.waiting else tags_of(w)))
         chosen, counts = select(cands, a.seed)
         if len(chosen) >= MIN_SEQ and all(counts[t] >= q for t, q in QUOTAS.items()):
             break
@@ -184,7 +254,8 @@ def main():
     json.dump(cases, open(OUT, "w"), indent=1)
     tc = collections.Counter(t for c in cases for t in c["tags"])
     print(f"window: {days} days\nsequences: {len(cases)}  steps: {sum(len(c['steps']) for c in cases)}  "
-          f"turns: {sum(s['kind'] == 'turn' for c in cases for s in c['steps'])}  threads: {len({c['thread'] for c in cases})}")
+          f"turns: {sum(s['kind'] == 'turn' for c in cases for s in c['steps'])}  said: {sum(s['kind'] == 'said' for c in cases for s in c['steps'])}  "
+          f"threads: {len({c['thread'] for c in cases})}")
     print("tags: " + ", ".join(f"{t}={tc[t]}" for t in QUOTAS) + f"  (untagged {sum(not c['tags'] for c in cases)})")
     print(f"-> {OUT}")
 

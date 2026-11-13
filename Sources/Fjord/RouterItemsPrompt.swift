@@ -139,7 +139,14 @@ enum RouterItemsPrompt {
 
     /// A whole message the agent posted while its run goes on: what it leaves open, and what it settles; no line.
     static let said = common + "\n\nThe thread's agent just posted a message while its run goes on (it keeps working, or waits on its own background "
-        + "tasks or subagents). Fill the fields in order.\n" + closing + "\n" + kinds
+        + "tasks or subagents). Fill the fields in order.\n" + closing + "\n" + kinds + "\n" + saidRule
+
+    private static let saidRule = """
+    Its run goes on, so most such messages leave nothing. What it says it does next, works around itself, or does by \
+    default unless the user says otherwise is not an item. A question is a decide only when it asks the user and the work \
+    it is about waits for the answer ("Do you want me to make that change?"); one it asks itself, or answers as it goes, is \
+    not. A caveat it leaves to the user ("that's your call") is a know.
+    """
 
     /// Your words to the thread: they may answer what is open; they add nothing.
     static let message = common + "\n\nThe user just wrote to the thread. Fill the field.\n" + closing

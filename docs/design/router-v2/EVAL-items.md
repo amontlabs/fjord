@@ -59,6 +59,38 @@ Held-out set (n = 45, 234 reads each):
 - **Duplicates**: one in 155 on the first set, none held out; 37 items were merged (restated, age reset) in each set.
 - **Mid-run wakes** are read like any turn, with "It was started by a notice, not the user" and what woke it.
 
+## Mid-run inputs (2026-11-13)
+
+A real miss: the agent ended its turn with "Do you want me to make that change?" while a subagent it delegated to still
+ran, so T3 showed the thread working and no turn end was read until your next message. Two inputs fix it
+(`RouterItemLedgers`): a turn that ends while its background work goes on is read as it ends (`waiting` below), and a
+whole message the agent posts while its run goes on is read as it lands (`said`: keyed by T3's message id, one read in
+flight per thread, at most one a minute, the newest waiting one read at the gap's end or when the run ends; read with
+its own prompt, `RouterItemsPrompt.said`, which finds items and writes no line).
+
+Two more held-out sets (`export.py --said` and `--said --waiting`, excluding every step of the two sets above):
+**held-said**, 15 sequences, 84 steps, 33 mid-run reads (6 that end on a question, all of them the agent asking itself);
+**held-wait**, 7 sequences, 43 steps, 18 turns that ended while background work went on, 7 of which ask you.
+
+| set, config | reads | added | precision | missed | recall | false | wrong kind | closes | wrong closes | missed closes | bad sentences |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| held-said, said v1 | 82 | 35 | 0.86 | 0 | 1.00 | 5 | 2 | 11 | 0 | 1 | 3 |
+| held-said, **said v2** | 82 | 36 | 0.86 | 0 | 1.00 | 5 | 1 | 9 | 0 | 4 | 1 |
+| held-wait, **said v2** | 42 | 25 | 0.84 | 0 | 1.00 | 4 | 0 | 4 | 0 | 3 | 0 |
+
+- **Mid-run reads alone** (held-said): v1 added 11 items, 3 false and 2 of the wrong kind (a default the agent takes
+  unless told otherwise read as a Decide, a workaround it runs itself as a Know); **v2** (one rule more: its run goes
+  on, so a question is a Decide only when the work it is about waits for the answer) adds 10, 1 false, 1 wrong kind, no
+  miss, no wrong close. The turn and message reads in these sets are unchanged; their counts move between runs by the
+  model's variance.
+- **Waiting turns** (held-wait): 11 of the 18 leave or restate a Stuck, Decide or Do. Before the fix the app read none
+  of them until the wake or your message.
+- **No regression**: the turn and message prompts are unchanged; the first held-out set's inputs, re-dumped, are
+  identical (`parts.json`, prompts, schemas), so its scores stand (precision 0.96, recall 0.99).
+- **Cost**: the owner's last 7 days have about 320 mid-run messages a day outside subagent threads; coalesced to one a
+  minute per thread, about 200 to 300 reads a day at about $0.007 (held-said: $0.0061 per read), so about $1.5 to $2 a
+  day more.
+
 ## What it still gets wrong
 
 - **Missed closes** (12 of about 70 that should close, held out): mostly your words settling more than the item they
@@ -92,6 +124,8 @@ python3 evals/router/items/run.py v2-sonnet                         # the app's 
 python3 evals/router/items/judge.py v2-sonnet && python3 evals/router/items/judge.py score v2-sonnet
 ITEMS_DATA=$PWD/evals/router/items/data/held python3 evals/router/items/run.py ...       # the held-out set
 python3 evals/router/items/calls.py                                 # reads a day
+python3 evals/router/items/export.py --said --seed 7 --days 10 --out evals/router/items/data/held-said/cases.json --exclude evals/router/items/data/cases.json evals/router/items/data/held/cases.json
+python3 evals/router/items/export.py --said --waiting --seed 7 --days 21 --out evals/router/items/data/held-wait/cases.json --exclude ... held-said/cases.json
 ```
 
 `run.py NAME --model M --turn-system FILE --message-system FILE` tries another model or prompt. Sequences already run are

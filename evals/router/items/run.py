@@ -37,11 +37,12 @@ def open_block(items, now):
     return "\n".join(out)
 
 
-def call(a, turn, text):
-    own = a.turn_system if turn else a.message_system
-    system = pathlib.Path(own).read_text() if own else (D / f"system-{'turn' if turn else 'message'}.txt").read_text()
-    schema = (D / f"schema-{'turn' if turn else 'message'}.json").read_text()
-    model = a.model if turn else (a.message_model or a.model)
+def call(a, kind, text):
+    """kind: turn, said (a mid-run message: finds, no line) or message."""
+    own = {"turn": a.turn_system, "said": a.said_system, "message": a.message_system}[kind]
+    system = pathlib.Path(own).read_text() if own else (D / f"system-{kind}.txt").read_text()
+    schema = (D / f"schema-{kind}.json").read_text()
+    model = a.message_model or a.model if kind == "message" else a.model
     args = ["claude", "-p", "--model", model, "--tools", "", "--setting-sources", "", "--strict-mcp-config",
             "--no-session-persistence", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--settings", '{"alwaysThinkingEnabled":false}', "--effort", "low", "--json-schema", schema, "--system-prompt", system]
@@ -71,14 +72,15 @@ def replay(a, case, parts):
     for k, step in enumerate(case["steps"]):
         now = ts(step.get("at"))
         turn = step["kind"] == "turn"
+        finds = step["kind"] in ("turn", "said")
         live = [i for i in ledger]
         rec = dict(step=k, kind=step["kind"], open=[dict(id=i["id"], kind=i["kind"], sentence=i["sentence"]) for i in live])
-        if not turn and not live:
+        if not finds and not live:
             rec["skipped"] = "nothing open"
             trace.append(rec)
             continue
         text = "\n".join([parts["head"], open_block(live, now), parts["steps"][k]])
-        r = call(a, turn, text)
+        r = call(a, step["kind"], text)
         rec.update(end=r["end"], first=r["first"], cost=r.get("cost"), in_tokens=r.get("in_tokens"), out_tokens=r.get("out_tokens"))
         ans = r["answer"]
         rec["answer"] = ans
@@ -89,7 +91,7 @@ def replay(a, case, parts):
         ids = {i["id"] for i in live}
         closes = {e["id"]: (e.get("how") or "obsolete") for e in ans.get("open", []) if e.get("verdict") == "close" and e.get("id") in ids}
         ledger = [i for i in ledger if i["id"] not in closes]
-        for f in ans.get("found", []) if turn else []:
+        for f in ans.get("found", []) if finds else []:
             same = f.get("same_as") if f.get("same_as") in ids and f.get("same_as") not in closes else None
             if same:
                 for i in ledger:
@@ -111,6 +113,7 @@ def main():
     ap.add_argument("--message-model")
     ap.add_argument("--turn-system")
     ap.add_argument("--message-system")
+    ap.add_argument("--said-system")
     ap.add_argument("--conc", type=int, default=4)
     ap.add_argument("--only", nargs="*")
     a = ap.parse_args()
