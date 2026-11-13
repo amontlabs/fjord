@@ -1,6 +1,6 @@
-# A message split across threads (1.9.2, look only, 2026-11-13)
+# A message split across threads (1.9.2, 2026-11-13)
 
-Owner-approved behaviour; the demo shows the look, the decider doesn't split yet. This replaces the first look
+Owner-approved behaviour, live since 2026-11-13 (the decider writes the parts, Return sends them). This replaces the first look
 (tinted parts in the composer, one row a destination over it), which the owner found confusing.
 
 - **The composer stays plain:** the owner's words and pills, no tints, no fragments.
@@ -57,7 +57,25 @@ One compact row a destination, saying what the page's pending lines say (same ar
 Shots: `v2-split-page`, `v2-split-reading`, `v2-split-unsure`, `v2-split-one`, `v2-split-many` (light and `-dark`).
 Suite: `RouterSplitTests`.
 
-## Not done (look only)
+## How it decides and sends (live)
 
-The decider's schema and prompt (sends with their words), Return sending each message, Tab between unsure parts, a
-click on a pending line on the page, and the failure line for one send of several.
+- **The decider** (`DeciderContext.split`, Sonnet on the full context) fills `sends` only when the message has parts for
+  different places: each `{to: thread id | project for new work, words, confidence, alternatives}`. Its words rule is the
+  one above; addressing words ("new thread:", "for the booking one:") are left out. A message about two things for one
+  thread is one place: `sends` stays empty and N4b's fields decide as before.
+- **Code checks every split** (`RouterProjectDecider.splitParts`): a word a part has that the message doesn't (rephrased or
+  added) drops the whole split, so does a place the board doesn't have, an empty part, two parts on one place, or fewer
+  than two parts. Each part is sure at the bar a whole message goes at (0.90 a thread, 0.70 new work); below, its guess
+  first and its alternatives. An unattended action never splits.
+- **Pills are context**: item and thread pills are listed after the message ("What the owner points at"); an answer pill
+  is never read: its answer goes to its item by code (`answerSends`). Pills alone, no free text: no model call. Jev's sure
+  single place still lands at once, unless pills point at two threads or more.
+- **The page** (`RouterReader.sends` → `RouterRead.sends` → `RouterModel.split`): the rows and pending lines are the read's;
+  while it reads again the last rows stay and the skeleton row shows. Words to a thread that asks one thing land on that
+  item (its T3 question, or its one open Decide). Tab moves ⌘1–3 among the unsure parts.
+- **Return** (`sendSplit`) sends every destination at once, each Sent on its own line (a refusal is that line's failure,
+  with Send again): answer pills first by code (a T3 request's structured), words that answer a thread's T3 question as its
+  structured answer (the option they name, else typed), other words to their threads (steering or queued as any send), and
+  a new thread through launch with the row's settings. Pressed before the read of these very words, it holds. One
+  decision log entry (`type: split`) has the read and every send.
+- **Eval**: EVAL-decider.md, "Split".

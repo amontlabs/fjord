@@ -93,3 +93,63 @@ A Jev read is ~$0.00004 and 0.24 s, so a 300 ms Jev pause costs nothing but main
 4. **Bars**: ship at the current 0.90 idle bar (no wrong-thread sends at all in this run). After ~200 live decisions refit with `evals/router/t3/refit.py`; the idle-bar sweep says 0.85 is probably worth 8–15 more follow-up sends at 0.3% wrong. Watch new work started in an old thread (`extends`, `pNew` in the decision log): it is the one metric where `w2` is nominally worse than N4.
 5. **Pauses**: Jev at 300 ms is fine. Don't start Sonnet at 600 ms on every pause: use `S = 1200` as designed, or 600 only behind the two guards above and only when Jev's read is unsure; Return still starts it at once. Measure the real pause histogram after the first live week (the reader should log each pause, start and cancel with timestamps into the decision log) and retune `enum RouterV2`'s constants from that, not from this simulation.
 6. **Next eval**: rerun `w2` once with the Swift builder's actual prompt (settled labels, read state) when a cached export of live boards exists; the 80-moment prior test should be rerun on live decisions logged with `open` set.
+
+## Split (2026-11-13)
+
+The shipped split prompt (`DeciderContext.split`, appended to the role) and schema (`sends` last), read from the Swift source by
+`evals/router/w2/splitcommon.py`, scored after a port of the Swift checks (`splitParts`: words the message has, two places at
+least, one part a place, the whole message's bars). `claude -p` Sonnet, effort high, thinking off, as the app calls it.
+Aggregates only.
+
+### (a) The 300 dev moments against N4 (`evals/router/t3/splitrun.py`)
+
+Every dev message has one gold place, so any split is a risk. The message as sent is the split's when the checks keep one,
+else N4b's rule. Shipped bars (idle 0.90, running 0.90, new 0.70, p_new 0.70), weighted, day-bootstrap CIs:
+
+| | new right | new pushed | follow right | follow wrong thread | follow to new | pooled wrong | wrong project |
+|---|---|---|---|---|---|---|---|
+| N4 `ctx` | 55.5% (46–65) | 0.7% | 59.3% (49–68) | 0.3% | 0.3% | 1.4% | 0.7% |
+| `w2` | 56.9% (49–67) | 1.5% | 51.0% (42–61) | 0.0% | 0.0% | 0.7% | 0.6% |
+| **`split`** | 48.2% (39–61) | 1.5% | 54.3% (44–64) | **0.0%** | **0.0%** | **0.7%** | **0.5%** |
+
+**Gate: no more wrong sends. Held.** Wrong-thread, to-new, pooled-wrong and wrong-project sends are all at or under N4's and
+`w2`'s. The model wrote `sends` on **1 of 300** real messages (two parts, both new work in the same project); the checks
+dropped it (one place twice), so **0 of 300 split**. Under CV bars at 1% / 2%: new right 67.9 / 67.9 (`w2` 70.8 / 70.8),
+follow right 61.3 / 70.7 (58.6 / 72.6), follow wrong thread 0.0 / 0.3 (0.3 / 0.7), new pushed 2.2 / 5.8 (2.9 / 5.8). The
+shipped-bar new-right dip (48.2 vs 56.9) has overlapping CIs and isn't there under CV bars; one run, so watch it in the log
+rather than act on it. Cost and latency unchanged: p50 7.9 s / p95 11.6 s, $0.178 a call as run here (`w2` $0.172), 830
+output tokens on average.
+
+### (b) 44 multi-destination drafts (`evals/router/w2/split_eval.py`, `split_drafts.py`)
+
+Written in the owner's style (lowercase, short, typos, missing apostrophes) on a synthetic board of 8 threads in 4 projects
+(a T3 question and a plan waiting, one running, one stopped): 27 splits (16 two places, 4 three places, 2 shared words for two
+threads, 4 with item or thread pills in the "What the owner points at" block, 1 with an answer pill taken out of the words),
+6 with an unsure part, 11 near-misses (one message about two things, or a place named in passing, for **one** place). Two runs;
+an Opus judge reads every part against the message (trimmed only? rephrased? intent added?).
+
+| | run 1 | run 2 |
+|---|---|---|
+| splits: every destination right | 27/27 | 27/27 |
+| unsure drafts right (split, the unsure part asked or at an accepted place) | 3/6 | 3/6 |
+| missed splits (sent whole or asked) | 3/33 | 3/33 |
+| near-misses kept whole | 10/11 | 10/11 |
+| **wrong sends** (a sure part, or the whole message, where it doesn't belong) | **0/44** | **0/44** |
+| parts faithful (judge) | 30/31 | 31/31 |
+| rephrased / intent added (judge) | 0 / 0 | 0 / 0 |
+| a word not in the message (would be dropped by code) | 0/44 | 0/44 |
+
+- **The three unsure misses** are safe: the model kept the message whole on the thread its first part names ("tabs. and the
+  spacing is off again" → Settings at 0.85–0.92, "silent. and make it faster" → Updater), below the bar or at a place the
+  draft allows. Nothing was sent to a place the words don't fit.
+- **The near-miss that split** both runs: "bar count: push it, and make the snapshot count use the same rule" → Bar count
+  (sure, right) + new work for the second half at 0.5, so it shows as an unsure part with its places; nothing wrong goes. It
+  is arguably two things; the one Return would send the guess if you don't pick.
+- **The one unfaithful part** (run 1): "thanks both, ship it — bar count and the install guide" became "thanks, ship it —
+  bar count" and "thanks, ship it — the install guide": "both" was cut from shared words. No word was ever changed or added;
+  the Swift check would have kept the split since every word is the owner's.
+- Addressing words stay in a part now and then ("bar count: push it"); harmless, worth a line in the prompt if it shows live.
+- Cost: $0.41–0.68 for 44 drafts on this small board.
+
+**Next**: rerun (a) on live decisions once the log has `type: split` entries; count how often a Return after a split is
+followed by a Send again or a move of one part (the log has each send's place and whether you lit it).
