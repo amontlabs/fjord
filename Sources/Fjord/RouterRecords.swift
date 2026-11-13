@@ -549,7 +549,7 @@ final class RouterRecords {
                 e.awaiting = true
             }
         }
-        if saved[id]?.nameKey != t.title, e.nameFailed != t.title, onPage, !e.asked, !e.naming {
+        if saved[id]?.nameKey != t.title, e.nameFailed != t.title, onPage, !e.asked, !e.awaiting, !e.naming {
             e.naming = true
             e.namingFor = t.title
             ask(RouterVerdictRequest(thread: id, fingerprint: t.title, kind: .name, input: input(t, e), at: t.lastActivity))
