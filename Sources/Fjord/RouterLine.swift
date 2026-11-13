@@ -565,7 +565,7 @@ struct RouterSentenceView: View {
                 // against it follow it on the line (`↑ "…" · sent`), and a new turn being read shows Fjord's mark.
                 // The whole sentence, never cut mid-fact: it wraps as text, a next line starting under the name (the
                 // row keeps its name, pill and age on the first line, `routerFirstLine`).
-                let text = (RouterFlow.lead(lead) + Text(item.sentence).strikethrough(item.closing, color: CDS.Text.muted))
+                let text = (RouterFlow.lead(lead) + Text(item.sentence).strikethrough(item.closing, color: CDS.Text.muted) + RouterFlow.end)
                     .font(CDS.sans(14))
                 let lines = Router.Items.sentenceLines
                 HStack(alignment: .top, spacing: Router.Thinking.gap) {

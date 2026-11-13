@@ -28,6 +28,10 @@ extension Router {
         /// The new pill over a timeline read back: "1 new".
         static func new(_ n: Int) -> String { "\(n) new" }
         static let pillHeight: CGFloat = 20
+        /// Over the pill's place at the timeline's top edge (2 + its height + 3) the words are gone, then fade in over this:
+        /// the pill never sits on words.
+        static let pillBand: CGFloat = 2 + pillHeight + 3
+        static let pillFade: CGFloat = 12
         /// The pill springing in and the timeline gliding back to its top.
         static let pillIn = Animation.spring(duration: 0.32, bounce: 0.24)
         static let toTop = Animation.smooth(duration: 0.4)
@@ -105,6 +109,7 @@ struct RouterWorkTimeline: View {
                 .scrollBounceBehavior(.basedOnSize)
             }
             .mask(alignment: .bottom) { fade(more) }
+            .mask(alignment: .top) { band(newer > 0) }
             .overlay(alignment: .top) {
                 if newer > 0 {
                     pill(newer) { toTop(proxy, shown) }
@@ -206,6 +211,21 @@ struct RouterWorkTimeline: View {
             LinearGradient(colors: [.black, .black.opacity(on ? 0 : 1)], startPoint: .top, endPoint: .bottom)
                 .frame(height: W.timelineFade)
         }
+    }
+
+    /// While the pill shows, its own band at the top edge: the words scroll out under it, gone behind the pill and
+    /// fading in under it, so the pill never covers text; nothing moves as it comes.
+    private func band(_ on: Bool) -> some View {
+        ZStack(alignment: .top) {
+            Rectangle()
+            VStack(spacing: 0) {
+                Rectangle().frame(height: W.pillBand)
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: W.pillFade)
+            }
+            .opacity(on ? 1 : 0)
+            .blendMode(.destinationOut)
+        }
+        .compositingGroup()
     }
 
     /// `↑ 2 new`: footnote, on the card's raised ground, a hairline around it.

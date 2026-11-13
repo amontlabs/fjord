@@ -224,6 +224,11 @@ extension Router {
         blanks[width] = blank
         return Text(blank)
     }
+
+    /// An invisible last word, to end a text with: macOS's line breaking won't leave one word alone on a last line and
+    /// pushes the word before it down, so a first line would break well short of its width ("…you still" / "run
+    /// 0.8.12"). A Hangul filler at 1 pt: a word that draws nothing and takes no room.
+    static let end = Text(verbatim: " \u{3164}").font(.system(size: 1))
 }
 
 // MARK: - The block's rows
@@ -352,12 +357,12 @@ struct RouterItemRow: View {
             ZStack(alignment: .topLeading) {
                 if case .closing(let how) = item.state {
                     (lead + Text(item.sentence).foregroundColor(CDS.Text.muted).strikethrough(true, color: CDS.Text.muted)
-                        + Text(verbatim: "  ") + Text(how).font(CDS.sans(12)).foregroundColor(CDS.Text.secondary))
+                        + Text(verbatim: "  ") + Text(how).font(CDS.sans(12)).foregroundColor(CDS.Text.secondary) + RouterFlow.end)
                         .font(CDS.sans(14))
                         .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
                         .transition(.opacity)
                 } else {
-                    let text = (lead + Text(item.sentence)).font(CDS.sans(14))
+                    let text = (lead + Text(item.sentence) + RouterFlow.end).font(CDS.sans(14))
                     text.foregroundStyle(checking ? CDS.Text.muted : CDS.Text.secondary)
                         .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
                         .overlay(alignment: .topLeading) {
