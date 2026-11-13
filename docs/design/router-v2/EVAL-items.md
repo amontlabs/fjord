@@ -102,6 +102,42 @@ Two more held-out sets (`export.py --said` and `--said --waiting`, excluding eve
   minute per thread, about 200 to 300 reads a day at about $0.007 (held-said: $0.0061 per read), so about $1.5 to $2 a
   day more.
 
+## Done's outcome (2026-11-13)
+
+Since the needs-you verdict went (7535f71d), a turn's read writes Done's sentence as `line`: v3 asked for "what the turn did
+and where it stands" in 12 words, so an answer read "answered the question" and a line often listed steps. Worse, a turn
+that ended before T3's projection had its reply was marked read with no line, and Done said only "finished" (two of the
+owner's five ledgers on 2026-11-13; fixed: the turn waits for its reply, as a projection miss, f5aaa5bc). **v4**
+(`prompts/system-turn-v4.txt`, the app's): `line` is the outcome, key fact first, the answer itself for a question (at
+most 16 words); `detail` one or two sentences it leaves out; `facts` at most 3 chips the reply states that code can't know
+(tests and their result, a version released, a number), each `kind` tests or note and a `tone`. Code adds the pull
+requests and the diff, and the agent's last message is the source (`RouterThread.summary`).
+
+**30 real finished turns** (`outcome.py pick`: the held-out set's turns, one per thread over 29 threads, read with nothing
+open as the app reads them). A blind Opus judge sees the redacted parts and the two outcomes in random order:
+
+| prompt | accurate | useful (1-5) | useful 5 | useful ≤ 3 | preferred | details | facts | line words | $/read | end p50 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| v3 (line) | 30/30 | 3.60 | 1 | 13 | 3 | - | - | 12.6 | 0.0098 | 4.0 s |
+| **v4 (outcome, detail, facts)** | 29/30 | **4.50** | 17 | 2 | **27** | 29 | 28 | 14.8 | 0.0125 | 4.9 s |
+
+- v4 wins 27 of 30 (no ties). Its lines carry the result ("disk has 7.3 GB free of 926 GB; about 150 GB of dev build and
+  cache data is clearable" against "audited disk usage; disk nearly full…").
+- One inaccuracy: a detail said a rail card's discount covers one train type only, where the reply also listed another.
+- Still loose: nearly every turn gets a detail (29 of 30; the rule says "only when it adds something"), and a few chips
+  repeat the line ("7.3 GB free of 926 GB"). v3's line sometimes named what waited on the owner ("30 and 34 await you");
+  v4 leaves that to the open items, which the same read writes.
+- The two extra fields add about $0.003 and 0.9 s at the end of the read; the line still streams first (its field
+  comes before them).
+
+```sh
+python3 evals/router/items/outcome.py pick
+FJORD_ITEMS_EVAL_DIR=$PWD/evals/router/items/data/outcome swift test --filter ItemsEvalDump
+python3 evals/router/items/outcome.py run v4
+python3 evals/router/items/outcome.py run v3 --system evals/router/items/prompts/system-turn-v3.txt --schema evals/router/items/data/held/schema-turn.json
+python3 evals/router/items/outcome.py judge v4 v3 && python3 evals/router/items/outcome.py score v4 v3
+```
+
 ## What it still gets wrong
 
 - **Missed closes** (12 of about 70 that should close, held out): mostly your words settling more than the item they

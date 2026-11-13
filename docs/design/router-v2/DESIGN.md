@@ -619,6 +619,15 @@ checking, closing with how, new).
   found item has its `sentence` (key fact first), a `detail` (the whole item, at most about 280 characters, only when it
   adds something) and a `quote` (the agent's exact lines), kept only when it is word for word in the reply or message
   read, else dropped (`RouterItemsReading.quote`). Items saved before have neither and quote the thread's last lines.
+- **One layout, one history** (the engine's side, 2026-11-13). Every record has `summary: RouterSummary` (sentence, detail,
+  facts as chips, source): Done's is its last turn's outcome (the items read's `line`, `detail` and `facts`, EVAL-items.md
+  "Done's outcome") with code's chips first (each pull request and its state, its link; the diff's files +/−) and the
+  agent's last message as source; Working's its newest summary with its subagents, background commands and waits as chips
+  and the agent's latest words; Stopped's its stop; an item's (`RouterItem.summary`) its sentence, detail and quote. Its
+  sentence is the settled one, never words still streaming. `history: [RouterEvent]`, newest first, 40 at most: the
+  summaries (`s<id>`), run starts (`r<run>`), items raised and closed (with how) and turn ends with their outcome, kept for
+  every state while the thread is on the page (in the verdict file, optional fields), gone with its summaries when it
+  leaves. `work.summaries` and `work.starts` are filled in every state.
 - **↑↓** walk the header, then each item. The header's card is the thread's (the working timeline); an item's card is its
   options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
   T3 ⌘O`. Done strikes the item "done by you", folds it after 1.6 s, and the toast offers Revert. The open card's ground
