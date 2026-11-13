@@ -4,7 +4,7 @@
 
 # Fjord
 
-**The power without the storm.**
+**Everything in its right place.**
 
 Coding agents multiply what you ship, and what you have to keep up with. Fjord sits between them and everything they work with, and brings you only what you need to know or decide.
 
