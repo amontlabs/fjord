@@ -10,7 +10,7 @@ import Carbon
 struct RouterKey {
     var code: Int
     var flags: NSEvent.ModifierFlags = []
-    /// The character the key gives, without its modifiers.
+    /// The character the key gives: with ⇧ and ⌥ applied (AZERTY's ⌥ characters: `{ [ | \\ ~`), without ⌘ or ⌃.
     var characters: String?
     var isRepeat = false
     /// The composer's caret is at the very start of its text, with nothing selected.
@@ -33,11 +33,18 @@ enum RouterKeys {
         let flags = event.modifierFlags.intersection(Shortcut.relevant)
         let field = responder as? MentionTextView
         var key = RouterKey(code: Int(event.keyCode), flags: flags,
-                              characters: flags.subtracting(.shift).isEmpty ? event.characters : event.charactersIgnoringModifiers,
+                              characters: Self.typed(flags) ? event.characters : event.charactersIgnoringModifiers,
                               isRepeat: event.isARepeat)
         if let field { key.caretAtStart = field.selectedRange() == NSRange(location: 0, length: 0) }
         // "Key" to the commit of what the key changed, "Key work" to this handler's return (docs: the budgets).
         if RouterSignposts.key({ handle(key, model: model, inField: responder is NSText, composer: composer) }) { return true }
+        // A dead key (^, ¨) with no field focused: the composer takes the keyboard and this key, so the accent composes there.
+        if !(responder is NSText), Self.typed(flags), event.characters?.isEmpty == true,
+           let base = event.charactersIgnoringModifiers, !base.isEmpty, base.unicodeScalars.allSatisfy({ $0.value < 0xF700 }),
+           let window = event.window, let composer = window.contentView.flatMap(Self.composerField) {
+            window.makeFirstResponder(composer)
+            return false
+        }
         // The @ field is a text view, not a field editor: ⇧Return is a new line there, and a Tab is never a tab character.
         if let field {
             if (key.code == kVK_Return || key.code == kVK_ANSI_KeypadEnter), flags == .shift {
@@ -47,6 +54,16 @@ enum RouterKeys {
             if key.code == kVK_Tab, flags.subtracting(.shift).isEmpty { return true }
         }
         return false
+    }
+
+    /// Keys that type: no ⌘ and no ⌃ (⇧ and ⌥ make characters).
+    nonisolated static func typed(_ flags: NSEvent.ModifierFlags) -> Bool { flags.intersection([.command, .control]).isEmpty }
+
+    /// The composer's text view in the window.
+    private static func composerField(_ view: NSView) -> MentionTextView? {
+        if let field = view as? MentionTextView { return field }
+        for sub in view.subviews { if let field = composerField(sub) { return field } }
+        return nil
     }
 
     /// `inField`: the composer has the keyboard (its text view types what isn't handled here).
@@ -246,7 +263,7 @@ enum RouterKeys {
         }
 
         // Any character typed with no field focused goes to the composer.
-        if !inField, flags.subtracting(.shift).isEmpty, let typed = key.characters, !typed.isEmpty,
+        if !inField, Self.typed(flags), let typed = key.characters, !typed.isEmpty,
            typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }) {
             model.insert(typed)
             return true

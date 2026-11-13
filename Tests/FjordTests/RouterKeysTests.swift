@@ -389,4 +389,18 @@ import Testing
         #expect(model.launchChoices(.access).count == 2)
         #expect(model.launchChoices(.model).map(\.label) == ["Slim"])
     }
+
+    // MARK: ⌥ characters type with no field focused (FINAL-REVIEW #16)
+
+    @Test func anOptionCharacterTypedWithNoFieldFocusedReachesTheComposer() {
+        let (model, _) = page(select: nil)
+        // AZERTY: ⌥à is @, ⌥( is {.
+        #expect(press(model, kVK_ANSI_0, .option, "@"))
+        #expect(press(model, kVK_ANSI_5, [.option, .shift], "["))
+        #expect(model.draft == "@[")
+        // ⌘ and ⌃ chords never type.
+        #expect(!press(model, kVK_ANSI_A, .control, "a"))
+        #expect(model.draft == "@[")
+        #expect(RouterKeys.typed([.option, .shift]) && !RouterKeys.typed([.option, .command]))
+    }
 }
