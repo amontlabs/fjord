@@ -403,4 +403,25 @@ import Testing
         #expect(model.draft == "@[")
         #expect(RouterKeys.typed([.option, .shift]) && !RouterKeys.typed([.option, .command]))
     }
+
+    // MARK: Walking past lines tells T3 nothing (FINAL-REVIEW #17)
+
+    @Test func onlyANewLineIsVisitedAndAWalkVisitsWhereItStops() throws {
+        let (model, source) = page(select: nil)
+        let fresh = try #require(model.threads.first { $0.isNew })
+        // Ten ↓: no visit at all.
+        for _ in 0..<10 { press(model, kVK_DownArrow) }
+        #expect(source.calls.filter { if case .visit = $0 { true } else { false } }.isEmpty)
+        // Stop on the new line, then a key that isn't an arrow: it is visited, once.
+        model.select(nil)
+        model.step(down: true)
+        while model.selection != .line(fresh.id) { press(model, kVK_DownArrow) }
+        #expect(source.calls.filter { if case .visit = $0 { true } else { false } }.isEmpty)
+        press(model, kVK_ANSI_A, [], "a")
+        #expect(source.calls.filter { if case .visit = $0 { true } else { false } } == [.visit(fresh.id)])
+        // A click on a line that isn't new tells T3 nothing.
+        let old = try #require(model.threads.first { !$0.isNew && $0.id != fresh.id })
+        model.select(.line(old.id))
+        #expect(source.calls.filter { if case .visit = $0 { true } else { false } }.count == 1)
+    }
 }

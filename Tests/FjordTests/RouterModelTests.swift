@@ -393,7 +393,8 @@ import Testing
         model.select(.line(ID.tab))
         model.stop(ID.tab)
         model.open(ID.tab)
-        #expect(source.calls == [.visit(ID.tab), .stop(ID.tab), .open(ID.tab)])
+        // Not new: T3 isn't told of a visit (FINAL-REVIEW #17).
+        #expect(source.calls == [.stop(ID.tab), .open(ID.tab)])
     }
 
     // MARK: A new thread's settings are T3's lists

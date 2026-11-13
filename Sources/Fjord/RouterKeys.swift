@@ -73,8 +73,8 @@ enum RouterKeys {
         let letter = key.characters?.lowercased()
         let isReturn = code == kVK_Return || code == kVK_ANSI_KeypadEnter
         let empty = model.draft.isEmpty
-        // Your first key after your own act opened a card: its "new" dot goes now.
-        model.ownerActed()
+        // Your first key after your own act or a walk opened a card: its "new" dot goes now. Not an arrow: the walk goes on.
+        if code != kVK_UpArrow, code != kVK_DownArrow { model.ownerActed() }
 
         // Filter mode (section 4): the keyboard is on the bar.
         if model.filterMode {

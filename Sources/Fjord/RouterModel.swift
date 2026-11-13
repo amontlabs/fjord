@@ -534,7 +534,9 @@ final class RouterModel {
         shownLines.map { .line($0.id) } + (shownOlder.isEmpty ? [] : [.housekeeping]) + failures.map { .failure($0.id) }
     }
 
-    func select(_ new: RouterSelection?) {
+    /// `walk`: the arrows moved it there: a new line's dot goes (and T3 is told) only at your next key that isn't an
+    /// arrow, or a pointer move, so lines walked past aren't marked read on T3's sidebar and phone.
+    func select(_ new: RouterSelection?, walk: Bool = false) {
         guard new != selection else { return }
         let interval = RouterSignposts.begin("Select")
         defer { RouterSignposts.end(interval, afterCommit: true) }
@@ -544,10 +546,14 @@ final class RouterModel {
             snoozeMenu = nil
             // Another card: the row's guess is asked again.
             waved = false
-            if case .line(let id)? = new {
-                // You opened its card: no longer new, and T3 is told.
-                update(id) { $0.isNew = false }
-                source?.visit(id)
+            if case .line(let id)? = new, thread(id)?.isNew == true {
+                // You opened its card: no longer new, and T3 is told (only of a new one).
+                if walk {
+                    pendingSeen = id
+                } else {
+                    update(id) { $0.isNew = false }
+                    source?.visit(id)
+                }
             }
         }
         if case .line(let id)? = new { show(id) }
@@ -567,10 +573,10 @@ final class RouterModel {
         let rows = walk
         guard !rows.isEmpty else { return }
         guard let selection, let i = rows.firstIndex(of: selection) else {
-            select(down ? rows.first : rows.last)
+            select(down ? rows.first : rows.last, walk: true)
             return
         }
-        select(rows[(i + (down ? 1 : rows.count - 1)) % rows.count])
+        select(rows[(i + (down ? 1 : rows.count - 1)) % rows.count], walk: true)
     }
 
     /// ⌥↓ / ⌥↑: the first line of the next or previous section shown.
@@ -581,7 +587,7 @@ final class RouterModel {
         let current = selectedThread.flatMap { sections.firstIndex(of: $0.section) }
         let next: Int
         if let current { next = (current + (down ? 1 : sections.count - 1)) % sections.count } else { next = down ? 0 : sections.count - 1 }
-        if let first = lines.first(where: { $0.section == sections[next] }) { select(.line(first.id)) }
+        if let first = lines.first(where: { $0.section == sections[next] }) { select(.line(first.id), walk: true) }
     }
 
     /// Where the selection goes when its line leaves `section`: the line after it there, else the one before, else none.
