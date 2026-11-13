@@ -77,6 +77,8 @@ extension Store {
 
     func makeRouterReader() -> RouterReader {
         let reader = RouterReader()
+        // Each pause, start, skip and cancel, counts only (no text), into the decision log: what the pauses are tuned from.
+        reader.log = Store.isDemo ? nil : routerDispatcher.decisionLog
         reader.jev = { [weak self] text, tagged in await self?.readDraft(text, tagged: tagged) }
         reader.decide = { [weak self] text, tagged, selected, reuse in
             await self?.decideDraft(text, tagged: tagged, notTo: nil, reuse: reuse, open: selected)

@@ -25,4 +25,15 @@ import Testing
         s.setRouterEnabled(false)
         #expect(!s.router.enabled)
     }
+
+    /// FINAL-REVIEW #18: the reader writes its pauses, starts and cancels into the decision log.
+    @Test func theReadersTypingLogGoesToTheDecisionLog() throws {
+        let dir = TempDir()
+        let s = store(dir, ["local_a"])
+        // This store's dispatcher was made before its folder was set: its log is made as the app's is.
+        s.routerDispatcher.decisionLog = DeciderLog.live(s.routerPaths)
+        let log = try #require(s.routerReader.log)
+        #expect(log === s.routerDispatcher.decisionLog)
+        #expect(log.url.path.hasPrefix(dir.path("support").path))
+    }
 }
