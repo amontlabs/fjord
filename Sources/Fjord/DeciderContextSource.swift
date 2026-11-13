@@ -51,7 +51,7 @@ extension Store {
         let archive = cards.archive(day: start, zone: zone) {
             DeciderContext.archiveBlock(threads, ids: ids, cards: cards.cards, turns: cards.turns, firsts: [:], dayStart: start, zone: zone)
         }
-        let search = routerPreview.searchHits(for: message)
+        let search = routerReader.searchHits(for: message)
         let x = DeciderContext.Inputs(projects: board.projects, purposes: board.purposes, threads: threads, cards: cards.cards,
                                       turns: cards.turns, archive: archive, index: cards.index, search: search, now: now, zone: zone,
                                       mentioned: mentionedThreads())

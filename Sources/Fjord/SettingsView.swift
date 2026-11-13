@@ -376,8 +376,6 @@ private struct RouterSettings: View {
         SettingsSection("T3 Code") {
             T3SettingsRows(store: store)
             SettingsDivider()
-            routerStyle
-            SettingsDivider()
             mutedFolders
             SettingsDivider()
             if store.triageOn {
@@ -421,16 +419,6 @@ private struct RouterSettings: View {
                     info: ("Let Jev label new comments", "With a TypeSafe API key, each refresh sends the inbox's new comments, reviews and thread replies (not yours, from the last two weeks), and the review requests and assignments waiting on you, to TypeSafe (api.typesafe.ai). What goes: the comment's text and its author, the one just before it, the PR or issue's title, number and repo, its author, labels, size and checks, and your part in it; and, when a session's turn ends waiting, the titles, numbers and checks of the PRs and workflows of its repo, for what it waits on. Jev labels each comment (asks you, to do, FYI or noise) and rates how important a request is: a row stands out or is dimmed by them, and a rule of yours can ask for them (a comment labeled, noise or a person, rated at least). They never hide a row or hold back a banner: your rules decide that. Off, nothing of the inbox is sent and nothing is labeled: noise is bots only.")) {
             SettingsSwitch("Let Jev label new comments",
                            isOn: Binding(get: { store.jevReadsInbox }, set: { store.settings.jevReadsInbox = $0 }))
-        }
-    }
-
-    /// How the cards' briefs and the sessions' summaries are written to you, in your words.
-    private var routerStyle: some View {
-        SettingsRow("How the Router writes to you",
-                    description: "Each card, and each summary of a session, is explained in these words' style.",
-                    info: ("How the Router writes to you", "Claude Haiku explains each card in plain words (what it needs from you and why, what it waits on, what is worth knowing, what was done), and writes the Working sessions' summaries. Both follow what you write here, within the Router's own rules: short, no markdown, and what the sessions wrote is only ever data. Haiku runs through Claude Code and reads the card, its turn's final message and the form it stopped on; nothing of it goes to TypeSafe."),
-                    below: AnyView(RouterStyleField(store: store))) {
-            if store.router.style != nil { ActionButton("Reset") { store.setRouterStyle("") } }
         }
     }
 
@@ -833,26 +821,6 @@ extension View {
             }
         }
     }
-}
-
-/// The Router's style, a few lines: kept as you type, saved when you leave it (or press Return), so the Router's state isn't
-/// written at every key.
-private struct RouterStyleField: View {
-    @Bindable var store: Store
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        CDSTextArea(placeholder: RouterStyle.defaultText, lines: 2...6, text: $text, onSubmit: save)
-            .focused($focused)
-            .accessibilityLabel("How the Router writes to you")
-            .onAppear { text = store.routerStyle }
-            .onChange(of: focused) { if !focused { save() } }
-            .onChange(of: store.router.style) { if !focused { text = store.routerStyle } }
-            .onDisappear(perform: save)
-    }
-
-    private func save() { store.setRouterStyle(text) }
 }
 
 /// A text input with its own focus (§3.1), secure or not.

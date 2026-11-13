@@ -4,8 +4,8 @@ import Testing
 
 /// E5's Jev-led path: the fusion and the BM25 give the Python's numbers (`deciders-t3/e5/fusion.py`, `build.py`, on synthetic
 /// rows), the gates send only to an idle thread at P ≥ 0.90 with little route mass on running threads, the decider runs it in
-/// first (it sends when sure, else Sonnet decides) and never for an unattended action, the log keeps its answer, and the
-/// composer's preview reads a draft once after a pause, drops stale reads and hands its answer to the send. Invented boards only.
+/// first (it sends when sure, else Sonnet decides) and never for an unattended action, and the log keeps its answer.
+/// Invented boards only.
 @MainActor
 @Suite(.serialized) struct RouterJevPathTests {
     // MARK: The math, against the Python
@@ -246,7 +246,7 @@ import Testing
         let log = DeciderLog(url: url)
         let f = result(route: Self.sure, ans: ["T-i1": 0.95], next: ["T-i1": 0.97])
         let decision = RouterProjectDecision(kind: .thread("T-i2"), confidence: 0.85, decider: .sonnet)
-        let shown = RouterPreview.Shown(text: Self.message, target: RouteTarget.thread("T-i1").targetID, p: f.p, decider: "jev", sure: true)
+        let shown = RouterShown(text: Self.message, target: RouteTarget.thread("T-i1").targetID, p: f.p, decider: "jev", sure: true)
         log.decision(id: UUID(), message: Self.message, decision: decision, board: "b", candidates: [], sent: "sent", fused: f,
                      preview: shown, focus: .init(open: "T-i2", lastTold: "T-i1", unseen: ["T-i3"]))
         log.flush()
@@ -262,160 +262,5 @@ import Testing
         let preview = try #require(json["preview"] as? [String: Any])
         #expect(preview["miss"] as? Bool == true && preview["forTheseWords"] as? Bool == true)
         #expect((json["focus"] as? [String: Any])?["lastTold"] as? String == "T-i1")
-    }
-
-    // MARK: The destination in the composer
-
-    func store() -> Store {
-        let s = Store.reading([
-            T3Fixture.shell("th-login", title: "Fix the login redirect", project: "p1", minutes: 2),
-            T3Fixture.shell("th-docs", title: "Write the README", project: "p1", minutes: 40),
-        ], projects: [T3Fixture.project("p1", title: "lookout", root: "/code/lookout")])
-        s.router.enabled = true
-        return s
-    }
-
-    /// A sure answer for `thread` (or an unsure one), as the fused path would give it.
-    static func answer(_ thread: String, p: Double) -> JevPath.Result {
-        let rows = [JevPath.Row(place: .thread(thread), name: thread, jev: p, features: .init(), p: p, running: false),
-                    JevPath.Row(place: .newThread(project: "p1"), name: "new", jev: 1 - p, features: .init(new: 1), p: 1 - p, running: false)]
-        return JevPath.Result(rows: rows, ans: [:], next: [:], fjord: nil, runningMass: 0, bm25: [:], twins: [], requestHash: "h", key: "k")
-    }
-
-    final class Reads { var words: [String] = []; var decided: [String] = []; var reused: [Bool] = []; var board = "b1" }
-
-    /// Jev at `p` for th-login; Sonnet (when Jev isn't sure) answers `sonnet`.
-    func preview(_ reads: Reads, p: Double = 0.95, sonnet: RouterProjectDecision.Kind? = nil) -> RouterPreview {
-        let preview = RouterPreview()
-        preview.jevDelay = .milliseconds(20)
-        preview.sonnetDelay = .milliseconds(60)
-        preview.boardKey = { reads.board }
-        preview.read = { text, _ in reads.words.append(text); return Self.answer("th-login", p: p) }
-        preview.decide = { text, _, _, reuse in
-            reads.decided.append(text)
-            reads.reused.append(reuse != nil)
-            return RouterProjectDecision(kind: sonnet ?? .ask([]), confidence: 0.6, decider: .sonnet)
-        }
-        return preview
-    }
-
-    static let login = RouteTarget.thread("th-login").targetID
-    static let docs = RouteTarget.thread("th-docs").targetID
-    static let newInP1 = RouteTarget.newThread(project: "p1").targetID
-
-    @Test func jevSureShowsTheThreadAndSonnetIsNotAsked() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads)
-        // Too short: nothing read.
-        p.update(text: "fix login", context: RouterContext(), store: s)
-        #expect(p.asking == nil)
-        // Keystrokes inside the pause: only the last words are read.
-        p.update(text: "fix the login red", context: RouterContext(), store: s)
-        p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { p.destination != nil }
-        #expect(reads.words == ["fix the login redirect"] && reads.decided.isEmpty)
-        #expect(p.destination?.sure == true && p.highlighted == Self.login && p.markedThread == "th-login")
-        // The same words again: nothing read again.
-        p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        #expect(p.asking == nil && reads.words.count == 1)
-    }
-
-    @Test func notSureSonnetDecidesAfterTheLongerPauseOnceReusingJev() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads, p: 0.5, sonnet: .ask([.thread("th-docs"), .thread("th-login"), .newThread(project: "p1")]))
-        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
-        await waitUntil { p.destination != nil }
-        #expect(reads.words.count == 1 && reads.decided == ["the readme needs a section"] && reads.reused == [true])
-        // The guess highlighted, up to 2 alternatives; Return would send to the guess.
-        #expect(p.destination?.sure == false && p.destination?.options == [Self.docs, Self.login, Self.newInP1])
-        #expect(p.highlighted == Self.docs)
-        // A click picks another; the menu always offers a new thread.
-        p.pick(Self.login, store: s)
-        #expect(p.highlighted == Self.login)
-        #expect(p.menu(store: s).map(\.target).contains(Self.newInP1))
-        // Sending carries what was shown, not sure since you picked.
-        #expect(p.carried(for: "the readme needs a section")?.sure == false)
-    }
-
-    @Test func aKeystrokeCancelsTheDecisionUnderWay() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads, p: 0.5, sonnet: .thread("th-docs"))
-        // The first words' decision is held until it is cancelled.
-        let decide = p.decide!
-        var started: [String] = []
-        p.decide = { text, tagged, notTo, reuse in
-            started.append(text)
-            if text == "the readme needs a section" { try? await Task.sleep(for: .seconds(30)) }
-            return await decide(text, tagged, notTo, reuse)
-        }
-        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
-        await waitUntil { started.count == 1 }
-        p.update(text: "the readme needs a section on setup", context: RouterContext(), store: s)
-        await waitUntil { p.destination != nil }
-        #expect(started == ["the readme needs a section", "the readme needs a section on setup"])
-        #expect(p.destination?.text == "the readme needs a section on setup" && p.destination?.sure == true)
-    }
-
-    @Test func theSameWordsOnTheSameBoardReuseTheAnswer() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads, p: 0.5, sonnet: .thread("th-docs"))
-        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
-        await waitUntil { p.destination != nil }
-        #expect(p.ready(for: "the readme needs a section")?.decision.kind == .thread("th-docs"))
-        #expect(p.ready(for: "the readme needs a section!") == nil)
-        // The board moved on: no answer to reuse.
-        reads.board = "b2"
-        #expect(p.ready(for: "the readme needs a section") == nil)
-    }
-
-    @Test func returnBeforeAnAnswerWaitsThenSendsWhenSure() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads, p: 0.5, sonnet: .thread("th-docs"))
-        p.update(text: "the readme needs a section", context: RouterContext(), store: s)
-        var sent = 0
-        p.waitAndSend("the readme needs a section", tagged: nil) { sent += 1 }
-        #expect(p.deciding && p.waiting == "the readme needs a section")
-        await waitUntil { sent == 1 }
-        #expect(p.waiting == nil && p.destination?.sure == true && reads.decided.count == 1)
-    }
-
-    @Test func returnBeforeAnUnsureAnswerShowsThePlacesAndWaitsForASecondReturnOrAClick() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads, p: 0.5, sonnet: .ask([.thread("th-docs"), .thread("th-login")]))
-        var sent = 0
-        p.waitAndSend("the readme needs a section", tagged: nil) { sent += 1 }
-        await waitUntil { p.destination != nil }
-        #expect(sent == 0 && p.waiting == nil && p.highlighted == Self.docs)
-        // A second Return finds the answer for these words: the guess.
-        #expect(p.ready(for: "the readme needs a section")?.sure == false)
-        // Or a click on another place sends the words there.
-        #expect(p.clickSends == "the readme needs a section")
-        p.pick(Self.login, store: s)
-        #expect(sent == 1 && p.pinned == Self.login && p.clickSends == nil)
-    }
-
-    @Test func escWavesTheGuessOffAndAPickedPlaceHolds() async throws {
-        let s = store()
-        let reads = Reads()
-        let p = preview(reads)
-        p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { p.destination != nil }
-        p.dismiss()
-        #expect(p.dismissed == Self.login && p.destination == nil)
-        // Cleared draft: starts over.
-        p.update(text: "", context: RouterContext(), store: s)
-        #expect(p.dismissed == nil)
-        // A pick holds: nothing is read again while it is there.
-        p.update(text: "fix the login redirect", context: RouterContext(), store: s)
-        await waitUntil { p.destination != nil }
-        p.pick(Self.docs, store: s)
-        p.update(text: "fix the login redirect again", context: RouterContext(target: p.pinned), store: s)
-        #expect(p.asking == nil && p.pinned == Self.docs)
     }
 }

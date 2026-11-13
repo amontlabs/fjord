@@ -1343,7 +1343,7 @@ extension WindowSeams {
                 controller.show(.router)
                 ticks.runTurns()
                 guard let run = controller.run, let shown = run.image else { return #expect(Bool(false), "no kept picture") }
-                if let e = controller.store.routerBriefs.page().entries.last { controller.pick(entry: e.target) }
+                if let e = controller.store.routerRecords.lines(in: .needsYou).last { controller.pick(entry: BriefTarget(project: e.project ?? "", thread: e.id)) }
                 controller.pick(message: UUID())
                 controller.navigator.go(.done)
                 ticks.runTurns()
@@ -1377,7 +1377,7 @@ extension WindowSeams {
                 let taken = AppTransition.captures
                 controller.navigator.go(.done)
                 controller.showUpdates()
-                if let e = controller.store.routerBriefs.page().entries.first { controller.pick(entry: e.target) }
+                if let e = controller.store.routerRecords.lines(in: .needsYou).first { controller.pick(entry: BriefTarget(project: e.project ?? "", thread: e.id)) }
                 ticks.runTurns()
                 #expect(AppTransition.captures == taken)
             }

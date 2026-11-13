@@ -6,7 +6,7 @@ import Observation
 // T3's threads: a reply armed on a thread goes to that thread; a thread you tagged goes there with no model; anything else is
 // for the decider (`RouterProjectDecider`: Jev's sure send, else Sonnet on the full context), whose decision is acted on as it
 // is: a thread gets the words (a waiting request is answered by its own rules first), a new thread starts with them, or the
-// Router answers here. Your own messages are decided in the composer before they go (`RouterPreview`): what reaches here
+// Router answers here. Your own messages are read in the composer before they go (`RouterV2Reader`): what reaches here
 // carries that decision, or the place you picked among its guesses. Only an unattended action, a wrong send asked again, or a
 // sure place that went away meanwhile asks "Where should this go?". Nothing is sent when it isn't sure.
 

@@ -712,8 +712,8 @@ final class RouterV2DemoScript {
                        lastLines: "Settings is one scrolling page now, with the sections in the order of the old tabs. The sidebar code is gone.",
                        prs: [.init(number: 58, state: .open)], diff: .init(files: 5, added: 184, removed: 97))
         await pause(1.2)
-        source.endTurn(ID.briefs, worth: .look, line: "briefs moved into BriefLog; tests pass; PR #59",
-                       lastLines: "The briefs live in BriefLog now. The old rows were copied once and checked row by row; briefs.db is kept for one release. All suites pass.",
+        source.endTurn(ID.briefs, worth: .look, line: "briefs moved into NoteLog; tests pass; PR #59",
+                       lastLines: "The briefs live in NoteLog now. The old rows were copied once and checked row by row; briefs.db is kept for one release. All suites pass.",
                        prs: [.init(number: 59, state: .open)], diff: .init(files: 6, added: 212, removed: 148))
         await pause(1.2)
         source.endTurn(ID.valCenis, line: "reserved for five; late checkout asked; the confirmation is in your inbox",

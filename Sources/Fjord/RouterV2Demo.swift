@@ -78,17 +78,17 @@ enum RouterV2Demo {
     }
 
     static let plan: [String] = [
-        "1. Add a `briefs` table to BriefLog: id, project, thread, body, written_at.",
-        "2. Write `BriefLog.save(_:)` and `BriefLog.latest(for:)` on that table.",
+        "1. Add a `briefs` table to NoteLog: id, project, thread, body, written_at.",
+        "2. Write `NoteLog.save(_:)` and `NoteLog.latest(for:)` on that table.",
         "3. Copy the old rows from briefs.db once, at the first launch after the update.",
         "4. Keep briefs.db untouched until the copy is checked row by row.",
-        "5. Point `RouterBriefs` at BriefLog for reads.",
-        "6. Point the brief engine at BriefLog for writes.",
+        "5. Point the notes view at NoteLog for reads.",
+        "6. Point the brief engine at NoteLog for writes.",
         "7. Move the Told marks into a `told` column.",
         "8. Move the read marks the same way.",
         "9. Delete `BriefStore` and its JSON fallback.",
-        "10. Seed BriefLog from `DemoBriefs`, so the shots keep their data.",
-        "11. Update the eval dump to read from BriefLog.",
+        "10. Seed NoteLog from the demo notes, so the shots keep their data.",
+        "11. Update the eval dump to read from NoteLog.",
         "12. Add a migration test: 200 old rows in, 200 new rows out.",
         "13. Add a test for a copy interrupted halfway: it starts again cleanly.",
         "14. Add a test for an empty briefs.db.",
@@ -140,8 +140,8 @@ enum RouterV2Demo {
         valCenis.question = "Reserve for five, or keep it at four?"
         valCenis.options = ["Reserve for five (+€62)", "Keep it at four"]
 
-        var briefs = T(id: ID.briefs, name: "Briefs migration", title: "Move the briefs into BriefLog", project: "fjord",
-                       state: .needsYou(.plan), sentence: .init(text: "plan ready: move briefs into BriefLog, copy the old rows once"),
+        var briefs = T(id: ID.briefs, name: "Briefs migration", title: "Move the briefs into NoteLog", project: "fjord",
+                       state: .needsYou(.plan), sentence: .init(text: "plan ready: move briefs into NoteLog, copy the old rows once"),
                        since: ago(6))
         briefs.plan = plan
         // T3 gives a plan no options: these two are Fjord's; "no" is typing what to change.
@@ -311,7 +311,7 @@ final class RouterV2DemoSource: RouterV2Source {
     var steps: [String: [Line]] = [
         RouterV2Demo.ID.settings: [.words("Reading SettingsView.swift")],
         RouterV2Demo.ID.valCenis: [.words("Thinking")],
-        RouterV2Demo.ID.briefs: [.words("Editing BriefLog.swift")],
+        RouterV2Demo.ID.briefs: [.words("Editing NoteLog.swift")],
         RouterV2Demo.ID.updater: [.words("Editing UpdatePrompt.swift")],
         RouterV2Demo.ID.disk: [.command("swift test --filter SnapshotRestore")],
         RouterV2Demo.ID.checkpoint: [.command("git worktree remove --force ~/silo-work/checkpoint-old"),

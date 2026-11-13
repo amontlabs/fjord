@@ -391,28 +391,11 @@ final class Store {
         dispatcher.claudePath = { [weak self] in self?.routerStatus.latestPath() }
         return dispatcher
     }()
-    /// Where the draft will go, shown while you type (RouterPreview.swift).
-    @ObservationIgnored lazy var routerPreview: RouterPreview = {
-        let preview = RouterPreview()
-        preview.read = { [weak self] text, tagged in await self?.readDraft(text, tagged: tagged) }
-        preview.decide = { [weak self] text, tagged, notTo, reuse in await self?.decideDraft(text, tagged: tagged, notTo: notTo, reuse: reuse) }
-        preview.search = { [weak self] text in await self?.searchDraft(text) ?? [] }
-        preview.boardKey = { [weak self] in self?.deciderBoardKey() ?? "" }
-        preview.eligible = { [weak self] target in self.map { $0.routerDispatcher.eligible(target, store: $0) } ?? false }
-        preview.allowed = { [weak self] in self?.previewsDrafts == true }
-        return preview
-    }()
     /// A shot's model usage, shown in Settings instead of the log.
     @ObservationIgnored var modelUsageShown: [ModelUsageLog.Entry]?
     /// Every thread's turns and Haiku card, the BM25 index and the day's archive: the decider's context, kept off its path
     /// (ThreadCards.swift). On disk under Application Support/Fjord/thread-cards; in memory only in a test or a demo.
     @ObservationIgnored lazy var threadCards = ThreadCardStore(folder: routerFiles?.support)
-    /// The per-project briefs and the general brief: the Router window's page (RouterBriefs.swift).
-    @ObservationIgnored lazy var routerBriefs: RouterBriefs = {
-        let briefs = RouterBriefs()
-        briefs.store = self
-        return briefs
-    }()
     /// The Router v2 page's records: one per T3 thread, what the page, the bar, the palette and the badge read
     /// (RouterRecords.swift). Not observed by views.
     @ObservationIgnored lazy var routerRecords: RouterRecords = makeRouterRecords()

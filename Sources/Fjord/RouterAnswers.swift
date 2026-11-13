@@ -53,7 +53,7 @@ extension Store {
 
     /// What T3 says the thread waits on you for now.
     func heldRequest(_ target: BriefTarget) -> ThreadRequest? {
-        requests[routerBriefs.threadID(target)]
+        requests[target.thread]
     }
 
     /// The last check before an answer goes: the Router is on and the thread still holds that very request (and, for an
@@ -78,7 +78,7 @@ extension Store {
             guard request.live else { throw RequestFailure.notLive }
             guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
             else { throw RequestFailure.moved }
-            try await sendCommands([.respondAnswers(threadId: routerBriefs.threadID(target), requestId: request.id, answers: checked)])
+            try await sendCommands([.respondAnswers(threadId: target.thread, requestId: request.id, answers: checked)])
             logEntryAction("Answered the question", target: target)
             return .success(())
         } catch {
@@ -96,7 +96,7 @@ extension Store {
             if feedback != nil, !request.supportsFeedback { throw RequestFailure.noFeedback }
             guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
             else { throw RequestFailure.moved }
-            try await sendCommands([.respondDecision(threadId: routerBriefs.threadID(target), requestId: request.id, decision: decision, feedback: feedback)])
+            try await sendCommands([.respondDecision(threadId: target.thread, requestId: request.id, decision: decision, feedback: feedback)])
             logEntryAction(decision == .decline ? "Declined the permission" : "Allowed the permission", target: target)
             return .success(())
         } catch {
@@ -111,7 +111,7 @@ extension Store {
         do {
             guard let markdown = request.planMarkdown else { throw RequestFailure.notAPlan }
             guard answerStillValid(request, target: target, snapshot: snapshot) else { throw RequestFailure.moved }
-            let thread = routerBriefs.threadID(target)
+            let thread = target.thread
             try await sendCommands([
                 .runtimeModeSet(threadId: thread, mode: mode),
                 .interactionModeSet(threadId: thread, mode: .default),
@@ -131,7 +131,7 @@ extension Store {
         do {
             guard request.isPlan else { throw RequestFailure.notAPlan }
             guard answerStillValid(request, target: target, snapshot: snapshot) else { throw RequestFailure.moved }
-            try await sendCommands([.messageDispatch(threadId: routerBriefs.threadID(target), messageId: UUID().uuidString.lowercased(), text: words,
+            try await sendCommands([.messageDispatch(threadId: target.thread, messageId: UUID().uuidString.lowercased(), text: words,
                                                      dispatch: .startImmediately(intent: .auto))])
             logEntryAction("Sent the plan back", target: target)
             return .success(())

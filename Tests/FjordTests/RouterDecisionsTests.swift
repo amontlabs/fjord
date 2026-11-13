@@ -47,11 +47,9 @@ import Testing
         #expect(s.router.decisions[0].summary == "reverted")
     }
 
-    @Test func answersFromTheBriefAreLogged() {
+    @Test func answersFromThePageAreLogged() {
         let s = store()
-        var doc = BriefDoc(project: "local:app")
-        doc.threads = [BriefThread(id: "local_a", title: "Fix the login bug", status: .needsYou, age: 0)]
-        s.routerBriefs.demoDocs = ["local:app": doc]
+        s.threads["local_a"] = AgentThread(id: "local_a", title: "Fix the login bug", lastActivity: Date())
         s.logEntryAction("Answered the form", target: BriefTarget(project: "local:app", thread: "local_a"))
         let d = s.router.decisions[0]
         #expect(d.trigger == .you("Answered the form") && d.outcome == .done)

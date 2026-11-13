@@ -24,24 +24,21 @@ struct RouterPaths: Equatable, Sendable {
 
 // MARK: - Persisted state
 
-/// What the Router keeps across launches: its switch, the log of what it did and changed, and how it writes to you. What you act on is the brief's entries (RouterBriefs.swift), never
-/// kept here. A file of an older version, cards and all, is read for these keys only: the rest is dropped at the next save.
+/// What the Router keeps across launches: its switch and the log of what it did and changed. What you act on is T3's
+/// threads (RouterRecords.swift), never kept here. A file of an older version, cards and all, is read for these keys only: the rest is dropped at the next save.
 struct RouterSaved: Codable, Equatable {
     /// Off by default; only offered while the Claude sessions extension is on.
     var enabled = false
     var enabledAt: Date?
-    /// What the Router changed in Fjord itself, and your acts on the brief, oldest first (see FjordChange.swift).
+    /// What the Router changed in Fjord itself, and your acts on the page, oldest first (see FjordChange.swift).
     var changes: [FjordChange] = []
     /// The decision log, oldest first (see RouterDecisions.swift).
     var decisions: [RouterDecision] = []
-    /// How the Router writes to you (Settings), in your words: what the briefs follow. Nil for the default
-    /// (`RouterStyle.defaultText`).
-    var style: String?
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, enabledAt, changes, decisions, style
+        case enabled, enabledAt, changes, decisions
     }
 
     func encode(to encoder: Encoder) throws {
@@ -50,7 +47,6 @@ struct RouterSaved: Codable, Equatable {
         try c.encodeIfPresent(enabledAt, forKey: .enabledAt)
         try c.encode(changes, forKey: .changes)
         try c.encode(decisions, forKey: .decisions)
-        try c.encodeIfPresent(style, forKey: .style)
     }
 
     init(from decoder: Decoder) throws {
@@ -74,7 +70,6 @@ struct RouterSaved: Codable, Equatable {
         enabledAt = value(.enabledAt)
         changes = list(.changes)
         decisions = list(.decisions)
-        style = value(.style)
         linkUnlinkedChanges()
         dropped = lost
     }
@@ -92,7 +87,7 @@ struct RouterSaved: Codable, Equatable {
         }
     }
 
-    /// What the file had that this version couldn't read ("2 of decisions", "style"): never saved, and handed on to
+    /// What the file had that this version couldn't read ("2 of decisions"): never saved, and handed on to
     /// `PersistedState.dropped` (empty once loaded).
     var dropped: [String] = []
 }

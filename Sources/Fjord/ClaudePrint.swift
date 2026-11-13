@@ -2,8 +2,7 @@ import Foundation
 
 // One structured model call through Claude Code on your subscription (`claude -p`): a system prompt, the user text on stdin
 // and a JSON schema, answered as the typed JSON. No tools, no settings, no MCP, no session kept, thinking off. The router's
-// decider (Sonnet) and its thread cards (Haiku) use it; the brief's Haiku runs through `RouterBriefer` the same way, and
-// Router v2's verdicts stream with the same flags (`ClaudeStream`). Every call's usage (`--output-format json`: its tokens
+// decider (Sonnet), its thread cards and project purposes (Haiku) use it, and Router v2's verdicts stream with the same flags (`ClaudeStream`). Every call's usage (`--output-format json`: its tokens
 // and `total_cost_usd`) goes to the model-usage log (`ModelUsageLog`).
 
 /// What a call cost, in tokens, and Claude Code's own cost for it (at API prices).
@@ -98,6 +97,7 @@ final class ModelUsageLog: @unchecked Sendable {
             switch self {
             case .decider: "Sonnet decider"
             case .cards: "Haiku thread cards"
+            // The old brief page's calls, still in the log's history.
             case .brief: "Haiku briefs"
             case .jev: "Jev"
             case .verdict: "Haiku verdicts"

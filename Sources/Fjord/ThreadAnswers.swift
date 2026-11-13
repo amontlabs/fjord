@@ -1,7 +1,7 @@
 import Foundation
 
-// What picked options and typed words become on a T3 request (a question, a form, a permission, a plan). The rules are
-// `RouterBriefs.answerRequest`'s, on `ThreadRequest` and with no brief entry: an option's number through the card is a
+// What picked options and typed words become on a T3 request (a question, a form, a permission, a plan). On
+// `ThreadRequest`: an option's number through the card is a
 // position in the request's own lists, words are never a yes (a permission typed is a decline carrying them, a plan's are
 // sent back), and an answer goes only while the thread still holds that very request (`RequestSnapshot`).
 

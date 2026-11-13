@@ -191,11 +191,6 @@ final class AppWindowController: NSObject, NSWindowDelegate {
     private let checksClaudeCode: Bool
     /// The rows' picked state, Settings' scroll requests and the category editor's step back, shared by the destinations.
     let hub = HubState()
-    private lazy var keys: RouterKeys = {
-        let keys = RouterKeys(store: store, model: routerModel)
-        keys.openPalette = { [weak self] in self?.palette.open() }
-        return keys
-    }()
     /// The inbox's search, and the keys of the inbox destinations (see `AppWindowKeys`).
     let search = InboxSearch()
     private(set) lazy var inboxKeys: AppWindowKeys = {
@@ -1022,7 +1017,7 @@ final class AppWindowController: NSObject, NSWindowDelegate {
         TrafficLights.place(window)
     }
 
-    /// The Router's keys (see `RouterKeys`) while the window is key and shows the Router; Esc dismisses a tooltip first.
+    /// The Router's keys (see `RouterV2Keys`) while the window is key and shows the Router; Esc dismisses a tooltip first.
     private func watchKeys() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in

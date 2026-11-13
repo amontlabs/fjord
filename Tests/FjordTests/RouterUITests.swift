@@ -33,55 +33,7 @@ import UserNotifications
         return view
     }
 
-    // MARK: Window keys
-
-
-
-    @Test func returnInTheComposerSendsAndShiftReturnDoesNot() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let editor = NSTextView()
-        model.composerFocused = true
-        model.draft = "tell lookout to run the tests"
-        let before = store.router.decisions.count
-        #expect(keys.key(key(kVK_Return, "\r", .shift), responder: editor))
-        #expect(store.router.decisions.count == before && !model.draft.isEmpty)
-        #expect(keys.key(key(kVK_Return, "\r"), responder: editor))
-        #expect(model.draft.isEmpty)
-        #expect(store.router.decisions.dropFirst(before).first?.triggerText == "tell lookout to run the tests")
-        // Typing in the composer is its own.
-        #expect(!keys.key(key(kVK_ANSI_A, "a"), responder: editor))
-    }
-
-    @Test func typingWithNothingFocusedGoesToTheComposer() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let request = model.focusRequest
-        #expect(keys.key(key(kVK_ANSI_H, "h"), responder: nil))
-        #expect(model.focusRequest != request && model.pendingKeys.count == 1)
-    }
-
     // MARK: Sending
-
-    @Test func theComposerIsShutWhileTheRouterOrTheSessionsAreOff() {
-        let store = demo()
-        let model = RouterModel()
-        let before = store.router.decisions.count
-        #expect(model.canSend(store))
-        store.router.enabled = false
-        #expect(!model.canSend(store))
-        store.router.enabled = true
-        store.agents.enabled = false
-        #expect(!model.canSend(store))
-        model.draft = "hello"
-        model.send(store: store)
-        #expect(model.draft == "hello" && store.router.decisions.count == before)
-        // Typing with nothing focused doesn't go to a composer that can't send.
-        let keys = RouterKeys(store: store, model: model)
-        #expect(!keys.key(key(kVK_ANSI_H, "h"), responder: nil))
-    }
 
     @Test func claudeCodeMissingIsSaidOnceLookedForAndSendWaits() async {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-ui-\(UUID().uuidString)")
@@ -95,9 +47,6 @@ import UserNotifications
         #expect(model.claudeCodeMissing == nil && model.canSend(store))
         await model.checkClaudeCode(store)
         #expect(model.claudeCodeMissing == true && !model.canSend(store))
-        model.draft = "hello"
-        model.send(store: store)
-        #expect(model.draft == "hello")
         // The binary appears: looking again finds it.
         FileManager.default.createFile(atPath: bin.path, contents: Data(), attributes: [.posixPermissions: 0o755])
         await model.checkClaudeCode(store)
@@ -112,74 +61,11 @@ import UserNotifications
 
     // MARK: Reply and @
 
-    @Test func escClearsTheSuggestionsThenTheReplyThenCloses() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        model.composerFocused = true
-        store.routerBriefs.focus(store.routerBriefs.page().entries[0].target)
-        let editor = editor(model, "tell @mi")
-        #expect(!model.suggestions(store).isEmpty)
-        #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(model.suggestions(store).isEmpty && store.routerBriefs.focused != nil)
-        #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(store.routerBriefs.focused == nil)
-        // Nothing left to step out of: the field keeps it, and the window stays.
-        #expect(keys.key(key(kVK_Escape), responder: editor))
-        #expect(store.routerBriefs.focused == nil && model.suggestions(store).isEmpty)
-    }
-
-    @Test func atSuggestsProjectsAndReturnOrTabPicksOne() throws {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        model.composerFocused = true
-        _ = editor(model, "check @")
-        let all = model.suggestions(store).map(\.name)
-        #expect(all.count >= 3)
-        var view = editor(model, "check @lc")
-        #expect(model.suggestions(store).first?.name == "lcu")
-        #expect(keys.key(key(kVK_DownArrow), responder: view))
-        let second = try #require(model.suggestions(store)[1].folder)
-        #expect(keys.key(key(kVK_Tab, "\t"), responder: view))
-        #expect(model.projects == [second] && model.pointers == [.project(second)])
-        #expect(model.draft == "check \(MentionText.markString) " && model.caretRequest == 8)
-        // Picked projects aren't suggested again; Return picks too.
-        view = editor(model, "check \(MentionText.markString) and @")
-        #expect(!model.suggestions(store).map(\.folder).contains(second))
-        #expect(keys.key(key(kVK_Return, "\r"), responder: view))
-        #expect(model.projects.count == 2 && model.pointers[0] == .project(second) && model.draft.filter { $0 == MentionText.mark }.count == 2)
-        // An @ inside a word (an email) is not a tag.
-        #expect(RouterModel.mentionQuery(in: "me@lookout") == nil)
-        #expect(RouterModel.mentionQuery(in: "@look  out") == nil)
-        #expect(RouterModel.mentionQuery(in: "hey @look") == "look")
-    }
-
-    @Test func theSuggestionsFollowTheCaretNotTheEndOfTheText() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        model.composerFocused = true
-        // Mid-message: the @ word the caret is in is the one suggested, and picking it keeps the rest of the text.
-        let view = editor(model, "ask @lc about the tests", caret: 7)
-        #expect(model.suggestions(store).first?.name == "lcu")
-        #expect(keys.key(key(kVK_Return, "\r"), responder: view))
-        #expect(model.draft == "ask \(MentionText.markString) about the tests" && model.caretRequest == 6)
-        #expect(model.projects.count == 1)
-        // The caret moved off a trailing @ word: no suggestions, and ↑↓ and Return are the composer's again.
-        let away = editor(model, "tell @mi", caret: 2)
-        #expect(model.suggestions(store).isEmpty)
-        #expect(!keys.key(key(kVK_DownArrow), responder: away))
-        let before = store.router.decisions.count
-        #expect(keys.key(key(kVK_Return, "\r"), responder: away))
-        #expect(store.router.decisions.count > before)
-    }
-
     /// The composer in a window: typing through its own text view, then moving the caret, drives the suggestions.
     @Test(.hostsWindows) func aMountedComposerFollowsTheCaret() async throws {
         let store = demo()
         let model = RouterModel()
-        let hosting = NSHostingView(rootView: RouterCodeView(store: store, model: model, checksClaudeCode: false)
+        let hosting = NSHostingView(rootView: RouterV2Screen(model: store.routerPage, store: store, text: model)
             .frame(width: 1100, height: 720))
         let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 720), styleMask: .titled, backing: .buffered,
                                 defer: false)
@@ -260,7 +146,7 @@ import UserNotifications
         model.open(thing: entry.id, in: navigator)
         #expect(navigator.selection == .router && model.pointers == [.notification(entry.id)])
         #expect(model.draft == MentionText.markString + " " && model.caretRequest == 2 && model.focusRequest == 1)
-        let hosting = NSHostingView(rootView: RouterCodeView(store: store, model: model, checksClaudeCode: false)
+        let hosting = NSHostingView(rootView: RouterV2Screen(model: store.routerPage, store: store, text: model)
             .frame(width: 1100, height: 720))
         let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 720), styleMask: .titled, backing: .buffered,
                                 defer: false)
@@ -280,50 +166,6 @@ import UserNotifications
         }
         #expect(composer.string == MentionText.markString + " " && composer.selectedRange() == NSRange(location: 2, length: 0))
         #expect(MentionText.serialize(composer.attributedString()).pointers == [.notification(entry.id)])
-    }
-
-    @Test(.hostsWindows) func aLongDraftScrolledInTheComposerIsStillTheComposers() {
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400), styleMask: .borderless,
-                              backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { window.contentView = nil; window.orderOut(nil) }
-        let content = NSView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
-        window.contentView = content
-        // The field: 100pt high at the bottom of the window, its text view scrolled down a draft far taller than it.
-        let anchor = FieldAnchor()
-        let behind = NSView(frame: CGRect(x: 0, y: 0, width: 600, height: 100))
-        content.addSubview(behind)
-        anchor.view = behind
-        let scroll = NSScrollView(frame: behind.frame)
-        let editor = NSTextView(frame: CGRect(x: 0, y: 0, width: 600, height: 100))
-        scroll.documentView = editor
-        content.addSubview(scroll)
-        editor.string = String(repeating: "a long draft\n", count: 300)
-        editor.layoutManager?.ensureLayout(for: editor.textContainer!)
-        editor.sizeToFit()
-        editor.scroll(CGPoint(x: 0, y: 2000))
-        #expect(anchor.owns(editor))
-        // A text view elsewhere in the window isn't.
-        let beside = NSTextView(frame: CGRect(x: 0, y: 200, width: 600, height: 100))
-        content.addSubview(beside)
-        #expect(!anchor.owns(beside))
-    }
-
-    @Test func backspaceAtTheStartTakesTheReplyOff() {
-        let store = demo()
-        let model = RouterModel()
-        let keys = RouterKeys(store: store, model: model)
-        let editor = NSTextView()
-        model.composerFocused = true
-        store.routerBriefs.focus(store.routerBriefs.page().entries[0].target)
-        #expect(keys.key(key(kVK_Delete), responder: editor))
-        #expect(store.routerBriefs.focused == nil)
-        // Nothing left: the key is the field's. Not at the start: the field's.
-        #expect(!keys.key(key(kVK_Delete), responder: editor))
-        store.routerBriefs.focus(store.routerBriefs.page().entries[0].target)
-        editor.string = "abc"
-        editor.setSelectedRange(NSRange(location: 3, length: 0))
-        #expect(!keys.key(key(kVK_Delete), responder: editor) && store.routerBriefs.focused != nil)
     }
 
     @Test func fuzzyMentionsRankPrefixesFirst() {
@@ -356,38 +198,33 @@ import UserNotifications
     @Test func anOptionIsAnsweredThroughT3() async throws {
         let sent = Sent()
         let store = sending(sent)
-        // The brief's local question: option 2 picked, then Return.
-        let briefs = store.routerBriefs
-        let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
+        // The local question: its second option.
+        let t = BriefTarget(project: "local:lcu", thread: Demo.blockedAgentID)
         let request = try #require(store.heldRequest(t))
-        briefs.pick(t, 2, store: store)
-        #expect(briefs.confirm(t, store: store))
-        // Its line in the drawer once the answer is sent.
-        await briefs.settled()
         let question = try #require(request.questions.first)
-        #expect(sent.commands == [.respondAnswers(threadId: Demo.blockedAgentID, requestId: request.id,
-                                                  answers: [question.id: .one("Ask first")])])
-        #expect(briefs.trouble[t] == nil && briefs.answers.first?.words == "Ask first")
+        let answers = [question.id: T3Answer.one("Ask first")]
+        if case .failure(let error) = await store.answerQuestion(request, answers, target: t) { Issue.record("\(error)") }
+        #expect(sent.commands == [.respondAnswers(threadId: Demo.blockedAgentID, requestId: request.id, answers: answers)])
     }
 
     @Test func answeringWhileTheRouterIsSwitchedOffSendsNothing() async throws {
         let sent = Sent()
         let store = sending(sent)
-        let briefs = store.routerBriefs
-        let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
-        briefs.pick(t, 2, store: store)
-        #expect(briefs.confirm(t, store: store))
+        let t = BriefTarget(project: "local:lcu", thread: Demo.blockedAgentID)
+        let request = try #require(store.heldRequest(t))
+        let answers = [try #require(request.questions.first).id: T3Answer.one("Ask first")]
         // Switched off before the answer goes.
         store.router.enabled = false
-        await waitUntil { briefs.trouble[t] != nil }
-        #expect(briefs.trouble[t] == RequestFailure.moved.errorDescription)
+        let result = await store.answerQuestion(request, answers, target: t)
+        guard case .failure(let error) = result else { Issue.record("answered with the Router off"); return }
+        #expect(error.localizedDescription == RequestFailure.moved.errorDescription)
         #expect(sent.commands.isEmpty)
     }
 
     @Test func aRequestThatMovedOnIsNotAnsweredWithTheOldOnesAnswer() async throws {
         let sent = Sent()
         let store = sending(sent)
-        let t = BriefTarget(project: "local:lcu", thread: Demo.briefLocalThread)
+        let t = BriefTarget(project: "local:lcu", thread: Demo.blockedAgentID)
         let old = try #require(store.heldRequest(t))
         // A retried permission is a new request id: the answer read for the old one doesn't go to it.
         var next = old

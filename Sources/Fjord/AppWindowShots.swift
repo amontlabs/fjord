@@ -145,35 +145,6 @@ enum AppWindowShots {
         Shot(name: "reviews") { store in store.shownCategories.first { $0.name.contains("Review") }?.id.asCategory ?? .done },
         Shot(name: "ci") { store in store.shownCategories.first(where: \.isCI)?.id.asCategory ?? .done },
         Shot(name: "done") { _ in .done },
-        Shot(name: "router") { _ in .router },
-        // The brief (RouterBriefView.swift): every section, an entry focused with option 2 picked (a question, a plan and a
-        // local form), a stale project, all quiet, and the history open.
-        briefShot("brief-home", .aqua), briefShot("brief-home-dark", .darkAqua),
-        briefShot("brief-needs-you", .aqua, height: 1500, focus: true), briefShot("brief-needs-you-dark", .darkAqua, height: 1500, focus: true),
-        briefShot("brief-rewriting", .aqua, rewriting: true), briefShot("brief-rewriting-dark", .darkAqua, rewriting: true),
-        briefShot("brief-stale", .aqua, variant: .stale), briefShot("brief-stale-dark", .darkAqua, variant: .stale),
-        briefShot("brief-finished", .aqua, height: 1100), briefShot("brief-finished-dark", .darkAqua, height: 1100),
-        briefShot("brief-quiet", .aqua, height: 800, variant: .quiet), briefShot("brief-quiet-dark", .darkAqua, height: 800, variant: .quiet),
-        // The history at the right on a wide window, across the bottom on a narrow one.
-        briefShot("brief-drawer", .aqua, drawer: true), briefShot("brief-drawer-dark", .darkAqua, drawer: true),
-        briefShot("brief-drawer-narrow", .aqua, width: 900, drawer: true), briefShot("brief-drawer-narrow-dark", .darkAqua, width: 900, drawer: true),
-        // A highlight hovered, its panel live: a question in the lead, a plan, a question with an option picked (and
-        // mentioned), a form of two questions, a permission with its buttons, a finished thread's (a line to message it).
-        briefShot("brief-hover", .aqua, hover: "lead-you#chan_demo_fjord/th_settings@3"),
-        briefShot("brief-mentions", .aqua, mentions: [BriefTarget(project: "chan_demo_fjord", thread: "th_settings"),
-                                                      BriefTarget(project: "chan_demo_fjord", thread: "th_migrate")]),
-        briefShot("brief-hover-plan", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_migrate@6"),
-        briefShot("brief-hover-question", .aqua, focus: true, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
-        briefShot("brief-hover-form", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", twoQuestions: true),
-        briefShot("brief-permission", .aqua, hover: "local:lcu#local:lcu/local_demo-ci@6", permission: true),
-        briefShot("brief-hover-finished", .darkAqua, hover: "chan_demo_docs#chan_demo_docs/th_guide@0"),
-        briefShot("brief-hover-stranded", .aqua, hover: "chan_demo_silo#chan_demo_silo/th_flaky@6", stranded: true),
-        // Your words queued behind a running thread: its history line offers Edit and Cancel while the run waits.
-        briefShot("router-queued", .aqua, drawer: true, queued: true),
-        // The brief's panel on a question: Mark read, Snooze, Settle, Rename and Open in T3.
-        briefShot("brief-panel-actions", .darkAqua, hover: "chan_demo_fjord#chan_demo_fjord/th_settings@0"),
-        // A question that T3 can no longer take an answer for, after a T3 restart: it is only shown.
-        briefShot("brief-expired", .aqua, hover: "local:lcu#local:lcu/\(Demo.briefLocalThread)@0", expired: true),
         Shot(name: "settings-t3-linked", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000),
              compose: { _, store in store.t3.demoStatus = .connected(threads: store.threads.count) }),
         Shot(name: "palette", destination: { $0.shownCategories[0].id.asCategory }, palette: PaletteShot()),
@@ -188,42 +159,6 @@ enum AppWindowShots {
              palette: PaletteShot(query: "e", fixture: true)),
         Shot(name: "palette-fixture-actions", destination: { $0.shownCategories[0].id.asCategory },
              palette: PaletteShot(query: "fix", actions: true, fixture: true)),
-        Shot(name: "router-composing", destination: { _ in .router }, compose: { model, store in
-            let folder = store.knownFolders.first { !$0.isEmpty } ?? "/Users/me/code/lookout"
-            model.pointers = [.project(folder)]
-            model.draft = "check the failing tests in \(MentionText.markString) and tell me what you find"
-        }),
-        // Where the draft goes, shown in the composer before it is sent: sure, "→ <thread>" (Return sends there) and the brief
-        // marks the thread, dashed.
-        Shot(name: "router-destination-sure", destination: { _ in .router }, compose: { model, store in
-            let id = Self.destinationThread(store)
-            store.routerDispatcher.preview()
-            model.draft = "also show the count on the hub's badge"
-            store.routerPreview.show(RouterPreview.Destination(
-                text: model.draft, key: "", decision: RouterProjectDecision(kind: .thread(id), confidence: 0.96, decider: .sonnet),
-                options: [RouteTarget.thread(id).targetID], sure: true))
-        }),
-        // Not sure: the best guess highlighted (Return sends there), an alternative thread and a new thread beside it.
-        Shot(name: "router-destination-unsure", destination: { _ in .router }, compose: { model, store in
-            let id = Self.destinationThread(store)
-            store.routerDispatcher.preview()
-            let other = store.threads.values.filter { $0.id != id && $0.folder != nil }.sorted { $0.id < $1.id }.first?.id
-            model.draft = "the count is wrong again"
-            let places: [RouterProjectDecision.Kind] = [.thread(id)] + (other.map { [.thread($0)] } ?? []) + [.newThread(project: "chan_demo_fjord")]
-            store.routerPreview.show(RouterPreview.Destination(
-                text: model.draft, key: "", decision: RouterProjectDecision(kind: .ask(places), confidence: 0.62, decider: .sonnet),
-                options: places.compactMap { RouterProjectDecision(kind: $0, confidence: 0, decider: .none).target?.targetID }, sure: false))
-        }),
-        // A reply to a thread that is running: the pick line reads "steer … (running)" (⌥Return would queue instead).
-        Shot(name: "router-steer", destination: { _ in .router }, compose: { model, store in
-            let target = BriefTarget(project: "local:lookout", thread: "local_demo-lookout")
-            var doc = BriefDoc(project: target.project)
-            doc.threads = [BriefThread(id: target.thread, title: "Agent completion notifications", status: .working,
-                                       age: Date().timeIntervalSince1970 - 60)]
-            store.routerBriefs.demoDocs[target.project] = doc
-            store.routerBriefs.mentioned = [target]
-            model.draft = "use the staging database instead of production"
-        }),
         Shot(name: "settings") { _ in .settings },
         // What the Router's models used, in Settings › T3 Code: today's calls, tokens and the API price estimate per model.
         Shot(name: "settings-model-usage", destination: { _ in .settings }, size: CGSize(width: 1400, height: 2000), compose: { _, store in
@@ -247,58 +182,6 @@ enum AppWindowShots {
         Shot(name: "router-collapsed-760", destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: 760, height: 1000)),
         Shot(name: "category-narrow", destination: { $0.shownCategories[0].id.asCategory }, size: CGSize(width: 1000, height: 640)),
     ] + RouterV2Shots.catalog + RouterV2MentionShot.catalog
-
-    private static func briefShot(_ name: String, _ look: NSAppearance.Name, width: CGFloat = 1280, height: CGFloat = 1100, variant: Demo.BriefVariant = .home,
-                                  focus: Bool = false, drawer: Bool = false, hover: String? = nil,
-                                  twoQuestions: Bool = false, permission: Bool = false, stranded: Bool = false, queued: Bool = false, expired: Bool = false, rewriting: Bool = false, mentions: [BriefTarget] = []) -> Shot {
-        Shot(name: name, destination: { _ in .router }, sidebarHidden: true, size: CGSize(width: width, height: height),
-             compose: { _, store in
-                 let briefs = store.routerBriefs
-                 if focus {
-                     let t = BriefTarget(project: "chan_demo_fjord", thread: "th_settings")
-                     briefs.focus(t)
-                     briefs.pick(t, 2, store: store)
-                 }
-                 // ⌘-clicked: several threads your words go to.
-                 for t in mentions { briefs.toggleMention(t) }
-                 if let hover, let slash = hover.firstIndex(of: "#"), let at = hover.lastIndex(of: "@"),
-                    let t = BriefTarget(key: String(hover[hover.index(after: slash)..<at])) {
-                     briefs.hover(hover, t, inside: true)
-                 }
-                 if stranded, var silo = briefs.demoDocs["chan_demo_silo"] {
-                     silo.needsYou = [BriefEntry(project: silo.project, thread: "th_flaky", kind: .stranded, state: .paused,
-                                                 since: Date().timeIntervalSince1970 - 7_200)]
-                     briefs.demoDocs["chan_demo_silo"] = silo
-                 }
-                 if twoQuestions, var request = store.requests[Demo.briefLocalSession], case .question(var questions) = request.body {
-                     questions.append(T3Question(demo: "Channel", "Which channel should it follow?", options: [("Stable", ""), ("Beta", "")]))
-                     request.body = .question(questions)
-                     store.requests[Demo.briefLocalSession] = request
-                 }
-                 if permission, var lcu = briefs.demoDocs["local:lcu"] {
-                     lcu.now.append("<t id=\"local_demo-ci\">The CI diagnosis</t> waits for a permission.")
-                     lcu.threads.append(BriefThread(id: "local_demo-ci", title: "CI failure diagnosis", status: .needsYou,
-                                                    age: Date().timeIntervalSince1970 - 240))
-                     lcu.needsYou.append(BriefEntry(project: lcu.project, thread: "local_demo-ci", kind: .permission, state: .needsYou,
-                                                    since: Date().timeIntervalSince1970 - 240))
-                     briefs.demoDocs["local:lcu"] = lcu
-                 }
-                 if expired, var request = store.requests[Demo.briefLocalSession] {
-                     request.live = false
-                     store.requests[Demo.briefLocalSession] = request
-                 }
-                 if queued { Self.queueWords(store) }
-                 if rewriting { briefs.demoRewriteProgress = (3, 8) }
-                 if drawer {
-                     briefs.drawerOpen = true
-                     store.threadAct(.read, on: BriefTarget(project: "chan_demo_docs", thread: "th_guide"),
-                                    title: briefs.title(BriefTarget(project: "chan_demo_docs", thread: "th_guide")))
-                     briefs.record(BriefTarget(project: "chan_demo_fjord", thread: "th_bar"), "Count only what's unread")
-                 }
-             },
-             prepare: { store in if variant != .home { Demo.briefs(store, now: Date(), variant) } },
-             appearance: look)
-    }
 
     /// `--window-shots <dir> [substring...]`.
     static func run(to dir: String) {
@@ -446,44 +329,7 @@ private extension UUID {
     var asCategory: AppDestination { .category(self) }
 }
 
-@MainActor extension AppWindowShots {
-    /// A sent line waiting in a running thread's queue (T3's `queued` run), so its history line shows Edit and Cancel.
-    static func queueWords(_ store: Store) {
-        let thread = "local_demo-lookout"
-        let words = "when the tests pass, bump the version"
-        let message = "demo-queued-message"
-        var entry = RouterDecision(at: Date().addingTimeInterval(-40), trigger: .you(words), decision: .init(intent: "message"))
-        entry.decision.targetID = RouteTarget.thread(thread).targetID
-        entry.add(.sent(to: "lookout · Agent completion notifications", text: words, original: nil))
-        entry.outcome = .done
-        entry.delivered = .init(thread: thread, messageID: message, commandID: "demo-queued-command", outcome: .queued, note: nil,
-                                at: Date().addingTimeInterval(-40))
-        store.router.decisions.append(entry)
-        let at = T3JSON.string(T3Timestamp.format(Date().addingTimeInterval(-40)))
-        let runs: [T3JSON] = [
-            ["id": "demo-run-1", "ordinal": 1, "status": "running", "userMessageId": "demo-earlier", "requestedAt": at],
-            ["id": "demo-run-2", "ordinal": 2, "status": "queued", "queuePosition": 1, "userMessageId": .string(message), "requestedAt": at],
-        ]
-        let shell = store.t3.store.shell.threads[thread]
-        store.t3.store.seed(T3Projection(json: [
-            "thread": ["id": .string(thread), "projectId": .string(shell?.projectId ?? "")], "runs": .array(runs), "messages": [],
-            "runtimeRequests": [], "plans": [], "turnItems": [], "providerSessions": [],
-        ]), for: thread)
-    }
-}
-
 extension AppWindowShots {
-    /// The demo's finished "Count untold needs-you on the bar" thread, which the destination shots name.
-    @MainActor static func destinationThread(_ store: Store) -> String {
-        let id = "th_bar"
-        if store.threads[id] == nil, var t = store.threads.values.sorted(by: { $0.id < $1.id }).first {
-            t.id = id; t.projectID = "chan_demo_fjord"; t.folder = "/Users/me/code/fjord"
-            t.title = "Count untold needs-you on the bar"; t.status = .completed; t.pendingRequest = nil; t.hasPlan = false
-            store.threads[id] = t
-        }
-        return id
-    }
-
     /// A day of the Router's model calls, for the usage shot.
     static func demoUsage(_ now: Date) -> [ModelUsageLog.Entry] {
         func e(_ role: ModelUsageLog.Role, _ model: String, _ n: Int, _ u: ModelUsage, ago: TimeInterval) -> [ModelUsageLog.Entry] {

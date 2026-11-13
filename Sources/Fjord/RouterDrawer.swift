@@ -1,12 +1,11 @@
 import SwiftUI
 
-// The history: a panel in the left sidebar's material, at the window's right beside the brief when the window is wide, and
-// across its bottom under the composer when it is narrow (RouterCode.swift places it). One line per event, newest first under
-// its day: your message, the thread or project it went to (a highlight in the brief's colours), whether it got there, and when;
+// The history: a panel in the left sidebar's material, at the window's right beside the page when the window is wide, and
+// across its bottom under the composer when it is narrow (RouterV2Screen places it). One line per event, newest first under
+// its day: your message, the thread or project it went to (in its line's state colours), whether it got there, and when;
 // an answer you gave; a change the Router or you made to Fjord, with Revert, opened to its card on a click. What didn't go is
 // pinned on top, with Send again and Elsewhere, until it goes. Filters over it: Sent, Answers, Changes (only those it has).
-// A click on a message or an answer makes its thread the composer's mention. The briefs' own rewrites aren't here: a
-// project's header in the brief says when it was last written, and its tooltip what changed.
+// A click on a message or an answer selects its thread's line, so the composer writes to it.
 
 struct RouterDrawer: View {
     let store: Store
@@ -98,7 +97,7 @@ struct RouterDrawer: View {
                 }
                 .padding(.horizontal, 8).padding(.bottom, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // The change cards' text stops at the panel's width, not the brief's column.
+                // The change cards' text stops at the panel's width, not the page's column.
                 .onGeometryChange(for: CGFloat.self, of: \.size.width) { column = $0 }
                 .environment(\.cdsColumnWidth, column)
             }
@@ -133,7 +132,7 @@ struct RouterDrawer: View {
     }
 
     /// Every line, newest first: your messages (RouterDecisions) with where they went and how it went, your answers, and
-    /// the changes to Fjord (the Router's, and your acts on the brief).
+    /// the changes to Fjord (the Router's, and your acts on the page).
     static func lines(_ store: Store) -> [Line] {
         var out: [Line] = []
         for d in store.router.decisions.suffix(80) {
@@ -201,16 +200,15 @@ private struct FilterPill: View {
     }
 }
 
-/// One event on one line: its mark, its words, where it went (a thread in the brief's colours, or a project), how it went,
-/// and when; its one button at the end. A change's line opens its card under it on a click; a message's or an answer's makes
-/// its thread the composer's mention.
+/// One event on one line: its mark, its words, where it went (a thread in its line's state colours, or a project), how it
+/// went, and when; its one button at the end. A change's line opens its card under it on a click; a message's or an answer's
+/// selects its thread's line.
 private struct HistoryLine: View {
     let store: Store
     let line: RouterDrawer.Line
     let now: Date
     let open: Bool
     let toggle: () -> Void
-    @Environment(\.briefReply) private var reply
     @State private var hover = false
     /// Editing a queued message's words in place.
     @State private var editing = false
@@ -267,9 +265,12 @@ private struct HistoryLine: View {
                 }
                 if sub { HStack(spacing: 5) {
                     if let target = line.target {
-                        let state = BriefSpanState.of(target, store: store)
-                        Image(systemName: state.symbol).font(.system(size: 8, weight: .semibold)).foregroundStyle(state.tint)
-                        Text(store.threads[target.thread]?.title.nonEmpty ?? store.routerRecords.record(target.thread)?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium)).foregroundStyle(state.quiet ? CDS.Text.secondary : state.tint)
+                        let record = store.routerRecords.record(target.thread)
+                        let look = record?.look
+                        Image(systemName: look?.symbol ?? "ellipsis").font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(look?.tint ?? CDS.Text.muted)
+                        Text(store.threads[target.thread]?.title.nonEmpty ?? record?.title.nonEmpty ?? "a thread").font(CDS.sans(11.5, .medium))
+                            .foregroundStyle(look?.ground == true ? look?.tint ?? CDS.Text.secondary : CDS.Text.secondary)
                             .lineLimit(1)
                         Text(store.routerProjectName(target.project)).font(CDS.sans(11)).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
                     } else if let project = line.project {
@@ -298,7 +299,6 @@ private struct HistoryLine: View {
         guard let target = line.target else { return }
         // Its line, selected: the composer writes to its card.
         store.routerFocus(target.thread)
-        reply()
     }
 
     /// Its one button: Revert on a change, Send again and Elsewhere on what didn't go.
@@ -385,14 +385,6 @@ private struct HistoryLine: View {
         case .message(let s): s.failed ? CDS.Text.danger : CDS.Text.muted
         default: CDS.Text.muted
         }
-    }
-}
-
-extension RouterBriefs {
-    /// The stored versions of every project's brief (a demo's own).
-    func versions() -> [String: [BriefVersion]] {
-        if let engine { return Dictionary(uniqueKeysWithValues: docs.keys.map { ($0, engine.versions($0)) }) }
-        return demoVersions
     }
 }
 

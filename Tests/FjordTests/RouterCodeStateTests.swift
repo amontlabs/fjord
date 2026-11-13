@@ -96,8 +96,8 @@ enum RecordFixture {
         #expect(bare.line == "plan ready")
         #expect(bare.loading)
         var d = RouterDetail()
-        d.request = ThreadRequest(id: "plan1", threadID: "t1", body: .plan(markdown: "# Move briefs into BriefLog\n- copy the rows"))
-        #expect(make(t, d).line == "plan ready: Move briefs into BriefLog")
+        d.request = ThreadRequest(id: "plan1", threadID: "t1", body: .plan(markdown: "# Move briefs into NoteLog\n- copy the rows"))
+        #expect(make(t, d).line == "plan ready: Move briefs into NoteLog")
         // A plan the shell no longer offers is past.
         t.hasPlan = false
         #expect(make(t, d).state == .done)

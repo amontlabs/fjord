@@ -96,7 +96,6 @@ enum PalettePlacesSource {
         ]))
         if store.routerOn {
             var rows = [
-                SettingsRowSpec(slug: "style", title: "How the Router writes to you", keywords: ["router style", "briefs", "summaries", "writing", "tone"]),
                 SettingsRowSpec(slug: "muted", title: "Muted folders", keywords: ["mute", "ignore", "projects", "sessions"]),
                 SettingsRowSpec(slug: "drafts", title: "Let Jev read what you type", keywords: ["jev", "typesafe", "privacy", "draft", "composer"]),
             ]

@@ -4,17 +4,13 @@ import SwiftUI
 
 // The Router composer's text model: the draft, its @ pills and suggestions, and the caret the composer's text view follows.
 
-/// What the window remembers while it is closed (the draft and its chips), and what the keys act on. The thread it replies to
-/// is the brief's (`RouterBriefs.mentioned`): one or more, whoever set them.
+/// What the window remembers while it is closed (the draft and its pills), and what the keys act on.
 @Observable
 @MainActor
 final class RouterModel {
     var draft = "" {
-        didSet { if draft != oldValue { sendRefused = nil; mentionChanged() } }
+        didSet { if draft != oldValue { mentionChanged() } }
     }
-    /// Why the draft wasn't sent (it stays in the composer), until it changes.
-    var sendRefused: String?
-    static let goneTarget = "Not sent: what you named is gone since. Pick where it goes on the ask, or say more."
     /// What the pills in the draft point to, one for each `MentionText.mark` in it, in order.
     var pointers: [RouterPointer] = []
     /// Local projects tagged with @ (their folders), in the order they stand in the draft: context for the Router.
@@ -80,71 +76,10 @@ final class RouterModel {
         if claudeCodeMissing != !found { claudeCodeMissing = !found }
     }
 
-    /// Sends the draft with its reply, its @pills (written as "@name" where they stand, their projects going with it) and the
-    /// target you pinned; the composer keeps the focus for the next one.
-    /// `queue` (⌥Return): the words wait for the turn under way instead of steering it.
-    func send(store: Store, queue: Bool = false) {
-        // Threads to reply to: your words go to each, no model. One that refuses them stays picked, with the words, so
-        // sending again reaches only it.
-        let briefs = store.routerBriefs
-        if !briefs.mentioned.isEmpty, pointers.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let refused = briefs.mentioned.filter { !briefs.send(draft, to: $0, store: store, queue: queue) }
-            if refused.isEmpty {
-                caret = nil
-                draft = ""
-            } else if refused != briefs.mentioned {
-                briefs.mentioned = refused
-            }
-            return
-        }
-        let sent = sentDraft(store)
-        let text = sent.text
-        guard !text.isEmpty, canSend(store) else { return }
-        var context = context(store, sent: sent)
-        context.queue = queue
-        // Where it goes is decided before it is sent (RouterPreview.swift): the composer's answer for these words on this
-        // board, the place picked, or, with none yet, the words wait here for the decision.
-        let preview = store.routerPreview
-        let decides = RouterDispatcher.plan(text: text, context: context, store: store) == .decide
-        if decides || preview.pinned != nil, store.previewsDrafts, preview.decide != nil {
-            if let d = preview.ready(for: text) {
-                context.decided = d.decision
-                if !d.sure || preview.pinned != nil {
-                    // Not sure: Return sends to the highlighted place; with none, a click picks one.
-                    guard let target = preview.highlighted else { return }
-                    context.target = target
-                }
-            } else if decides {
-                preview.waitAndSend(text, tagged: RouterPointers.context(sent.mentions, store: store)) { [weak self] in
-                    self?.send(store: store, queue: queue)
-                }
-                return
-            }
-        }
-        guard store.sendToRouter(text, context: context) else {
-            sendRefused = Self.goneTarget
-            Announce.say(Self.goneTarget)
-            return
-        }
-        caret = nil
-        pointers = []
-        draft = ""
-        store.routerPreview.reset()
-        store.routerBriefs.focus(nil)
-    }
-
     /// The composer takes the keyboard (typing anywhere in the window lands there).
     func reply() { focusRequest &+= 1 }
 
-    // MARK: Chips and @
-
-    /// Backspace at the start of the composer: the last reply chip goes.
-    @discardableResult
-    func removeLastChip(store: Store) -> Bool {
-        guard !store.routerBriefs.mentioned.isEmpty else { return false }
-        store.routerBriefs.mentioned.removeLast()
-        return true
-    }
+    // MARK: @
 
     /// The @ word being typed at the end of the draft, if any ("…@look" → "look").
     static func mentionQuery(in text: String, caret: Int? = nil) -> String? { mention(in: text, caret: caret)?.query }

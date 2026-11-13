@@ -1,7 +1,7 @@
 import Foundation
 
 // The Router's own destinations (its runs), and what you told each session through it: what the project
-// decider's context and the brief read.
+// decider's context reads.
 
 /// The Router's own runs as targets.
 enum RouteLabel: String, CaseIterable {
@@ -10,9 +10,6 @@ enum RouteLabel: String, CaseIterable {
 }
 
 extension RouterTools {
-    /// The entries that wait on you: what a thread's context lists as waiting.
-    static let waitsOnYou: Set<BriefEntry.Kind> = [.question, .plan, .request, .permission]
-
     /// The project decider's question to Jev (`RouterProjectDecider.jevRequest`), as measured.
     static let routeQuestion: [String: Any] = [
         "question": "Which place does the user's `message` belong to: one of the existing threads, or a new thread in a project?",

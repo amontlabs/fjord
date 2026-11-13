@@ -263,12 +263,10 @@ extension [DockEdge] {
     static let rightAndTop: [DockEdge] = [.right, .top]
 }
 
-/// The Router in a shot (it fills the app window's content): the brief, an entry focused, and the composer.
+/// The Router in a shot (it fills the app window's content): the page, and the first Needs-you line's card open.
 struct RouterWindowShot {
-    /// The first entry of this kind focused, its options showing.
-    var focuses: BriefEntry.Kind?
-    /// The composer mid-message: replying to the local question, a project tagged, and an @ being typed.
-    var composing = false
+    /// The first Needs-you line selected, its card open.
+    var opensCard = false
     static let size = CGSize(width: 1100, height: 720)
 }
 
@@ -380,8 +378,8 @@ enum PlaygroundShots {
             + Shot.edges("peek-\(slug)", on: .rightAndTop) { $0.section = .inbox; $0.environment = environment }
     }
 
-    /// The Router: its cell at rest and its peek on every edge; the Router itself, with a question focused, under Increase
-    /// Contrast, switched off, mid-message, and with a plan focused.
+    /// The Router: its cell at rest and its peek on every edge; the Router itself, a card open, under Increase Contrast, and
+    /// switched off.
     private static let routerShots: [Shot] = {
         var shots = Shot.edges("rest-router") { $0.scenario = .router }
         shots += Shot.edges("peek-router") { $0.scenario = .router; $0.section = .router }
@@ -392,11 +390,9 @@ enum PlaygroundShots {
             configure(&shot)
             return shot
         }
-        shots.append(window("") { $0.routerWindow?.focuses = .question })
+        shots.append(window("") { $0.routerWindow?.opensCard = true })
         shots.append(window("-contrast") { $0.environment = .contrast })
         shots.append(window("-off") { $0.scenario = .routerOff })
-        shots.append(window("-composing") { $0.routerWindow?.composing = true })
-        shots.append(window("-plan") { $0.routerWindow?.focuses = .plan })
 
         return shots
     }()
@@ -483,16 +479,10 @@ enum PlaygroundShots {
 
     /// The Router, offscreen, as the app window shows it.
     private static func openRouterWindow(_ shot: RouterWindowShot, store: Store, environment: ShotEnvironment) -> NSWindow {
-        let model = RouterModel()
-        let briefs = store.routerBriefs
-        if let kind = shot.focuses { briefs.focus(briefs.page().entries.first { $0.kind == kind }?.target) }
-        if shot.composing, let local = briefs.page().entries.first(where: { store.requests[$0.thread] != nil }) {
-            briefs.focus(local.target)
-            model.pointers = [.project("/Users/me/code/lookout")]
-            model.draft = "yes, ask first; and tell \(MentionText.markString) about it"
-        }
+        let page = store.routerPage
+        if shot.opensCard, let first = store.routerRecords.lines(in: .needsYou).first { page.select(.line(first.id)) }
         let size = RouterWindowShot.size
-        let root = RouterCodeView(store: store, model: model, checksClaudeCode: false)
+        let root = RouterV2Screen(model: page, store: store, text: RouterModel())
             .environment(Chrome(mode: .opaque))
             .shotEnvironment(environment)
             .frame(width: size.width, height: size.height)

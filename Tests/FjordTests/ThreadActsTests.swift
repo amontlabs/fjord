@@ -80,12 +80,6 @@ import Testing
         #expect(store.router.changes.last?.isReverted == true)
     }
 
-    @Test func readStateIsTheThreadsNotAMarkOfFjords() {
-        let marks = BriefMarks()
-        #expect(BriefMarks.Kind.allCases.map(\.rawValue).sorted() == ["notified", "told"])
-        #expect(marks.told.isEmpty && marks.notified.isEmpty)
-    }
-
     // MARK: Banners
 
     private func thread(_ build: (inout AgentThread) -> Void) -> AgentThread {

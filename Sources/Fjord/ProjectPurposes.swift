@@ -1,10 +1,9 @@
 import CryptoKit
 import Foundation
 
-// Each project's purpose in a sentence, for the decider's block B (docs/design/router-v2/IMPLEMENTATION.md 1.4): until
-// now the brief's project call wrote it (`DeciderBoardSource`, `routerBriefs.docs[p].purpose`). Now one small Haiku call
-// per project, through the verdict engine's queue and cap (after every verdict), when the set of its threads' first asks
-// changes; kept in `Application Support/Fjord/project-purposes.json`, read off the main thread at launch, written off it.
+// Each project's purpose in a sentence, for the decider's block B (docs/design/router-v2/IMPLEMENTATION.md 1.4): one small
+// Haiku call per project, through the verdict engine's queue and cap (after every verdict), when the set of its threads'
+// first asks changes; kept in `Application Support/Fjord/project-purposes.json`, read off the main thread at launch, written off it.
 
 @MainActor final class ProjectPurposes {
     /// One project's purpose and the first asks it was written from (their hash).

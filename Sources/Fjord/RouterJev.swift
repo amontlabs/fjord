@@ -32,11 +32,8 @@ extension RouterModel {
             guard case .line(let id)? = store.routerPage.selection else { return nil }
             return RouteTarget.thread(id).briefTarget(store: store)
         }()
-        // The place picked in the composer is where it goes; the one waved off is never sent to unasked.
-        let preview = store.routerPreview
-        var context = RouterContext(replyTo: reply, target: preview.pinned, notTo: preview.dismissed)
+        var context = RouterContext(replyTo: reply)
         context.tag(sent.mentions)
-        context.preview = preview.carried(for: sent.text)
         return context
     }
 
