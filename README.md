@@ -35,10 +35,10 @@ Fjord has two tools, the Router and Triage. Each works alone, and the first laun
 
 ### Router: one chat above all your T3 Code threads
 
-- **See who needs you.** One brief over every project, from any provider T3 runs: what needs you first, then what finished, what is working and what is quiet. Each question or plan to approve is an entry you answer right there, by its option or in your own words; mark it read or archive it, with Revert in the history.
-- **Type once.** The Router picks the T3 thread your message is for, or starts one, and delivers your exact words as your own message. A running thread is steered by default; <kbd>⌥Return</kbd> queues it. It shows where a draft will go while you type: the thread (or a new thread) when it is sure, and its best guess with two alternatives when it isn't; Return sends to the one highlighted, a click to another.
+- **See who needs you.** One line per thread over every project, from any provider T3 runs: what needs you first, then what finished, then what is working. Each question, plan or permission opens as a card you answer right there, by its option or in your own words; settle or snooze it, with Revert in the history.
+- **Type once.** The Router picks the T3 thread your message is for, or starts one, and delivers your exact words as your own message. A running thread is steered by default; <kbd>⌥Return</kbd> queues it. It shows where a draft will go while you type: the thread (or a new thread) when it is sure, and its best guess with two alternatives when it isn't; Return sends to the one highlighted.
 - **Change your mind.** Cancel a message, edit and resend it, or send it somewhere else.
-- **Look away.** Working threads show what they're doing in the brief; the bar's panel lists what needs you and what works.
+- **Look away.** Working threads show what they're doing on their line; the bar's panel lists what needs you and what works.
 - **Bring things in.** `@` adds a project, a session, a GitHub item or a saved prompt to your message.
 - **It only talks.** It never edits files, runs commands or acts on GitHub.
 
@@ -66,7 +66,7 @@ Requires **macOS 14** or later, Apple silicon or Intel.
 | Tool | Also needs |
 | --- | --- |
 | Triage | GitHub access: `gh auth login`, `GH_TOKEN` / `GITHUB_TOKEN`, or a token pasted in Settings (kept in your Keychain). |
-| Router | [T3 Code](https://t3.codes) installed and running. The `claude` CLI on your `PATH`, for routing decisions and briefs (your own subscription). |
+| Router | [T3 Code](https://t3.codes) installed and running. The `claude` CLI on your `PATH`, for routing decisions and each thread's line (your own subscription). |
 
 The Router connects to the local T3 server over its WebSocket API, with a token Fjord mints through `t3 auth session issue` and keeps in your Keychain. It writes nothing into any agent's config. If T3 is closed or its API changes, the Router says so, and Triage keeps working.
 
@@ -77,7 +77,7 @@ Updates download in the background and are verified (checksum, and the same sign
 Fjord has no server and no account. What leaves your Mac:
 
 - **GitHub**: Triage reads your pull requests, issues and workflows through GitHub's API; updates come from this repo's Releases.
-- **Anthropic**: routing decisions are made by Claude Sonnet through `claude -p`, on your own subscription, with your projects' purposes, a summary of each thread from the last 30 days, recent messages and your words. The Router's briefs, summaries and thread cards are written by Claude Haiku the same way. Settings › T3 Code shows each model's calls and tokens.
+- **Anthropic**: routing decisions are made by Claude Sonnet through `claude -p`, on your own subscription, with your projects' purposes, a summary of each thread from the last 30 days, recent messages and your words. Each finished turn's line, the threads' names and thread cards are written by Claude Haiku or Sonnet the same way. Settings › T3 Code shows each model's calls and tokens.
 - **TypeSafe** *(optional)*: with a [TypeSafe](https://typesafe.ai) API key, its classifier (Jev) helps route your messages (it sends one to a thread by itself only when it is very sure, otherwise Claude decides), read how each session's turn ended, label new comments (*asks you*, *to do*, *FYI*, *noise*) and pick icons. It receives your messages and drafts, sessions' titles, activity and final messages, project names and, for labels, the comment and its pull request or issue details. Without a key, nothing is sent there.
 
 Everything else stays on your Mac, in `~/Library/Application Support/Fjord/`. Code folders you add in Settings are scanned locally for git clones.

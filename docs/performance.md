@@ -181,6 +181,48 @@ suites**; the final `scripts/test.sh` passed **1567 tests in 155 suites** in 45.
 frame, a resized scrolling frame and an expanded working card. Temporary counters, samples, binaries and shots were
 removed and the bare binary's `Fjord` preferences restored.
 
+## Router page (November 2026)
+
+The Router page (docs/design/router-v2/IMPLEMENTATION.md, section 2) replaced the brief page on 2026-11-13. How it stays
+fast:
+
+- **One record per thread** (`RouterRecords`): a T3 push re-reduces one row and hands on at most one `.upsert`; nothing sorts
+  every thread, nothing rebuilds a board. Streamed words go through one coalescer flushed once per main-loop turn
+  (`RouterModel.post`), never a timer or a display link.
+- **Narrow observables**: one box per line; the list reads only a stored, `Equatable` layout (row ids and kinds), rewritten
+  when a line's section or order changes. Selection, hover and the draft's destination are flags on the two boxes involved.
+- **Hosting views per row** (`RouterHostedRows`, `RouterGlideView`): each row has its own `NSHostingView` whose update
+  requests don't relayout the list, rows are placed at once and glide on Core Animation.
+- **Ticks on Core Animation** (`RouterTicks`): ages, section and filter counts and a state's mark roll as pictures, so a
+  roll costs SwiftUI nothing per frame.
+- **Verdicts only when they can come**: with the Router off nothing is asked and nothing sheens waiting.
+
+Gates (2.4), release build, 1617 × 1188, 2026-11-13. The machine was **not quiet** (load average 5-11: a browser tab at
+~75 % of a core, WindowServer ~45 %); p95s move several ms between identical runs.
+
+| Gate | Run | Budget | Measured (runs) | |
+| --- | --- | --- | --- | --- |
+| T3 event, synthetic | `--router-v2-load` | p95 ≤ 8, max ≤ 16 ms | p95 17 / 17 / 17, max 140 / 244 / 467 | red |
+| Flush, synthetic | same | p95 ≤ 2 ms | 8 / 11 / 11 | red |
+| T3 event, real day | `--router-v2-load real` | p95 ≤ 8, max ≤ 16 ms | p95 22 / 27 / 15, max 23 / 30 / 17 | red |
+| Flush, real day | same | p95 ≤ 2 ms | 10 / 10 / 11 | red |
+| T3 event work (the handler alone) | both | ≤ 2 ms | p95 1, max 2 | green |
+| Select | demo script, speed 4 | p95 ≤ 8 ms | 28 / 35 | red |
+| Key, Send | demo script | p95 ≤ 2 / 8 ms | not logged: the script calls the key map's `handle`, past the signposts | — |
+| Bodies per change | `RouterRenderTests` | 1 line body per upsert, 0 list; 2 per hover | as budgeted | green |
+| Idle, window open on the Router | `ROUTER=1 scripts/idle-cpu.sh` | ≤ 0.6 % | 0.30 % | green |
+| Idle, window closed | `scripts/idle-cpu.sh` (rest) | ≤ 0.1 % | 0.000 % | green |
+| Open / Close | `morph-timings --scenario router --steps "open,close x10"` | p95 ≤ 325 ms | Open 316 / 320, Close 320 / 321 | green |
+| First flush | same | p95 ≤ 16 ms | Open 17 / 18, Close 10 / 8 | Open red by 1-2 ms |
+| Captures inside a morph | same | 0 | 0 | green |
+
+What is left red is SwiftUI's own layout and drawing per frame, not Fjord's work (the event handler is 1 ms at p95). The
+next lever, measured in wave 2 and not yet in: during a move every line's hosting view lays out on every frame (about 5000
+line layouts a second under the synthetic load's moves), because the list's stack animates each row's container while
+`routerGlides()` holds the hosting view still inside it, so AppKit tells every `NSHostingView` below that its geometry
+changed. Not animating the stack for changes that add or take no row cut it to about 600 a second; rows that come or go
+then need their fold. See docs/design/router-v2/WAVE2-NOTES.md, "Layout performance".
+
 ## Rules for new code
 
 1. Nothing synchronous and expensive between a user's action and the first frame that answers it. If it must happen, do it

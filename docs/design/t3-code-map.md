@@ -1,5 +1,7 @@
 # Fjord on T3 Code: the full map
 
+> **Note (2026-11-13).** The brief (`RouterBrief*.swift`, `briefs.db`) named below is gone: the Router page reads T3 through `RouterRecords` ([router-v2/IMPLEMENTATION.md](router-v2/IMPLEMENTATION.md)). File references to it are historical.
+
 Status: research, 2026-11-06. Nothing built. T3 Code v0.1.7 (the installed app, source at tag `v0.1.7` in `~/code/research/t3code`).
 Paths: `SF/` = `Sources/Fjord/`; `T3:` = the t3code repo; `OV2` = `T3:packages/contracts/src/orchestrationV2.ts`.
 Every T3 fact below was read in source. Items marked **unverified** were not run or not read to the end; they are listed in §9.

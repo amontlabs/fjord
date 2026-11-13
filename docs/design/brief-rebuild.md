@@ -1,5 +1,7 @@
 # Brief rebuild: settled threads ignored, stateless briefs (2026-11-10)
 
+> **Replaced (2026-11-13).** The brief page this plan rebuilt is gone: the Router page is now one line per T3 thread, by state ([router-v2/DESIGN.md](router-v2/DESIGN.md), built per [router-v2/IMPLEMENTATION.md](router-v2/IMPLEMENTATION.md)). This file is kept as the record of the T3 migration's decisions.
+
 Owner: "When I settle a thread in T3 I consider it done; the router shouldn't keep mentioning it." Plus the 2026-11-09 audit:
 Silo's brief said PRs #95/#97/#103 "wait for your merge" 3 to 19 h after they merged, because every call starts from the
 previous brief, working threads send no text, nothing checks PR state, and the lead is built from project prose.

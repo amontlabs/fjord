@@ -63,8 +63,8 @@ Mock data with Triage on (and the Router, in its scenarios). Nothing is saved. `
 | Updates | `updateAvailable` `updateDownloading` `updateReady` |
 | Router | `router` `routerOff` |
 
-`router` is the brief over demo projects (DemoBriefs.swift): entries that need you (a question and a plan from T3 threads), working and finished threads, a decision log and an ask waiting for its pick.
-For release window timings, run `scripts/morph-timings.sh --scenario router --steps "open,close x6"`.
+`router` is the Router page over the demo's threads (one asks a question, one holds a plan, others work or are done) and a decision log; `routerOff` the same with the Router off.
+For release window timings, run `scripts/morph-timings.sh --scenario router --steps "open,close x10"`.
 
 ### Window, bar and screenshots
 
@@ -77,7 +77,9 @@ For release window timings, run `scripts/morph-timings.sh --scenario router --st
 
 `FJORD_THEME=dark|light|claude` pins the look: Fjord light, Fjord dark, or Claude's own. The default is Fjord, following the Mac's appearance live.
 
-**Router v2 demo** (docs/design/router-v2/DESIGN.md). `--window --router-v2-demo` shows the Router v2 page (`RouterV2*.swift`) on fake records in the Router's place and plays the storyboard on it: a drawn pointer, keys through the page's own key map, fake T3 events. `--beats 5,6,14` plays only those beats, `--from <beat>` runs the earlier ones at 30 times the speed, `--until <beat>` ends after that beat, `--speed <x>` scales every wait, `--reduce-motion` turns Reduce Motion on for the page, `--quit-after` quits at the end, `--frames <dir>` writes the window's own picture ten times a second while the script plays (`--frames-rate <n>` for more, up to 60; each file is named by its time in hundredths of a second; frames to check a beat's motion where nothing can be filmed; it needs no Screen Recording permission). When the script is over (and nothing records) the page is yours to try. Its stills are the `v2-` window shots, light and dark (`v2-home`, `v2-card-plan-dark`, `v2-new-thread-pills`, …). To film it: `FJORD_THEME=light FJORD_GLASS=0 scripts/record-window.sh router-v2 -- --window --router-v2-demo`.
+**Router page demo** (docs/design/router-v2/DESIGN.md). `--window --router-v2-demo` shows the Router page (`Router*.swift`: `RouterScreen`, `RouterPage`, `RouterLine`, `RouterCard`, `RouterDock`) on fake records and plays the storyboard on it: a drawn pointer, keys through the page's own key map, fake T3 events. `--beats 5,6,14` plays only those beats, `--from <beat>` runs the earlier ones at 30 times the speed, `--until <beat>` ends after that beat, `--speed <x>` scales every wait, `--reduce-motion` turns Reduce Motion on for the page, `--quit-after` quits at the end, `--frames <dir>` writes the window's own picture ten times a second while the script plays (`--frames-rate <n>` for more, up to 60; each file is named by its time in hundredths of a second; frames to check a beat's motion where nothing can be filmed; it needs no Screen Recording permission). When the script is over (and nothing records) the page is yours to try. Its stills are the `v2-` window shots, light and dark (`v2-home`, `v2-card-plan-dark`, `v2-new-thread-pills`, …). To film it: `FJORD_THEME=light FJORD_GLASS=0 scripts/record-window.sh router-v2 -- --window --router-v2-demo`.
+
+**Router load scenarios** (the speed gates, docs/performance.md "Router page"). `--window --router-v2-load` is the demo's page grown to 60 lines in a 1617 × 1188 window for twelve seconds: eight lines stream a verdict, a record lands every 30 ms, a line moves four times a second. `--router-v2-load real` is the shape of a real T3 day: twenty lines, two streaming, a record about every second, a move every ten, thirty seconds. Both quit with `--quit-after`; read them with `scripts/morph-timings.sh --args "--window --router-v2-load --quit-after"`. `FJORD_LOAD_OFF=streams,reply,records,moves` leaves parts out.
 
 ```sh
 FJORD_THEME=dark .build/debug/Fjord --window
@@ -85,14 +87,12 @@ FJORD_THEME=dark .build/debug/Fjord --window
 
 ### The Router's routing
 
-Every message goes to a T3 thread as one `message.dispatch` over T3's WebSocket API (`T3Link`, `T3Client`). A reply armed on a brief entry (or one focused) goes to that
-thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Sonnet through `claude -p` (`ClaudePrint`) on N4's full context, `DeciderContext`, at N4's 1% bars), whose stage shows on the message's pill. E5's Jev-led path
+The Router page is one line per T3 thread (`RouterRecords`: the code's state from T3's shell and the thread's projection, then a Haiku or Sonnet verdict per finished turn, `RouterVerdicts`), grouped Needs you, Done, Working. With the Router off no verdict is asked and a finished thread is plain Done. Every message goes to a T3 thread as one `message.dispatch` over T3's WebSocket API (`T3Link`, `T3Client`), through `RouterActs`. Words typed with a line's card open answer that thread; a tagged project or thread goes there with no model; anything else is the project decider's (`RouterProjectDecider`: Sonnet through `claude -p` (`ClaudePrint`) on N4's full context, `DeciderContext`, at N4's 1% bars), whose stage shows on the message's pill. E5's Jev-led path
 (`JevPath`, RouterJevPath.swift: one Jev call, two yes/no checks on the 3 latest idle threads, recency and BM25 fused in code) runs first (always on,
 no setting, no shadow) and is logged in `decider-log.jsonl`; it sends to an idle thread at fused P ≥ 0.90
-without Sonnet, and below that Sonnet decides. Your own messages are decided in the composer before they go (`RouterPreview`): Jev after 600 ms, Sonnet after 1.2 s; sure, "→ <thread>" and Return sends; unsure, the guess and 2 alternatives (shots `router-destination-sure`, `router-destination-unsure`). The context's thread cards, BM25 text and the day's archive are kept off the decision path in `Application Support/Fjord/thread-cards` (`ThreadCardStore`); every model call's tokens and cost go to `model-usage.jsonl`, shown in Settings › T3 Code (shot `settings-model-usage`). Refit its weights from
+without Sonnet, and below that Sonnet decides. Your own messages are read in the composer before they go (`RouterReader`): Jev after a 300 ms typing pause, Sonnet after 600 ms when Jev isn't sure; the destination row under the draft says where Return sends: sure, the thread; unsure, the guess and 2 alternatives (shots `v2-destination-sure`, `v2-destination-unsure`). The context's thread cards, BM25 text and the day's archive are kept off the decision path in `Application Support/Fjord/thread-cards` (`ThreadCardStore`); every model call's tokens and cost go to `model-usage.jsonl`, shown in Settings › T3 Code (shot `settings-model-usage`). Refit its weights from
 the log with `evals/router/t3/refit.py`. A project that fits nothing is proposed under the
-composer (`RouterProjectProposal`, revised by Sonnet). The brief's entries are the one model of what needs you (no cards):
-mark read and archive are Fjord changes with a Revert in the history drawer, kept with the Told marks in briefs.db. Each history entry keeps who decided (`decision.decider`) and a
+composer (`RouterProjectProposal`, revised by Sonnet). Settle, snooze and the other acts on a line are T3 commands with a Revert (the toast, ⌘Z, the history drawer, ⌥⌘B). Each history entry keeps who decided (`decision.decider`) and a
 correction (Send elsewhere, a different pick on an ask, a proposal you changed) as its outcome, for measurement.
 
 ### Live data
@@ -124,6 +124,7 @@ Pretends to be version 0.1.0: checks for, downloads and verifies the latest rele
 
 ### Tooling-only flags
 
+- `--open router` opens the window on the Router page at launch (`--open` alone opens it where it was left).
 - `--lifecycle` prints the app's idle state (threads, how many are working, whether a window shows, Reduce Motion) for `scripts/idle-cpu.sh`.
 - `--motion-script <steps> --quit-after` plays a scripted sequence of motions and quits, for `scripts/motion-trace.sh`.
 
@@ -133,7 +134,7 @@ Pretends to be version 0.1.0: checks for, downloads and verifies the latest rele
 | --- | --- |
 | `scripts/build-app.sh` | Builds `build/Fjord.app` (see [Build and run](#build-and-run)). |
 | `scripts/test.sh` | The test suite as CI runs it, output in `test.log`. |
-| `scripts/idle-cpu.sh` | Checks the release build's CPU stays under its limit at rest and with the window kept open, on the right edge and along the top, on demo data. Puts the bar on screen for minutes. |
+| `scripts/idle-cpu.sh` | Checks the release build's CPU stays under its limit at rest and with the window kept open, on the right edge and along the top, on demo data; `ROUTER=1` measures the window kept open on the Router page (`--demo router --open router`, limit 0.6 %). Puts the bar on screen for minutes. |
 | `scripts/motion-trace.sh` | Records the release build with `xctrace` while it plays a motion script, then reports hitches and signpost latencies; `--baseline FILE` stores or compares against a baseline. Takes the screen while it runs. Options are documented at the top of the script. |
 | `swift scripts/make-icon.swift [--preview DIR]` | Draws `Resources/AppIcon.icns` and the layers of `Resources/AppIcon.icon`. |
 
