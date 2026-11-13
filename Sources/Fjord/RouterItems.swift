@@ -69,7 +69,7 @@ struct RouterItem: Identifiable, Equatable {
     /// What the sentence leaves out, in a sentence or two, when there is more to say (the demo's only, for now).
     var detail: String? = nil
     /// The exact lines of the agent's message the item comes from (the demo's only, for now): the peek and the card
-    /// quote them, and the card offers the links in them.
+    /// quote them, their links clickable in the words.
     var quote: String? = nil
     var state: State = .open
 
@@ -102,11 +102,18 @@ struct RouterItem: Identifiable, Equatable {
         return out
     }
 
-    /// The links in the quote, in order, each once.
+    /// The links the card offers as buttons, in order, each once: those in the detail that the quote doesn't show. A
+    /// link in the quote is already there, a link in its words (no button doubling it).
     var links: [URL] {
-        guard let quote, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
+        let shown = Set(Self.links(in: quote))
+        return Self.links(in: detail).filter { !shown.contains($0) }
+    }
+
+    /// The web links in a text, in order, each once.
+    static func links(in text: String?) -> [URL] {
+        guard let text, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
         var seen = Set<URL>()
-        return detector.matches(in: quote, range: NSRange(quote.startIndex..., in: quote)).compactMap(\.url)
+        return detector.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url)
             .filter { ($0.scheme == "https" || $0.scheme == "http") && seen.insert($0).inserted }
     }
 }
@@ -437,7 +444,7 @@ struct RouterItemPlaceholder: View {
 // MARK: - An item's card
 
 /// The selected item's card: what the line doesn't say (its detail), the agent's words it comes from (cut with Show all
-/// when long), the links in them as quiet buttons, its options (they pick; Return sends what the destination row shows),
+/// when long; their links clickable there), links only the detail has as quiet buttons, its options (they pick; Return sends what the destination row shows),
 /// then Done, which closes it with a Revert, and Open in T3. Never empty: an item with nothing more of its own quotes the
 /// thread's last lines.
 struct RouterItemCard: View {

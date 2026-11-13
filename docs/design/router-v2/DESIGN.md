@@ -608,7 +608,7 @@ checking, closing with how, new).
   pill; in a block a line it wraps to starts under the kind's mark (`RouterFlow`: the first line starts with a blank as
   wide as the name or the mark). The mark, the name, the pill and the age stay centred on its first line.
 - **R8. An item's card**, in order: the detail (prose 14/20 `Text.primary`), the quote (the agent's lines behind the
-  item, as the card's last lines: rail, 4 lines, fade, Show all `→`), the links in the quote as quiet buttons (22 tall,
+  item, as the card's last lines: rail, 4 lines, fade, Show all `→`), links the quote doesn't show (in the detail) as quiet buttons; a link in the quote is clickable there, never doubled (22 tall,
   radius 6, the `quiet` fill, `chosen` under the pointer; `↗` and the address without its scheme, footnote 12
   `Text.secondary`, middle truncation), the options, then `Done ⌘⌫` · `Open in T3 ⌘O`. Never empty: an item with no
   detail, quote or options quotes the thread's last lines. The line's own item's card starts under the name as every
