@@ -339,4 +339,13 @@ import Testing
         #expect(text.contains("It was started by a notice, not the user"))
         #expect(text.components(separatedBy: SessionFence.close).count - 1 == 2)
     }
+
+    @Test func theAppSendsTheEvalsV2Prompts() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
+        for (name, prompt) in [("turn", RouterItemsPrompt.turn), ("message", RouterItemsPrompt.message)] {
+            let v2 = try String(contentsOf: root.appendingPathComponent("evals/router/items/prompts/system-\(name)-v2.txt"), encoding: .utf8)
+            #expect(words(prompt) == words(v2), "the \(name) prompt is EVAL-items.md's v2")
+        }
+    }
 }
