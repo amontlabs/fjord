@@ -24,18 +24,19 @@ extension RouterModel {
         guard !draft.isEmpty, explicit == nil, !waved else { return nil }
         let answers = hasAnswers ? answerSends : []
         var parts: [RouterSend] = []
+        var formWords = false
         if !draftEmpty, let read {
             if !read.sends.isEmpty {
                 parts = read.sends
-            } else if !answers.isEmpty, let first = read.places.first,
-                      // Words typed on the open card's form answer its question: the form's path, not a split.
-                      !formTyping(first) {
-                parts = [RouterSend(places: read.sure ? [read.places[0]] : Array(read.places.prefix(3)), sure: read.sure,
-                                    words: plainDraft)]
+            } else if !answers.isEmpty, let first = read.places.first {
+                // Words typed on the open card's form answer its question: the form's path, not a split.
+                formWords = formTyping(first)
+                if !formWords { parts = [RouterSend(places: read.sure ? [read.places[0]] : Array(read.places.prefix(3)), sure: read.sure,
+                                    words: plainDraft)] }
             }
         }
         // Answers with words still unread: a split already (the words' row is the skeleton).
-        let unread = !draftEmpty && parts.isEmpty && !answers.isEmpty
+        let unread = !draftEmpty && parts.isEmpty && !answers.isEmpty && !formWords
         guard answers.count + parts.count >= 2 || unread else { return nil }
         // Your own picks, by the part's words.
         for i in parts.indices where !parts[i].sure {

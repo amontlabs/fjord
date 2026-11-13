@@ -123,12 +123,21 @@ import Testing
         #expect(press(model, kVK_DownArrow))
         let first = model.selection
         #expect(first != nil)
-        #expect(press(model, kVK_DownArrow))
+        // A thread waiting on a request walks its header, then its request item (1.15), before the next row.
+        var steps = 0
+        repeat {
+            #expect(press(model, kVK_DownArrow))
+            steps += 1
+        } while model.selection == first && steps < 4
         #expect(model.selection != first)
-        #expect(press(model, kVK_UpArrow))
+        for _ in 0..<steps { #expect(press(model, kVK_UpArrow)) }
         #expect(model.selection == first)
         // Up from the first wraps to the last row.
-        #expect(press(model, kVK_UpArrow))
+        var ups = 0
+        repeat {
+            #expect(press(model, kVK_UpArrow))
+            ups += 1
+        } while model.selection == first && ups < 4
         #expect(model.selection != first && model.selection != nil)
         // With a draft the arrows are the text's.
         model.setDraft("hello")
