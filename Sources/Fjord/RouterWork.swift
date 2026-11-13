@@ -6,14 +6,19 @@ import Foundation
 ///   model writes one when the agent writes something new or its to-do step changes, at most about once a minute.
 /// - **The raw detail.** The command or tool running now and the last few that ran, as T3 has them: the working peek's.
 ///
-/// The demo fills it (`RouterDemo.work(at:)`); the real summaries aren't wired yet, and a thread without any keeps the
-/// code's line (the running step, the agent's words, the command).
+/// The records fill it: the summaries from the verdict file (`RouterRecords.summary`), the raw detail from the thread's live
+/// projection (`RouterDetail`). A thread with no summary of its run yet keeps the code's line (the running step, the
+/// agent's words, the command). The demo's are `RouterDemo.work(at:)`.
 struct RouterWork: Equatable {
-    struct Summary: Equatable, Identifiable {
+    struct Summary: Equatable, Identifiable, Codable {
         var id: Int
         var text: String
         /// When the model wrote it.
         var at: Date
+        /// The run it is about: the line reads only its own run's.
+        var run: String?
+        /// What it was written from (`RouterRecords.summaryPrint`): the same facts aren't summed up twice.
+        var print: String?
     }
 
     /// One tool call or command: its words (a command in mono) and when it started.

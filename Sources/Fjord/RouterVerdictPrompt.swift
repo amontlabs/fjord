@@ -159,6 +159,7 @@ enum RouterVerdictPrompt {
         case .finished: finished
         case .ask: ask
         case .name: name
+        case .summary: RouterSummaryPrompt.system
         }
     }
 
@@ -167,6 +168,7 @@ enum RouterVerdictPrompt {
         case .finished: finishedSchema
         case .ask: askSchema
         case .name: nameSchema
+        case .summary: RouterSummaryPrompt.schema
         }
     }
 

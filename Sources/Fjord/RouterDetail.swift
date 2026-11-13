@@ -40,6 +40,15 @@ struct RouterDetail: Equatable {
     var steers = true
     /// Its subagents, background commands and waits.
     var activity = RouterActivity()
+    /// A live run's raw detail: the tool or command running now and the few before it, newest first (the working peek's).
+    var workNow: RouterWork.Step?
+    var workRecent: [RouterWork.Step] = []
+    /// The agent's latest whole words in the live run, and their message: what a working summary reads (one being
+    /// written isn't news yet).
+    var said: String?
+    var saidID: String?
+    /// The kind of tool running now ("command", T3's tool name): a summary's fingerprint has it.
+    var toolKind: String?
 
     /// Reads a projection. `now` stands in for a missing run start.
     static func make(_ p: T3Projection, now: Date) -> RouterDetail {
@@ -58,6 +67,7 @@ struct RouterDetail: Equatable {
             let items = p.turnItems.filter { $0.runId == nil || $0.runId == active.id }
             let since = (active.startedAt ?? active.requestedAt).flatMap(AgentThread.date) ?? now
             d.working = working(items, steps: d.steps, messages: p.messages, since: since)
+            work(&d, items, messages: p.messages, now: now)
         } else if p.thread.status.isLive, !(p.thread.status == .queued) {
             d.working = Working(text: Router.Copy.starting, mono: false,
                                 since: p.thread.activityRunStartedAt.flatMap(AgentThread.date) ?? now)
@@ -103,6 +113,60 @@ struct RouterDetail: Equatable {
     }
 
     // MARK: Pieces
+
+    /// The peek's steps and a summary's input, from the live run's items read once from their end: the tool running now,
+    /// the three before it, the latest whole words.
+    static let recentSteps = 3
+
+    private static func work(_ d: inout RouterDetail, _ items: [T3TurnItem], messages: [T3Message], now: Date) {
+        var tools: [RouterWork.Step] = []
+        var kind: String?
+        var running = false
+        for item in items.reversed() {
+            if d.said == nil, case .assistantMessage(let id, var text, let streaming) = item.detail, !streaming {
+                if text.isEmpty { text = messages.first { $0.id == id }?.text ?? "" }
+                if !text.isEmpty { d.said = text; d.saidID = id.isEmpty ? item.id : id }
+            } else if tools.count <= recentSteps, ThreadWork.isTool(item), !isThinking(item) {
+                if tools.isEmpty {
+                    running = item.status == "running" || item.status == "waiting"
+                    kind = toolKind(item)
+                }
+                tools.append(workStep(item, now: now))
+            }
+            if d.said != nil, tools.count > recentSteps { break }
+        }
+        if running, let first = tools.first {
+            d.workNow = first
+            d.toolKind = kind
+            d.workRecent = Array(tools.dropFirst())
+        } else {
+            d.workRecent = Array(tools.prefix(recentSteps))
+        }
+    }
+
+    /// One tool call as the peek lists it: its own words, else a command's first line (mono), else the tool's name and
+    /// main object. Its id is its place in the run; its time when it started.
+    private static func workStep(_ i: T3TurnItem, now: Date) -> RouterWork.Step {
+        let at = (i.raw.ts("startedAt") ?? i.updatedAt).flatMap(AgentThread.date) ?? now
+        if let own = ownDescription(i) { return .init(id: i.ordinal, text: own, at: at) }
+        if case .commandExecution(let input, _, _) = i.detail {
+            let line = firstLine(input)
+            return line.isEmpty ? .init(id: i.ordinal, text: "Running a command", at: at) : .init(id: i.ordinal, text: line, mono: true, at: at)
+        }
+        if case .fileChange(let name, _, _) = i.detail, !name.isEmpty {
+            return .init(id: i.ordinal, text: "Edited " + (name as NSString).lastPathComponent, at: at)
+        }
+        return .init(id: i.ordinal, text: plainLabel(i), at: at)
+    }
+
+    private static func toolKind(_ i: T3TurnItem) -> String {
+        switch i.detail {
+        case .commandExecution: "command"
+        case .fileChange: "edit"
+        case .dynamicTool(let name): name
+        default: i.type.rawValue
+        }
+    }
 
     private static func steps(of items: some Sequence<T3TurnItem>) -> [RouterThread.Step] {
         var last: [T3TodoStep] = []

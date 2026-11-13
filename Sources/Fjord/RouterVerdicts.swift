@@ -3,7 +3,7 @@ import OSLog
 
 // The verdict engine (docs/design/router-v2/IMPLEMENTATION.md 1.4): one streamed Haiku call per thread per fingerprint,
 // started in the turn the store asks, at most four at once, queued by need (asks, then finished turns newest first, then
-// names, then project purposes), cancelled with its process when the thread moves on. What it reads comes back to the
+// names, then working threads' summaries, then project purposes), cancelled with its process when the thread moves on. What it reads comes back to the
 // store as events: the state first, then the line's words as they grow, then the whole verdict; or `failed`, once, after
 // its retries. A call that fails is asked again after a backoff (2^n s, capped), one wake scheduled for the earliest; a rate
 // limit holds the queue for the time it named (else the backoff) and puts its call back. A cancelled call says nothing,
@@ -19,6 +19,8 @@ struct RouterVerdictRequest: Equatable, Sendable {
         case finished
         /// A thread with no name yet.
         case name
+        /// A working thread: a short line of what it is doing now (`RouterSummaryPrompt`), told through `onSummary`.
+        case summary
 
         static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
     }
@@ -28,6 +30,8 @@ struct RouterVerdictRequest: Equatable, Sendable {
     var fingerprint: String
     var kind: Kind
     var input: RouterVerdictInput
+    /// A summary's facts (`kind == .summary` only).
+    var summary: RouterSummaryInput?
     /// When it happened (the turn's end, the ask's time): finished turns go newest first.
     var at = Date()
 }
@@ -116,7 +120,8 @@ struct RouterVerdictReading {
             shown = words
             return [.words(words, done: false)]
         case .field("line", let raw) where kind != .name && !lineDone:
-            guard kind != .finished || stateTold, let line = PartialJSON.string(raw).map(Self.flat), !line.isEmpty else { return [] }
+            let clean: (String) -> String = kind == .summary ? RouterSummaryPrompt.line : Self.flat
+            guard kind != .finished || stateTold, let line = PartialJSON.string(raw).map(clean), !line.isEmpty else { return [] }
             lineDone = true
             shown = line
             return [.words(line, done: true)]
@@ -155,6 +160,10 @@ struct RouterVerdictReading {
         switch kind {
         case .name:
             guard !v.name.isEmpty else { return nil }
+        case .summary:
+            v.name = ""
+            v.line = RouterSummaryPrompt.line(text("line"))
+            guard !v.line.isEmpty else { return nil }
         case .ask:
             guard !v.line.isEmpty else { return nil }
             v.needsYou = true
@@ -191,6 +200,8 @@ struct RouterVerdictReading {
 
     /// Every event, with its thread and the fingerprint it is for, on the main actor.
     var onEvent: (String, String, RouterVerdictEvent) -> Void = { _, _, _ in }
+    /// A summary call's events (`words`, `done`, `failed`), the same way.
+    var onSummary: (String, String, RouterVerdictEvent) -> Void = { _, _, _ in }
     /// Claude Code's binary (`RouterStatus.latestPath`); nil: none found, and an ask fails at once.
     var binary: () -> String?
     let runner: ClaudeStream.Runner
@@ -231,7 +242,7 @@ struct RouterVerdictReading {
         var need: Int {
             switch self {
             case .verdict(let r): r.kind.rawValue
-            case .purpose: 3
+            case .purpose: RouterVerdictRequest.Kind.summary.rawValue + 1
             }
         }
 
@@ -284,10 +295,14 @@ struct RouterVerdictReading {
         enqueue(key, .verdict(r))
     }
 
-    /// Cancels every call of this thread (a run started, the thread left): its process is terminated, nothing is told.
+    /// Cancels every verdict and name call of this thread (a run started, the thread left): its process is terminated,
+    /// nothing is told. Its summary is apart (`cancelSummary`).
     func cancel(_ thread: String) {
         for kind in [RouterVerdictRequest.Kind.ask, .finished, .name] { drop(Self.key(thread, kind)) }
     }
+
+    /// Cancels the thread's summary call (it stopped working, it left): nothing is told.
+    func cancelSummary(_ thread: String) { drop(Self.key(thread, .summary)) }
 
     /// A purpose call for a project; a newer one for the same project replaces it.
     func purpose(_ call: PurposeCall) {
@@ -300,12 +315,17 @@ struct RouterVerdictReading {
     var queuedCount: Int { queued.count }
 
     private static func key(_ thread: String, _ kind: RouterVerdictRequest.Kind) -> String {
-        kind == .name ? "\u{1}name:" + thread : thread
+        switch kind {
+        case .name: "\u{1}name:" + thread
+        case .summary: "\u{1}summary:" + thread
+        case .ask, .finished: thread
+        }
     }
 
     private func enqueue(_ key: String, _ work: Work, attempt: Int = 0, notBefore: Date? = nil) {
         tokens += 1
-        let timed = if case .verdict = work { true } else { false }
+        // The verdict gates' signposts time verdicts only, not summaries.
+        let timed = if case .verdict(let r) = work, r.kind != .summary { true } else { false }
         queued.append(Job(key: key, work: work, token: tokens, attempt: attempt, notBefore: notBefore,
                           state: timed ? RouterSignposts.begin("Verdict state") : nil,
                           done: timed ? RouterSignposts.begin("Verdict done") : nil))
@@ -366,7 +386,7 @@ struct RouterVerdictReading {
         guard let path = binary() else {
             job.close()
             switch job.work {
-            case .verdict(let r): onEvent(r.thread, r.fingerprint, .failed)
+            case .verdict(let r): (r.kind == .summary ? onSummary : onEvent)(r.thread, r.fingerprint, .failed)
             case .purpose(let call): call.done(nil)
             }
             return
@@ -374,6 +394,10 @@ struct RouterVerdictReading {
         let (arguments, kind): ([String], RouterVerdictRequest.Kind?)
         let input: @MainActor () -> Data
         switch job.work {
+        case .verdict(let r) where r.kind == .summary:
+            (arguments, kind) = (RouterSummaryPrompt.arguments, r.kind)
+            let facts = r.summary ?? RouterSummaryInput(title: r.input.title, project: r.input.project)
+            input = { Data(RouterSummaryPrompt.text(facts).utf8) }
         case .verdict(let r):
             (arguments, kind) = (RouterVerdictPrompt.arguments(r.kind), r.kind)
             input = { Data(RouterVerdictPrompt.text(r.input, kind: r.kind).utf8) }
@@ -427,7 +451,7 @@ struct RouterVerdictReading {
                 running[key]?.state = nil
             }
             if case .done = e, let done = job.done { RouterSignposts.end(done, afterCommit: true) }
-            onEvent(r.thread, r.fingerprint, e)
+            (r.kind == .summary ? onSummary : onEvent)(r.thread, r.fingerprint, e)
         }
     }
 
@@ -436,7 +460,7 @@ struct RouterVerdictReading {
         guard let job = running[key], job.token == token else { return }
         if let end {
             let model = reading.map { RouterVerdictPrompt.model($0.kind) } ?? RouterVerdictPrompt.model
-            log?.record(role: reading == nil ? .purpose : .verdict, model: model, end.usage)
+            log?.record(role: reading == nil ? .purpose : reading?.kind == .summary ? .summary : .verdict, model: model, end.usage)
         }
         if limit.hit {
             // The call goes back in the queue, and the queue waits for the limit's time.

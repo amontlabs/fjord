@@ -30,6 +30,7 @@ extension Store {
             self.routerVerdicts.ask(request)
         }
         records.cancel = { [weak self] thread in self?.routerVerdicts.cancel(thread) }
+        records.cancelSummary = { [weak self] thread in self?.routerVerdicts.cancelSummary(thread) }
         records.fetch = { [weak self] thread, key in self?.routerTurnReads.read(thread, key: key) }
         records.onNeedsYou = { [weak self] n in if self?.routerNeedsYou != n { self?.routerNeedsYou = n } }
         records.emit = { [weak self] change in self?.routerPage.post(change) }
@@ -72,6 +73,9 @@ extension Store {
         })
         verdicts.onEvent = { [weak self] thread, fingerprint, event in
             self?.routerRecords.verdict(thread, fingerprint: fingerprint, event)
+        }
+        verdicts.onSummary = { [weak self] thread, fingerprint, event in
+            self?.routerRecords.summary(thread, fingerprint: fingerprint, event)
         }
         return verdicts
     }
