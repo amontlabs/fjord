@@ -1,12 +1,9 @@
 import SwiftUI
 
-// The wide layouts' rows (RouterLab.swift, docs/design/router-v2/WIDE-OPTIONS.md), demo only. Two grammars:
-// - Margin (options A and D): a thread's name hangs in a margin left of the reading column, right-aligned so it ends
-//   beside its words; every row of the column is a mark, its words and the age right after them. A thread costs no row
-//   of its own: its name stands beside its first row.
-// - Classic (options B and C): the page's own line and block (the name's row, the items under it), the card under its row
-//   or left to a pane.
-// Neither draws a rail by a thread's own words. The rows are placed at once (no glides): these are looks to choose from.
+// The wide page's rows (RouterWide.swift, docs/design/router-v2/WIDE-OPTIONS.md): a thread's name hangs in a margin left
+// of the reading column, right-aligned so it ends beside its words; every row of the column is a mark, its words and the
+// age right after them. A thread costs no row of its own: its name stands beside its first row. No rail is drawn by a
+// thread's own words.
 
 extension Router {
     /// The margin grammar's measures. The content cell's left edge is where an open card's ground starts; the marks'
@@ -34,7 +31,7 @@ extension Router {
 /// A thread in the margin grammar: its name in the margin beside its first row; its own words (a run's summary, Done's
 /// outcome, a line's sentence) as the first row when it has some, then a row per item. The selected row and its card
 /// share the selected ground, in the column.
-struct RouterLabMarginThread: View {
+struct RouterWideMarginThread: View {
     let model: RouterModel
     let box: RouterLineBox
     let margin: CGFloat
@@ -66,7 +63,7 @@ struct RouterLabMarginThread: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 HStack(alignment: .top, spacing: M.nameGap) {
                     ZStack(alignment: .topTrailing) {
-                        if index == 0 { RouterLabMarginName(model: model, thread: thread, project: project) }
+                        if index == 0 { RouterWideMarginName(model: model, thread: thread, project: project) }
                     }
                     .frame(width: margin, alignment: .trailing)
                     .frame(minHeight: I.rowHeight, alignment: .top)
@@ -103,7 +100,7 @@ struct RouterLabMarginThread: View {
                     own(thread)
                 }
                 .background { ground(focused: focused, hot: flags.hot, pressed: flags.pressed) }
-                if focused && cards { RouterLabCard(model: model, box: box) }
+                if focused && cards { RouterWideCard(model: model, box: box) }
             }
             .background { selected(focused) }
         case .item(let item):
@@ -112,11 +109,11 @@ struct RouterLabMarginThread: View {
             let focused = open && box.item == item.id
             VStack(alignment: .leading, spacing: 0) {
                 RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
-                    RouterLabItemWords(model: model, thread: id, item: item, hot: flags.hot && !focused)
+                    RouterWideItemWords(model: model, thread: id, item: item, hot: flags.hot && !focused)
                 }
                 .disabled(!item.live)
                 .background { ground(focused: focused, hot: flags.hot, pressed: flags.pressed) }
-                if focused && cards { RouterLabCard(model: model, box: box) }
+                if focused && cards { RouterWideCard(model: model, box: box) }
             }
             .background { selected(focused) }
         case .sent(let words):
@@ -153,7 +150,7 @@ struct RouterLabMarginThread: View {
         }
         let empty = block && RouterBlockHeader.words(thread, sentence: s).isEmpty
         let reading = block ? thread.ledger.read != nil : s.phase == .reassessing
-        return RouterLabWords(words: words, age: empty ? nil : RouterLabAge.text(model, thread.since)) {
+        return RouterWideWords(words: words, age: empty ? nil : RouterWideAge.text(model, thread.since)) {
             if block, thread.ledger.top != nil {
                 // Its name has its most urgent item's colour: its own state is the mark by its own words.
                 if thread.isRunning {
@@ -176,7 +173,7 @@ struct RouterLabMarginThread: View {
 
 /// A thread's name in the margin, right-aligned so it ends beside its words: on its colour's ground when it asks
 /// something of you, plain otherwise, with no mark (the marks are the column's); before it its project, and the new dot.
-struct RouterLabMarginName: View {
+struct RouterWideMarginName: View {
     let model: RouterModel
     let thread: RouterThread
     var project = true
@@ -216,7 +213,7 @@ struct RouterLabMarginName: View {
 
 /// A row of the column: its mark, its words flowing with the age right after the last of them (they wrap under their
 /// own start, the mark hung before them), then what trails them.
-struct RouterLabWords<Mark: View, Trail: View>: View {
+struct RouterWideWords<Mark: View, Trail: View>: View {
     let words: Text
     var age: Text?
     @ViewBuilder let mark: () -> Mark
@@ -242,7 +239,7 @@ struct RouterLabWords<Mark: View, Trail: View>: View {
 }
 
 /// An age that hugs its words: two spaces that don't break, then "4m", so it wraps with the last word, never alone.
-@MainActor enum RouterLabAge {
+@MainActor enum RouterWideAge {
     static func text(_ model: RouterModel, _ since: Date) -> Text {
         _ = model.clock.minute
         return Text(verbatim: "\u{00A0}\u{00A0}" + BriefAge.short(model.now.timeIntervalSince(since)))
@@ -253,7 +250,7 @@ struct RouterLabWords<Mark: View, Trail: View>: View {
 /// An item's row in the margin grammar: its kind's mark, its sentence, its age after it; struck with how it closed.
 /// Under the pointer the age gives way to a quiet Done in its place, right after the words (the row's own act: struck
 /// "done by you", Revert in the toast; a request's is the thread's Settle, off while T3 holds it).
-struct RouterLabItemWords: View {
+struct RouterWideItemWords: View {
     let model: RouterModel
     let thread: String
     let item: RouterItem
@@ -269,7 +266,7 @@ struct RouterLabItemWords: View {
         } else {
             Text(item.sentence).foregroundColor(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
         }
-        RouterLabWords(words: words, age: item.closing || done ? nil : RouterLabAge.text(model, item.since)) {
+        RouterWideWords(words: words, age: item.closing || done ? nil : RouterWideAge.text(model, item.since)) {
             Image(systemName: item.kind.symbol).font(.system(size: Router.Items.mark, weight: .semibold))
                 .foregroundStyle(item.kind.tint).opacity(item.closing ? 0.45 : 1)
         } trail: {
@@ -300,7 +297,7 @@ struct RouterLabItemWords: View {
 }
 
 /// The open row's card, its words on the row's words' column (`Router.Card.leading` from the selected ground's edge).
-struct RouterLabCard: View {
+struct RouterWideCard: View {
     let model: RouterModel
     let box: RouterLineBox
 
@@ -308,127 +305,5 @@ struct RouterLabCard: View {
         RouterCard(model: model, box: box)
             .environment(\.routerCardLeading, Router.Card.leading)
             .environment(\.routerLive, true)
-    }
-}
-
-// MARK: - Classic grammar
-
-/// A thread as the page has it: a line, or a block's header and its items one a row. `cards`: the open card under its
-/// row, on the selected ground; without (a pane shows it), the selected row alone has the ground.
-struct RouterLabClassicThread: View {
-    let model: RouterModel
-    let box: RouterLineBox
-    var cards = true
-
-    private typealias L = Router.Line
-
-    var body: some View {
-        let thread = box.head
-        let id = thread.id
-        let open = box.selected
-        let flags = model.flags(.row(id))
-        VStack(alignment: .leading, spacing: 0) {
-            if thread.ledger.block {
-                let onHeader = open && box.item == nil
-                VStack(alignment: .leading, spacing: 0) {
-                    RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                        RouterBlockHeader(model: model, thread: thread, hot: flags.hot, sentence: box.sentence)
-                    }
-                    .background { rowGround(selected: onHeader, hot: flags.hot, pressed: flags.pressed) }
-                    if cards, onHeader { RouterLabCard(model: model, box: box) }
-                }
-                .background { cardGround(cards && onHeader) }
-                ForEach(thread.ledger.items) { item in
-                    let key = RouterModel.itemKey(id, item.id)
-                    let f = model.flags(.row(key))
-                    let focused = open && box.item == item.id
-                    VStack(alignment: .leading, spacing: 0) {
-                        RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
-                            RouterItemRow(model: model, thread: id, item: item, selected: focused, hot: f.hot, pressed: f.pressed)
-                        }
-                        .disabled(!item.live)
-                        if cards, focused {
-                            RouterLabCard(model: model, box: box).padding(.leading, Router.Items.groundLeading)
-                        }
-                    }
-                    .background {
-                        RoundedRectangle(cornerRadius: cards ? L.selectedRadius : L.radius, style: .continuous)
-                            .fill(focused ? Router.Surface.quiet : .clear)
-                            .padding(.leading, Router.Items.groundLeading)
-                    }
-                }
-                switch thread.ledger.read {
-                case .message(let words)?: RouterItemSentRow(words: words)
-                case .turn?: RouterItemPlaceholder()
-                case nil: EmptyView()
-                }
-                // A block's air.
-                Color.clear.frame(height: 4)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                        RouterLabLine(model: model, box: box, hot: flags.hot)
-                    }
-                    .background { rowGround(selected: open, hot: flags.hot, pressed: flags.pressed) }
-                    if cards, open { RouterLabCard(model: model, box: box) }
-                }
-                .background { cardGround(cards && open) }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(thread.name), \(thread.look.label)")
-    }
-
-    private func rowGround(selected: Bool, hot: Bool, pressed: Bool) -> some View {
-        RoundedRectangle(cornerRadius: L.radius, style: .continuous)
-            .fill(selected ? (cards ? .clear : Router.Surface.quiet) : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
-            .transaction { $0.animation = nil }
-    }
-
-    private func cardGround(_ on: Bool) -> some View {
-        RoundedRectangle(cornerRadius: L.selectedRadius, style: .continuous).fill(on ? Router.Surface.quiet : .clear)
-    }
-}
-
-/// A line as the page draws it: the new dot, the name, the sentence flowing from after it and wrapping under it, the
-/// activity glyphs, the project and the age.
-struct RouterLabLine: View {
-    let model: RouterModel
-    let box: RouterLineBox
-    let hot: Bool
-    @State private var nameWidth: CGFloat = 0
-    @State private var rowWidth: CGFloat = 0
-
-    private typealias L = Router.Line
-
-    var body: some View {
-        let thread = box.head
-        HStack(alignment: .routerFirstLine, spacing: 0) {
-            Circle().fill(CDS.Fill.accent).opacity(thread.isNew ? 1 : 0)
-                .frame(width: CDS.Dot.size, height: CDS.Dot.size)
-                .padding(.leading, L.dotLeading).padding(.trailing, L.dotGap)
-            ZStack(alignment: .topLeading) {
-                RouterSentenceView(model: model, box: box, lead: nameWidth > 0 ? nameWidth + L.sentenceGap : 0)
-                    .routerActivity(model, thread)
-                    .padding(.top, L.namePadY)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                RouterName(model: model, thread: thread, rowHot: hot)
-                    .modifier(RouterWidthCap(cap: rowWidth > 0 ? rowWidth * L.nameShare : .infinity))
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { nameWidth = $0 }
-            }
-            .alignmentGuide(.routerFirstLine) { _ in L.namePadY + Router.Items.lineHeight / 2 }
-            if let project = thread.project {
-                RouterProjectPill(model: model, thread: thread.id, project: project)
-                    .padding(.leading, L.pillGap)
-                    .opacity(model.project == nil ? 1 : 0)
-                    .layoutPriority(1)
-            }
-            RouterAge(model: model, since: thread.since)
-                .padding(.leading, L.ageGap).padding(.trailing, L.reach)
-                .layoutPriority(1)
-        }
-        .padding(.vertical, (L.minHeight - Router.Items.lineHeight - 2 * L.namePadY) / 2)
-        .frame(minHeight: L.minHeight)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
     }
 }

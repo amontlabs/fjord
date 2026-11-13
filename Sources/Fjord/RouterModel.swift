@@ -149,9 +149,6 @@ final class RouterModel {
     var focus: String? { didSet { if focus != oldValue { focusChanged() } } }
     /// The filters: one project or all, one state or all.
     var project: String? { didSet { if project != oldValue { relayout() } } }
-    /// Demo only: a wide layout to look at in the page's place when it has the room (`RouterLab`, WIDE-OPTIONS.md),
-    /// from `FJORD_WIDE` or a shot.
-    var lab: RouterLab.Option? = RouterLab.pinned
     var section: RouterSection? { didSet { if section != oldValue { for box in boxes.values { box.filter = section }; relayout() } } }
     /// ⌘F: the keyboard is on the filter bar, the ring on `ring`.
     var filterMode = false

@@ -13,8 +13,8 @@ import Testing
     /// The demo's page drawn in a window, settled.
     private func hosted() async -> (RouterModel, NSWindow) {
         let model = RouterDemo.records(still: true)
-        let hosting = NSHostingView(rootView: RouterScreen(model: model).frame(width: 1280, height: 960))
-        let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 960), styleMask: .titled, backing: .buffered,
+        let hosting = NSHostingView(rootView: RouterScreen(model: model).frame(width: 960, height: 960))
+        let window = AwayWindow(contentRect: CGRect(x: 0, y: 0, width: 960, height: 960), styleMask: .titled, backing: .buffered,
                                 defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting

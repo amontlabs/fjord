@@ -34,22 +34,18 @@ struct RouterScreen: View {
     /// The column's edges from the page's sides: the title, the headers, the names and the composer share them. With
     /// the drawer's toggle on the title line, the column's end stays clear of it.
     private var edges: RouterEdges {
-        // A wide layout being looked at (`RouterLab`): the title starts with its reading column, the search ends with
-        // its last one.
-        if let lab {
+        // A wide page (`RouterWide`): the title starts with its reading column, the search ends with its last one.
+        if let wide {
             let toggle = store != nil && !(drawerOpen && side) ? Self.toggleRoom : 0
-            return RouterEdges(leading: max(lab.frame.start, leadingInset + 14), trailing: max(width - lab.frame.end, toggle))
+            return RouterEdges(leading: max(wide.frame.start, leadingInset + 14), trailing: max(width - wide.frame.end, toggle))
         }
         let inset = AppPage<EmptyView, EmptyView>.columnInset((Router.column, Router.gutter), pageWidth: width)
         let toggle = store != nil && !(drawerOpen && side) ? Self.toggleRoom : 0
         return RouterEdges(leading: max(inset, leadingInset + 14), trailing: max(inset, toggle))
     }
 
-    /// The wide layout being looked at, when the page has the room for it (demo only; without, the page is its own).
-    private var lab: (option: RouterLab.Option, frame: RouterLab.Frame)? {
-        guard let option = model.lab else { return nil }
-        return RouterLab.resolve(option, page: width)
-    }
+    /// The ledger, or the ledger and its pane, when the page has the room (without, the page is its own).
+    private var wide: (layout: RouterWide.Layout, frame: RouterWide.Frame)? { RouterWide.frame(page: width) }
 
     var body: some View {
         if let store {
@@ -87,8 +83,8 @@ struct RouterScreen: View {
             topBar
             // The Router off, or Claude Code missing: one line under the title, with its button.
             if let store, let text { RouterSetupNotice(store: store, model: text, edges: edges) }
-            if let lab {
-                RouterLabPage(model: model, option: lab.option, frame: lab.frame, page: width)
+            if let wide {
+                RouterWidePage(model: model, layout: wide.layout, frame: wide.frame, page: width)
             } else {
                 RouterList(model: model, edges: edges)
             }

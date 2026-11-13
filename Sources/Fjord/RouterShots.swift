@@ -268,35 +268,20 @@ enum RouterShots {
             model.select(.line(ID.checkpoint))
             model.focusItem(RouterDemo.Item.keep)
         },
-        // The page in a wide window: its column stays 720, centred (the wide layouts to choose from are below).
-        State(name: "v2-items-1600", make: { model in
-            model.select(nil)
-            RouterDemo.items(model)
-        }, size: wideLab),
-        // Four ways to use a wide window, to choose from (WIDE-OPTIONS.md, `RouterLab`): the same records in each, at
-        // rest and with Checkpoint boot's Decide open.
-    ] + [1100, 1450, 1650, 1900].map { (width: CGFloat) in
-        // The breakpoints (`steps`): the same page, a card open, at four window widths.
-        State(name: "v2-steps-\(Int(width))", make: { model in
-            model.lab = .steps
-            RouterDemo.items(model)
-            model.select(.line(ID.checkpoint))
-            model.focusItem(RouterDemo.Item.keep)
-        }, size: CGSize(width: width, height: 1000))
-    } + RouterLab.Option.allCases.filter { $0 != .steps }.flatMap { option in
+    ] + [1100, 1450, 1650, 1900].flatMap { (width: CGFloat) in
+        // The page at four window widths (`RouterWide`): its own, the ledger, the ledger and its pane, the pane at its
+        // widest; at rest and with Checkpoint boot's Decide open.
         [
-            State(name: "v2-wide-\(option.rawValue)", make: { model in
-                model.lab = option
+            State(name: "v2-wide-\(Int(width))", make: { model in
                 model.select(nil)
                 RouterDemo.items(model)
-            }, size: wideLab),
-            State(name: "v2-wide-\(option.rawValue)-card", make: { model in
-                model.lab = option
+            }, size: CGSize(width: width, height: 1000)),
+            State(name: "v2-wide-\(Int(width))-card", make: { model in
                 RouterDemo.items(model)
                 model.select(.line(ID.checkpoint))
                 model.focusItem(RouterDemo.Item.keep)
                 model.pick(1)
-            }, size: wideLab),
+            }, size: CGSize(width: width, height: 1000)),
         ]
     } + [
         State(name: "v2-reassessing") { model in

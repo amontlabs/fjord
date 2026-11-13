@@ -53,7 +53,7 @@ enum RouterBlockLayout {
     static func rowsKey(_ thread: RouterThread) -> [String] { rows(thread).map(\.id) }
 
     /// Whether the header has something of its own to say besides its name: its own words, Fjord's mark while a read
-    /// is under way, or its card open under it (the wide layouts to choose from give it a row only then, `RouterLab`).
+    /// is under way, or its card open under it (the wide page gives it a row only then, `RouterWide`).
     static func headerShown(_ thread: RouterThread, sentence: RouterThread.Sentence? = nil, card: Bool) -> Bool {
         card || thread.ledger.read != nil || !RouterBlockHeader.words(thread, sentence: sentence).isEmpty
     }

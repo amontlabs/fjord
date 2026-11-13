@@ -5,6 +5,22 @@ far from their content, and a thread's own sentence had a quote-like rail. The o
 width and save the rows that thread names take, without stretching the reading column. That layout is removed: the
 real page keeps its 720 column at any width (shot `v2-items-1600`) until one of these is chosen.
 
+## Chosen (2026-11-13): the ledger, then the ledger and its pane
+
+The owner found D the cleanest and asked for it with B's pane (option E). Built for real in `RouterWide.swift` and
+`RouterWideRows.swift`; the switch and options A, B and C are removed. By the page's width (the window less the
+sidebar, about 310 pt):
+
+| Page width | Window, sidebar shown | Layout |
+|---|---|---|
+| under `ledgerFrom` (about 1010) | under about 1320 | the page's own: the 720 column by state, cards under their row |
+| `ledgerFrom` to `paneFrom` (about 1250) | about 1320 to 1560 | the ledger: projects in a rail, names in a margin, the 680 column, cards under their row |
+| from `paneFrom` | from about 1560 | the ledger in a 520 column, the selected row's card in a pane (380 to 620) beside it, level with the first row; centred once the pane is at its widest |
+
+Shots: `v2-wide-<1100|1450|1650|1900>[-card]`.
+
+The rest of this note is the comparison as it was made; its switch and shot names are gone.
+
 Four options are built as real components on the page's own records, bar, dock, cards and peeks. They are behind a
 demo-only switch and the real page is unchanged.
 

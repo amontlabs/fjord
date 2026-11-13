@@ -745,9 +745,9 @@ The page's column is 720 pt at any window width, centred (shot `v2-items-1600`).
 
 A first wide layout (the column growing to 1120 pt, a block's name, project and age in a 180 pt left column, a hairline
 down its rows) was turned down by the owner on 2026-11-13 and is removed: the ages ended up far from their words and
-the names from their content, and a thread's own sentence should have no rail. Four other ways to use a wide window
-are built behind a demo-only switch, with a recommendation, for the owner to choose from:
-[WIDE-OPTIONS.md](WIDE-OPTIONS.md) (`FJORD_WIDE=a|b|c|d`, shots `v2-wide-<a..d>[-card]`).
+the names from their content, and a thread's own sentence should have no rail. Of the options built after it
+([WIDE-OPTIONS.md](WIDE-OPTIONS.md)), the owner chose on 2026-11-13 the ledger by project with the card in a pane
+beside it, the ledger alone below that width (`RouterWide.swift`, shots `v2-wide-<1100|1450|1650|1900>[-card]`).
 
 ## 2. Thread state model
 

@@ -56,7 +56,7 @@ struct RouterSummaryView: View {
 }
 
 extension EnvironmentValues {
-    /// Demo only (`RouterLab`): the card's words' column from its ground's edge, where a wide layout draws the card.
+    /// The card's words' column from its ground's edge, where the wide page (`RouterWide`) draws the card.
     @Entry var routerCardLeading: CGFloat? = nil
 }
 
