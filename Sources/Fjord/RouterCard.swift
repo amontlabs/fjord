@@ -361,22 +361,19 @@ struct RouterLastLines: View {
 struct RouterPlan: View {
     let model: RouterModel
     let thread: RouterThread
-    /// The first lines' height: where the plan is cut while closed.
-    @State private var cut: CGFloat = 0
 
     var body: some View {
         let open = model.expanded.contains(thread.id)
         let more = thread.plan.count > Router.Card.planLines
-        let clipped = more && !open && cut > 0
         VStack(alignment: .leading, spacing: 6) {
-            lines(thread.plan)
-                .frame(height: clipped ? cut : nil, alignment: .top)
+            // Cut where the first lines end in the layout that first places the plan: measured a turn later, a card
+            // opening on a plan was as tall as the whole plan for a frame, and the rows under it went off the page and
+            // came back.
+            RouterPlanCut(cut: more && !open) {
+                lines(thread.plan)
+                lines(Array(thread.plan.prefix(Router.Card.planLines))).hidden()
+            }
                 .clipped()
-                .background(alignment: .topLeading) {
-                    lines(Array(thread.plan.prefix(Router.Card.planLines)))
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cut = $0 }
-                        .hidden()
-                }
                 .mask {
                     VStack(spacing: 0) {
                         Color.black
@@ -401,6 +398,25 @@ struct RouterPlan: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The plan's lines (the first view), as tall as its first lines (the second, not drawn) while `cut`, or all of them; both
+/// measured in the same pass. What is past the cut is drawn: the plan clips it.
+private struct RouterPlanCut: Layout {
+    var cut: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = ProposedViewSize(width: proposal.width, height: nil)
+        guard let all = subviews.first?.sizeThatFits(width) else { return .zero }
+        guard cut, subviews.count > 1 else { return all }
+        return CGSize(width: all.width, height: min(all.height, subviews[1].sizeThatFits(width).height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for view in subviews {
+            view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
     }
 }
 

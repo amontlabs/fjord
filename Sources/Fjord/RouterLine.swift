@@ -180,6 +180,9 @@ struct RouterLineView: View {
                         .transition(.identity)
                 }
             }
+                // As wide as the line while closed too: an empty place had no width, and a card's first open grew its
+                // clip from nothing across, cutting its words on the right for the first frames.
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     // Grown or shrunk while open (a reply, a plan): the rows under it glide as it does, on the spatial
