@@ -28,6 +28,8 @@ import Testing
         }
         try write("system-turn.txt", RouterItemsPrompt.turn)
         try write("system-message.txt", RouterItemsPrompt.message)
+        try write("system-said.txt", RouterItemsPrompt.said)
+        try write("schema-said.json", RouterItemsPrompt.saidSchema)
         try write("schema-turn.json", RouterItemsPrompt.turnSchema)
         try write("schema-message.json", RouterItemsPrompt.messageSchema)
         try write("open-sample.txt", RouterItemsPrompt.openBlock([
@@ -39,9 +41,11 @@ import Testing
             let base = RouterItemsInput(title: c.title, project: c.project, firstAsk: c.firstAsk, input: .message(words: "", replyBefore: nil))
             let steps: [String] = c.steps.map { s in
                 var x = base
-                x.input = s.kind == "turn"
-                    ? .turn(reply: s.reply ?? "", yourWords: s.started, woke: s.woke, status: s.status ?? "completed")
-                    : .message(words: s.text ?? "", replyBefore: s.replyBefore)
+                x.input = switch s.kind {
+                case "turn": .turn(reply: s.reply ?? "", yourWords: s.started, woke: s.woke, status: s.status ?? "completed")
+                case "said": .said(message: s.text ?? "", yourWords: s.started)
+                default: .message(words: s.text ?? "", replyBefore: s.replyBefore)
+                }
                 return RouterItemsPrompt.inputBlock(x)
             }
             parts.append(["id": c.id, "head": RouterItemsPrompt.head(base), "steps": steps, "kinds": c.steps.map(\.kind)])

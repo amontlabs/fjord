@@ -648,20 +648,159 @@ import Testing
         #expect(again.ledger.items.map(\.id) == ["i1", "i2"])
     }
 
-    /// REVIEW-items 3.1: a thread first seen (a first launch on open items) reads its latest turn only when it ended in
-    /// the last few minutes, and only a few threads at once; older Done lines are the code's words, with no read.
-    @Test func aFirstLaunchReadsOnlyAFewFreshTurns() {
+    /// A launch reads the latest unread input of every thread on the page, however long ago it ended (paced by the
+    /// queues' caps, 4 at a time, in the app); what it finds of turns that ended before the launch is never a banner.
+    @Test func aLaunchReadsEveryThreadsLatestTurnWithNoBannerForWhatEndedBefore() {
         let h = Harness()
-        var old = Self.ended("r1", minutes: 120)
-        old.id = "old"
-        h.records.put(old)
-        #expect(h.fetched.isEmpty && h.records.saved["old"]?.ledger?.read == ["turn:r1"])
-        for n in 0..<(RouterItemLedgers.firstReads + 2) {
-            var t = Self.ended("r1", minutes: 1)
+        var told: [ThreadNotice] = []
+        let notifier = RouterNotifier()
+        notifier.post = { if $0.key.hasPrefix("item:") { told.append($0) } }
+        h.records.notifier = notifier
+        for n in 0..<8 {
+            var t = Self.ended("r1", minutes: n == 0 ? 1 : 120)
             t.id = "t\(n)"
+            t.unseen = true
             h.records.put(t)
         }
-        #expect(h.fetched.count == RouterItemLedgers.firstReads)
+        #expect(h.fetched.count == 8)
+        h.facts(RouterItemFacts(turns: ["r1": Self.turn("Merge it?")]), thread: "t0")
+        h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "merge it?")]), thread: "t0")
+        #expect(h.records.saved["t0"]?.ledger?.items.map(\.sentence) == ["merge it?"])
+        #expect(told.isEmpty)
+        // A turn that ends after the launch is told.
+        h.clock = h.clock.addingTimeInterval(60)
+        var t = Self.ended("r2", minutes: 0)
+        t.id = "t0"
+        t.unseen = true
+        h.records.put(t)
+        h.facts(RouterItemFacts(turns: ["r2": Self.turn("Sign in to Silo?")]), thread: "t0")
+        h.answer(RouterItemsAnswer(found: [.init(kind: .do, sentence: "sign in to Silo")]), thread: "t0")
+        #expect(told.count == 1)
+    }
+
+    /// Turns that ended while Fjord was closed, on a thread it knows: each is read, in order, from the one after the last
+    /// read, not only the latest.
+    @Test func turnsThatEndedWhileFjordWasClosedAreEachRead() throws {
+        let h = seeded()
+        let again = Harness(saved: RouterVerdictFile.decode(try #require(RouterVerdictFile.encode(h.records.saved))))
+        again.records.put(Self.ended("r3"))
+        #expect(again.fetched.last?.1 == "turn:r3")
+        again.facts(RouterItemFacts(turns: ["r1": Self.turn("Keep 0.3?"), "r2": Self.turn("Sign in to Silo, please."),
+                                            "r3": Self.turn("Done; tests pass.")], order: ["r1", "r2", "r3"]))
+        #expect(again.reads.map(\.fingerprint) == ["turn:r2"])
+        again.answer(RouterItemsAnswer(found: [.init(kind: .do, sentence: "sign in to Silo")]))
+        #expect(again.reads.map(\.fingerprint) == ["turn:r2", "turn:r3"])
+        again.answer(RouterItemsAnswer(line: "tests pass"))
+        #expect(again.saved?.pending.isEmpty == true)
+        #expect(again.saved?.items.map(\.sentence).contains("sign in to Silo") == true)
+    }
+
+    // MARK: Mid-run
+
+    static func working(_ run: String, said: String, id: String) -> (AgentThread, RouterDetail) {
+        var d = F.working("Waiting on a subagent")
+        d.said = said
+        d.saidID = id
+        return (running(run), d)
+    }
+
+    /// A real miss (2026-11-13): the agent asked "Do you want me to make that change?" and its run ended, but the
+    /// subagent it delegated to was still running, so the thread stayed Working and no turn end was read. A turn that
+    /// ended while its background work goes on is read as it ends.
+    @Test func aTurnThatEndsWhileItsSubagentRunsIsRead() throws {
+        let h = Harness()
+        var t = Self.ended("run:thread:af00d2c8:ordinal:91", minutes: 0)
+        t.status = .completed
+        t.pendingTasks = [T3PendingTask(json: ["taskId": "task-1", "kind": "subagent", "description": "Fix the empty band"])]
+        h.records.put(t)
+        #expect(h.record?.state == .working)
+        #expect(h.fetched.map(\.1) == ["turn:run:thread:af00d2c8:ordinal:91"])
+        let reply = """
+            I'd change the rule. On launch, read the latest unread turn of every thread on the page, with no 10-minute or \
+            6-thread limit: 4 reads at a time, as now; turns that ended before the launch don't trigger a banner.
+
+            Do you want me to make that change? I'll also check the "ended while Fjord was closed" case and fix it if it's a gap.
+            """
+        h.facts(RouterItemFacts(turns: ["run:thread:af00d2c8:ordinal:91": Self.turn(reply, words: "What does that mean?")],
+                                order: ["run:thread:af00d2c8:ordinal:91"]))
+        let read = try #require(h.reads.last)
+        guard case .turn(let r, _, _, _)? = read.items?.input else { Issue.record("not a turn"); return }
+        #expect(r.contains("Do you want me to make that change?"))
+        h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "read every thread's latest turn on launch, 4 at a time?")],
+                                   line: "proposed a new launch rule"))
+        #expect(h.ledger.items.map(\.kind) == [.decide])
+        #expect(h.record?.section == .needsYou)
+    }
+
+    /// A whole message the agent posts while its run goes on is read as it lands, with nothing open or something open,
+    /// by its id, once; it finds items and writes no line; nothing sheens while it reads.
+    @Test func aQuestionAskedMidRunIsReadAsItIsAsked() throws {
+        let h = Harness()
+        let (t, d) = Self.working("r1", said: "The fix is ready on the branch. Do you want me to make that change?", id: "m1")
+        h.records.put(t)
+        h.records.detail("t1", d)
+        let read = try #require(h.reads.last)
+        #expect(read.fingerprint == "said:m1")
+        #expect(h.fetched.isEmpty)
+        guard case .said(let message, _)? = read.items?.input else { Issue.record("not a mid-run message"); return }
+        #expect(message.hasSuffix("Do you want me to make that change?"))
+        #expect(read.items?.reads == .said)
+        h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "make the fix on the branch?")]))
+        #expect(h.ledger.items.map(\.kind) == [.decide])
+        #expect(h.record?.section == .needsYou)
+        // The same message again reads nothing.
+        h.records.put(t)
+        h.records.detail("t1", d)
+        #expect(h.reads.count == 1)
+        // A later one, while the ledger has the Decide: read with it open, and nothing sheens.
+        h.clock = h.clock.addingTimeInterval(120)
+        var d2 = d
+        d2.said = "Still waiting on the subagent."
+        d2.saidID = "m2"
+        h.records.detail("t1", d2)
+        #expect(h.reads.last?.fingerprint == "said:m2")
+        #expect(h.reads.last?.items?.open.map(\.id) == ["i1"])
+        #expect(h.ledger.items.allSatisfy { $0.state != .checking } && h.ledger.read == nil)
+    }
+
+    /// Coalesced like summaries: at most one mid-run message read per gap, the newest waiting one read at its end; at
+    /// most one in flight; a turn end behind it doesn't wait, and reads the message itself when it is the reply.
+    @Test func midRunMessagesAreCoalescedOneInFlight() throws {
+        let h = Harness()
+        let (t, d) = Self.working("r1", said: "Looking at the tests.", id: "m1")
+        h.records.put(t)
+        h.records.detail("t1", d)
+        #expect(h.reads.map(\.fingerprint) == ["said:m1"])
+        // Two more while m1 is read: one in flight; the newest replaces the one waiting.
+        for (n, words) in [(2, "Found it."), (3, "Want me to fix it now?")] {
+            var dn = d
+            dn.said = words
+            dn.saidID = "m\(n)"
+            h.records.detail("t1", dn)
+        }
+        #expect(h.reads.count == 1)
+        #expect(h.saved?.pending.map(\.key) == ["said:m1", "said:m3"])
+        h.answer(RouterItemsAnswer())
+        // Inside the gap: m3 waits for its end.
+        #expect(h.reads.count == 1)
+        h.clock = h.clock.addingTimeInterval(61)
+        h.records.items.retried("t1")
+        #expect(h.reads.map(\.fingerprint) == ["said:m1", "said:m3"])
+        h.answer(RouterItemsAnswer(found: [.init(kind: .decide, sentence: "fix it now?")]))
+        // A message waiting when its run ends, and the turn's reply: the turn reads it, at once.
+        var d4 = d
+        d4.said = "All done. Merge it?"
+        d4.saidID = "m4"
+        h.records.detail("t1", d4)
+        #expect(h.saved?.pending.map(\.key) == ["said:m4"])
+        var done = Self.ended("r1", minutes: 0)
+        done.lastRunEndedAt = h.clock
+        var dd = RouterDetail()
+        dd.reply = "All done. Merge it?"
+        h.records.detail("t1", dd)
+        h.records.put(done)
+        #expect(h.saved?.pending.map(\.key) == ["turn:r1"])
+        #expect(h.fetched.last?.1 == "turn:r1")
     }
 
     /// REVIEW-items 3.1: an item found is told as a banner only while it is fresh and you haven't seen the thread.
@@ -674,6 +813,8 @@ import Testing
             h.records.notifier = notifier
             var t = Self.ended("r1", minutes: minutes)
             t.unseen = unseen
+            // Seen working first: its end comes after the launch.
+            if minutes <= 10 { h.records.put(Self.running("r1")) }
             h.records.put(t)
             if minutes > 10 {
                 // A turn left pending before a relaunch, read long after.
@@ -738,9 +879,9 @@ import Testing
     @Test func theAppSendsTheEvalsV2Prompts() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
-        for (name, prompt) in [("turn", RouterItemsPrompt.turn), ("message", RouterItemsPrompt.message)] {
-            let v2 = try String(contentsOf: root.appendingPathComponent("evals/router/items/prompts/system-\(name)-v2.txt"), encoding: .utf8)
-            #expect(words(prompt) == words(v2), "the \(name) prompt is EVAL-items.md's v2")
+        for (name, prompt) in [("turn-v2", RouterItemsPrompt.turn), ("message-v2", RouterItemsPrompt.message), ("said-v1", RouterItemsPrompt.said)] {
+            let v = try String(contentsOf: root.appendingPathComponent("evals/router/items/prompts/system-\(name).txt"), encoding: .utf8)
+            #expect(words(prompt) == words(v), "the \(name) prompt is EVAL-items.md's")
         }
     }
 }

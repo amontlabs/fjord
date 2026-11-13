@@ -241,8 +241,8 @@ final class FakeClaude: @unchecked Sendable {
     }
 
     @Test func onlyAnItemsReadRunsOnSonnet() async {
-        #expect(RouterItemsPrompt.arguments(turn: true).contains("claude-sonnet-5-5"))
-        #expect(RouterItemsPrompt.arguments(turn: false).contains("claude-sonnet-5-5"))
+        #expect(RouterItemsPrompt.arguments(.turn).contains("claude-sonnet-5-5"))
+        #expect(RouterItemsPrompt.arguments(.message).contains("claude-sonnet-5-5"))
         #expect(RouterVerdictPrompt.arguments(.ask).contains("claude-haiku-5-5"))
         #expect(RouterVerdictPrompt.arguments(.name).contains("claude-haiku-5-5"))
         let fake = FakeClaude()

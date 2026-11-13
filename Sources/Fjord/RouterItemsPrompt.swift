@@ -23,6 +23,17 @@ struct RouterItemsInput: Equatable, Sendable {
         case turn(reply: String, yourWords: String?, woke: String?, status: String)
         /// Your words to the thread, and the agent's last reply before them (what they answer).
         case message(words: String, replyBefore: String?)
+        /// A whole message the agent posted while its run goes on (it keeps working, or waits on its own background
+        /// tasks), and your last words to it: a question asked mid-run is read when it is asked, not at the turn's end.
+        case said(message: String, yourWords: String?)
+    }
+
+    /// What a read says: a turn's read finds items and writes the line; a mid-run message's finds items; your words' only close.
+    enum Reads: Equatable, Sendable {
+        case turn, said, message
+
+        var finds: Bool { self != .message }
+        var lines: Bool { self == .turn }
     }
 
     var title: String
@@ -33,6 +44,14 @@ struct RouterItemsInput: Equatable, Sendable {
     var pullRequests: [RouterVerdictInput.PullRequest] = []
 
     var isTurn: Bool { if case .turn = input { true } else { false } }
+
+    var reads: Reads {
+        switch input {
+        case .turn: .turn
+        case .said: .said
+        case .message: .message
+        }
+    }
 }
 
 /// What a read says, whole.
@@ -118,6 +137,10 @@ enum RouterItemsPrompt {
     /// A turn the agent ended.
     static let turn = common + "\n\nThe thread's agent just ended a turn. Fill the fields in order.\n" + closing + "\n" + kinds + "\n" + line
 
+    /// A whole message the agent posted while its run goes on: what it leaves open, and what it settles; no line.
+    static let said = common + "\n\nThe thread's agent just posted a message while its run goes on (it keeps working, or waits on its own background "
+        + "tasks or subagents). Fill the fields in order.\n" + closing + "\n" + kinds
+
     /// Your words to the thread: they may answer what is open; they add nothing.
     static let message = common + "\n\nThe user just wrote to the thread. Fill the field.\n" + closing
 
@@ -130,11 +153,17 @@ enum RouterItemsPrompt {
     /// In this order: what closes lands first, then what is new, then the line streams.
     static let turnSchema = #"{"type":"object","properties":{"open":"# + openSchema + #","found":"# + foundSchema
         + #","line":{"type":"string"}},"required":["open","found","line"],"additionalProperties":false}"#
+    static let saidSchema = #"{"type":"object","properties":{"open":"# + openSchema + #","found":"# + foundSchema
+        + #"},"required":["open","found"],"additionalProperties":false}"#
     static let messageSchema = #"{"type":"object","properties":{"open":"# + openSchema + #"},"required":["open"],"additionalProperties":false}"#
 
-    static func arguments(turn: Bool) -> [String] {
-        ClaudePrint.arguments(model: model, system: turn ? Self.turn : message, schema: turn ? turnSchema : messageSchema,
-                              effort: "low", streaming: true)
+    static func arguments(_ reads: RouterItemsInput.Reads) -> [String] {
+        let (system, schema) = switch reads {
+        case .turn: (Self.turn, turnSchema)
+        case .said: (Self.said, saidSchema)
+        case .message: (Self.message, messageSchema)
+        }
+        return ClaudePrint.arguments(model: model, system: system, schema: schema, effort: "low", streaming: true)
     }
 
     // MARK: The input
@@ -192,6 +221,19 @@ enum RouterItemsPrompt {
                              + fenced(kept))
             }
             lines.append("The user's words to the thread now:\n" + fenced(V.head(words, wordsCharacters)))
+        case .said(let message, let words):
+            lines.append("The agent's run goes on; it just posted this message:")
+            if let words = words.flatMap(nonEmpty) {
+                lines.append("The user's last words to it:\n" + fenced(V.head(words, wordsCharacters)))
+            }
+            let (kept, cut) = V.tail(message, replyCharacters)
+            lines.append((cut ? "Its message (its end):\n" : "Its message:\n") + fenced(kept))
+            if !x.pullRequests.isEmpty {
+                lines.append("Pull requests:")
+                for pr in x.pullRequests {
+                    lines.append("- " + (pr.number.map { "#\($0) " } ?? "") + pr.url + ": " + (pr.state ?? "state unknown"))
+                }
+            }
         }
         return lines.joined(separator: "\n")
     }
@@ -227,7 +269,9 @@ enum RouterItemsEvent: Equatable, Sendable {
 
 /// One read's answer as it comes (pure): the pieces of `PartialJSON` into events, and the whole answer checked.
 struct RouterItemsReading {
-    let turn: Bool
+    /// It finds items (a turn, a mid-run message), and writes a line (a turn).
+    let finds: Bool
+    let lines: Bool
     /// The ids the read was given: anything else it names is ignored.
     let ids: Set<String>
     private(set) var closeTold = false
@@ -235,10 +279,13 @@ struct RouterItemsReading {
     private(set) var lineDone = false
     private var shown = ""
 
-    init(turn: Bool, ids: Set<String>) {
-        self.turn = turn
+    init(_ reads: RouterItemsInput.Reads, ids: Set<String>) {
+        finds = reads.finds
+        lines = reads.lines
         self.ids = ids
     }
+
+    init(turn: Bool, ids: Set<String>) { self.init(turn ? .turn : .message, ids: ids) }
 
     mutating func take(_ piece: PartialJSON.Piece) -> [RouterItemsEvent] {
         switch piece {
@@ -246,15 +293,15 @@ struct RouterItemsReading {
             guard let a = Self.array(raw) else { return [] }
             closeTold = true
             return [.closing(Self.closes(a, ids: ids))]
-        case .field("found", let raw) where turn && !foundTold:
+        case .field("found", let raw) where finds && !foundTold:
             guard let a = Self.array(raw) else { return [] }
             foundTold = true
             return [.found(Self.found(a, ids: ids))]
-        case .growing("line", let words) where turn && !lineDone:
+        case .growing("line", let words) where lines && !lineDone:
             guard foundTold, words != shown else { return [] }
             shown = words
             return [.words(words, done: false)]
-        case .field("line", let raw) where turn && !lineDone:
+        case .field("line", let raw) where lines && !lineDone:
             guard foundTold, let line = PartialJSON.string(raw).map(RouterVerdictReading.flat), !line.isEmpty else { return [] }
             lineDone = true
             shown = line
@@ -266,23 +313,25 @@ struct RouterItemsReading {
 
     /// The read's end: what wasn't told yet, then the answer; `failed` when it doesn't read.
     mutating func end(_ json: Data?) -> [RouterItemsEvent] {
-        guard let json, let answer = Self.answer(json, turn: turn, ids: ids) else { return [.failed] }
+        guard let json, let answer = Self.answer(json, finds: finds, lines: lines, ids: ids) else { return [.failed] }
         var out: [RouterItemsEvent] = []
         if !closeTold { closeTold = true; out.append(.closing(answer.close)) }
-        if turn, !foundTold { foundTold = true; out.append(.found(answer.found)) }
-        if turn, !lineDone, !answer.line.isEmpty { lineDone = true; out.append(.words(answer.line, done: true)) }
+        if finds, !foundTold { foundTold = true; out.append(.found(answer.found)) }
+        if lines, !lineDone, !answer.line.isEmpty { lineDone = true; out.append(.words(answer.line, done: true)) }
         out.append(.done(answer))
         return out
     }
 
     /// The whole answer, checked: closes of known ids only, found items with a kind and a sentence, a turn's line.
     static func answer(_ json: Data, turn: Bool, ids: Set<String>) -> RouterItemsAnswer? {
+        answer(json, finds: turn, lines: turn, ids: ids)
+    }
+
+    static func answer(_ json: Data, finds: Bool, lines: Bool, ids: Set<String>) -> RouterItemsAnswer? {
         guard let o = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any], let open = o["open"] as? [Any] else { return nil }
         var a = RouterItemsAnswer(close: closes(open, ids: ids))
-        if turn {
-            a.found = found((o["found"] as? [Any]) ?? [], ids: ids)
-            a.line = RouterVerdictReading.flat(o["line"] as? String ?? "")
-        }
+        if finds { a.found = found((o["found"] as? [Any]) ?? [], ids: ids) }
+        if lines { a.line = RouterVerdictReading.flat(o["line"] as? String ?? "") }
         return a
     }
 

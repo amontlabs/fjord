@@ -118,8 +118,10 @@ final class RouterRecords {
         items.added = { [unowned self] id, new, key in
             // Told like a code change: only while fresh (not a turn that ended long ago, read after a relaunch), only
             // while you haven't seen the thread, and not on the card you have open.
-            guard let e = self.entries[id], let t = e.thread, let notifier = self.notifier, let first = new.first, t.unseen, e.seen == nil,
-                  self.now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh else { return }
+            // A question the agent asks mid-run is fresh as it lands (the engine tells only what this run of Fjord saw).
+            let mid = key.hasPrefix("said:")
+            guard let e = self.entries[id], let t = e.thread, let notifier = self.notifier, let first = new.first, t.unseen || mid,
+                  e.seen == nil, mid || self.now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh else { return }
             let told = notifier.item(t, project: self.project(t), input: key, sentence: first.sentence, told: self.saved[id]?.told ?? [])
             if let told { self.tell(id, told) }
         }
@@ -129,7 +131,8 @@ final class RouterRecords {
     private func itemsContext(_ t: AgentThread, _ e: Entry) -> RouterItemLedgers.Context {
         RouterItemLedgers.Context(title: t.title, project: project(t), firstAsk: firstAsk(t.id),
                                   pullRequests: t.pullRequests.map { .init(url: $0.url, number: $0.number, state: $0.state) },
-                                  lastReply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 } ?? t.latestMessage)
+                                  lastReply: e.detail.map(\.reply).flatMap { $0.isEmpty ? nil : $0 } ?? t.latestMessage,
+                                  yourWords: e.detail?.youSaid ?? t.lastUserText)
     }
 
     // MARK: Reads
@@ -521,9 +524,15 @@ final class RouterRecords {
                 }
             }
             readIfNeeded(id, e, t, code)
-            // Turn ends and your messages are read against what is open; a run starting again never stops a read.
-            items.observe(id, t, ended: code.state == .done || code.state == .stopped,
-                          reads: canAsk() && e.scope == .line && e.hidden != true, context: itemsContext(t, e))
+            // Turn ends and your messages are read against what is open; a run starting again never stops a read. A turn
+            // that ended while its subagents or background work go on is ended too (no run is live: the shell lists them
+            // only then), and a whole message the agent posts while its run goes on is read as it lands.
+            let ended = code.state == .done || code.state == .stopped || code.state == .working && !code.paused && !t.pendingTasks.isEmpty
+            let said = code.state == .working && !ended ? e.detail.flatMap { d in
+                d.saidID.flatMap { id in d.said.map { RouterItemLedgers.Said(id: id, words: $0) } }
+            } : nil
+            items.observe(id, t, ended: ended, said: said, reads: canAsk() && e.scope == .line && e.hidden != true,
+                          context: itemsContext(t, e))
             if !items.reading(id, run: t.latestRunID) { e.itemWords = nil }
             askIfNeeded(id, e, t, code)
             summarizeIfNeeded(id, e, t, code, now: now)

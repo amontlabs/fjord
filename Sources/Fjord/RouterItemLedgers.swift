@@ -202,6 +202,9 @@ struct RouterItemFacts: Equatable, Sendable {
         case message(id: String, at: Date, words: String, before: String?)
         /// Your words sent from here: they show in the block at once.
         case sent(at: Date, words: String)
+        /// A whole message the agent posted while its run `run` goes on, by T3's id: a question asked mid-run (while it
+        /// waits on a subagent, say) is read when it is asked. Coalesced: a newer one replaces one still waiting.
+        case said(id: String, run: String, words: String)
 
         var key: String {
             switch self {
@@ -209,18 +212,22 @@ struct RouterItemFacts: Equatable, Sendable {
             case .messages(_, let upTo): "msgs:" + Self.ms(upTo)
             case .message(let id, _, _, _): "msg:" + id
             case .sent(let at, _): "sent:" + Self.ms(at)
+            case .said(let id, _, _): "said:" + id
             }
         }
 
         private static func ms(_ d: Date) -> String { String(Int64(d.timeIntervalSince1970 * 1000)) }
 
         var isTurn: Bool { if case .turn = self { true } else { false } }
+        var isSaid: Bool { if case .said = self { true } else { false } }
+        /// Your words: they can close what is open, and add nothing.
+        var isYours: Bool { !isTurn && !isSaid }
 
         /// Your words, when the input is a message whose words are known.
         var words: String? {
             switch self {
             case .message(_, _, let words, _), .sent(_, let words): words
-            case .turn, .messages: nil
+            case .turn, .messages, .said: nil
             }
         }
     }
@@ -233,6 +240,14 @@ struct RouterItemFacts: Equatable, Sendable {
         var pullRequests: [RouterVerdictInput.PullRequest] = []
         /// The agent's last reply, as the records hold it: what your words sent here answer.
         var lastReply: String?
+        /// Your last words to the thread: what a mid-run message is read with.
+        var yourWords: String?
+    }
+
+    /// The agent's latest whole message in a run that goes on, by T3's id.
+    struct Said: Equatable {
+        var id: String
+        var words: String
     }
 
     static let readKept = 40
@@ -258,6 +273,9 @@ struct RouterItemFacts: Equatable, Sendable {
     var retryAfter: (Int) -> TimeInterval = { n in min(30 * pow(2, Double(max(n, 1) - 1)), RouterVerdicts.maxBackoff) }
     /// How long a closed item strikes, and a new one is lit, before the ledger settles (0 in tests: `settle` by hand).
     var strike: TimeInterval = Router.Items.strike
+    /// At most one mid-run message read per thread this often, as summaries (`RouterRecords.summaryGap`): one that comes
+    /// sooner waits for the gap's end, and a newer one replaces it meanwhile. Anything queued behind it doesn't wait.
+    var saidGap: TimeInterval = 60
 
     // MARK: State
 
@@ -291,7 +309,19 @@ struct RouterItemFacts: Equatable, Sendable {
         var retryToken = 0
         /// A message you sent here, until T3 stamps it.
         var sentAt: Date?
+        /// The inputs seen in this run of Fjord after it started (not before a launch, not pending from the last one):
+        /// only their items are told as banners.
+        var heard: Set<String> = []
+        /// The last mid-run message read's start, and the wait for the gap's end.
+        var saidAt: Date?
+        var saidWait = false
+        var saidToken = 0
     }
+
+    /// When this run of Fjord first looked at a thread, and the threads it has looked at since: what it finds on a
+    /// thread's first look ended before the launch, unless T3's stamps say otherwise.
+    private var launchedAt: Date?
+    private var looked: Set<String> = []
 
     private var live: [String: Live] = [:]
 
@@ -307,58 +337,69 @@ struct RouterItemFacts: Equatable, Sendable {
     /// The thread as T3 shows it now, on the page (`reads`: the Router may call the model): what ended and what you wrote
     /// since it was last seen become inputs, and the next one is read.
     /// `ended`: the latest run is over (the thread is Done or Stopped).
-    func observe(_ id: String, _ t: AgentThread, ended over: Bool, reads: Bool, context: @autoclosure () -> Context) {
+    /// `said`: the agent's latest whole message while its run goes on (nil when it ended, or wrote nothing whole yet).
+    /// A thread first seen (a first launch, a thread listed again) reads its latest input: the turn it ended, or the
+    /// message it posted mid-run. Reads are paced by the verdict queue's cap and the projection reads' (4 at a time).
+    func observe(_ id: String, _ t: AgentThread, ended over: Bool, said: Said? = nil, reads: Bool, context: @autoclosure () -> Context) {
         guard reads else { return }
+        if launchedAt == nil { launchedAt = now() }
         if let stash = load(id)?.settled { unsettled(id, stash, run: t.latestRunID) }
         let had = load(id)
         let ended = t.latestRunID.flatMap { over ? Input.turn(run: $0).key : nil }
+        let run = t.latestRunID
+        let mid = run.flatMap { r in said.flatMap { over ? nil : Input.said(id: $0.id, run: r, words: $0.words) } }
         // Nothing new since it was last seen (the common case: one T3 event of many): only a waiting input may go on.
         if let had, had.run == t.latestRunID, (t.lastAuthoredAt ?? .distantPast) <= (had.message ?? .distantPast),
-           ended.map({ had.read.contains($0) }) ?? true {
+           ended.map({ had.read.contains($0) }) ?? true,
+           mid.map({ m in had.read.contains(m.key) || had.pending.contains { $0.key == m.key } }) ?? true {
+            looked.insert(id)
             if live[id]?.reading == nil, !had.pending.isEmpty { pump(id, context: context) }
             return
         }
+        // Its first look in this run of Fjord: what it finds ended before the launch unless its stamp is later.
+        let first = looked.insert(id).inserted
+        let launch = launchedAt ?? .distantPast
         let l = entry(id)
         var s = had ?? Saved(run: t.latestRunID, message: t.lastAuthoredAt)
-        let run = t.latestRunID
-        if had == nil, let run, over, !firstRead(t) {
-            // First seen (a first launch, a thread listed again): a turn that ended long ago, or one past the launch's
-            // cap, is taken as read; its line is the code's words.
-            markRead(&s, Input.turn(run: run).key)
-        }
         // A run that is no longer the latest ended: read it, even when the next one started at once (a wake).
-        if let prev = s.run, prev != run { enqueue(l, &s, .turn(run: prev)) }
+        if let prev = s.run, prev != run { enqueue(l, &s, .turn(run: prev), heard: !first) }
         s.run = run
         // You wrote since: every message after the last one seen is listed from the projection, one input each, before
         // the turn that ended after them (a steer, a queued message) and after one that ended before.
         let wrote = t.lastAuthoredAt.flatMap { $0 > (s.message ?? .distantPast) ? $0 : nil }
         let endedFirst = wrote.map { at in t.lastRunEndedAt.map { $0 < at } ?? false } ?? true
-        if endedFirst, let run, over { enqueue(l, &s, .turn(run: run)) }
+        let turnHeard = !first || (t.lastRunEndedAt ?? .distantPast) >= launch
+        if endedFirst, let run, over { endTurn(l, &s, run, heard: turnHeard, reply: context().lastReply) }
         if let at = wrote {
             let after = s.message
             s.message = at
             if let i = s.pending.indices.last, case .messages(let from, _) = s.pending[i], l.reading?.key != s.pending[i].key {
                 s.pending[i] = .messages(after: from, upTo: at)
             } else {
-                enqueue(l, &s, .messages(after: after, upTo: at))
+                enqueue(l, &s, .messages(after: after, upTo: at), heard: !first || at >= launch)
             }
         }
-        if !endedFirst, let run, over { enqueue(l, &s, .turn(run: run)) }
+        if !endedFirst, let run, over { endTurn(l, &s, run, heard: turnHeard, reply: context().lastReply) }
+        if let mid, !s.read.contains(mid.key), !s.pending.contains(where: { $0.key == mid.key }) {
+            // Coalesced: a newer message replaces one still waiting (not the one being read).
+            s.pending.removeAll { $0.isSaid && $0.key != l.reading?.key }
+            enqueue(l, &s, mid, heard: !first)
+        }
         // The inputs and their triggers seen, in one write.
         if s != had { store(id, s) }
         pump(id, context: context)
     }
 
-    /// How many threads first seen in this run of Fjord get their latest turn read: a first launch reads only a few.
-    static let firstReads = 6
-    private var firstReadCount = 0
-
-    /// A thread first seen: its latest turn is read only when it ended in the last few minutes, and only for the first
-    /// few such threads.
-    private func firstRead(_ t: AgentThread) -> Bool {
-        guard now().timeIntervalSince(t.lastRunEndedAt ?? t.lastActivity) <= ThreadNotices.fresh, firstReadCount < Self.firstReads else { return false }
-        firstReadCount += 1
-        return true
+    /// `run`'s turn ended: it is read. A mid-run message of it still waiting is its reply (`reply`, the records' last
+    /// one): the turn's read reads it.
+    private func endTurn(_ l: Live, _ s: inout Saved, _ run: String, heard: Bool, reply: String?) {
+        if let reply = reply.map(RouterVerdictReading.flat), !reply.isEmpty {
+            s.pending.removeAll { p in
+                guard case .said(_, let r, let words) = p, r == run, p.key != l.reading?.key else { return false }
+                return RouterVerdictReading.flat(words) == reply
+            }
+        }
+        enqueue(l, &s, .turn(run: run), heard: heard)
     }
 
     /// Your words to the thread, sent here: they show in the block at once and its open items sheen; they are read once
@@ -370,7 +411,7 @@ struct RouterItemFacts: Equatable, Sendable {
         let input = Input.sent(at: at, words: words)
         s.sent = Array((s.sent + [Sent(at: at, words: words)]).suffix(Self.sentKept))
         l.sending[input.key] = false
-        enqueue(l, &s, input)
+        enqueue(l, &s, input, heard: true)
         store(id, s)
         changed(id)
         pump(id, context: context)
@@ -402,9 +443,10 @@ struct RouterItemFacts: Equatable, Sendable {
         pump(id, context: context)
     }
 
-    private func enqueue(_ l: Live, _ s: inout Saved, _ input: Input) {
+    private func enqueue(_ l: Live, _ s: inout Saved, _ input: Input, heard: Bool) {
         guard !s.read.contains(input.key), !s.pending.contains(where: { $0.key == input.key }) else { return }
         s.pending.append(input)
+        if heard { l.heard.insert(input.key) }
         // A new turn: the header pulses once.
         if input.isTurn, !s.items.isEmpty { l.pulse &+= 1 }
     }
@@ -418,9 +460,10 @@ struct RouterItemFacts: Equatable, Sendable {
 
     /// A failed read's wait is over: it is made again (`pump` on the next `observe`, or here).
     func retry(_ id: String, context: @autoclosure () -> Context) {
-        guard let l = live[id], l.held || l.factsFailed != nil else { return }
+        guard let l = live[id], l.held || l.factsFailed != nil || l.saidWait else { return }
         l.held = false
         l.factsFailed = nil
+        l.saidWait = false
         changed(id)
         pump(id, context: context)
     }
@@ -472,7 +515,7 @@ struct RouterItemFacts: Equatable, Sendable {
         case .messages(_, let upTo):
             // Facts read for it that list the message T3 stamped (the projection may lag the shell).
             spent(l, input.key) || l.factsFor == input.key && l.facts?.messages.contains { $0.at >= upTo.addingTimeInterval(-2) } == true
-        case .message: true
+        case .message, .said: true
         // Read once T3 took them.
         case .sent: l.sending[input.key] == true
         }
@@ -484,7 +527,7 @@ struct RouterItemFacts: Equatable, Sendable {
         let l = entry(id)
         guard l.reading == nil, !l.held else { return }
         while var s = load(id), let input = s.pending.first {
-            if !input.isTurn {
+            if input.isYours {
                 // Nothing open: your words can't close anything. A turn after them that they started reads them too
                 // (not a turn that was only queued, steered or under way when you wrote).
                 let carried = if case .message(let mid, _, _, _) = input {
@@ -511,6 +554,20 @@ struct RouterItemFacts: Equatable, Sendable {
                 fetch(id, input.key)
                 return
             }
+            if input.isSaid, s.pending.count == 1, let at = l.saidAt, now() < at.addingTimeInterval(saidGap) {
+                // Sooner than the gap after the last one: it waits for the gap's end (a newer one replaces it).
+                guard !l.saidWait else { return }
+                l.saidWait = true
+                l.saidToken &+= 1
+                let token = l.saidToken, wait = at.addingTimeInterval(saidGap).timeIntervalSince(now())
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(wait))
+                    guard let self, let l = self.live[id], l.saidWait, l.saidToken == token else { return }
+                    self.retried(id)
+                }
+                return
+            }
+            l.saidWait = false
             if case .messages(let after, let upTo) = input {
                 let f = l.factsFor == input.key ? l.facts ?? RouterItemFacts() : RouterItemFacts()
                 // Each message of yours in it, by its id, oldest first; T3's copy of words sent from here is not read again.
@@ -522,6 +579,7 @@ struct RouterItemFacts: Equatable, Sendable {
                     }
                     inputs.append(.message(id: m.id, at: m.at, words: m.text, before: m.before))
                 }
+                if l.heard.contains(input.key) { l.heard.formUnion(inputs.map(\.key)) }
                 // T3 never listed it: a note, so an answer of yours isn't silently unread.
                 if !f.messages.contains(where: { $0.at >= upTo.addingTimeInterval(-2) }) { note(&s, Router.Items.Copy.unreadMessage) }
                 markRead(&s, input.key)
@@ -539,13 +597,25 @@ struct RouterItemFacts: Equatable, Sendable {
                                      input: .message(words: "", replyBefore: nil), pullRequests: context.pullRequests)
             switch input {
             case .turn(let run):
-                // The turns that ended after it and were never seen (the thread was off the page): read after it, in order.
                 if let f = l.facts, let i = f.order.firstIndex(of: run) {
-                    let later = f.order[(i + 1)...].filter { r in
-                        f.turns[r].map { !$0.live } == true
-                            && !s.read.contains(Input.turn(run: r).key) && !s.pending.contains(.turn(run: r))
+                    func unread(_ r: String) -> Bool {
+                        f.turns[r].map { !$0.live } == true && !s.read.contains(Input.turn(run: r).key) && !s.pending.contains(.turn(run: r))
                     }
+                    // The turns between the last one read and this one, never seen (they ran while Fjord was closed, or
+                    // the thread off the page): read first, in order. Not on a thread's first read: only its latest is.
+                    if let last = f.order[..<i].lastIndex(where: { s.read.contains(Input.turn(run: $0).key) }) {
+                        let missed = f.order[(last + 1)..<i].filter(unread)
+                        if !missed.isEmpty {
+                            s.pending.insert(contentsOf: missed.map { Input.turn(run: $0) }, at: 0)
+                            if l.heard.contains(input.key) { l.heard.formUnion(missed.map { Input.turn(run: $0).key }) }
+                            store(id, s)
+                            continue
+                        }
+                    }
+                    // The turns that ended after it and were never seen (the thread was off the page): read after it, in order.
+                    let later = f.order[(i + 1)...].filter(unread)
                     s.pending.insert(contentsOf: later.map { Input.turn(run: $0) }, at: 1)
+                    if l.heard.contains(input.key) { l.heard.formUnion(later.map { Input.turn(run: $0).key }) }
                 }
                 guard let turn = l.facts?.turns[run], !turn.reply.isEmpty else {
                     // A turn with no words, or older than the facts keep: nothing to read. One T3 never listed: a note.
@@ -560,6 +630,9 @@ struct RouterItemFacts: Equatable, Sendable {
                 x.input = .message(words: words, replyBefore: before ?? context.lastReply)
             case .sent(_, let words):
                 x.input = .message(words: words, replyBefore: context.lastReply)
+            case .said(_, _, let words):
+                x.input = .said(message: words, yourWords: context.yourWords)
+                l.saidAt = now()
             case .messages:
                 return
             }
@@ -673,8 +746,10 @@ struct RouterItemFacts: Equatable, Sendable {
         l.closing += striking
         l.fresh.formUnion(added.map(\.id))
         settleLater(id, l)
+        // Told only for what this run of Fjord saw happen: not what ended before the launch, nor a read left pending by the last.
         let needs = added.filter { $0.kind != .know }
-        if !needs.isEmpty { self.added(id, needs, input.key) }
+        if !needs.isEmpty, l.heard.contains(input.key) { self.added(id, needs, input.key) }
+        l.heard.remove(input.key)
         changed(id)
     }
 
@@ -794,7 +869,8 @@ struct RouterItemFacts: Equatable, Sendable {
             return RouterLedger()
         }
         let l = live[id]
-        let busy = l?.held != true && (l?.reading != nil || !s.pending.isEmpty)
+        // A mid-run message's read is quiet: what it finds lands, nothing sheens meanwhile.
+        let busy = l?.held != true && (l?.reading.map { !$0.isSaid } ?? false || s.pending.contains { !$0.isSaid })
         var items = s.items.map { item -> RouterItem in
             var item = item
             if let how = l?.closes[item.id] {
@@ -822,7 +898,9 @@ struct RouterItemFacts: Equatable, Sendable {
         var ledger = RouterLedger(items: items)
         ledger.pulse = l?.pulse ?? 0
         if busy, !s.items.isEmpty, let l {
-            if let input = l.reading ?? s.pending.first { ledger.read = input.words.map { .message($0) } ?? .turn }
+            if let input = l.reading.flatMap({ $0.isSaid ? nil : $0 }) ?? s.pending.first(where: { !$0.isSaid }) {
+                ledger.read = input.words.map { .message($0) } ?? .turn
+            }
         }
         return ledger
     }

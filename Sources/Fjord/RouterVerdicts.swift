@@ -365,8 +365,8 @@ struct RouterVerdictReading {
         switch job.work {
         case .verdict(let r) where r.kind == .items:
             let x = r.items ?? RouterItemsInput(title: r.input.title, input: .message(words: "", replyBefore: nil))
-            (arguments, kind) = (RouterItemsPrompt.arguments(turn: x.isTurn), nil)
-            itemsReading = RouterItemsReading(turn: x.isTurn, ids: Set(x.open.map(\.id)))
+            (arguments, kind) = (RouterItemsPrompt.arguments(x.reads), nil)
+            itemsReading = RouterItemsReading(x.reads, ids: Set(x.open.map(\.id)))
             input = { Data(RouterItemsPrompt.text(x).utf8) }
         case .verdict(let r) where r.kind == .summary:
             (arguments, kind) = (RouterSummaryPrompt.arguments, .summary)
