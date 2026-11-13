@@ -436,7 +436,7 @@ struct RouterFloating: View {
         let frames = model.targets.frames
         ZStack(alignment: .topLeading) {
             if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)] {
-                hung(from: frame, width: thread.peeksWork ? Router.Work.peekWidth : Router.Peek.width) {
+                hung(from: blockFrame(thread, name: frame, frames: frames), width: thread.peeksWork ? Router.Work.peekWidth : Router.Peek.width) {
                     if thread.peeksWork { RouterWorkingPeek(model: model, thread: thread) } else { RouterPeek(thread: thread) }
                 }
                     .id("peek-" + id)
@@ -475,6 +475,19 @@ struct RouterFloating: View {
         .motion(.fade, value: model.snoozeMenu != nil)
         .motion(.fade, value: model.placesMenu)
         .motion(.fade, value: model.launchMenu)
+    }
+
+    /// What a line's peek hangs from: its name; for a block, the name down to its last row, so a peek under it never
+    /// covers the block's own items (over it, it hangs from the name as any line's).
+    private func blockFrame(_ thread: RouterThread, name: CGRect, frames: [RouterHit: CGRect]) -> CGRect {
+        guard thread.ledger.block else { return name }
+        var bottom = name.maxY
+        for item in thread.ledger.items {
+            if let f = frames[.row(RouterModel.itemKey(thread.id, item.id))] { bottom = max(bottom, f.maxY) }
+        }
+        // Your words or the placeholder under the items: a row each, with no target of their own.
+        if thread.ledger.read != nil { bottom += Router.Items.rowHeight }
+        return CGRect(x: name.minX, y: name.minY, width: name.width, height: bottom - name.minY)
     }
 
     /// `trailing`: the panel's trailing edge on its anchor's (a menu under a trailing button).

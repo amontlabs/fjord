@@ -184,6 +184,13 @@ enum RouterShots {
             model.select(nil)
             RouterDemo.items(model)
         },
+        // The pointer on a running block's header: its working peek hangs under the whole block, never over its items.
+        State(name: "v2-items-hover", make: { model in
+            model.select(nil)
+            RouterDemo.items(model)
+        }, pointer: { model in
+            model.hoverRow = ID.checkpoint
+        }),
         State(name: "v2-items-card") { model in
             RouterDemo.items(model)
             model.select(.line(ID.checkpoint))
