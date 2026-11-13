@@ -275,7 +275,15 @@ enum RouterShots {
         }, size: wideLab),
         // Four ways to use a wide window, to choose from (WIDE-OPTIONS.md, `RouterLab`): the same records in each, at
         // rest and with Checkpoint boot's Decide open.
-    ] + RouterLab.Option.allCases.flatMap { option in
+    ] + [1100, 1450, 1650, 1900].map { (width: CGFloat) in
+        // The breakpoints (`steps`): the same page, a card open, at four window widths.
+        State(name: "v2-steps-\(Int(width))", make: { model in
+            model.lab = .steps
+            RouterDemo.items(model)
+            model.select(.line(ID.checkpoint))
+            model.focusItem(RouterDemo.Item.keep)
+        }, size: CGSize(width: width, height: 1000))
+    } + RouterLab.Option.allCases.filter { $0 != .steps }.flatMap { option in
         [
             State(name: "v2-wide-\(option.rawValue)", make: { model in
                 model.lab = option

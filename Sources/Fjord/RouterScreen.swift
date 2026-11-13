@@ -47,8 +47,8 @@ struct RouterScreen: View {
 
     /// The wide layout being looked at, when the page has the room for it (demo only; without, the page is its own).
     private var lab: (option: RouterLab.Option, frame: RouterLab.Frame)? {
-        guard let option = model.lab, let frame = RouterLab.frame(option, page: width) else { return nil }
-        return (option, frame)
+        guard let option = model.lab else { return nil }
+        return RouterLab.resolve(option, page: width)
     }
 
     var body: some View {

@@ -9,11 +9,22 @@ import SwiftUI
 // - b, list and pane: the list as it is in a 600 column, the selected row's card in a pane beside it.
 // - c, board: Needs you in the column, Done and Working in a slimmer column beside it.
 // - d, ledger by project: a's rows grouped by project, the project in a rail, no section headers.
+// - steps: e, else d, else the page's own, by the page's width.
 // - e, ledger and pane: d's ledger in a narrower column, the selected row's card in b's pane beside it.
 
 enum RouterLab {
     enum Option: String, CaseIterable {
         case a, b, c, d, e
+        /// The breakpoints: e when the page has the room, else d, else the page's own.
+        case steps
+    }
+
+    /// The option drawn on a page `page` wide, and its columns: `steps` resolved to the widest that fits.
+    static func resolve(_ option: Option, page: CGFloat) -> (option: Option, frame: Frame)? {
+        if option == .steps {
+            return resolve(.e, page: page) ?? resolve(.d, page: page)
+        }
+        return frame(option, page: page).map { (option, $0) }
     }
 
     /// `FJORD_WIDE`: the option every page of this run starts with.
@@ -73,6 +84,8 @@ enum RouterLab {
             guard room >= margin.lowerBound else { return nil }
             let m = min(room, ledgerMargin)
             return Frame(start: max((page - ledger) / 2, g + rail + m + lead), column: ledger, margin: m, rail: rail)
+        case .steps:
+            return nil
         case .e:
             let gap: CGFloat = 40
             let column: CGFloat = 520
@@ -124,7 +137,7 @@ struct RouterLabPage: View {
                 case .a: margins
                 case .c: board
                 case .d: ledger(cards: true)
-                case .b, .e: EmptyView()
+                case .b, .e, .steps: EmptyView()
                 }
             }
         }
