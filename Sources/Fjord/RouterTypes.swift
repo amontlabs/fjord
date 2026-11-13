@@ -35,12 +35,15 @@ enum Router {
     enum Line {
         static let minHeight: CGFloat = 34
         static let padY: CGFloat = 6
-        /// The row's ground past the text, each side.
-        static let reach: CGFloat = 8
+        /// The row's ground past its words, each side: the name starts this far in (past the dot's column), and the age
+        /// ends as far from the other edge, so a line's ground and its card have the same inset left and right.
+        static let reach: CGFloat = nameLeading
+        /// The dot's column (new, or where your words go), from the row's edge.
+        static let dotLeading: CGFloat = 8
         static let radius: CGFloat = Surface.row
         static let dotGap: CGFloat = 6
-        /// Where the name starts, from the row's edge: reach, dot, gap.
-        static let nameLeading: CGFloat = reach + CDS.Dot.size + dotGap
+        /// Where the name starts, from the row's edge: the dot's column, the dot, gap.
+        static let nameLeading: CGFloat = dotLeading + CDS.Dot.size + dotGap
         static let mark: CGFloat = 9.5
         static let markBox: CGFloat = 13
         static let markGap: CGFloat = 4
@@ -67,11 +70,13 @@ enum Router {
 
     enum Card {
         static let leading: CGFloat = Line.nameLeading
-        /// The footer's keys and the options' end on one edge.
-        static let trailing: CGFloat = 16
-        /// An option's ground past the card's column: its radio sits on the column, its keys on the footer's edge.
+        /// The footer's keys, the options' and the line's age end on one edge, as far from the ground's edge as the
+        /// card's column starts from the other.
+        static let trailing: CGFloat = Line.reach
+        /// An option's ground past the card's column, each side: its radio sits on the column, its keys on the footer's
+        /// edge.
         static let optionReach: CGFloat = 12
-        static let optionTrailing: CGFloat = 8
+        static let optionTrailing: CGFloat = optionReach
         static let bottom: CGFloat = 10
         static let gap: CGFloat = 10
         static let maxWidth: CGFloat = 560
@@ -482,6 +487,8 @@ enum RouterHit: Hashable {
     case revert, toast
     case clearFilter
     case prBadge(String, Int)
+    /// A link found in an item's quote (its card's quiet buttons): the item's key, the link's place.
+    case link(String, Int)
 }
 
 enum RouterFooterAct: Hashable {

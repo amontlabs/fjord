@@ -42,10 +42,11 @@ enum RouterShots {
         let name: String
         let make: (RouterModel) -> Void
         var pointer: ((RouterModel) -> Void)?
+        var size = CGSize(width: 1280, height: 960)
     }
 
     private static func shot(_ name: String, _ look: NSAppearance.Name, _ state: State) -> AppWindowShots.Shot {
-        AppWindowShots.Shot(name: name, destination: { _ in .router }, size: CGSize(width: 1280, height: 960), appearance: look,
+        AppWindowShots.Shot(name: name, destination: { _ in .router }, size: state.size, appearance: look,
                             v2: {
                                 let model = RouterDemo.records(still: true)
                                 state.make(model)
@@ -211,6 +212,35 @@ enum RouterShots {
             RouterDemo.items(model)
             sendReply(model)
             model.itemsRead(ID.checkpoint, RouterDemo.replyRead, settle: false)
+        },
+        // What an item's line leaves out (OPEN-ITEMS.md): the whole sentence wrapping on the line and in a block; the
+        // peek with the item's detail and the agent's words behind it; the card with them, the link and its acts.
+        // In a window a little narrower, as the owner's: the Do's sentence wraps on its line too.
+        State(name: "v2-item-line-wrap", make: { model in
+            model.select(nil)
+            RouterDemo.itemsLook(model)
+        }, size: CGSize(width: 1040, height: 900)),
+        State(name: "v2-item-peek", make: { model in
+            model.select(nil)
+            RouterDemo.itemsLook(model)
+        }, pointer: { model in
+            model.hoverRow = ID.transcriptGap
+            model.hoverName = ID.transcriptGap
+        }),
+        State(name: "v2-item-peek-row", make: { model in
+            model.select(nil)
+            RouterDemo.itemsLook(model)
+        }, pointer: { model in
+            model.hoverRow = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.smaller)
+        }),
+        State(name: "v2-item-card") { model in
+            RouterDemo.itemsLook(model)
+            model.select(.line(ID.transcriptGap))
+        },
+        State(name: "v2-item-card-block") { model in
+            RouterDemo.itemsLook(model)
+            model.select(.line(ID.checkpoint))
+            model.focusItem(RouterDemo.Item.keep)
         },
         State(name: "v2-reassessing") { model in
             model.select(nil)

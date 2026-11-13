@@ -367,7 +367,9 @@ struct RouterLineView: View {
     private func row(_ thread: RouterThread, hot: Bool) -> some View {
         // The line the draft goes to, when it isn't the selected one: the destination row's arrow, in the dot's slot.
         let marked = box.marked
-        return HStack(spacing: 0) {
+        // A line that is its thread's one item may wrap its sentence: the rest keeps to its first line.
+        let single = thread.ledger.single != nil && thread.sent == nil
+        return HStack(alignment: .routerFirstLine, spacing: 0) {
             ZStack {
                 Circle().fill(CDS.Fill.accent).opacity(thread.isNew && !marked ? 1 : 0)
                     // Its own fade, whatever change takes it away (a key's act carries it: `RouterModel.markSeen`).
@@ -379,7 +381,7 @@ struct RouterLineView: View {
                 }
             }
             .frame(width: CDS.Dot.size, height: CDS.Dot.size)
-            .padding(.leading, M.reach).padding(.trailing, M.dotGap)
+            .padding(.leading, M.dotLeading).padding(.trailing, M.dotGap)
             .motion(.fade, value: marked)
             .accessibilityLabel(marked ? "Your words go here" : thread.isNew ? "New" : "")
             RouterName(model: model, thread: thread, rowHot: hot)
@@ -390,6 +392,7 @@ struct RouterLineView: View {
                 .routerActivity(model, thread)
                 .padding(.leading, M.sentenceGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .alignmentGuide(.routerFirstLine) { d in single ? min(d.height, Router.Items.lineHeight) / 2 : d[VerticalAlignment.center] }
             if let project = thread.project {
                 RouterProjectPill(model: model, thread: thread.id, project: project)
                     .padding(.leading, M.pillGap)
@@ -401,6 +404,8 @@ struct RouterLineView: View {
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .layoutPriority(1)
         }
+        // As much air over and under the name's ground as a one-line row has, when the words wrap.
+        .padding(.vertical, single ? (M.minHeight - Router.Items.lineHeight - 2 * M.namePadY) / 2 : 0)
         .frame(minHeight: M.minHeight)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         // A name being given: the sentence slides to its new start.
@@ -539,24 +544,30 @@ struct RouterSentenceView: View {
             } else if let item = thread.ledger.single {
                 // The line is its one open item: its sentence, sheening while a read may close it; your words sent
                 // against it follow it on the line (`↑ "…" · sent`), and a new turn being read shows Fjord's mark.
+                // The whole sentence, wrapping under itself when it needs to: never cut mid-fact (the row keeps its name,
+                // pill and age on the first line, `routerFirstLine`).
                 let text = Text(item.sentence).font(CDS.sans(14))
-                HStack(spacing: Router.Thinking.gap) {
+                let lines = Router.Items.sentenceLines
+                HStack(alignment: .top, spacing: Router.Thinking.gap) {
                     text.foregroundStyle(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
                         .strikethrough(item.closing, color: CDS.Text.muted)
-                        .lineLimit(1).truncationMode(.tail)
-                        .overlay(alignment: .leading) {
+                        .lineLimit(lines).fixedSize(horizontal: false, vertical: true)
+                        .overlay(alignment: .topLeading) {
                             if item.state == .checking {
-                                RouterSheen().mask(alignment: .leading) { text.lineLimit(1).truncationMode(.tail) }
+                                RouterSheen().mask(alignment: .topLeading) {
+                                    text.lineLimit(lines).fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                         }
                     switch thread.ledger.read {
                     case .message(let words)?:
                         Text("↑ “\(words)” · \(Router.Items.Copy.sent)").font(CDS.sans(14)).foregroundStyle(CDS.Text.muted)
                             .lineLimit(1).truncationMode(.middle)
+                            .frame(minWidth: 120, alignment: .leading)
                             .layoutPriority(-1)
                             .transition(.opacity)
                     case .turn?:
-                        RouterThinking().transition(.opacity)
+                        RouterThinking().frame(height: Router.Items.lineHeight).transition(.opacity)
                     case nil:
                         EmptyView()
                     }
@@ -793,6 +804,11 @@ struct RouterOlderPeek: View {
         }
         .modifier(RouterPeekShell(width: Router.Peek.olderWidth))
     }
+}
+
+extension View {
+    /// The page's peek shell (1.6): padding 12, 360 wide, floating, read-only.
+    func routerPeekShell(width: CGFloat = Router.Peek.width) -> some View { modifier(RouterPeekShell(width: width)) }
 }
 
 private struct RouterPeekShell: ViewModifier {

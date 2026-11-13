@@ -233,7 +233,8 @@ struct RouterHousekeepingRow: View {
             RouterPushButton(model: model, hit: .settleAll, title: count == 1 ? "Settle" : "Settle all", variant: .ghost,
                                removes: true) { model.settleAll() }
         }
-        .padding(.leading, Router.Line.nameLeading).padding(.trailing, 5)
+        // The button's words end on the ages' edge (its ground past them).
+        .padding(.leading, Router.Line.nameLeading).padding(.trailing, Router.Line.reach - 3)
         .frame(minHeight: Router.Line.minHeight)
         // Selected: the card's ground, at a row's size.
         .background {
@@ -426,6 +427,11 @@ private struct RouterClearFilters: View {
 
 // MARK: - What floats
 
+private extension CGRect {
+    /// From `leading` in, the same height.
+    func inset(by leading: CGFloat) -> CGRect { CGRect(x: minX + leading, y: minY, width: max(0, width - leading), height: height) }
+}
+
 /// The hover peek, the housekeeping line's peek and the menus, placed by the frame of what they hang from: under it in
 /// the top half of the page, over it in the bottom half.
 struct RouterFloating: View {
@@ -437,9 +443,23 @@ struct RouterFloating: View {
         ZStack(alignment: .topLeading) {
             if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)] {
                 hung(from: blockFrame(thread, name: frame, frames: frames), width: thread.peeksWork ? Router.Work.peekWidth : Router.Peek.width) {
-                    if thread.peeksWork { RouterWorkingPeek(model: model, thread: thread) } else { RouterPeek(thread: thread) }
+                    if thread.peeksWork {
+                        RouterWorkingPeek(model: model, thread: thread)
+                    } else if let item = thread.ledger.single {
+                        // The line is its one item: what the line doesn't say.
+                        if RouterItemPeek.has(thread, item) { RouterItemPeek(thread: thread, item: item) }
+                    } else {
+                        RouterPeek(thread: thread)
+                    }
                 }
                     .id("peek-" + id)
+                    .transition(.scaleFade(0.98, reduce: reduce))
+            }
+            if let (thread, item) = model.peekedItem, let frame = frames[.row(RouterModel.itemKey(thread.id, item.id))] {
+                // An item's row in a block: hung from its words, under its row (over it in the page's lower half).
+                let words = frame.inset(by: Router.Items.indent + Router.Line.markBox + Router.Line.markGap)
+                hung(from: words, width: Router.Peek.width) { RouterItemPeek(thread: thread, item: item) }
+                    .id("item-peek-" + item.id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
             if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {

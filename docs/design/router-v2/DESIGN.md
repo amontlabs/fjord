@@ -255,7 +255,7 @@ Exact sentence, by state, when the code writes it (the model's line replaces the
 ### 1.5 Card (the selected line's)
 
 One card component, inline under its line, inside the selected surface. Selection by ↑↓, click or page open shows the
-same card. Body inset: leading 20 (under the name), trailing 16 (**R4**), bottom 10; blocks 10 apart. **R3.** Prose blocks keep to
+same card. Body inset: leading 20 (under the name), trailing 20, the same (**R8**, 2026-11-13: a line's ground reaches 20 past its words on both sides, the dot's column inside the leading 20, so the age, the footer's keys and the options' keys end 20 from the ground's edge as the name starts 20 from the other), bottom 10; blocks 10 apart. **R3.** Prose blocks keep to
 560; option rows run the card's width. Inline code is 0.92 of the size of the text beside it.
 
 Common blocks, in order (no T3 title: it is the start of the thread's first message, which says little; the name
@@ -289,8 +289,8 @@ Kind blocks:
 
 - **Option row.** Radio 16 (multi-select: checkbox, radius `Approval.checkboxRadius`), label prose 14/20, its key
   (`⇧1`) trailing; 34 tall. **R4.** Plain rows, 1 apart: no outline around them, no dividers. Each row's ground
-  (radius 8) reaches 12 past the card's column at the leading edge and to 8 from the card's trailing edge, so the
-  radios sit on the column and the keys end on the footer's. Hover `hover`; pressed `pressed`; picked: accent radio
+  (radius 8) reaches 12 past the card's column on each side (**R8**), so the radios sit on the column and the keys end
+  on the footer's and the ages'. Hover `hover`; pressed `pressed`; picked: accent radio
   and the `chosen` fill. A click picks it; it does not send. **R3.** With a draft under way the keys dim and a picked
   radio shows at half strength (digits are words now).
 - **PR badge.** CDS Badge tinted, height 18: `#41 open` success, `#41 merged` violet, `#41 closed` danger. Click opens
@@ -316,6 +316,13 @@ Kind blocks:
   · its model as a person says it ("Opus 5.5"; T3's string when it isn't a Claude id) · its age; a background command
   in `CDS.mono(12)` · its age; a wait: what (a thread wait by the waited thread's page name, a command in mono) · its
   age. Ages are from T3's start, else from when Fjord first saw it. Subagents first, then commands, then waits.
+- **R8.** An item's peek (the pointer on the name of a line that is its thread's one item, or anywhere on an item's row
+  in a block, unless its card is open; hung from the row's words): only what the line doesn't already say. The item's
+  detail (body `Text.primary`) when it adds something, then the exact lines of the agent's message behind it, body
+  `Text.secondary` behind the card's rail, cut by whole lines at 4 with a bottom fade; each bare link in it shown as its
+  address without the scheme (never cut after `https://`). "Click for its card" (caption muted) only when the card has
+  more: the words go on past the cut, or it has links or options. An item with neither detail nor words quotes the
+  thread's last lines; with nothing at all, no peek.
 - **R6.** A working line's peek replaces both the name's and the glyphs' there: the pointer anywhere on the row. 400
   wide, the same shell, hung from the name. The command or tool running now (the working dots in the 14 pt
   glyph column, the words in `Text.primary`, a command in `CDS.mono(12)`, middle truncation) and up to three before it
@@ -596,6 +603,16 @@ checking, closing with how, new).
   row per item: the kind's mark alone in its tint (no ground, no word; the accessibility label says the kind) under the
   name's words, the sentence (14, `Text.secondary`), the item's age. The block has 4 pt of air under it.
 - **Working counts it faintly**: "Working 3 +1", the `+1` in `Text.disabled`, for running threads shown in another section.
+- **R8. The whole sentence.** An item's sentence is never cut: it wraps under itself (at most 3 lines, a guard) on the
+  line and in a block, in the sentence column; the mark, the name, the pill and the age stay centred on its first line.
+- **R8. An item's card**, in order: the detail (prose 14/20 `Text.primary`), the quote (the agent's lines behind the
+  item, as the card's last lines: rail, 4 lines, fade, Show all `→`), the links in the quote as quiet buttons (22 tall,
+  radius 6, the `quiet` fill, `chosen` under the pointer; `↗` and the address without its scheme, footnote 12
+  `Text.secondary`, middle truncation), the options, then `Done ⌘⌫` · `Open in T3 ⌘O`. Never empty: an item with no
+  detail, quote or options quotes the thread's last lines. The line's own item's card starts under the name as every
+  card; a block item's under its row's sentence. Demo only for now (`RouterItem.detail`, `.quote`; shots
+  `v2-item-line-wrap`, `v2-item-peek`, `v2-item-peek-row`, `v2-item-card`, `v2-item-card-block`); the engine doesn't
+  fill them yet.
 - **↑↓** walk the header, then each item. The header's card is the thread's (the working timeline); an item's card is its
   options (they pick; Return sends the picked words to the thread, the destination row says so) and `Done ⌘⌫` · `Open in
   T3 ⌘O`. Done strikes the item "done by you", folds it after 1.6 s, and the toast offers Revert. The open card's ground

@@ -25,7 +25,7 @@ struct RouterCard: View {
 
     var body: some View {
         if let item {
-            RouterItemCard(model: model, thread: thread, item: item)
+            RouterItemCard(model: model, thread: thread, item: item, lastLines: box.lastLines)
         } else {
             card
         }
@@ -297,7 +297,7 @@ private struct RouterHeldActs: View {
     }
 }
 
-private extension View {
+extension View {
     /// A card's prose keeps to a readable measure.
     func prose() -> some View { frame(maxWidth: Router.Card.maxWidth, alignment: .leading) }
 }
@@ -363,7 +363,7 @@ struct RouterLastLines: View {
 /// "Show all" (→) under a shut quote, "Show less" (←) under an open one. Both titles are always there, one of them
 /// clear: a title that swapped in (a new view) was drawn where the button ends from its first frame, ahead of the edge
 /// of the words it rides as they roll.
-private struct RouterShowAll: View {
+struct RouterShowAll: View {
     let model: RouterModel
     let id: String
     let open: Bool
@@ -398,10 +398,13 @@ private struct RouterShowAll: View {
 /// A quote's views in one layout: its words (all of them, clipped to what they are offered), its first lines (not drawn,
 /// for the cut), the fade over the cut's bottom, the rail beside the words and the button under them. Cut while shut and
 /// longer than its first lines; the fade and the button only then (the button stays, as "Show less", while open).
-private struct RouterQuoteCut: Layout {
+struct RouterQuoteCut: Layout {
     var open: Bool
+    /// Between the words and the button.
+    var buttonGap: CGFloat = 4
+    /// Whether the button shows: by default only when the words go on past their first lines.
+    var shows: Bool? = nil
     private typealias M = Router.Card
-    private static let buttonGap: CGFloat = 4
 
     struct Cache {
         var width: CGFloat = -1
@@ -423,13 +426,15 @@ private struct RouterQuoteCut: Layout {
 
     private func more(_ cache: Cache) -> Bool { cache.all > cache.first + 1 }
 
+    private func showsButton(_ cache: Cache) -> Bool { shows ?? more(cache) }
+
     /// The words' shown height.
     private func shown(_ cache: Cache) -> CGFloat { more(cache) && !open ? cache.first : cache.all }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         let width = proposal.width ?? M.maxWidth
         measure(width, subviews, &cache)
-        let button = more(cache) ? Self.buttonGap + cache.button : 0
+        let button = showsButton(cache) ? buttonGap + cache.button : 0
         return CGSize(width: width, height: shown(cache) + button)
     }
 
@@ -447,9 +452,9 @@ private struct RouterQuoteCut: Layout {
         subviews[2].place(at: CGPoint(x: origin.x, y: bounds.minY + height - fade), anchor: .topLeading,
                           proposal: ProposedViewSize(width: cut ? words : 0, height: fade))
         subviews[3].place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: 1, height: height))
-        let button = more(cache) ? cache.button : 0
-        subviews[4].place(at: CGPoint(x: origin.x, y: bounds.minY + height + Self.buttonGap), anchor: .topLeading,
-                          proposal: ProposedViewSize(width: more(cache) ? nil : 0, height: button))
+        let button = showsButton(cache) ? cache.button : 0
+        subviews[4].place(at: CGPoint(x: origin.x, y: bounds.minY + height + buttonGap), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: showsButton(cache) ? nil : 0, height: button))
     }
 }
 
@@ -547,7 +552,7 @@ struct RouterOptions: View {
             }
         }
         .padding(.leading, -reach)
-        .padding(.trailing, -(Router.Card.trailing - Router.Line.reach))
+        .padding(.trailing, -Router.Card.optionReach)
     }
 }
 

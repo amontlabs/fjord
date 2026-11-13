@@ -568,6 +568,18 @@ final class RouterModel {
         return nil
     }
 
+    /// The item whose peek shows: the pointer on an item's row in a block, unless its card is open. (A line that is its
+    /// thread's one item peeks from its name, `peeked`.)
+    var peekedItem: (thread: RouterThread, item: RouterItem)? {
+        guard let key = hoverRow, hoverName == nil else { return nil }
+        for t in threads where t.ledger.block && key.hasPrefix(t.id + "#") {
+            guard let item = t.ledger.items.first(where: { Self.itemKey(t.id, $0.id) == key }), !item.closing else { continue }
+            if selection == .line(t.id), focus == item.id { return nil }
+            return RouterItemPeek.has(t, item) ? (t, item) : nil
+        }
+        return nil
+    }
+
     // MARK: Selection
 
     /// The rows ↑↓ walk: lines top to bottom, the housekeeping line, the failure lines.

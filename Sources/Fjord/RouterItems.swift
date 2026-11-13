@@ -66,6 +66,11 @@ struct RouterItem: Identifiable, Equatable {
     var since: Date
     /// A choice's options, when the agent gave some: the item's card lists them.
     var options: [String] = []
+    /// What the sentence leaves out, in a sentence or two, when there is more to say (the demo's only, for now).
+    var detail: String? = nil
+    /// The exact lines of the agent's message the item comes from (the demo's only, for now): the peek and the card
+    /// quote them, and the card offers the links in them.
+    var quote: String? = nil
     var state: State = .open
 
     var closing: Bool { if case .closing = state { true } else { false } }
@@ -74,6 +79,36 @@ struct RouterItem: Identifiable, Equatable {
     var preview = false
     /// Still open: counted, ranked, walked.
     var live: Bool { !closing }
+
+    /// The detail, when it says more than the sentence.
+    var extra: String? {
+        guard let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty,
+              detail.caseInsensitiveCompare(sentence) != .orderedSame else { return nil }
+        return detail
+    }
+
+    /// Words quoted from the agent as the peek and the card show them: each bare link as its address without the scheme
+    /// (`github.com/…/v0.8.13`), still a link. Whole, a link broke after `https://` and read as two words.
+    static func quoted(_ text: String) -> String {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return text }
+        var out = text
+        let matches = detector.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        for m in matches.reversed() {
+            guard let url = m.url, url.scheme == "https" || url.scheme == "http", let range = Range(m.range, in: out) else { continue }
+            // Already a Markdown link's target or label: leave it.
+            if range.lowerBound > out.startIndex, "(<[".contains(out[out.index(before: range.lowerBound)]) { continue }
+            out.replaceSubrange(range, with: "[\(RouterLinkButton.label(url))](\(url.absoluteString))")
+        }
+        return out
+    }
+
+    /// The links in the quote, in order, each once.
+    var links: [URL] {
+        guard let quote, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
+        var seen = Set<URL>()
+        return detector.matches(in: quote, range: NSRange(quote.startIndex..., in: quote)).compactMap(\.url)
+            .filter { ($0.scheme == "https" || $0.scheme == "http") && seen.insert($0).inserted }
+    }
 }
 
 /// A thread's open items and the read that may change them.
@@ -122,8 +157,21 @@ extension RouterItem {
 extension Router {
     /// The block's rows (1.15): items indented under the header's name.
     enum Items {
-        /// An item's row: shorter than a line, so a block reads as one thing.
+        /// An item's row: shorter than a line, so a block reads as one thing. A sentence that wraps makes it taller; its
+        /// mark and age stay on its first line.
         static let rowHeight: CGFloat = 28
+        /// One line of a sentence (14): the mark and the age are centred on the first.
+        static let lineHeight: CGFloat = {
+            let f = CDS.nsSans(14)
+            return (f.ascender - f.descender + f.leading).rounded(.up)
+        }()
+        /// The most lines a sentence takes: it is a short sentence, so this is a guard, never a cut in practice.
+        static let sentenceLines = 3
+        /// The peek's quote, in lines.
+        static let peekLines = 4
+        /// A link's quiet button in the card.
+        static let linkHeight: CGFloat = 22
+        static let linkMaxWidth: CGFloat = 420
         /// Items start under the header's name (its words, past the mark).
         static let indent: CGFloat = Line.nameLeading + Line.namePadX + Line.markBox + Line.markGap
         /// An item's mark sits under the name's words (`indent`), so its rows hang under the name.
@@ -145,6 +193,7 @@ extension Router {
             static let obsolete = "no longer open"
             static let doneByYou = "done by you"
             static let done = "Done"
+            static let more = "Click for its card"
             /// A turn or message Fjord couldn't read (T3 never had it): kept as a Know, so what it said isn't silently lost.
             static let unread = "a turn couldn't be read: open the thread to see what it said"
             static let unreadMessage = "a message of yours couldn't be read: open the thread to check it was answered"
@@ -153,6 +202,15 @@ extension Router {
 }
 
 // MARK: - The block's rows
+
+extension VerticalAlignment {
+    private enum RouterFirstLine: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { d[VerticalAlignment.center] }
+    }
+
+    /// A line's first line of words: its name, pill and age sit on it when an item's sentence wraps.
+    static let routerFirstLine = VerticalAlignment(RouterFirstLine.self)
+}
 
 /// The header of a thread with two or more items: its name as a one-item line's, with its most urgent item's mark and
 /// tint on the name's ground (so a block reads as one thing, its colour on its name), the working dots and the newest
@@ -175,7 +233,7 @@ struct RouterBlockHeader: View {
         let shape = RoundedRectangle(cornerRadius: M.nameRadius, style: .continuous)
         HStack(spacing: 0) {
             Color.clear.frame(width: CDS.Dot.size, height: CDS.Dot.size)
-                .padding(.leading, M.reach).padding(.trailing, M.dotGap)
+                .padding(.leading, M.dotLeading).padding(.trailing, M.dotGap)
             name(top: top, running: running, shape: shape)
                 .routerTarget(model, .name(thread.id))
                 .layoutPriority(2)
@@ -262,26 +320,29 @@ struct RouterItemRow: View {
     var body: some View {
         let closing = item.closing
         let checking = item.state == .checking
-        HStack(spacing: 0) {
+        // The whole sentence, wrapping under itself when it needs to (never cut mid-fact); the mark and the age keep to
+        // its first line.
+        HStack(alignment: .top, spacing: 0) {
             kind
+                .frame(height: I.lineHeight)
                 .padding(.leading, I.markLeading)
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .topLeading) {
                 if case .closing(let how) = item.state {
-                    HStack(spacing: 8) {
-                        Text(item.sentence).font(CDS.sans(14)).foregroundStyle(CDS.Text.muted)
-                            .strikethrough(true, color: CDS.Text.muted)
-                            .lineLimit(1).truncationMode(.tail)
-                        Text(how).font(CDS.sans(12)).foregroundStyle(CDS.Text.secondary).lineLimit(1).fixedSize()
-                    }
-                    .transition(.opacity)
+                    (Text(item.sentence).foregroundColor(CDS.Text.muted).strikethrough(true, color: CDS.Text.muted)
+                        + Text(verbatim: "  ") + Text(how).font(CDS.sans(12)).foregroundColor(CDS.Text.secondary))
+                        .font(CDS.sans(14))
+                        .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
+                        .transition(.opacity)
                 } else {
                     let text = Text(item.sentence).font(CDS.sans(14))
                     text.foregroundStyle(checking ? CDS.Text.muted : CDS.Text.secondary)
-                        .lineLimit(1).truncationMode(.tail)
-                        .overlay(alignment: .leading) {
+                        .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
+                        .overlay(alignment: .topLeading) {
                             if checking {
-                                RouterSheen().mask(alignment: .leading) { text.lineLimit(1).truncationMode(.tail) }
-                                    .transition(.opacity)
+                                RouterSheen().mask(alignment: .topLeading) {
+                                    text.lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
+                                }
+                                .transition(.opacity)
                             }
                         }
                         .transition(.opacity)
@@ -290,9 +351,11 @@ struct RouterItemRow: View {
             .padding(.leading, M.markGap)
             .frame(maxWidth: .infinity, alignment: .leading)
             RouterAge(model: model, since: item.since)
+                .frame(height: I.lineHeight)
                 .padding(.leading, M.ageGap).padding(.trailing, M.reach)
                 .opacity(closing ? 0 : 1)
         }
+        .padding(.vertical, (I.rowHeight - I.lineHeight) / 2)
         .frame(minHeight: I.rowHeight)
         .background {
             let shape = RoundedRectangle(cornerRadius: M.radius, style: .continuous)
@@ -356,19 +419,41 @@ struct RouterItemPlaceholder: View {
 
 // MARK: - An item's card
 
-/// The selected item's card: its options (they pick; Return sends what the destination row shows) and Done, which closes
-/// it with a Revert.
+/// The selected item's card: what the line doesn't say (its detail), the agent's words it comes from (cut with Show all
+/// when long), the links in them as quiet buttons, its options (they pick; Return sends what the destination row shows),
+/// then Done, which closes it with a Revert, and Open in T3. Never empty: an item with nothing more of its own quotes the
+/// thread's last lines.
 struct RouterItemCard: View {
     let model: RouterModel
     let thread: RouterThread
     let item: RouterItem
+    /// The thread's last lines (its line's box keeps them, not the record it draws from).
+    let lastLines: String
 
     var body: some View {
         let d = CDS.Density.compact
         let key = RouterModel.itemKey(thread.id, item.id)
         let picked = Set((model.picks[key] ?? [:]).values)
         let quiet = !model.draftEmpty
+        let detail = item.extra
+        // The agent's words behind the item; with nothing of its own, its thread's last lines.
+        let quote = item.quote ?? (detail == nil && item.options.isEmpty && !lastLines.isEmpty ? lastLines : nil)
+        let links = item.links
         VStack(alignment: .leading, spacing: Router.Card.gap) {
+            if let detail {
+                Text(RouterInline.text(detail, size: d.prose.0)).cdsText(d.prose, .regular, CDS.Text.primary)
+                    .fixedSize(horizontal: false, vertical: true).prose()
+            }
+            if let quote {
+                RouterItemQuote(model: model, thread: thread.id, text: quote).prose()
+            }
+            if !links.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(links.enumerated()), id: \.offset) { n, url in
+                        RouterLinkButton(model: model, hit: .link(key, n), url: url)
+                    }
+                }
+            }
             if !item.options.isEmpty {
                 VStack(spacing: 1) {
                     ForEach(Array(item.options.enumerated()), id: \.offset) { n, label in
@@ -380,8 +465,7 @@ struct RouterItemCard: View {
                         .accessibilityLabel(label)
                     }
                 }
-                .padding(.leading, -Router.Card.optionReach)
-                .padding(.trailing, -(Router.Card.trailing - Router.Line.reach))
+                .padding(.horizontal, -Router.Card.optionReach)
             }
             HStack(spacing: Router.Card.footerGap) {
                 Spacer(minLength: 0)
@@ -391,12 +475,133 @@ struct RouterItemCard: View {
                     model.open(thread.id)
                 }
             }
-            .padding(.top, 2)
         }
-        .padding(.leading, Router.Items.indent + Router.Line.markBox + Router.Line.markGap + Router.Line.namePadX - Router.Line.namePadX)
+        // In a block, under its row's sentence; the line's own item, under the name as every card.
+        .padding(.leading, thread.ledger.block ? Router.Items.indent + Router.Line.markBox + Router.Line.markGap : Router.Card.leading)
         .padding(.trailing, Router.Card.trailing).padding(.bottom, Router.Card.bottom)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A link from an item's quote, as a quiet button: the page's address without its scheme, opened in the browser.
+struct RouterLinkButton: View {
+    let model: RouterModel
+    let hit: RouterHit
+    let url: URL
+
+    var body: some View {
+        RouterButton(model: model, hit: hit, action: { NSWorkspace.shared.open(url) }) { hot, pressed in
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(hot ? CDS.Text.secondary : CDS.Text.muted)
+                Text(Self.label(url)).font(CDS.sans(12)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: Router.Items.linkHeight)
+            .frame(maxWidth: Router.Items.linkMaxWidth, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
+            .background {
+                let s = Router.Surface.self
+                RoundedRectangle(cornerRadius: s.control, style: .continuous)
+                    .fill(pressed ? s.pressed : hot ? s.chosen : s.quiet)
+            }
+            .hoverMotion(hot)
+        }
+        .routerLink()
+        .help(url.absoluteString)
+        .accessibilityLabel("Open \(Self.label(url))")
+    }
+
+    /// `github.com/amontlabs/lastdrop/releases/tag/v0.8.13`: no scheme, no `www.`, no trailing slash.
+    static func label(_ url: URL) -> String {
+        var s = url.absoluteString
+        for prefix in ["https://", "http://", "www."] where s.hasPrefix(prefix) { s.removeFirst(prefix.count) }
+        while s.hasSuffix("/") { s.removeLast() }
+        return s
+    }
+}
+
+/// An item's quote in its card: the agent's words behind a rail, its first lines with a fade and Show all when there is
+/// more (the card's last lines' cut, `RouterQuoteCut`).
+struct RouterItemQuote: View {
+    let model: RouterModel
+    let thread: String
+    let text: String
+
+    var body: some View {
+        let d = CDS.Density.compact
+        let open = model.expanded.contains(thread)
+        let words = Text(RouterInline.text(RouterItem.quoted(text), size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
+        RouterQuoteCut(open: open) {
+            words.fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+                .contentShape(Rectangle())
+                .onTapGesture { if !open { model.expand(true) } }
+            words.lineLimit(Router.Card.lastLines).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .hidden()
+            LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
+                .blendMode(.destinationOut)
+                .allowsHitTesting(false)
+            Rectangle().fill(CDS.Settings.railLine)
+            RouterShowAll(model: model, id: thread, open: open)
+                .frame(minWidth: 0, minHeight: 0, alignment: .topLeading)
+                .clipped()
+        }
+        .compositingGroup()
+    }
+}
+
+// MARK: - An item's peek
+
+/// The pointer on an item (a line that is its thread's one item, or an item's row in a block): what the line doesn't
+/// already say. Its detail when it adds something, then the agent's words it comes from, behind a rail, cut by whole
+/// lines with a fade. "Click for its card" only when the card has more: the words go on past the cut, or it has links
+/// or options. With neither detail nor words, the thread's last lines.
+struct RouterItemPeek: View {
+    let thread: RouterThread
+    let item: RouterItem
+
+    var body: some View {
+        let d = CDS.Density.compact
+        let detail = item.extra
+        let quote = item.quote ?? (detail == nil ? (thread.lastLines.isEmpty ? nil : thread.lastLines) : nil)
+        let more = !item.links.isEmpty || !item.options.isEmpty
+        let caption = Text(Router.Items.Copy.more).cdsText(d.caption, .regular, CDS.Text.muted)
+        VStack(alignment: .leading, spacing: 8) {
+            if let detail {
+                Text(RouterInline.text(detail, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let quote {
+                let words = Text(RouterInline.text(RouterItem.quoted(quote), size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
+                // The caption rides the cut: it shows when the words go on past it (the card has them whole).
+                RouterQuoteCut(open: false, buttonGap: 8, shows: more ? true : nil) {
+                    words.fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+                        .clipped()
+                    words.lineLimit(Router.Items.peekLines).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .hidden()
+                    LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
+                        .blendMode(.destinationOut)
+                    Rectangle().fill(CDS.Settings.railLine)
+                    caption.frame(minWidth: 0, minHeight: 0, alignment: .topLeading).clipped()
+                }
+                .compositingGroup()
+            } else if more {
+                caption
+            }
+        }
+        .routerPeekShell()
+    }
+
+    /// Whether it has anything to say: an item whose line says it all has no peek.
+    static func has(_ thread: RouterThread, _ item: RouterItem) -> Bool {
+        item.extra != nil || item.quote != nil || !thread.lastLines.isEmpty || !item.links.isEmpty || !item.options.isEmpty
     }
 }
 

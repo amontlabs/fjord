@@ -8,6 +8,7 @@ extension RouterDemo {
     enum Item {
         static let stuck = "boot-timeout", keep = "keep-checkpoint", smaller = "image-smaller", quota = "vm-quota"
         static let push = "push-or-pr"
+        static let update = "lastdrop-update"
         /// Your words to Checkpoint boot in the shots and the beat.
         static let reply = "keep 0.3 for now; boot it with 4 GB of RAM"
     }
@@ -39,6 +40,53 @@ extension RouterDemo {
         }
         model.apply(.batch(changes))
     }
+
+    /// The items' look with what a line leaves out (shots `v2-item-*`): the owner's real case as a Do on a thread of its own
+    /// (its sentence wraps, its card quotes the release with its page as a button), Checkpoint boot's Decide in a sentence
+    /// long enough to wrap in its block, its Know with the words it came from.
+    static func itemsLook(_ model: RouterModel) {
+        items(model)
+        let now = model.now
+        func ago(_ m: Double) -> Date { now.addingTimeInterval(-m * 60 - 20) }
+        var gap = RouterThread(id: ID.transcriptGap, name: "Subagent transcript gap", title: "Subagent transcript gap",
+                               project: "lastdrop", state: .done, sentence: .init(text: "released as 0.8.13"), since: ago(13))
+        gap.lastLines = lastdropRelease
+        gap.ledger = RouterLedger(items: [
+            RouterItem(id: Item.update, kind: .do, sentence: "Install the lastdrop 0.8.13 update from its panel; you still run 0.8.12",
+                       since: ago(13),
+                       detail: "The subagent transcript fix ships in 0.8.13: it isn't live until the installed app is updated.",
+                       quote: lastdropInstall),
+        ])
+        var changes: [RouterChange] = [.upsert(gap)]
+        if var t = model.thread(ID.checkpoint) {
+            for i in t.ledger.items.indices {
+                switch t.ledger.items[i].id {
+                case Item.keep:
+                    t.ledger.items[i].sentence = "keep the 0.3 checkpoint as a fallback until the new base has booted cleanly on all three VMs, or delete it now to free 14 GB?"
+                    t.ledger.items[i].quote = "The 0.3 checkpoint is still on disk (14 GB). I can keep it as a fallback until the new base boots cleanly on all three VMs, or delete it now. Which do you want?"
+                case Item.smaller:
+                    t.ledger.items[i].quote = "Side note: the new base image is 1.2 GB smaller than 0.3 (3.1 GB against 4.3 GB), mostly from dropping the old toolchains."
+                default: break
+                }
+            }
+            changes.append(.upsert(t))
+        }
+        model.apply(.batch(changes))
+    }
+
+    /// The agent's last message on the transcript gap thread (the owner's real case, 2026-11-13).
+    static let lastdropRelease = """
+        The fix is committed, pushed to `main` (d24947a), and released as lastdrop 0.8.13: https://github.com/amontlabs/lastdrop/releases/tag/v0.8.13
+        - Build: the release is the signed universal app (Apple silicon and Intel), notarized and stapled.
+        - Check: a run with two subagents now keeps both transcripts whole, with no gap between their turns.
+        - Install: the app's update panel offers 0.8.13; accept it there. The installed app is still 0.8.12, so the fix isn't live until you do.
+        """
+
+    /// The lines of that message the Do comes from.
+    static let lastdropInstall = """
+        The fix is committed, pushed to `main` (d24947a), and released as lastdrop 0.8.13: https://github.com/amontlabs/lastdrop/releases/tag/v0.8.13
+        - Install: the app's update panel offers 0.8.13; accept it there. The installed app is still 0.8.12, so the fix isn't live until you do.
+        """
 
     /// Right after your words to Checkpoint boot: they show in its block, its items sheen, its header has Fjord's mark.
     static func itemsSent(_ model: RouterModel) {

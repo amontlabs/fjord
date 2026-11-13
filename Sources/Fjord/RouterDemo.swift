@@ -81,6 +81,8 @@ enum RouterDemo {
         static let settings = "settings", valCenis = "val-cenis", briefs = "briefs", updater = "updater", disk = "disk"
         static let guide = "guide", bar = "bar", tab = "tab", snapshot = "snapshot", checkpoint = "checkpoint"
         static let upstream = "upstream", glass = "glass"
+        /// The items' look only (`RouterDemo.itemsLook`).
+        static let transcriptGap = "transcript-gap"
     }
 
     static let plan: [String] = [
