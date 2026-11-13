@@ -57,9 +57,9 @@ enum RouterDemo {
         }
     }
 
-    /// Only writing frames (`--frames`, `--select-check`), not filming: the window is drawn off every screen.
+    /// Only writing frames (`--frames`, `--select-check`) or playing a load (`--router-v2-load`), not filming: the window is drawn off every screen.
     static var offscreen: Bool {
-        (frames != nil || RouterDemoScript.selectCheck != nil) && !WindowRecorder.isRequested
+        (frames != nil || RouterDemoScript.selectCheck != nil || RouterLoad.isRequested) && !WindowRecorder.isRequested
     }
 
     static var reduceMotion: Bool { CommandLine.arguments.contains("--reduce-motion") }

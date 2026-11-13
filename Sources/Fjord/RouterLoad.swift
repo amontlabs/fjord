@@ -73,7 +73,8 @@ enum RouterLoad {
             // The gate's size (docs/performance.md: demo data at the default size understates real costs).
             if let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width >= 800 }) {
                 window.setContentSize(NSSize(width: 1617, height: 1188))
-                window.center()
+                // Offscreen (the default) it stays where the run put it, off every screen.
+                if !AppPolicy.offscreen { window.center() }
             }
             let working = model.threads.filter { $0.state == .working }.map(\.id)
             if let first = working.first { model.select(.line(first)) }

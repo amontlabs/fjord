@@ -233,6 +233,23 @@ identical runs. Before → after where it moved.
 | First flush | same | p95 ≤ 16 ms | Open 16 / 21 / 18 (before 20 / 16 / 18), Close 10 / 8 / 8 | Open red by 0-5 ms |
 | Captures inside a morph | same | 0 | 0 | green |
 
+Latest single run of each gate, release, 2026-11-13, at `9c387ca5` plus the load runs drawn offscreen (`--router-v2-load`
+now draws its window off every screen like `--frames`: no focus, no Dock icon; its numbers sit in the ranges above, so
+offscreen doesn't change what it measures). Load average 19. The Open/Close and idle runs need the window on a screen
+(the morph grows from the bar; an offscreen window isn't composited, which would understate the idle cost) and stay visible.
+The idle build also held another agent's uncommitted `RouterLine.swift` edit.
+
+| Gate | Measured | Budget | |
+| --- | --- | --- | --- |
+| T3 event, synthetic | p95 19, max 366 ms | 8 / 16 | red |
+| Flush, synthetic | p95 6, max 364 ms | 2 | red |
+| T3 event, real day | p95 12, max 61 ms (work p95 1) | 8 / 16 | red |
+| Flush, real day | p95 3, max 8 ms | 2 | red |
+| Select, `--router-v2-load select` | p95 21, max 35 ms (work p95 1) | 8 | red |
+| A line becoming a block | p95 16, max 110 ms (first of the load); T3 event p95 9, Flush p95 1 | 16 | p95 at budget |
+| Open / Close | Open p95 315, Close 323 ms; first flush Open 8, Close 10 ms; 0 captures inside | 325 / 16 | green |
+| Idle, Router page open | 0.100 % | 0.6 % | green |
+
 What is left red is SwiftUI's own update, layout and drawing at the commit, not Fjord's work. Under the demo script,
 sampled, the main thread's display cycle is 8.9k of 53k samples, 6.1k of them SwiftUI's render (`updateOutputs`,
 display-list rendering); the Router's own frames are a small part.
