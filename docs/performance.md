@@ -234,17 +234,37 @@ handlers' work halved; the key-to-commit time hardly moved: the same update now 
 about what its pieces did. Writes in a handler that views read must share one animation; give a view its own curve
 (`.motion(.fade, value:)`) when it must keep one.
 
-**Rows missing while a card opens or shuts** (beat 4 at 1.6-1.9 s: the rows under the card that opens are blank for
-some 0.15 s, then come back faint; the same at `5abf8131`, and reported in the build before 35837c36). Ruled out, each tried and measured on beat
-4's frames (ink in the lower list per frame): the stack's own animation (rows always placed at once: the same blank),
-the row containers' clipping (SwiftUI wraps each row in an `_NSGraphicsView` with `clipsToBounds`; unclipped: the
-same), the glide's key path (`position.y` instead of `transform.translation.y`: the same) and the glides themselves
-(logged: one per row per change, sizes and directions right). With the glides off the rows don't go missing (they
-jump). In the blank frames each row's tick views (small hosting views of their own) are drawn where the row glides,
-and the line's own SwiftUI content is not: the line's drawing, not its place, is what's missing while its place in the
-window animates. Next: check whether the line's text layers are redrawn (CPU, asynchronously) when the hosting view's
-transform changes, the same layers lever 3 (main waiting on the render server) is about. Until then, pre-building the
-neighbours' cards and placing the scroll content's height at once stay out.
+**Rows missing while a card opens or shuts, and the clicked line dropping** (found 2026-11-13). Clicking a line made it
+vanish, come back lower and glide up as its card opened; the rows under it were blank for some 0.15 s. Four causes, each
+seen in 60 fps frames (`--frames-rate 60`) and in the views' geometry logged per frame:
+
+- *The list's stack animated its rows for a card.* Only a change of order was placed at once (`placedAtOnce`); a card
+  opening or shutting kept SwiftUI's animation, so the stack moved each row's container (`_NSGraphicsView`) on the
+  curve while the row's hosting view, under `routerGlides()`'s nil animation, sat at its new place inside it: up to
+  216 pt outside the container, whose clip (the fold transition's `mask`, applied at identity too) cut it, and whose
+  `visibleRect` left it out of SwiftUI's drawing. The ticks, Core Animation layers of their own, still drew. Now the
+  list places its rows at once in every turn but one where rows come or go (`RouterModel.folding`), and the fold's mask
+  reaches 20 000 pt above and below an open row, so a row gliding is drawn where it is.
+- *SwiftUI animates a hosting view's new size around its root's new centre.* When a line's hosting view grew for its
+  card in an animated update, its root took its new centre at once and its size on the curve: the line was drawn half
+  the card's height lower and slid up. The line's hosting view now keeps one height (`RouterLineSlotView.room`, 2400 pt,
+  grown in steps for a taller card); only the slot is hit.
+- *A card's roll is drawn two or three frames behind the glides.* It is SwiftUI's, on the main thread; the rows glide on
+  the render server. A line rising under a card that shut covered its last lines. The line's hosting layer has a mask
+  down to the slot's bottom whose height rolls on the glides' own Core Animation curve (`RouterLineSlotView.clip`), with
+  the selected ground's bottom corners.
+- *The card's first layout was not its last.* A plan was cut at a height measured a turn later (the whole plan for a
+  frame: the rows under it went off the page and came back), and the card's place had no width while closed (its clip
+  grew across for the first frames). The plan is cut in the same layout (`RouterPlanCut`) and the place is the line's
+  width.
+
+Also: the line's slot took the list's proposed height, not the hosting controller's measurement, which lagged a turn and
+left a shut card's slot at its open height, over the rows after it.
+
+Checked with `--select-check [few]` (cards opened mid-list and last, switched, shut, ↓ and ↑ walks; `few`: five lines)
+and `scripts/router-frames-check.py`, which reads each frame's `rows-*.json`: 0 rows missing in 3,759 frames (beat 4,
+both scenarios). The Select load at `c3061d76` → after, release, two runs each, interleaved, load 7-8: p95 25 / 26 → 23 /
+27 ms, p50 17 / 16 → 13 / 14.
 
 ## Rules for new code
 
