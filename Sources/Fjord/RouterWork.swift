@@ -43,7 +43,7 @@ struct RouterWork: Equatable {
     /// What started each run, by its id (`RouterDetail.starts`, from the run's message as T3 marks it). A run missing
     /// here started from something not known: the card shows nothing for it.
     var starts: [String: Start] = [:]
-    /// A shot's or the demo's pose for the card's timeline (`RouterWorkTimeline`): nil in the app.
+    /// A shot's or the demo's pose for the card's timeline (`RouterTimeline`): nil in the app.
     var pose: Pose?
 
     /// What started a run, from T3's fields on its message, never from its words (docs/design/router-v2/DESIGN.md R6).
