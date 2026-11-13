@@ -140,9 +140,10 @@ struct RouterActivityRows: View {
         let d = CDS.Density.compact
         let size = compact ? d.footnote : d.body
         let meta = meta.compactMap { $0 }.joined(separator: " · ")
-        return HStack(spacing: compact ? 7 : 8) {
+        // The card's glyphs sit under the line's mark, hung left of the card's column (`Router.Card.hang`).
+        return HStack(spacing: compact ? Router.Card.glyphGap : 8) {
             Image(systemName: symbol).font(.system(size: compact ? 9 : 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
-                .frame(width: A.glyphBox)
+                .frame(width: compact ? Router.Card.glyphBox : A.glyphBox)
             text.cdsText(size, .regular, compact ? CDS.Text.muted : CDS.Text.primary).lineLimit(1).truncationMode(.tail)
             if !meta.isEmpty {
                 Spacer(minLength: 8)

@@ -39,13 +39,13 @@ struct RouterCard: View {
                     RouterSkeletonBar(share: 0.92)
                     RouterSkeletonBar(share: 0.61)
                 }
-                .padding(.leading, M.railInset + 1)
                 .padding(.vertical, 4)
                 .prose()
                 .transition(.opacity)
             } else if box.talking, !summarized {
                 // A working thread with summaries shows them instead (below): its last turn's words aren't news.
-                RouterLastLines(model: model, box: box).prose().transition(.opacity)
+                // Its rail hangs left of the column; its words start on it.
+                RouterLastLines(model: model, box: box).prose().padding(.leading, -M.railInset).transition(.opacity)
             }
             kind
             footer
@@ -97,6 +97,8 @@ struct RouterCard: View {
         case .done:
             HStack(spacing: 8) {
                 badges
+                    // A badge's words, not its ground, start on the column.
+                    .padding(.leading, thread.prs.isEmpty ? 0 : -Router.Line.namePadX - 1)
                 if let diff = thread.diff {
                     (Text(verbatim: "\(diff.files) file\(diff.files == 1 ? "" : "s")  ").foregroundColor(CDS.Text.muted)
                         + Text(verbatim: "+\(diff.added)").foregroundColor(CDS.Git.added)
@@ -115,7 +117,7 @@ struct RouterCard: View {
             if !thread.steps.isEmpty { steps.prose() }
             // Its subagents, background commands and waits, each with how long it has run.
             if !thread.activity.isEmpty {
-                RouterActivityRows(model: model, activity: thread.activity, compact: true).agesColumn()
+                RouterActivityRows(model: model, activity: thread.activity, compact: true).padding(.leading, -M.hang).agesColumn()
                     .transition(.opacity)
             }
         case .sent:
@@ -162,17 +164,18 @@ struct RouterCard: View {
                         }
                     }
                     // Its options' grounds stop short of the rail.
-                    RouterOptions(model: model, thread: thread, labels: question.options, from: from, reach: 8)
+                    RouterOptions(model: model, thread: thread, labels: question.options, from: from, reach: M.formReach)
                     if let typed = model.typed[thread.id]?[q] {
                         Text("Your answer: \(typed)").cdsText(d.body, .regular, CDS.Text.secondary).lineLimit(2)
                             .transition(.opacity)
                     }
                 }
-                .padding(.leading, 12)
                 .overlay(alignment: .leading) {
+                    // Hung in the gutter, left of the radios and their grounds.
                     if q == at {
                         RoundedRectangle(cornerRadius: 1).fill(CDS.Text.accent).frame(width: 2)
                             .matchedGeometryEffect(id: "rail", in: rail)
+                            .offset(x: -(M.radioHang + M.formReach + 4))
                     }
                 }
             }
@@ -188,12 +191,15 @@ struct RouterCard: View {
                 .textSelection(.enabled)
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: Router.Surface.control, style: .continuous).fill(Router.Surface.quiet))
+                // The command's words on the column, its ground around them.
+                .padding(.leading, -8)
             if !p.warning.isEmpty {
-                HStack(spacing: 5) {
-                    Image(systemName: "exclamationmark.triangle").font(.system(size: 10, weight: .medium))
+                HStack(spacing: M.glyphGap) {
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 10, weight: .medium)).frame(width: M.glyphBox)
                     Text(p.warning)
                 }
                 .cdsText(d.footnote, .regular, CDS.Text.warning)
+                .padding(.leading, -M.hang)
             }
         }
     }
@@ -208,6 +214,8 @@ struct RouterCard: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(shape.fill(Router.dangerFill))
+                // The error's words on the column, its ground around them.
+                .padding(.leading, -10)
             (Text("Last step: ") + Text(RouterInline.text(stop.lastStep, size: d.footnote.0)))
                 .cdsText(d.footnote, .regular, CDS.Text.muted)
         }
@@ -217,7 +225,7 @@ struct RouterCard: View {
     private var steps: some View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(thread.steps.prefix(M.steps)) { step in
-                HStack(spacing: 7) {
+                HStack(spacing: M.glyphGap) {
                     ZStack {
                         switch step.state {
                         case .done: Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
@@ -225,14 +233,16 @@ struct RouterCard: View {
                         case .pending: Circle().strokeBorder(CDS.borderStrong, lineWidth: 1).frame(width: 7, height: 7)
                         }
                     }
-                    .frame(width: 14, height: 14)
+                    .frame(width: M.glyphBox, height: 14)
                     Text(step.text).cdsText(d.footnote, .regular, step.state == .running ? CDS.Text.primary : CDS.Text.muted).lineLimit(1)
                 }
             }
             if thread.steps.count > M.steps {
-                Text(verbatim: "+\(thread.steps.count - M.steps) more").cdsText(d.footnote, .regular, CDS.Text.muted).padding(.leading, 21)
+                Text(verbatim: "+\(thread.steps.count - M.steps) more").cdsText(d.footnote, .regular, CDS.Text.muted).padding(.leading, M.hang)
             }
         }
+        // The marks hang left of the column; the steps' words start on it.
+        .padding(.leading, -M.hang)
     }
 
     // MARK: Footer
@@ -245,6 +255,8 @@ struct RouterCard: View {
                 RouterPushButton(model: model, hit: .footer(id, .rerun), title: Router.Copy.continueTitle, keys: ["enter"]) {
                     model.resume(id)
                 }
+                // Its title on the column, its ground around it.
+                .padding(.leading, -8)
             }
             if thread.state == .needsYou(.form) {
                 Text(verbatim: "\(model.answeredCount(thread)) of \(thread.form.count) answered")
@@ -551,7 +563,8 @@ struct RouterOptions: View {
                 .accessibilityHint("Option \(number)")
             }
         }
-        .padding(.leading, -reach)
+        // The radios hang left of the column; the labels start on it.
+        .padding(.leading, -(reach + Router.Card.radioHang))
         .padding(.trailing, -Router.Card.optionReach)
     }
 }
@@ -568,12 +581,12 @@ struct RouterOptionRow: View {
     var reach: CGFloat = Router.Card.optionReach
 
     var body: some View {
-        HStack(spacing: CDS.Approval.gap.sm) {
+        HStack(spacing: Router.Card.radioGap) {
             ZStack {
                 Circle().fill(on ? CDS.Fill.accent : .clear)
                 if on { Circle().fill(.white).frame(width: 6, height: 6) } else { Circle().strokeBorder(CDS.borderStrong, lineWidth: 1) }
             }
-            .frame(width: 16, height: 16)
+            .frame(width: Router.Card.radio, height: Router.Card.radio)
             .opacity(on && quiet ? 0.5 : 1)
             Text(RouterInline.text(label, size: CDS.Density.compact.prose.0)).cdsText(CDS.Density.compact.prose, .regular, CDS.Text.primary)
                 .fixedSize(horizontal: false, vertical: true)

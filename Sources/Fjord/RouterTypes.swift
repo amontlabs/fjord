@@ -39,9 +39,9 @@ enum Router {
         /// ends as far from the other edge, so a line's ground and its card have the same inset left and right.
         static let reach: CGFloat = nameLeading
         /// The dot's column (new, or where your words go), from the row's edge.
-        static let dotLeading: CGFloat = 8
+        static let dotLeading: CGFloat = 4
         static let radius: CGFloat = Surface.row
-        static let dotGap: CGFloat = 6
+        static let dotGap: CGFloat = 4
         /// Where the name starts, from the row's edge: the dot's column, the dot, gap.
         static let nameLeading: CGFloat = dotLeading + CDS.Dot.size + dotGap
         static let mark: CGFloat = 9.5
@@ -69,14 +69,26 @@ enum Router {
     }
 
     enum Card {
-        static let leading: CGFloat = Line.nameLeading
+        /// The card's one text column, from the ground's edge: where the line's name words start (past its ground's pad
+        /// and its mark). Every block's words start here; glyphs, radios and rails hang in the gutter to its left.
+        static let leading: CGFloat = Line.nameLeading + Line.namePadX + Line.markBox + Line.markGap
         /// The footer's keys, the options' and the line's age end on one edge, as far from the ground's edge as the
-        /// card's column starts from the other.
+        /// line's name ground starts from the other.
         static let trailing: CGFloat = Line.reach
-        /// An option's ground past the card's column, each side: its radio sits on the column, its keys on the footer's
-        /// edge.
-        static let optionReach: CGFloat = 12
+        /// A glyph hung left of the column (a step's, an activity row's, a run start's arrow, a warning): the line's
+        /// mark box and gap, so it sits under the line's mark.
+        static let glyphBox: CGFloat = Line.markBox
+        static let glyphGap: CGFloat = Line.markGap
+        static let hang: CGFloat = glyphBox + glyphGap
+        /// An option's radio and the gap after it, hung left of the column so its label starts on it.
+        static let radio: CGFloat = 16
+        static let radioGap: CGFloat = 8
+        static let radioHang: CGFloat = radio + radioGap
+        /// An option's ground past its radio and past the card's trailing edge.
+        static let optionReach: CGFloat = 8
         static let optionTrailing: CGFloat = optionReach
+        /// A form's option grounds reach less far: its current question's rail hangs left of them.
+        static let formReach: CGFloat = 4
         static let bottom: CGFloat = 10
         static let gap: CGFloat = 10
         static let maxWidth: CGFloat = 560

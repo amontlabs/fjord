@@ -474,7 +474,8 @@ struct RouterItemCard: View {
                     .fixedSize(horizontal: false, vertical: true).prose()
             }
             if let quote {
-                RouterItemQuote(model: model, thread: thread.id, text: quote).prose()
+                // Its rail hangs left of the column; its words start on it.
+                RouterItemQuote(model: model, thread: thread.id, text: quote).prose().padding(.leading, -Router.Card.railInset)
             }
             if !links.isEmpty {
                 HStack(spacing: 6) {
@@ -482,6 +483,8 @@ struct RouterItemCard: View {
                         RouterLinkButton(model: model, hit: .link(key, n), url: url)
                     }
                 }
+                // The first link's words on the column, its ground around them.
+                .padding(.leading, -8)
             }
             if !item.options.isEmpty {
                 VStack(spacing: 1) {
@@ -494,7 +497,9 @@ struct RouterItemCard: View {
                         .accessibilityLabel(label)
                     }
                 }
-                .padding(.horizontal, -Router.Card.optionReach)
+                // The radios hang left of the column; the labels start on it.
+                .padding(.leading, -(Router.Card.optionReach + Router.Card.radioHang))
+                .padding(.trailing, -Router.Card.optionReach)
             }
             HStack(spacing: Router.Card.footerGap) {
                 Spacer(minLength: 0)
@@ -506,7 +511,7 @@ struct RouterItemCard: View {
             }
         }
         // In a block, under its row's sentence; the line's own item, under the name as every card.
-        .padding(.leading, thread.ledger.block ? Router.Items.indent + Router.Line.markBox + Router.Line.markGap : Router.Card.leading)
+        .padding(.leading, thread.ledger.block ? Router.Items.indent + Router.Card.hang : Router.Card.leading)
         .padding(.trailing, Router.Card.trailing).padding(.bottom, Router.Card.bottom)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)

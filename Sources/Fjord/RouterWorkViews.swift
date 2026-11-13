@@ -126,7 +126,9 @@ struct RouterWorkTimeline: View {
             .onChange(of: work.pose?.toTop) { _, _ in toTop(proxy, shown) }
             .onAppear { pose(proxy, live) }
         }
-        .padding(.leading, Router.Activity.glyphBox + 7)
+        // The run starts' arrows hang left of the card's column (inside the scroll view, so they aren't clipped); every
+        // row's words start on it.
+        .padding(.leading, -Router.Card.hang)
         .agesColumn()
         .accessibilityElement(children: .contain)
     }
@@ -258,6 +260,7 @@ struct RouterWorkTimeline: View {
                 .cdsText(d.body, .regular, newest ? CDS.Text.primary : CDS.Text.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
+                .padding(.leading, Router.Card.hang)
             Spacer(minLength: 8)
             Text(RouterWorkTime.clock(s.at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
                 .fixedSize()
@@ -267,11 +270,12 @@ struct RouterWorkTimeline: View {
     /// Your words that started the run, quoted on one line; or, quieter still and unquoted, what woke it.
     private func start(_ start: RouterWork.Start) -> some View {
         let ink = Self.yours(start) ? CDS.Text.muted : CDS.Text.muted.opacity(0.7)
-        return HStack(alignment: .firstTextBaseline, spacing: 5) {
+        return HStack(alignment: .firstTextBaseline, spacing: Router.Card.glyphGap) {
             Image(systemName: "arrow.up").font(.system(size: 9, weight: .medium)).foregroundStyle(ink)
+                .frame(width: Router.Card.glyphBox)
             Self.words(start, size: d.footnote.0).cdsText(d.footnote, .regular, ink).lineLimit(1).truncationMode(.tail)
         }
-        .frame(maxWidth: Router.Card.maxWidth, alignment: .leading)
+        .frame(maxWidth: Router.Card.maxWidth + Router.Card.hang, alignment: .leading)
     }
 
     static func yours(_ start: RouterWork.Start) -> Bool { if case .asked = start { true } else { false } }
