@@ -33,7 +33,7 @@ import Testing
         #expect(val.block ? val.pendingItems["i1"] == answer && val.pending == nil : val.pending == answer)
         #expect(model.ghosts == [RouterGhost(project: "fjord", words: "trim the onboarding copy")])
         #expect(model.layout.contains { $0.kind == .ghost(RouterGhost(project: "fjord", words: "trim the onboarding copy")) })
-        #expect(model.splitCount == 3)
+        #expect(model.splitRows.rows == [0, 1, 2] && model.splitRows.more == 0)
         // The split marks its own targets: no other line is marked.
         #expect(model.marked == nil)
     }
@@ -70,5 +70,23 @@ import Testing
         // The sure part is untouched, and a key past its places does nothing.
         #expect(model.split?[0].place == .thread(ID.settings))
         #expect(!model.lightPart(2))
+    }
+
+    @Test func pastFourRowsTheRestIsCountedAndTheUnsurePartStaysShown() {
+        var sends = three + [RouterSend(places: [.thread(ID.briefs)], words: "copy the old rows first"),
+                             RouterSend(places: [.thread(ID.updater)], words: "ship it")]
+        #expect(page(text, sends: sends).splitRows == ([0, 1, 2, 3], 1))
+        sends.append(RouterSend(places: [.thread(ID.tab), .thread(ID.snapshot)], sure: false, words: "the spacing is off"))
+        let model = page(text, sends: sends)
+        #expect(model.splitRows.rows == [0, 1, 2, 5] && model.splitRows.more == 2)
+    }
+
+    @Test func aClickOnARowLightsItsTargetOnThePage() {
+        let model = page(text, sends: three)
+        model.revealSend(0)
+        #expect(model.splitLit == .row(ID.settings))
+        model.revealSend(1)
+        let val = model.box(ID.valCenis)
+        #expect(model.splitLit == .row(val.block ? RouterModel.itemKey(ID.valCenis, "i1") : ID.valCenis))
     }
 }

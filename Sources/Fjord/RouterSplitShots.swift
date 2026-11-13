@@ -3,7 +3,8 @@ import SwiftUI
 
 // A message split across threads (docs/design/router-v2/SPLIT.md; `--window-shots <dir> v2-split`), light and dark
 // (`-dark`): three targets on the page (a thread, an item it answers, a new thread's ghost line), the Router reading
-// again, a part it isn't sure of, and one target. The composer is plain; each target shows what it will receive.
+// again, a part it isn't sure of, one target, and six (four rows over the composer and "+2 more"). The composer is
+// plain; each target shows what it will receive, and one row a destination over the composer says the same.
 // Look only: the demo's reads carry the sends.
 
 @MainActor
@@ -32,6 +33,14 @@ enum RouterSplitShots {
                   sends: [RouterSend(places: [.thread(ID.settings)], words: "keep the sidebar icons in the page headers"),
                           RouterSend(places: [.thread(ID.tab), .thread(ID.snapshot), .newThread(project: "fjord")], sure: false,
                                      words: "the spacing is off again", part: "“the spacing”")])
+        }),
+        ("v2-split-many", { model in
+            draft(model, three + ". briefs: copy the old rows first. updater: ship it. tab handover: the spacing is off",
+                  sends: threeSends + [
+                      RouterSend(places: [.thread(ID.briefs)], words: "copy the old rows first"),
+                      RouterSend(places: [.thread(ID.updater)], words: "ship it"),
+                      RouterSend(places: [.thread(ID.tab)], words: "the spacing is off"),
+                  ])
         }),
         ("v2-split-one", { model in
             draft(model, "settings: keep the sidebar icons in the page headers",

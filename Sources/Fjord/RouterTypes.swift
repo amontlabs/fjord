@@ -115,6 +115,9 @@ enum Router {
         static let pendingInk = 0.75
         /// Pending words wrap to this many lines at most: they are shown whole, unless the Router wrote a lot.
         static let pendingLines = 3
+        /// The rows over the composer: one a destination, this many at most before "+N more".
+        static let rows = 4
+        static let rowHeight: CGFloat = 22
     }
 
     enum Dock {

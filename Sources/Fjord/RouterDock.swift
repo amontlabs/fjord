@@ -40,10 +40,10 @@ struct RouterDock: View {
                         insertion: .scaleFade(0.96, reduce: reduce).animation(Motion.spatial.resolved(reduce: reduce)?.delay(0.08)),
                         removal: .scaleFade(0.96, reduce: reduce)))
             }
-            // A message split across threads: the page shows what each target receives, this line where Return sends
+            // A message split across threads: the page shows what each target receives, these rows one a destination
             // (SPLIT.md); else the one row.
             if let split = model.split {
-                RouterSplitLine(model: model, sends: split)
+                RouterSplitRows(model: model, sends: split)
                     .transition(.scaleFade(0.96, reduce: reduce))
             } else if let destination = model.destination {
                 RouterDestinationRow(model: model, destination: destination)

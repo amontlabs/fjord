@@ -34,27 +34,30 @@ Owner-approved behaviour; the demo shows the look, the decider doesn't split yet
 
 ## Over the composer
 
-One line, the destination row's place and metrics:
+One compact row a destination, saying what the page's pending lines say (same arrow, same wording, same quotes rule):
 
 ```
-→ 3 threads · Return sends                                          sure, several places
-→ [? Settings layout fjord] · Return sends                          sure, one place
-◐ 3 threads · Return sends   (sheen over the words)                 reading again after more typing
-→ “the spacing”  [Tab handover fjord ⌘1]  Snapshot API ⌘2  new thread in fjord ⌘3  · Return sends   a part it isn't sure of
+→ [? Settings layout fjord]  “keep the sidebar icons in the page headers”
+→ [? reserve for five?]      yes, reserve for five
+→ + New thread fjord         “trim the onboarding copy to two screens”
+  +2 more                                                              past four rows
 ```
 
-- While the Router reads, Fjord's mark takes the arrow's slot and the sheen passes over the words; the page keeps what
-  the last read showed. The first read of a draft shows the usual mark and skeleton row (1.9).
-- **Unsure part.** The line names it in a few of the owner's words (`RouterSend.part`) and shows its usual places
-  (the guess lit with the `chosen` fill, a place you lit yourself with the accent's tint, the light sliding on
-  `Motion.glass`); ⌘1–3 (by key position, AZERTY-safe) or a click light one, and its pending line moves to that
-  target.
+- Each row: the target arrow, the place as the page names it (a thread's mark, name and project; an item's kind mark and
+  short words; `+ New thread` and its project), then what it receives, cut once at the end. A guess ends `· a guess`.
+- **Past four rows**, `+N more`; the part ⌘1–3 light is always among the four.
+- **Reading again:** the rows the last read knew stay; a skeleton row with Fjord's mark stands for what is still read.
+  The first read of a draft shows the usual mark and skeleton row (1.9).
+- **Unsure part:** its row shows its usual places (the guess lit with the `chosen` fill, a place you lit yourself with
+  the accent's tint, the light sliding on `Motion.glass`), then its words; ⌘1–3 (by key position, AZERTY-safe) or a
+  click light one, and its pending line moves to that target. Only the focused part shows its places.
+- The pointer on a row lights its target on the page; a click brings it into view (a new thread: its ghost line).
 - A place you pick yourself for the whole message (a thread pill, the places menu) ends the split.
 
-Shots: `v2-split-page`, `v2-split-reading`, `v2-split-unsure`, `v2-split-one` (light and `-dark`). Suite:
-`RouterSplitTests`.
+Shots: `v2-split-page`, `v2-split-reading`, `v2-split-unsure`, `v2-split-one`, `v2-split-many` (light and `-dark`).
+Suite: `RouterSplitTests`.
 
 ## Not done (look only)
 
 The decider's schema and prompt (sends with their words), Return sending each message, Tab between unsure parts, a
-click on a pending line, and the failure line for one send of several.
+click on a pending line on the page, and the failure line for one send of several.

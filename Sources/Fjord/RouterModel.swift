@@ -208,6 +208,8 @@ final class RouterModel {
     var pressed: RouterHit? { didSet { if pressed != oldValue { pressedChanged(from: oldValue) } } }
     /// The item the composer's @ list has lit: its row on the page lights as the pointer would light it (`RouterAnswerPills`).
     var atLit: RouterHit? { didSet { if atLit != oldValue { hotChanged(oldValue, atLit) } } }
+    /// The target a split message's row over the composer lights on the page (the pointer on the row, or its click).
+    var splitLit: RouterHit? { didSet { if splitLit != oldValue { hotChanged(oldValue, splitLit) } } }
 
     /// The lines changing section now: drawn over their neighbours.
     var moving: Set<String> = [] { didSet { if moving != oldValue { movingChanged(from: oldValue) } } }

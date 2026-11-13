@@ -5,8 +5,9 @@ import SwiftUI
 // pills. The Router writes each destination's message from those words (their wording, trimmed of what belongs
 // elsewhere, never rephrased) and the preview is on the page, on the targets: each target line or item has the arrow in
 // its dot's slot and, under its row, a quiet line with what it will receive; a new thread is a ghost line in Working.
-// Over the composer one short line says how many places Return sends to. Look only for now: the demo's reads carry the
-// sends; the decider doesn't write them yet.
+// Over the composer, one compact row a destination says the same: the arrow, the place as the page names it, what it
+// receives (quoted to a thread, said as the answer to an item). Look only for now: the demo's reads carry the sends; the
+// decider doesn't write them yet.
 
 /// A new thread the split starts, as its ghost line shows it.
 struct RouterGhost: Equatable {
@@ -55,12 +56,33 @@ extension RouterModel {
         } ?? []
     }
 
-    /// The places Return sends to, counted once each.
-    var splitCount: Int {
-        guard let split else { return 0 }
-        var seen: [RouterPlace] = []
-        for send in split where !seen.contains(send.place) { seen.append(send.place) }
-        return seen.count
+    /// The sends the rows over the composer show, by index, and how many more there are: the first few, with the one
+    /// ⌘1–3 light always among them.
+    var splitRows: (rows: [Int], more: Int) {
+        guard let split else { return ([], 0) }
+        var rows = Array(split.indices.prefix(Router.Split.rows))
+        if let focus = splitFocus, !rows.contains(focus), !rows.isEmpty { rows[rows.count - 1] = focus }
+        return (rows, split.count - rows.count)
+    }
+
+    /// The row on the page a send goes to: its item's row in a block, else its thread's line. nil: a new thread.
+    func splitTarget(_ send: RouterSend) -> RouterHit? {
+        guard case .thread(let id) = send.place else { return nil }
+        if let item = send.item, box(id).block { return .row(Self.itemKey(id, item)) }
+        return .row(id)
+    }
+
+    /// A click on a send's row: its target comes into view and lights (a new thread's ghost line comes into view).
+    func revealSend(_ n: Int) {
+        guard let split, n < split.count else { return }
+        let send = split[n]
+        if case .thread(let id) = send.place {
+            splitLit = splitTarget(send)
+            show(id)
+        } else if case .newThread = send.place {
+            let ghost = split[..<n].filter { if case .newThread = $0.place { true } else { false } }.count
+            show("ghost-\(ghost)")
+        }
     }
 }
 
@@ -140,106 +162,155 @@ struct RouterGhostLine: View {
 
 // MARK: - Over the composer
 
-/// One short line over the composer: where Return sends (`3 threads · Return sends`, or the one place by name); the
-/// mark and a sheen while the Router reads; the usual places, ⌘1–3, for a part it isn't sure of, named in a few words.
-struct RouterSplitLine: View {
+/// One compact row a destination over the composer, as the page's pending lines say it: the arrow, the place as the
+/// page names it (a thread's mark, name and project; an item's mark and words; `+ New thread` and its project), then
+/// what it receives, quoted to a thread and said as the answer to an item, cut once at the end. Past a few rows,
+/// "+N more". The part the Router isn't sure of shows its places on its row (⌘1–3). While the Router reads again the
+/// rows it knows stay and a skeleton row with Fjord's mark stands for the rest. The pointer on a row lights its target
+/// on the page; a click brings it into view.
+struct RouterSplitRows: View {
     let model: RouterModel
     let sends: [RouterSend]
-    @Namespace private var light
-    @Namespace private var lightNarrow
 
     var body: some View {
-        HStack(spacing: 7) {
-            lead
-            if let focus = model.splitFocus {
-                unsure(sends[focus], n: focus)
-            } else {
-                sure
+        let shown = model.splitRows
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(shown.rows, id: \.self) { n in
+                RouterSplitRow(model: model, send: sends[n], n: n, focused: n == model.splitFocus)
+                    .transition(.opacity)
+            }
+            if shown.more > 0 {
+                Text("+\(shown.more) more").font(CDS.sans(12)).foregroundStyle(CDS.Text.muted)
+                    .padding(.leading, Router.Thinking.row + 7)
+                    .frame(height: Router.Split.rowHeight)
+                    .contentTransition(.numericText(value: Double(shown.more)))
+                    .accessibilityLabel("and \(shown.more) more places")
+            }
+            if model.reading {
+                skeleton.transition(.opacity)
             }
         }
         .padding(.leading, CDS.Composer.pad + CDS.Composer.textInset - 2)
-        .frame(height: Router.Dock.rowHeight)
-        .motion(.fade, value: model.splitFocus)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(label)
-    }
-
-    private var label: String {
-        if let focus = model.splitFocus {
-            let send = sends[focus]
-            return "Not sure where \(send.part ?? "a part") goes. Return sends it to \(model.name(send.place))"
-        }
-        return model.splitCount == 1 ? "Return sends to \(model.name(sends[0].place))" : "Return sends to \(model.splitCount) threads"
-    }
-
-    /// The arrow, and in its place Fjord's mark while the Router reads.
-    private var lead: some View {
-        ZStack {
-            if model.reading {
-                RouterThinking(tint: CDS.Text.accent, size: Router.Thinking.row, label: "Reading where it goes")
-                    .transition(.opacity)
-            } else {
-                Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.accent)
-                    .accessibilityHidden(true)
-                    .transition(.opacity)
-            }
-        }
-        .frame(width: Router.Thinking.row, height: Router.Thinking.row)
+        .motion(.fade, value: shown.rows)
         .motion(.fade, value: model.reading)
+        .motion(.fade, value: model.splitFocus)
+        .onDisappear { model.splitLit = nil }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Return sends to \(sends.count) places")
     }
 
-    /// The place by name when there is one, else how many; then what Return does. Sheened while the Router reads again.
-    private var sure: some View {
-        let count = model.splitCount
-        return sureWords(count)
-            .overlay {
-                // The band passes over the words only.
-                if model.reading { RouterSheen().mask { sureWords(count) }.transition(.opacity) }
-            }
-            .motion(Router.counts, value: count)
-            .motion(.fade, value: model.reading)
-    }
-
-    private func sureWords(_ count: Int) -> some View {
+    /// What the Router is still reading: Fjord's mark in the arrow's slot, a bar where the place will be.
+    private var skeleton: some View {
         HStack(spacing: 7) {
-            if count == 1 {
-                RouterPlaceView(model: model, place: sends[0].place)
+            RouterThinking(tint: CDS.Text.accent, size: Router.Thinking.row, label: "Reading where the rest goes")
+                .frame(width: Router.Thinking.row, height: Router.Thinking.row)
+            let bar = RoundedRectangle(cornerRadius: Router.Dock.skeleton.height / 2, style: .continuous)
+            bar.fill(CDS.alpha(0.06))
+                .frame(width: Router.Dock.skeleton.width, height: Router.Dock.skeleton.height)
+                .overlay { RouterSheen(color: RouterSheen.skeleton).mask { bar } }
+        }
+        .frame(height: Router.Split.rowHeight)
+    }
+}
+
+/// One destination's row: `→ [place]  “words”`, or for the part ⌘1–3 light, `→ [places ⌘1–3]  “words”`.
+private struct RouterSplitRow: View {
+    let model: RouterModel
+    let send: RouterSend
+    let n: Int
+    let focused: Bool
+    @Namespace private var light
+    @Namespace private var lightNarrow
+
+    private var quoted: String { send.item != nil ? send.words : "“\(send.words)”" }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            RouterTargetArrow()
+                .frame(width: Router.Thinking.row, height: Router.Thinking.row)
+            if focused {
+                ViewThatFits(in: .horizontal) {
+                    places(pills: true, light: light)
+                    places(pills: false, light: lightNarrow)
+                }
+                .layoutPriority(1)
             } else {
-                Text("\(count) threads").font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.primary)
-                    .contentTransition(.numericText(value: Double(count)))
+                place.layoutPriority(1)
             }
-            Text("· Return sends").font(CDS.sans(13)).foregroundStyle(CDS.Text.muted)
+            Text(quoted).font(CDS.sans(13)).foregroundStyle(CDS.Text.secondary)
+                .lineLimit(1).truncationMode(.tail)
+            if !send.sure, !focused {
+                Text("· a guess").font(CDS.sans(13)).foregroundStyle(CDS.Text.muted).fixedSize()
+            }
+            Spacer(minLength: 0)
         }
-        .fixedSize()
+        .frame(height: Router.Split.rowHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { model.revealSend(n) }
+        .onHover { inside in
+            let hit = model.splitTarget(send)
+            if inside { model.splitLit = hit } else if model.splitLit == hit { model.splitLit = nil }
+        }
+        .motion(.fade, value: send.words)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Sends \(quoted) to \(name)\(send.sure ? "" : ", a guess")")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { model.revealSend(n) }
     }
 
-    /// The part named in a few words, its places (the guess lit, ⌘1–3), then what Return does.
-    private func unsure(_ send: RouterSend, n: Int) -> some View {
-        HStack(spacing: 7) {
-            Text(send.part ?? "this part").font(CDS.sans(13)).foregroundStyle(CDS.Text.secondary).lineLimit(1).fixedSize()
-            ViewThatFits(in: .horizontal) {
-                places(send, n: n, pills: true, light: light)
-                places(send, n: n, pills: false, light: lightNarrow)
+    private var name: String {
+        if case .thread(let id) = send.place, let item = send.item,
+           let found = model.item(key: RouterModel.itemKey(id, item))?.item {
+            return RouterModel.short(found)
+        }
+        return model.name(send.place)
+    }
+
+    /// The place as the page names it.
+    @ViewBuilder private var place: some View {
+        switch send.place {
+        case .thread(let id):
+            if let item = send.item, let found = model.item(key: RouterModel.itemKey(id, item))?.item {
+                HStack(spacing: 5) {
+                    Image(systemName: found.kind.symbol).font(.system(size: Router.Line.mark, weight: .semibold))
+                        .foregroundStyle(found.kind.tint)
+                        .frame(width: Router.Line.markBox, height: Router.Line.markBox)
+                    Text(RouterModel.short(found)).font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.primary).lineLimit(1)
+                }
+                .fixedSize()
+            } else {
+                RouterPlaceView(model: model, place: send.place)
             }
+        case .newThread(let project):
+            HStack(spacing: 5) {
+                Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).foregroundStyle(CDS.Text.secondary)
+                    .frame(width: Router.Line.markBox, height: Router.Line.markBox)
+                Text("New thread").font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.primary).lineLimit(1)
+                RouterProjectBadge(project: project)
+            }
+            .fixedSize()
+        case .here:
+            RouterPlaceView(model: model, place: send.place)
         }
     }
 
-    private func places(_ send: RouterSend, n: Int, pills: Bool, light: Namespace.ID) -> some View {
+    /// The part's places, the guess lit, ⌘1–3.
+    private func places(pills: Bool, light: Namespace.ID) -> some View {
         HStack(spacing: 2) {
             ForEach(Array(send.places.prefix(3).enumerated()), id: \.offset) { i, place in
                 Button { model.lightPart(i, send: n) } label: {
-                    chip(place, i: i, lit: i == send.lit, mine: send.mine, pill: pills || i == send.lit, light: light)
+                    chip(place, i: i, lit: i == send.lit, pill: pills || i == send.lit, light: light)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel((i == send.lit ? "Sends to " : "Or ") + model.name(place))
             }
-            Text("· Return sends").font(CDS.sans(13)).foregroundStyle(CDS.Text.muted).fixedSize().padding(.leading, 5)
         }
+        .fixedSize()
         .motion(.glass, value: send.lit)
         .motion(.fade, value: send.mine)
     }
 
-    private func chip(_ place: RouterPlace, i: Int, lit: Bool, mine: Bool, pill: Bool, light: Namespace.ID) -> some View {
+    private func chip(_ place: RouterPlace, i: Int, lit: Bool, pill: Bool, light: Namespace.ID) -> some View {
         let s = Router.Surface.self
         let shape = RoundedRectangle(cornerRadius: s.control, style: .continuous)
         return HStack(spacing: 6) {
@@ -250,7 +321,7 @@ struct RouterSplitLine: View {
         .frame(height: Router.Dock.place)
         .background {
             if lit {
-                shape.fill(mine ? CDS.Text.accent.opacity(s.tintStrong) : s.chosen)
+                shape.fill(send.mine ? CDS.Text.accent.opacity(s.tintStrong) : s.chosen)
                     .matchedGeometryEffect(id: "light", in: light)
             }
         }
