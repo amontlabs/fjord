@@ -430,6 +430,46 @@ final class RouterDemoScript {
         escape()
         await pause(1.2)
         await longReply()
+        await blocks()
+    }
+
+    /// A block's cards: an item's opened mid-block, walked down and out of the block and back, shut by a second click,
+    /// another item's opened, the header's opened from it, then your words sent to it (the card shuts and the next one
+    /// opens). Its rows under the card move on a layer of their own (`RouterLineSlotView.placeTail`);
+    /// `scripts/router-bands-check.py` finds a band left bare on the way.
+    private func blocks() async {
+        RouterDemo.items(model)
+        await pause(1.0)
+        let keep = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.keep)
+        let know = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.smaller)
+        RouterFrames.note("open item")
+        await click(.row(keep))
+        await pause(1.0)
+        for (note, down) in [("item down", true), ("out of block", true), ("back into block", false), ("item up", false)] {
+            RouterFrames.note(note)
+            if down { self.down() } else { up() }
+            await pause(0.8)
+        }
+        // The open item clicked again: its card shuts inside the block.
+        RouterFrames.note("shut item")
+        await click(.row(keep))
+        await pause(1.0)
+        RouterFrames.note("open item again")
+        await click(.row(know))
+        await pause(1.0)
+        // The block's header clicked while an item's card is open: the card moves up to the header's row.
+        RouterFrames.note("card to header")
+        await click(.row(ID.checkpoint))
+        await pause(1.0)
+        await park()
+        await type(RouterDemo.Item.reply)
+        await pause(0.4)
+        RouterFrames.note("send to block")
+        enter()
+        await pause(1.5)
+        RouterFrames.note("escape")
+        escape()
+        await pause(1.0)
     }
 
     /// A card whose reply is longer than its quote (a line both shapes keep, so no row folds in): → rolls the quote open
