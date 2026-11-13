@@ -240,11 +240,16 @@ Exact sentence, by state, when the code writes it (the model's line replaces the
 | Working | **R3.** The running to-do step, else the agent's latest words, else the running tool or command (a command in `CDS.mono(12)`); "starting"; "paused at the usage limit, resumes 15:00" (final: code only) |
 | Done | **R3.** "finished" * |
 
-- **Working, summed up.** **R6** (2026-11-13, owner; demo only, the model call isn't wired: `RouterWork.swift`,
-  shots `v2-working-*`). A working line's sentence is the newest of short lines the Router's model writes about the run
-  ("Image built; waiting on CI before it boots the VM"), not the raw command. It is written again when the agent writes
-  something new or its to-do step changes, at most about once a minute, sheening then streaming in (2.2, 2.3). The pointer
-  anywhere on a working line shows its one peek (1.6); its card lists the summaries (1.5).
+- **Working, summed up.** **R6** (2026-11-13, owner; `RouterWork.swift`, `RouterSummaryPrompt.swift`,
+  `RouterRecords.summarizeIfNeeded`, shots `v2-working-*`). A working line's sentence is the newest of short lines the
+  Router's model (Haiku, through the verdicts' queue and cap, after every verdict) writes about the run ("Image built;
+  waiting on CI before it boots the VM"), not the raw command; at most 9 words, present tense, no commands or ids
+  (EVAL-summaries.md). It is written when the agent finishes writing something new or its to-do step changes, at most one
+  a minute per thread (a trigger inside the minute waits for its end, one wake), never twice for the same facts (the
+  words, the step, the kind of tool running, the run), sheening on the line it replaces, then streaming in (2.2, 2.3).
+  Until its run has one, the line is the code's (R3). A call that fails keeps the line it had; a run that ends cancels
+  its call. The summaries are kept, newest first, twenty at most, in the verdict file until the thread leaves the page.
+  The pointer anywhere on a working line shows its one peek (1.6); its card lists the summaries (1.5).
 
 ### 1.5 Card (the selected line's)
 
@@ -279,8 +284,8 @@ Kind blocks:
 | **Done** | PR badges; "4 files" + `+96` in `Git.added`, `−212` in `Git.removed` (footnote, mono digits) | none | same three |
 | **Stopped** | reason banner: fill `Text.danger` 12 % (`RouterV2.dangerFill`), no ring (**R4**), radius 8, padding 10; the error in `CDS.mono(12)` `Text.primary`, max 6 lines; under it "Last step: " + step, footnote muted | none | **R3.** left: `Continue` + the key `⏎` (the page's button, **R4**: 24 tall, radius 6, the chosen fill); then the same three. T3 has no rerun: Continue sends T3's own words, "Continue where you left off.", and the destination row shows them (1.9). The Sent line reads those words |
 | **Working** | **R3.** T3's to-do steps only when the thread has a list (Claude sends one only with T3's to-do setting), footnote: done `checkmark` muted, running in `Text.primary` with the working dots, pending muted; at most 5, then "+3 more". A thread started here shows what it runs on as the card's first footnote through its first run | none | Stop · Open in T3 ⌘O. **R3.** Stop is the page's one act with no way back: a button, no key |
-| **Working: summaries** | **R6.** In the last lines' place (no quote: the last turn's words aren't news): the model's summaries, newest first, five at most then "N earlier". A 5 pt mark in the glyph column (the newest 6 pt, `Text.secondary`; older `Text.muted`) on a `Settings.railLine` hairline that stops 3 pt clear of each mark; the words body 13/19, the newest `Text.primary`, older `Text.secondary`; the clock time ("13:58") trailing at the prose's edge, caption muted mono digits, where the activity's ages end. Then the steps, then the activity | none | as Working |
-| **Working: activity** | **R5.** Under the steps, the activity peek's rows (1.6) at footnote size in `Text.muted`, the glyph column 14 wide like the steps' | none | as Working |
+| **Working: summaries** | **R6.** In the last lines' place (no quote: the last turn's words aren't news): the model's summaries, newest first, five at most then "N earlier". The one the line above reads is left out (the card is what came before it; a summary streaming in on the line puts it back), so a run with one summary shows none. A 5 pt mark in the glyph column on a `Settings.railLine` hairline that stops 3 pt clear of each mark, `Text.muted`; the words body 13/19 `Text.secondary`, at the prose's width (a newest the line doesn't read: 6 pt mark `Text.secondary`, words `Text.primary`); the clock time ("13:58"), caption muted mono digits, trailing in the line's ages column, where the activity rows' ages end too. Then the steps, then the activity | none | as Working |
+| **Working: activity** | **R5.** Under the steps, the activity peek's rows (1.6) at footnote size in `Text.muted`, the glyph column 14 wide like the steps'; **R6.** their ages trail in the line's ages column | none | as Working |
 | **Sent** | your words, body `Text.primary`; a thread started here: under them what it starts with, footnote `Text.muted` ("Opus 5.5 · High · Auto"), until its run starts | none | Open in T3 ⌘O |
 
 - **Option row.** Radio 16 (multi-select: checkbox, radius `Approval.checkboxRadius`), label prose 14/20, its key
