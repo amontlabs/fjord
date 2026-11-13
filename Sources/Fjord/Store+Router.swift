@@ -89,7 +89,7 @@ extension Store {
         reader.onRead = { [weak self] read, decision in
             guard let self else { return }
             self.routerLastDecision = decision.map { (read.draft, $0) }
-            self.routerPage.post(.read(read))
+            self.routerPage.post(.read(self.routerNamed(read)))
         }
         return reader
     }
@@ -190,6 +190,16 @@ extension Store {
 
     static func routerNotice(_ n: ThreadNotice) -> String {
         routerNoticePrefix + BriefTarget(project: n.project, thread: n.thread).key
+    }
+
+    /// A read as the page shows it: a new thread's project by the name its lines and pills have, not T3's id.
+    func routerNamed(_ read: RouterRead) -> RouterRead {
+        var read = read
+        read.places = read.places.map { place in
+            guard case .newThread(let project) = place, t3.store.shell.projects[project] != nil else { return place }
+            return .newThread(project: routerProjectName(project))
+        }
+        return read
     }
 
     /// A project as a banner names it: T3's title, else its folder's name.

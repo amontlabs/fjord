@@ -147,4 +147,19 @@ import Testing
         #expect(sent.commands.map { $0.payload(commandId: "c").str("type") } == ["thread.settle", "thread.unsettle"])
     }
 
+
+    // MARK: A read's new thread is named as the page names its project (FINAL-REVIEW #8)
+
+    @Test func aNewThreadTheDeciderPicksIsNamedByItsProjectNotItsID() {
+        let s = store([F.shell("t1", title: "Fix the fence")])
+        let read = RouterRead(draft: "plant tomatoes", places: [.newThread(project: "p1"), .thread("t1")], sure: false)
+        #expect(s.routerNamed(read).places == [.newThread(project: "Garden"), .thread("t1")])
+        // The page's line names the same project.
+        #expect(s.routerPage.thread("t1")?.project == "Garden")
+        // A name the page shows is not touched.
+        let named = RouterRead(draft: "x", places: [.newThread(project: "Garden")], sure: true)
+        #expect(s.routerNamed(named) == named)
+        // The start finds T3's id again from that name.
+        #expect(s.routerActs.env.projectID("Garden") == "p1")
+    }
 }

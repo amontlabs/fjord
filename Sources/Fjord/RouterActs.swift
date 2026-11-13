@@ -325,6 +325,8 @@ extension RouterActs {
                 guard let projects = store?.t3.store.shell.projects.values.filter({ $0.archivedAt == nil }) else { return nil }
                 return projects.first { $0.id == name }?.id
                     ?? projects.first { $0.title.caseInsensitiveCompare(name) == .orderedSame }?.id
+                    // A project with no title is named by its folder on the page.
+                    ?? projects.first { $0.title.isEmpty && store?.folderName($0.workspaceRoot) == name }?.id
             },
             away: { [weak store] in store?.t3Away ?? false },
             title: { [weak store] id in store?.threads[id]?.title ?? "thread" },
