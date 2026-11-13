@@ -107,6 +107,32 @@ import Testing
         #expect(RouterDetail.sentence("   ") == "")
     }
 
+    /// A working summary's input and the working peek's rows: the tool running now, the ones before it newest first, and
+    /// the agent's latest whole words (one still being written isn't news yet).
+    @Test func aLiveRunsRawDetailAndLatestWholeWords() {
+        var streaming = say("b", "Half a sen", ordinal: 5, status: "running")
+        if case .object(var o) = streaming { o["streaming"] = true; streaming = .object(o) }
+        let items = [say("a", "Found the gap. Moving the copy.", ordinal: 1),
+                     command("c1", "rg -n caret Sources", ordinal: 2, status: "completed"),
+                     F.item("e", type: "file_change", ordinal: 3, status: "completed", ["fileName": "/a/Composer.swift"]),
+                     F.item("r", type: "dynamic_tool", ordinal: 4, status: "completed",
+                            ["toolName": "Read", "title": "Read /a/Tab.swift", "input": ["file_path": "/a/Tab.swift"]]),
+                     streaming,
+                     command("c2", "swift test --filter Tab\nmore", ordinal: 6)]
+        let d = RouterDetail.make(projection(items: items), now: now)
+        #expect(d.said == "Found the gap. Moving the copy.")
+        #expect(d.saidID == "m-a")
+        #expect(d.toolKind == "command")
+        #expect(d.workNow?.text == "swift test --filter Tab" && d.workNow?.mono == true && d.workNow?.id == 6)
+        #expect(d.workRecent.map(\.text) == ["Read /a/Tab.swift", "Edited Composer.swift", "rg -n caret Sources"])
+        // Nothing running now: no current step, the last ones are the recent ones; no run, no detail.
+        let idle = RouterDetail.make(projection(items: Array(items.prefix(4))), now: now)
+        #expect(idle.workNow == nil && idle.toolKind == nil)
+        #expect(idle.workRecent.first?.text == "Read /a/Tab.swift")
+        let over = RouterDetail.make(projection(runs: [F.run("r1", status: "completed")], items: items, status: "completed"), now: now)
+        #expect(over.said == nil && over.workNow == nil && over.workRecent.isEmpty)
+    }
+
     @Test func aStreamingMessageSetsWriting() {
         var streaming = F.message("m2", role: "assistant", text: "Half a sen")
         if case .object(var o) = streaming { o["streaming"] = true; streaming = .object(o) }

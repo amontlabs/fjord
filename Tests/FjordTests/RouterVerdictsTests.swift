@@ -39,7 +39,7 @@ final class FakeClaude: @unchecked Sendable {
     /// A whole stream-json answer: the typed answer's text cut in pieces of `size`, then the result line.
     static func answer(_ object: [String: Any], size: Int = 6, usage: (Int, Int) = (1600, 330)) -> [String] {
         // In the schema's order, as the model writes it.
-        let order = ["state", "worth", "name", "line", "ask", "options", "result", "purpose"]
+        let order = ["state", "worth", "done", "now", "name", "line", "ask", "options", "result", "purpose"]
         let ordered = "{" + order.compactMap { k -> String? in
             guard let v = object[k] else { return nil }
             let raw = String(decoding: try! JSONSerialization.data(withJSONObject: v, options: .fragmentsAllowed), as: UTF8.self)
