@@ -523,5 +523,42 @@ enum RouterShots {
             model.select(nil)
             model.apply(.batch(model.threads.filter { $0.section == .needsYou }.map { .remove($0.id) }))
         },
+        // Show me (a proposal on demo data, RouterShowMe.swift). The composer's toggle on: Return sends, then Show me.
+        State(name: "v2-show-toggle") { model in
+            model.select(nil)
+            RouterShowMeDemo.rest(model, unseen: false)
+            model.showMe?.armed = true
+            model.setDraft("why does it need my claude token?")
+            model.apply(.read(RouterRead(draft: model.draft, places: [.thread(ID.settings)], sure: true)))
+        },
+        // A Done card: Show me its reply.
+        State(name: "v2-show-card") { model in
+            RouterShowMeDemo.rest(model, unseen: false)
+            model.select(.line(ID.guide))
+        },
+        // The dock at rest, one finished explainer not watched yet; while one is made; while one waits for its thread.
+        State(name: "v2-show-dock") { model in
+            model.select(nil)
+            RouterShowMeDemo.rest(model, unseen: true)
+        },
+        State(name: "v2-show-dock-making") { model in
+            model.select(nil)
+            RouterShowMeDemo.busy(model, queued: false)
+        },
+        State(name: "v2-show-dock-queued") { model in
+            model.select(nil)
+            RouterShowMeDemo.busy(model, queued: true)
+        },
+        // The dock open on a finished explainer, "simpler" typed: Return makes a new version of it.
+        State(name: "v2-show-open") { model in
+            model.select(nil)
+            RouterShowMeDemo.open(model, selected: RouterShowMeDemo.token)
+            model.setDraft("simpler")
+        },
+        // The dock open on one being made: its latest draft, what the agent is fixing.
+        State(name: "v2-show-open-making") { model in
+            model.select(nil)
+            RouterShowMeDemo.open(model, selected: RouterShowMeDemo.lastdrop)
+        },
     ]
 }

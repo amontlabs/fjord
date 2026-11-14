@@ -226,6 +226,8 @@ final class RouterModel {
     var launchRolls: [RouterLaunchField: RouterRoll] = [:]
 
     var toast: RouterToast?
+    /// Show me's dock and toggle: demo only (RouterShowMe.swift); nil, nothing of it shows.
+    var showMe: RouterShowMeState?
     var snoozeMenu: RouterSnoozeMenu?
 
     // The pointer (the real one, or the demo's drawn one).

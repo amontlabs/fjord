@@ -573,10 +573,12 @@ enum RouterHit: Hashable {
     case link(String, Int)
     /// The quiet Done at an item row's end, on hover: the item's key.
     case itemDone(String)
+    /// Show me's controls (a proposal on demo data, RouterShowMe.swift).
+    case showMe(String)
 }
 
 enum RouterFooterAct: Hashable {
-    case snooze, settle, open, stop, rerun
+    case snooze, settle, open, stop, rerun, showMe
 
     /// It takes its line off the page: disarmed under a pointer that hasn't moved since it arrived there.
     var removes: Bool { self == .snooze || self == .settle }

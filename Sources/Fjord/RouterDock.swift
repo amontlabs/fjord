@@ -42,14 +42,37 @@ struct RouterDock: View {
             }
             // A message split across threads: the page shows what each target receives, these rows one a destination
             // (SPLIT.md); else the one row.
-            if let split = model.split {
+            if let showMe = model.showMe, showMe.open, let explainer = showMe.chosen, !model.draftEmpty {
+                // The panel has an explainer: Return makes a new version of it with the words.
+                RouterShowMeDestination(explainer: explainer)
+                    .transition(.scaleFade(0.96, reduce: reduce))
+            } else if let split = model.split {
                 RouterSplitRows(model: model, sends: split)
                     .transition(.scaleFade(0.96, reduce: reduce))
             } else if let destination = model.destination {
                 RouterDestinationRow(model: model, destination: destination)
                     .transition(.scaleFade(0.96, reduce: reduce))
             }
-            RouterComposer(model: model)
+            HStack(alignment: .bottom, spacing: 8) {
+                RouterComposer(model: model)
+                // Show me's dock, on the composer's control row and never over it.
+                if let showMe = model.showMe {
+                    RouterShowMePill(model: model, state: showMe)
+                        .padding(.bottom, CDS.Composer.pad)
+                }
+            }
+        }
+        // Open, its panel floats over the page with its bottom right on the dock's top right.
+        .overlay(alignment: .top) {
+            if let showMe = model.showMe, showMe.open {
+                // A strip with no height on the dock's top edge: the panel hangs from it, upward.
+                Color.clear.frame(height: 0)
+                    .overlay(alignment: .bottomTrailing) {
+                        RouterShowMePanel(model: model, state: showMe)
+                            .fixedSize()
+                            .padding(.bottom, RouterShowMeLayout.panelGap)
+                    }
+            }
         }
         .motion(.spatial, value: model.toast != nil)
         .motion(.spatial, value: model.failures.count)
@@ -186,10 +209,14 @@ struct RouterComposer: View {
         ZStack(alignment: .bottomTrailing) {
             field
                 .padding(.leading, C.pad + C.textInset)
-                .padding(.trailing, C.pad + 6 + C.row)
+                .padding(.trailing, C.pad + 6 + C.row + (model.showMe == nil ? 0 : RouterShowMeLayout.toggle + 2))
                 .padding(.vertical, C.pad + (C.row - 20) / 2)
                 .frame(maxWidth: .infinity, minHeight: C.minHeight, alignment: .topLeading)
-            sendButton.padding(C.pad)
+            HStack(spacing: 2) {
+                if let showMe = model.showMe { RouterShowMeToggle(model: model, on: showMe.armed) }
+                sendButton
+            }
+            .padding(C.pad)
         }
         .background(shape.fill(CDS.Surface.s3))
         .overlay(shape.strokeBorder(ring, lineWidth: 1))
@@ -530,6 +557,7 @@ struct RouterDestinationRow: View {
         HStack(spacing: 7) {
             lead
             content
+            if model.showMe?.armed == true { RouterShowMeTail() }
         }
         // The arrow's own edge on the composer's words.
         .padding(.leading, CDS.Composer.pad + CDS.Composer.textInset - 2)
