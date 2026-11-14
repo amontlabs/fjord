@@ -192,6 +192,7 @@ final class RouterAttachments {
     /// that failed again, was taken out or isn't known, saying which. The bytes stay until T3 takes the send (`sent`): a
     /// refused one may be sent again, or its pill put back and taken out and back again.
     func uploads(_ ids: [String]) async throws -> [String: T3Attachment] {
+        try checkLimits(ids)
         var out: [String: T3Attachment] = [:]
         for id in ids where out[id] == nil {
             guard let item = items[id] else { throw ThreadSendFailure("An attachment is gone: nothing was sent") }
@@ -216,6 +217,19 @@ final class RouterAttachments {
             out[id] = item.t3(attachmentId)
         }
         return out
+    }
+
+    /// T3's limits for one message (`chatAttachment.ts`): at most 100 pictures and files, at most 80 MB of pictures. Over
+    /// either, the send is refused before anything waits, saying which.
+    func checkLimits(_ ids: [String]) throws {
+        let unique = Set(ids)
+        if unique.count > RouterAttachment.maxPerMessage {
+            throw ThreadSendFailure("Over T3's \(RouterAttachment.maxPerMessage) pictures and files in one message: nothing was sent")
+        }
+        let imageBytes = unique.compactMap { items[$0] }.filter { $0.kind == .image }.reduce(0) { $0 + $1.sizeBytes }
+        if imageBytes > RouterAttachment.maxImageBytesPerMessage {
+            throw ThreadSendFailure("Over T3's \(RouterAttachment.maxImageBytesPerMessage / (1024 * 1024)) MB of pictures in one message: nothing was sent")
+        }
     }
 
     /// Its bytes are here and T3 takes their size: an upload can be tried (again).

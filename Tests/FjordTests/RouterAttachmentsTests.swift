@@ -236,6 +236,21 @@ import Testing
         #expect(try await attachments.uploads([id])[id]?.id == "att-9")
     }
 
+    @Test func aMessageOverT3sLimitsIsRefusedPlainlyBeforeAnythingWaits() async throws {
+        let attachments = RouterAttachments()
+        // 101 files: one over T3's count.
+        let files = (0...RouterAttachment.maxPerMessage).map { "file_\($0)" }
+        for id in files { attachments.put(item(id, name: "\(id).txt", mime: "text/plain", size: 3), state: .ready(id)) }
+        await #expect { try await attachments.uploads(files) } throws: { ($0 as? ThreadSendFailure)?.message.contains("100") == true }
+        #expect(try await attachments.uploads(Array(files.prefix(RouterAttachment.maxPerMessage))).count == RouterAttachment.maxPerMessage)
+        // Nine 9.5 MB pictures: each under T3's 10 MB, together over its 80 MB a message.
+        let big = Int(9.5 * 1024 * 1024)
+        let pictures = (0..<9).map { "image_\($0)" }
+        for id in pictures { attachments.put(item(id, name: "\(id).png", mime: "image/png", size: big), state: .ready(id)) }
+        await #expect { try await attachments.uploads(pictures) } throws: { ($0 as? ThreadSendFailure)?.message.contains("80 MB") == true }
+        #expect(try await attachments.uploads(Array(pictures.prefix(8))).count == 8)
+    }
+
     @Test func aSendAgainUploadsAFailedOneAgainAndThrowsOnlyIfThatFailsToo() async throws {
         var tries = 0
         var failing = 2
