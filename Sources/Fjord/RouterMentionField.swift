@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The composer's text with its @ pills inline (a project, a session, a notification, a category: `RouterPointer`): each is
 /// an atomic pill (one `MentionAttachment` character) where it was typed. `RouterComposerModel.draft` holds the text with one `mark`
@@ -67,9 +68,17 @@ final class MentionAttachment: NSTextAttachment {
 }
 
 /// The composer's text view: pills copy as "@name", a paste is plain text (a pill is made only by picking from the @
-/// suggestions: pasted code's `@cache` stays the decorator it is), and its focus is told.
+/// suggestions: pasted code's `@cache` stays the decorator it is), and its focus is told. Where it takes attachments
+/// (`attach`), a pasted or dropped picture or file is a pill at the caret.
 final class MentionTextView: NSTextView {
     var onFocus: (Bool) -> Void = { _ in }
+    /// Makes an attachment of a pasted or dropped picture or file (its name, type and bytes): the pill's pointer. Nil: the
+    /// field takes text only (a "Then" prompt).
+    var attach: ((_ name: String, _ mimeType: String, _ data: Data) -> RouterPointer?)? {
+        didSet { if (attach == nil) != (oldValue == nil) { updateDragTypeRegistration() } }
+    }
+    /// A click on an attachment's pill (a failed one tries again).
+    var onAttachment: ((String) -> Void)?
     /// A click on a pill that opens something (an item's, an answer's: their card). Nil: a pill is clicked as text.
     var onPill: ((RouterPointer) -> Void)?
     var makePill: (RouterPointer) -> MentionAttachment? = { _ in nil }
@@ -88,6 +97,10 @@ final class MentionTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if let onAttachment, case .attachment(let id)? = pill(at: convert(event.locationInWindow, from: nil)) {
+            onAttachment(id)
+            return
+        }
         if let onPill, let pointer = pill(at: convert(event.locationInWindow, from: nil)) {
             switch pointer {
             case .item, .answer:
@@ -130,8 +143,51 @@ final class MentionTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
+        if insertAttachments(from: NSPasteboard.general, replacing: selectedRange()) { return }
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         insertPlain(text, replacing: selectedRange())
+    }
+
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
+        attach == nil ? super.acceptableDragTypes : readablePasteboardTypes
+    }
+
+    /// Files and pictures are read too where the field takes attachments.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        let text = super.readablePasteboardTypes
+        return attach == nil ? text : [.fileURL, .png, .tiff] + text
+    }
+
+    /// The pasteboard's files (each by its own name and type) or else its picture, made pills where `range` is, in order,
+    /// with a space after each. False when it holds neither, or the field takes no attachments.
+    func insertAttachments(from pboard: NSPasteboard, replacing range: NSRange) -> Bool {
+        guard let attach else { return false }
+        var found: [(name: String, mime: String, data: Data)] = []
+        let urls = pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        for url in urls {
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), !isFolder.boolValue,
+                  let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+            let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+            found.append((url.lastPathComponent, mime, data))
+        }
+        if found.isEmpty, urls.isEmpty {
+            // A picture copied as one (a screenshot to the clipboard, an image copied from a page): PNG as it is, else TIFF.
+            if let png = pboard.data(forType: .png) { found.append(("Pasted image.png", "image/png", png)) }
+            else if let tiff = pboard.data(forType: .tiff) { found.append(("Pasted image.tiff", "image/tiff", tiff)) }
+        }
+        guard !found.isEmpty, let storage = textStorage else { return false }
+        let out = NSMutableAttributedString()
+        for f in found {
+            guard let pointer = attach(f.name, f.mime, f.data), let pill = makePill(pointer) else { continue }
+            out.append(NSAttributedString(attachment: pill))
+            out.append(NSAttributedString(string: " ", attributes: base))
+        }
+        guard out.length > 0, shouldChangeText(in: range, replacementString: out.string) else { return !found.isEmpty }
+        storage.replaceCharacters(in: range, with: out)
+        setSelectedRange(NSRange(location: range.location + out.length, length: 0))
+        didChangeText()
+        return true
     }
 
     /// A drag of the selection carries it as copying does, each pill as "@name".
@@ -144,6 +200,7 @@ final class MentionTextView: NSTextView {
 
     /// A drop (or a paste) is plain text, as a paste is.
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        if insertAttachments(from: pboard, replacing: rangeForUserTextChange) { return true }
         guard let text = pboard.string(forType: .string) else { return false }
         insertPlain(text, replacing: rangeForUserTextChange)
         return true
@@ -203,6 +260,8 @@ struct MentionField: NSViewRepresentable {
     /// The text changed by the owner's typing, a pick or an undo (not by the model): the draft with a mark for each pill, and
     /// what the pills point to. Called in the same turn as the edit, after the model has it.
     var onEdit: ((String, [RouterPointer]) -> Void)? = nil
+    /// Where pasted and dropped pictures and files go (the Router composer's); nil: the field takes text only.
+    var attachments: RouterAttachments? = nil
 
     private static var role: (CGFloat, CGFloat) { CDS.Density.compact.prose }
 
@@ -274,8 +333,23 @@ struct MentionField: NSViewRepresentable {
         }
         view.onFocus = onFocus
         view.onPill = onPill
+        if let attachments {
+            if view.attach == nil {
+                view.attach = { [weak attachments] name, mime, data in attachments?.add(name: name, mimeType: mime, data: data) }
+                view.onAttachment = { [weak attachments] id in attachments?.retry(id) }
+            }
+        } else if view.attach != nil {
+            view.attach = nil
+            view.onAttachment = nil
+        }
+        c.attachments = attachments
         c.view = view
         c.follow(model)
+        // An upload's state changed (read here, so the field updates with it): its pill is drawn again.
+        if let revision = attachments?.revision, c.attachmentRevision != revision {
+            c.attachmentRevision = revision
+            c.redrawAttachments(in: view)
+        }
         if c.focusTick != focusTick {
             c.focusTick = focusTick
             DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
@@ -335,6 +409,8 @@ struct MentionField: NSViewRepresentable {
         var onCommand: ((Selector) -> Bool)?
         var onSelection: ((NSTextView) -> Void)?
         var onEdit: ((String, [RouterPointer]) -> Void)?
+        weak var attachments: RouterAttachments?
+        var attachmentRevision = -1
         /// The text's height at a width, for the text it had then (a pill is one character of it; pills made anew clear it).
         var fits: [Fit: CGFloat] = [:]
         /// While an input method composes and the model changed meanwhile (a prefill): the view's text as the model last
@@ -428,6 +504,36 @@ struct MentionField: NSViewRepresentable {
             }
         }
 
+        /// Your edit took attachments' pills out (typed away, cut) or brought them back (an undo): their uploads are deleted,
+        /// or made again. A change of the model's (a send emptying the draft) never deletes one.
+        private func edited(from old: [RouterPointer], to new: [RouterPointer]) {
+            guard let attachments, old != new else { return }
+            let before = Set(old.compactMap(\.attachment))
+            let after = Set(new.compactMap(\.attachment))
+            for id in before.subtracting(after) { attachments.remove(id) }
+            for id in after.subtracting(before) { attachments.restore(id) }
+        }
+
+        /// Every attachment's pill made again, its look now (uploading, done, failed); the text and the caret as they were.
+        func redrawAttachments(in view: MentionTextView) {
+            guard let storage = view.textStorage, storage.length > 0 else { return }
+            var swaps: [(NSRange, MentionAttachment)] = []
+            storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                guard let pill = value as? MentionAttachment, pill.pointer.attachment != nil,
+                      let fresh = view.makePill(pill.pointer), fresh.look != pill.look else { return }
+                swaps.append((range, fresh))
+            }
+            guard !swaps.isEmpty else { return }
+            syncing = true
+            defer { syncing = false }
+            storage.beginEditing()
+            for (range, pill) in swaps { storage.addAttribute(.attachment, value: pill, range: range) }
+            storage.endEditing()
+            fits.removeAll()
+            view.invalidateIntrinsicContentSize()
+            view.enclosingScrollView?.invalidateIntrinsicContentSize()
+        }
+
         struct Fit: Hashable {
             var width: CGFloat
             var text: String
@@ -442,6 +548,7 @@ struct MentionField: NSViewRepresentable {
                 guard !syncing, let model, view?.undoManager?.isUndoing == true || view?.undoManager?.isRedoing == true
                 else { return }
                 let (draft, pointers) = MentionText.serialize(textStorage)
+                edited(from: model.pointers, to: pointers)
                 told = (draft, pointers)
                 if model.pointers != pointers { model.pointers = pointers }
                 if model.draft != draft { model.draft = draft }
@@ -463,6 +570,7 @@ struct MentionField: NSViewRepresentable {
                 composing = (draft, pointers)
                 (draft, pointers) = Self.merge(view: (draft, pointers), base: base, model: (model.draft, model.pointers))
             }
+            edited(from: model.pointers, to: pointers)
             told = (draft, pointers)
             if model.pointers != pointers { model.pointers = pointers }
             if model.draft != draft { model.draft = draft }

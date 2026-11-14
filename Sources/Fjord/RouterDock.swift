@@ -234,12 +234,12 @@ struct RouterComposer: View {
             .allowsHitTesting(false).accessibilityHidden(true)
             if model.still {
                 // A still has no field to type in: its words alone (a field there draws them selected).
-                Self.drawn(model, dark: scheme == .dark).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
+                Self.drawn(model, dark: scheme == .dark, attachments: host?.store.attachments).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
             } else if let host = viewHost {
                 mentionField(host)
             } else if !model.mentions.isEmpty {
                 // The script's pills: drawn with the words (a TextField can't hold them).
-                Self.drawn(model, dark: scheme == .dark).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
+                Self.drawn(model, dark: scheme == .dark, attachments: host?.store.attachments).font(CDS.sans(d.prose.0)).foregroundStyle(ink).lineLimit(1...8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .allowsHitTesting(false)
             } else {
@@ -254,7 +254,7 @@ struct RouterComposer: View {
             }
             if model.scripted, !model.filterMode {
                 // Before the placeholder's first letter while the draft is empty, after the last word once there is one.
-                Self.drawn(model, dark: scheme == .dark).font(CDS.sans(d.prose.0)).lineLimit(1).hidden()
+                Self.drawn(model, dark: scheme == .dark, attachments: host?.store.attachments).font(CDS.sans(d.prose.0)).lineLimit(1).hidden()
                     .overlay(alignment: .trailing) { RouterCaret().offset(x: empty ? -1.5 : 2.5).opacity(model.held ? 0 : 1) }
                     .allowsHitTesting(false)
                     // The caret is where the words end, at once: it doesn't slide back across the placeholder.
@@ -275,7 +275,7 @@ struct RouterComposer: View {
                                 if now { placeCaret(host) }
                             },
                             label: "Message",
-                            hint: "Return sends, Option Return queues after the turn, Shift Return starts a new line, @ names a thread or a project",
+                            hint: "Return sends, Option Return queues after the turn, Shift Return starts a new line, @ names a thread or a project, a pasted or dropped picture or file goes where the caret is",
                             onSelection: { view in
                                 // The @ list follows the caret wherever it is in the text: only while the field edits (ending
                                 // its editing, when it loses the keyboard, moves its selection; that isn't the caret moving).
@@ -284,7 +284,8 @@ struct RouterComposer: View {
                             },
                             onPill: { model.openPill($0) },
                             onEdit: { text, pointers in model.edit(text, marks: RouterMentions.marks(text, pointers: pointers, name: host.store.pointerName),
-                                                                  projectName: { RouteTarget.projectName($0, store: host.store) }) })
+                                                                  projectName: { RouteTarget.projectName($0, store: host.store) }) },
+                            attachments: host.store.attachments)
             .opacity(model.held ? 0.55 : 1)
             .accessibilityLabel("Message")
             .onChange(of: host.text.caretRequest) { _, request in
@@ -347,7 +348,8 @@ struct RouterComposer: View {
 
     /// The draft as the drawn composer shows it: its words, and each pill as the field draws it (a settings pill quiet, with
     /// its glyph; another pointer by its name).
-    static func drawn(_ model: RouterModel, dark: Bool) -> Text {
+    /// `attachments`: where a pasted picture's or file's pill finds its picture and its upload's state.
+    static func drawn(_ model: RouterModel, dark: Bool, attachments: RouterAttachments? = nil) -> Text {
         let font = CDS.nsSans(CDS.Density.compact.prose.0)
         var pills = model.mentions.makeIterator()
         var out = Text(verbatim: "")
@@ -359,15 +361,18 @@ struct RouterComposer: View {
             }
             out = Text("\(out)\(Text(verbatim: run))")
             run = ""
-            let pill = Text(Image(nsImage: MentionPill.image(look(mention), font: font, dark: dark)))
+            let pill = Text(Image(nsImage: MentionPill.image(look(mention, attachments: attachments), font: font, dark: dark)))
                 .baselineOffset(font.descender + ((font.ascender - font.descender) - MentionPill.height) / 2)
             out = Text("\(out)\(pill)")
         }
         return Text("\(out)\(Text(verbatim: run))")
     }
 
-    private static func look(_ mention: RouterMention) -> MentionLook {
+    private static func look(_ mention: RouterMention, attachments: RouterAttachments? = nil) -> MentionLook {
         if case .setting(let s) = mention.pointer { return s.look }
+        if case .attachment(let id) = mention.pointer {
+            return .attachment(id, item: attachments?.items[id], state: attachments?.states[id], name: mention.name)
+        }
         // An item's and an answer's as the page's model last made them (`RouterPillLooks`).
         if let look = RouterPillLooks.looks[mention.pointer] { return look }
         switch mention.pointer {

@@ -13,8 +13,31 @@ enum RouterShots {
             [shot(state.name, .aqua, state), shot(state.name + "-dark", .darkAqua, state)]
         } + screens.flatMap { screen in
             [shot(screen.name, .aqua, screen), shot(screen.name + "-dark", .darkAqua, screen)]
-        }
+        } + [attachments(.aqua), attachments(.darkAqua)]
     }
+
+    /// A draft with what was pasted and dropped in it, each pill where the caret was: a screenshot (its picture), a file, a
+    /// picture still uploading and a file whose upload failed (a click tries again). Nothing selected: the words go by the read.
+    private static func attachments(_ look: NSAppearance.Name) -> AppWindowShots.Shot {
+        AppWindowShots.Shot(name: "v2-composer-attachments" + (look == .darkAqua ? "-dark" : ""), destination: { _ in .router },
+                            size: CGSize(width: 1280, height: 960), compose: composeAttachments, appearance: look,
+                            v2: {
+                                let model = RouterDemo.records(still: true)
+                                model.select(nil)
+                                // The page's own draft, as the composer pushes it (a still draws the page's words).
+                                let names = Dictionary(uniqueKeysWithValues: attachmentNames.map { (RouterPointer.attachment($0.0), $0.1) })
+                                model.edit(attachmentDraft, marks: RouterMentions.marks(attachmentDraft, pointers: attachmentNames.map { .attachment($0.0) },
+                                                                                       name: { names[$0] ?? "" }))
+                                return model
+                            })
+    }
+
+    private static let attachmentNames = [("image_shot1", "Screenshot 2026-11-14 at 10.42.png"), ("file_log1", "crash-report.txt"),
+                                          ("image_paste1", "Pasted image.png"), ("file_trace1", "trace.json")]
+    private static let attachmentDraft = { () -> String in
+        let m = MentionText.markString
+        return "the settings sheet clips here \(m) after a resize, the log \(m) has the crash, and this \(m) is the same in dark; trace \(m) is from that run"
+    }()
 
     /// What the screen around the page draws from the app's store: the History drawer, the setup notice.
     private struct Screen {
@@ -36,7 +59,37 @@ enum RouterShots {
         Screen(name: "v2-setup") { model, _ in model.claudeCodeMissing = true },
         // The Router off: the notice with Turn on.
         Screen(name: "v2-off") { _, store in store.switchRouter(false) },
+        // A draft with what was pasted and dropped in it, each pill where the caret was: a screenshot (its picture), a
+        // file, a picture still uploading and a file whose upload failed (a click tries again).
     ]
+
+    private static func composeAttachments(_ model: RouterComposerModel, _ store: Store) {
+        let a = store.attachments
+        a.put(RouterAttachment(id: "image_shot1", kind: .image, name: "Screenshot 2026-11-14 at 10.42.png", mimeType: "image/png",
+                               sizeBytes: 482_113, thumbnail: RouterAttachments.thumbnail(samplePicture(.systemBlue))),
+              state: .ready("att-1"))
+        a.put(RouterAttachment(id: "file_log1", kind: .file, name: "crash-report.txt", mimeType: "text/plain", sizeBytes: 12_408),
+              state: .ready("att-2"))
+        a.put(RouterAttachment(id: "image_paste1", kind: .image, name: "Pasted image.png", mimeType: "image/png", sizeBytes: 90_210,
+                               thumbnail: RouterAttachments.thumbnail(samplePicture(.systemOrange))), state: .uploading)
+        a.put(RouterAttachment(id: "file_trace1", kind: .file, name: "trace.json", mimeType: "application/json", sizeBytes: 2_201_004),
+              state: .failed("T3 refused the upload (500)"))
+        model.pointers = attachmentNames.map { .attachment($0.0) }
+        model.draft = attachmentDraft
+    }
+
+    /// A stand-in screenshot: a window's chrome and a few rows on a ground of `tint`.
+    private static func samplePicture(_ tint: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 160, height: 100), flipped: false) { rect in
+            tint.withAlphaComponent(0.35).setFill()
+            rect.fill()
+            NSColor.white.setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 18, dy: 14), xRadius: 6, yRadius: 6).fill()
+            tint.setFill()
+            for row in 0..<3 { NSRect(x: 30, y: 26 + CGFloat(row) * 18, width: 70 + CGFloat(row) * 15, height: 8).fill() }
+            return true
+        }
+    }
 
     private struct State {
         let name: String
