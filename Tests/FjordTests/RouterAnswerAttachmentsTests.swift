@@ -103,7 +103,10 @@ import Testing
                                              target: target)
         #expect(throws: RequestFailure.optionsOnly) { try refused.get() }
         s.requests["t1"] = question(custom: true)
-        s.attachments.put(item("image_b"), state: .failed("T3 refused the upload (500)"))
+        // Failed with no bytes left to upload again: the send can't recover it.
+        var gone = item("image_b")
+        gone.data = nil
+        s.attachments.put(gone, state: .failed("T3 refused the upload (500)"))
         let failed = await s.answerQuestion(question(custom: true), ["q1": .one("this")], attachments: ["q1": ["image_b"]],
                                             target: target)
         #expect(throws: ThreadSendFailure.self) { try failed.get() }
