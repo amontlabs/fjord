@@ -226,8 +226,12 @@ final class RouterModel {
     var launchRolls: [RouterLaunchField: RouterRoll] = [:]
 
     var toast: RouterToast?
-    /// Show me's dock and toggle: demo only (RouterShowMe.swift); nil, nothing of it shows.
+    /// Show me's dock and toggle (RouterShowMe.swift): the engine's explainers, or the demo's; nil, nothing of it shows.
     var showMe: RouterShowMeState?
+    /// ⌘Return: this send (held until its read lands, too) goes with Show me; Return's end, typing or Esc clears it.
+    @ObservationIgnored var showMeOnce = false
+    /// Show me's engine (the store); nil in a demo or a shot.
+    @ObservationIgnored weak var explainers: RouterExplainers?
     var snoozeMenu: RouterSnoozeMenu?
 
     // The pointer (the real one, or the demo's drawn one).

@@ -124,6 +124,8 @@ extension Store {
         router = state
         // Off: your messages' runs stop.
         if !on { routerDispatcher.stopAll(reason: RouterDispatcher.unlinkedWords, actions: true); routerDispatcher.unlinked() }
+        // Show me follows the Router (the page's toggle and dock), once the page is there.
+        explainers.onChange?(explainers.items)
     }
 
     /// Where the Router's files are, when they may be touched at all: never in a demo, and in a test only where the test said.

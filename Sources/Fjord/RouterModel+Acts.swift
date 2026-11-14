@@ -259,7 +259,7 @@ extension RouterModel {
         if launchMenu != nil { animate(.fade) { launchMenu = nil }; return true }
         if filterMode { filterMode = false; return true }
         // A held Return: the words are yours again.
-        if held { unhold(); return true }
+        if held { unhold(); showMeOnce = false; return true }
         // The keyboard in a new thread's settings: back to the words.
         if launchFocus != nil { leaveLaunch(); return true }
         if !draft.isEmpty {

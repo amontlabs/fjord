@@ -37,6 +37,8 @@ struct ExplainerItem: Identifiable, Equatable, Sendable {
     /// The final fell back to a draft: the run ended with no code of its own (§2.4).
     var draft = false
     var unseen = false
+    /// It has a thread in T3 (a run, not a request that never launched): Open in T3 has somewhere to go.
+    var launched = false
 }
 
 /// An explainer thread Fjord started, kept in `runs/<id>/run.json` (the renderer keeps `meta.json` beside it).
@@ -455,15 +457,20 @@ final class ExplainerEngine: ExplainerRenderHost {
                                      answer: shown?.answer ?? "", captions: shown?.captions ?? [], since: run.createdAt,
                                      stage: stage, length: Int((shown?.length ?? 0).rounded()), page: shown?.page,
                                      posterLight: shown?.posterLight, posterDark: shown?.posterDark, draft: run.draft,
-                                     unseen: run.unseen))
+                                     unseen: run.unseen, launched: true))
         }
         return Array(out.sorted { ($0.since, $0.id) > ($1.since, $1.id) }.prefix(Self.listed))
     }
 
+    /// T3 has the project: Show me can be asked for (the page's toggle and dock show only then).
+    var ready: Bool { projectID != nil }
+    private var publishedReady = false
+
     private func publish() {
         let next = list()
-        guard next != items else { return }
+        guard next != items || ready != publishedReady else { return }
         items = next
+        publishedReady = ready
         onChange?(next)
     }
 

@@ -564,9 +564,11 @@ private struct RouterSummaryCard: View {
                         RouterTextButton(model: model, hit: .footer(id, .settle), title: "Settle", keys: ["cmd", "backspace"],
                                          removes: true) { model.settle(id) }
                     }
-                    // Show me (a proposal on demo data): an explainer of this reply, at once.
+                    // Show me: an explainer of this reply, at once.
                     if case .done = thread.state, model.showMe != nil {
-                        RouterTextButton(model: model, hit: .footer(id, .showMe), title: "Show me", keys: RouterShowMeLayout.keys) {}
+                        RouterTextButton(model: model, hit: .footer(id, .showMe), title: "Show me", keys: RouterShowMeLayout.keys) {
+                            model.explain(reply: id)
+                        }
                     }
                     // A request that is no longer live has it in its options' place.
                     if thread.live { openButton }

@@ -38,6 +38,9 @@ import Testing
         q.afterTurn(id: "b", source: "t2", ask: nil, sentAt: Self.sent)
         q.afterTurn(id: "c", source: "gone", ask: nil, sentAt: Self.sent)
         q.afterTurn(id: "d", source: "t3", ask: nil, sentAt: Self.sent)
+        // "gone" was there (running) before it left the shell.
+        _ = q.advance(shell: T3Fixture.state([Self.row("gone", status: "running", active: "r1", completed: Self.sent - 60)]),
+                      now: Self.sent + 1)
         let shell = T3Fixture.state([Self.row("t1", status: "interrupted", completed: Self.sent + 9),
                                      Self.row("t2", status: "failed", completed: Self.sent + 9),
                                      Self.row("t3", completed: Self.sent + 9, archived: true)])
@@ -45,6 +48,15 @@ import Testing
         #expect(dropped.map(\.0.id) == ["a", "b", "c", "d"])
         #expect(dropped.map(\.1) == [.turnStopped, .turnStopped, .threadGone, .threadGone])
         #expect(q.requests.isEmpty)
+    }
+
+    @Test func aNewThreadNotInTheShellYetIsWaitedFor() {
+        var q = ExplainerQueue()
+        q.afterTurn(id: "n", source: "new", ask: "m1", sentAt: Self.sent)
+        #expect(q.advance(shell: T3ShellState(), now: Self.sent + 1).isEmpty)
+        #expect(q.requests.map(\.id) == ["n"])
+        _ = q.advance(shell: T3Fixture.state([Self.row("new", completed: Self.sent + 20)]), now: Self.sent + 21)
+        #expect(q.ready.map(\.id) == ["n"])
     }
 
     @Test func aRequestOlderThanADayExpires() {

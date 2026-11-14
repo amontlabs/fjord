@@ -69,6 +69,10 @@ extension Store {
         page.source = routerActs
         page.attachments = attachments
         page.apply(routerRecords.snapshot())
+        // Show me: the engine's explainers on the page, and the page's asks to it (RouterShowMe.swift).
+        page.explainers = self
+        explainers.onChange = { [weak self] items in self?.showMeChanged(items) }
+        showMeChanged(explainers.items, on: page)
         return page
     }
 

@@ -573,7 +573,7 @@ enum RouterHit: Hashable {
     case link(String, Int)
     /// The quiet Done at an item row's end, on hover: the item's key.
     case itemDone(String)
-    /// Show me's controls (a proposal on demo data, RouterShowMe.swift).
+    /// Show me's controls (RouterShowMe.swift): the toggle, the dock's pill, a panel row, "N more", Open in T3.
     case showMe(String)
 }
 

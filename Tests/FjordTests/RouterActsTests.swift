@@ -35,6 +35,7 @@ import Testing
         var opened: [String] = []
         var emitted: [RouterChange] = []
         var away = false
+        var explained: [(thread: String, entry: UUID?)] = []
 
         func began(send: RouterActs.Send) { log.append("began"); began.append(send) }
         func ended(send: RouterActs.Send) { log.append("ended"); ended.append(send) }
@@ -75,7 +76,8 @@ import Testing
                 projectID: { name in ["Garden": "p1", "p1": "p1"][name] },
                 away: { [self] in away },
                 title: { $0 == "t1" ? "Fix the fence" : "thread" },
-                now: { Date(timeIntervalSince1970: 1_800_000_000) })
+                now: { Date(timeIntervalSince1970: 1_800_000_000) },
+                explain: { [self] thread, entry, _ in explained.append((thread, entry)) })
             let acts = RouterActs(env: env, records: self, emit: { [self] in emitted.append($0) })
             return acts
         }
@@ -130,6 +132,35 @@ import Testing
         // The word of an entry is heard once.
         acts.sendEvent(first, .refused(reason: "late", offline: false))
         #expect(f.ended.count == 1 && f.emitted.count == 1)
+    }
+
+    @Test func showMeIsAskedForOnlyWhenT3TakesTheSend() {
+        let f = Fake()
+        let acts = f.acts()
+        let first = UUID(), second = UUID(), third = UUID()
+        f.entry = first
+        var shown = out("t1", "why the token?")
+        shown.showMe = true
+        acts.send(shown)
+        f.entry = second
+        shown.thread = "t2"
+        acts.send(shown)
+        f.entry = third
+        acts.send(out("t3", "plain"))
+        acts.sendEvent(first, .taken)
+        acts.sendEvent(second, .refused(reason: "T3 is away", offline: true))
+        acts.sendEvent(third, .taken)
+        #expect(f.explained.map(\.thread) == ["t1"] && f.explained.first?.entry == first)
+        #expect(f.began.map(\.showMe) == [true, true, false])
+    }
+
+    @Test func aNewThreadStartedWithShowMeAsksForItOnceTaken() {
+        let f = Fake()
+        let acts = f.acts()
+        acts.start("n1", words: "add dark mode", attached: [], hold: nil, project: "Garden", launch: RouterLaunch(model: "claude-opus-5-5", effort: .high, access: .autoEdits), read: nil,
+                   showMe: true)
+        acts.sendEvent(f.entry!, .taken)
+        #expect(f.explained.map(\.thread) == ["n1"])
     }
 
     @Test func aRouterThatIsOffRefusesAtOnceAndEndsThePendingSend() {

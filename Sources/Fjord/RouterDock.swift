@@ -42,9 +42,9 @@ struct RouterDock: View {
             }
             // A message split across threads: the page shows what each target receives, these rows one a destination
             // (SPLIT.md); else the one row.
-            if let showMe = model.showMe, showMe.open, let explainer = showMe.chosen, !model.draftEmpty {
+            if let showMe = model.showMe, let explainer = showMe.target, !model.draftEmpty {
                 // The panel has an explainer: Return makes a new version of it with the words.
-                RouterShowMeDestination(explainer: explainer)
+                RouterShowMeDestination(explainer: explainer, note: showMe.note)
                     .transition(.scaleFade(0.96, reduce: reduce))
             } else if let split = model.split {
                 RouterSplitRows(model: model, sends: split)
@@ -209,7 +209,7 @@ struct RouterComposer: View {
         ZStack(alignment: .bottomTrailing) {
             field
                 .padding(.leading, C.pad + C.textInset)
-                .padding(.trailing, C.pad + 6 + C.row + (model.showMe == nil ? 0 : RouterShowMeLayout.toggle + 2))
+                .padding(.trailing, C.pad + 6 + C.row + showMeRoom)
                 .padding(.vertical, C.pad + (C.row - 20) / 2)
                 .frame(maxWidth: .infinity, minHeight: C.minHeight, alignment: .topLeading)
             HStack(spacing: 2) {
@@ -234,6 +234,12 @@ struct RouterComposer: View {
         .onDisappear { host?.text.settingRows = nil }
         .zIndex(1)
         .modifier(RouterPills(model: model, host: viewHost))
+    }
+
+    /// The toggle's room beside Return, and its hint's while it's on (on hover the hint covers the words instead).
+    private var showMeRoom: CGFloat {
+        guard let showMe = model.showMe else { return 0 }
+        return RouterShowMeLayout.toggle + 2 + (showMe.armed ? RouterShowMeLayout.hint + 2 : 0)
     }
 
     /// The @ field: in a still, or while the script types, the field is the demo's.

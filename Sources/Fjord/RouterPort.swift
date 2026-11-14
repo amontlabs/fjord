@@ -67,6 +67,8 @@ struct RouterOutgoing: Equatable {
     var attached: [RouterMention] = []
     /// The key holding the pictures and files it carries until T3 takes or refuses it (`RouterModel.holdSend`); nil: none.
     var hold: String? = nil
+    /// Show me after it (the composer's toggle, or ⌘Return): once T3 takes it, an explainer waits for the turn it went into.
+    var showMe = false
 }
 
 /// What takes the page's acts: the demo's fake T3 (RouterDemoSource), or the real one (RouterActs). The page has
@@ -86,9 +88,10 @@ struct RouterOutgoing: Equatable {
     func mintThread() -> String
     /// Starts a thread with your words and the settings the row showed.
     func start(_ thread: String, words: String, project: String, launch: RouterLaunch, read: RouterRead?)
-    /// The same with the pictures' and files' pills in the words (`RouterOutgoing.attached`), held by `hold`.
+    /// The same with the pictures' and files' pills in the words (`RouterOutgoing.attached`), held by `hold`, and Show me
+    /// after its first turn (`showMe`).
     func start(_ thread: String, words: String, attached: [RouterMention], hold: String?, project: String, launch: RouterLaunch,
-               read: RouterRead?)
+               read: RouterRead?, showMe: Bool)
     func stop(_ thread: String)
     /// A card opened here: T3's `thread.visit`.
     func visit(_ thread: String)
@@ -105,7 +108,7 @@ struct RouterOutgoing: Equatable {
 extension RouterSource {
     /// A source that sends nothing anywhere (the demo's) has no use for the attachments.
     func start(_ thread: String, words: String, attached: [RouterMention], hold: String?, project: String, launch: RouterLaunch,
-               read: RouterRead?) {
+               read: RouterRead?, showMe: Bool) {
         start(thread, words: words, project: project, launch: launch, read: read)
     }
     func itemDone(_ thread: String, item: String, on: Bool) {}

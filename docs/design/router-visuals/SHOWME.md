@@ -551,3 +551,36 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
   dark load, the media query turning to light without a reload, and the sandbox configuration. The rebuild in place needs a
   look in the live panel (P5).
 - **Live check:** `FJORD_EXPLAINER_LIVE=1 swift test --filter ExplainerPlayerLive` (offscreen, about 1 s).
+
+### P5 (2026-11-14)
+- **`RouterExplainer` is gone: the page lists the engine's `ExplainerItem`**, the demo's too (`RouterShowMeDemo` builds
+  them, with `posterLight`/`posterDark` pointing at `Resources/ShowMeDemo`). `scene`, `elapsed` and `picture` left with it.
+  `ExplainerItem` gained `launched` (a run with a thread, so Open in T3 has somewhere to go). The engine gained `ready`
+  (T3 has the project) and publishes when it turns, not only when the list changes.
+- **Who sets `routerPage.showMe`:** `Store.showMeChanged` (in `RouterShowMe.swift`, `extension Store: RouterExplainers`),
+  wired in `makeRouterPage` (`Store+Router.swift`) and called again by `setRouterEnabled` (`Router.swift`): nil unless the
+  Router is on and `explainers.ready`. The page reaches the engine through `RouterModel.explainers` (protocol
+  `RouterExplainers`; nil in demos and shots, so a demo's Show me acts do nothing).
+- **The send carries Show me, the acts ask for it.** `RouterOutgoing.showMe`, a `showMe:` parameter on the attached
+  `RouterSource.start`, `RouterActs.Send.showMe`. On `.taken` the acts call `env.explain(thread, entry, at)`; the live env
+  reads the entry's `RouterDecision.delivered` for the thread and message id (a new thread's too) and calls
+  `explainers.requested(source:ask:sentAt:)`. ⌘Return sets `RouterModel.showMeOnce`, which survives a Return held for its
+  read and is cleared by the Return's end, typing, or Esc.
+- **No read while the panel targets an explainer**, done in `RouterModel.startRead` rather than `RouterReader`: the page
+  never asks. `RouterShowMeState.target` is the open panel's selection when it's ready or being made (a queued or failed one
+  isn't a target). Opening, closing or changing the selection reads the draft again when the target changes.
+- **Queue fix (P3's file):** a source thread missing from the shell waits instead of dropping as gone, because a new
+  thread's row arrives after T3 took the send. `ExplainerRequest.seen` marks a row that was there; only a row that was
+  seen and then left is "Its thread is gone". Known limit: a ⌥Return (queued) send with Show me is ready at the end of
+  the turn it waits behind, so its input can find no answer to its message yet and fails "There's no answer to explain yet".
+- **Toggle:** the glyph alone (`RouterShowMeLayout.toggle` = `CDS.Composer.row`). The hint is part of the toggle's button,
+  on the composer's ground so it covers words on hover; while on, the field keeps `RouterShowMeLayout.hint` (92 pt) free.
+- **Player:** `ExplainerStage` sits at one place in `RouterExplainerPlayer`. With the web view the panel draws only Open in
+  T3 under it (and "A draft: it stopped before its final" for a draft final). The still (demos, shots, making, queued,
+  failed) keeps the answer over it and, under it, the last scene's caption (the poster is the last frame), full scene
+  segments and the length: a picture of the page's bar, not controls (the old play/pause and Sources were dead buttons).
+- **`ExplainerWebView.chrome` (132 pt) is still untuned**, and the theme rebuilding in place is still unseen: both need the
+  live panel.
+- **`EX/run.py`** names its server `fjord` (tool `mcp__fjord__preview`), prefixes `<ticket>eval0001</ticket>` to inputs that
+  lack one, and runs the shipped prompt (`Resources/Explainer/CLAUDE.md`; `PROMPT=<file>` for another), since `system.md`
+  predates the ticket.

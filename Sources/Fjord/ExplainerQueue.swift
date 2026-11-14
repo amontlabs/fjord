@@ -21,6 +21,9 @@ struct ExplainerRequest: Codable, Equatable, Identifiable, Sendable {
     var ask: String?
     var sentAt: Date
     var state: State
+    /// The source thread has been in the shell since the request: a new thread's row arrives after T3 took the send, so
+    /// only a row that was there and left means the thread is gone.
+    var seen: Bool? = nil
 }
 
 struct ExplainerQueue: Codable, Equatable, Sendable {
@@ -61,9 +64,13 @@ struct ExplainerQueue: Codable, Equatable, Sendable {
         requests = requests.compactMap { r in
             if now.timeIntervalSince(r.sentAt) > Self.expiry { dropped.append((r, .expired)); return nil }
             guard r.state == .waitingForTurn else { return r }
-            guard let row = shell.threads[r.source], row.archivedAt == nil, row.deletedAt == nil else {
-                dropped.append((r, .threadGone)); return nil
+            guard let row = shell.threads[r.source] else {
+                if r.seen == true { dropped.append((r, .threadGone)); return nil }
+                return r
             }
+            guard row.archivedAt == nil, row.deletedAt == nil else { dropped.append((r, .threadGone)); return nil }
+            var r = r
+            r.seen = true
             guard row.activeRunId == nil, !row.status.isLive, let done = row.latestRunCompletedAt?.date,
                   done >= r.sentAt else { return r }
             if [.interrupted, .failed, .cancelled].contains(row.status) { dropped.append((r, .turnStopped)); return nil }

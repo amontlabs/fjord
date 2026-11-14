@@ -2,20 +2,19 @@ import AppKit
 import SwiftUI
 
 // The Show me dock open (RouterShowMe.swift): a floating panel over the page, its bottom right on the dock's, above the
-// destination row so what Return does stays in sight. The explainers first, then the selected one's player. The panel
-// has no field: a follow-up is typed in the composer, whose row then targets the explainer.
+// destination row so what Return does stays in sight. The explainers first, then the selected one's player. While one
+// plays the list folds to its row and "N more". The panel has no field: a follow-up is typed in the composer, whose row
+// then targets the explainer.
 
 struct RouterShowMePanel: View {
     let model: RouterModel
     let state: RouterShowMeState
+    @Environment(\.controlActiveState) private var active
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(spacing: 0) {
-                ForEach(state.explainers) { e in
-                    RouterExplainerRow(model: model, explainer: e, selected: e.id == state.selected)
-                }
-            }
+            list
+            // One place in the tree whatever the list does, so the player's web view is kept across selections.
             if let e = state.chosen {
                 RouterExplainerPlayer(model: model, explainer: e)
                     .padding(.horizontal, 6)
@@ -27,6 +26,29 @@ struct RouterShowMePanel: View {
         .routerFloating(radius: Router.Surface.card)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Explainers")
+        // Watched: shown selected, finished, with the window key.
+        .task(id: Watch(id: state.chosen?.id, unseen: state.chosen?.unseen == true && state.chosen?.stage == .ready,
+                        key: active == .key)) {
+            guard active == .key, let e = state.chosen, e.unseen, e.stage == .ready else { return }
+            model.explainers?.watched(e.id)
+        }
+    }
+
+    private struct Watch: Equatable { var id: String?; var unseen: Bool; var key: Bool }
+
+    @ViewBuilder private var list: some View {
+        VStack(spacing: 0) {
+            if state.playing, !state.expanded, let e = state.chosen {
+                RouterExplainerRow(model: model, explainer: e, selected: true)
+                if state.explainers.count > 1 {
+                    RouterExplainerMore(model: model, count: state.explainers.count - 1)
+                }
+            } else {
+                ForEach(state.explainers) { e in
+                    RouterExplainerRow(model: model, explainer: e, selected: e.id == state.selected)
+                }
+            }
+        }
     }
 }
 
@@ -34,17 +56,17 @@ struct RouterShowMePanel: View {
 /// its state's words and its age. The selected one on the chosen ground.
 private struct RouterExplainerRow: View {
     let model: RouterModel
-    let explainer: RouterExplainer
+    let explainer: ExplainerItem
     let selected: Bool
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Router.Surface.row, style: .continuous)
-        RouterButton(model: model, hit: .showMe("row-" + explainer.id), action: { model.showMe?.selected = explainer.id }) { hot, _ in
+        RouterButton(model: model, hit: .showMe("row-" + explainer.id), action: { model.selectExplainer(explainer.id) }) { hot, _ in
             HStack(spacing: 8) {
                 glyph.frame(width: 14, height: 14)
                 Text(explainer.title).font(CDS.sans(13, selected ? .medium : .regular)).foregroundStyle(CDS.Text.primary)
                     .lineLimit(1).truncationMode(.tail)
-                RouterExplainerSource(model: model, thread: explainer.thread)
+                RouterExplainerSource(model: model, explainer: explainer)
                 Spacer(minLength: 8)
                 words
                 Text(BriefAge.short(model.now.timeIntervalSince(explainer.since)))
@@ -65,10 +87,10 @@ private struct RouterExplainerRow: View {
         case .queued:
             Image(systemName: "clock").font(.system(size: 10, weight: .medium)).foregroundStyle(CDS.Text.muted)
         case .ready:
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: RouterShowMeLayout.symbol).font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(explainer.unseen ? CDS.Text.accent : CDS.Text.muted)
-            }
+            Image(systemName: RouterShowMeLayout.symbol).font(.system(size: 11, weight: .medium))
+                .foregroundStyle(explainer.unseen ? CDS.Text.accent : CDS.Text.muted)
+        case .failed:
+            Image(systemName: "exclamationmark.circle").font(.system(size: 11, weight: .medium)).foregroundStyle(CDS.Text.muted)
         }
     }
 
@@ -76,133 +98,177 @@ private struct RouterExplainerRow: View {
         let font = CDS.sans(12)
         switch explainer.stage {
         case .making(let draft, _):
-            Text("Making · draft \(draft)").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
+            Text(draft == 0 ? "Making" : "Making · draft \(draft)").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
         case .queued:
             Text("Queued").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
         case .ready:
-            Text(RouterExplainerPlayer.clock(explainer.length)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted).fixedSize()
+            Text(RouterExplainerPlayer.clock(explainer.length)).font(font).monospacedDigit().foregroundStyle(CDS.Text.muted).fixedSize()
+        case .failed:
+            Text("Didn't finish").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
         }
+    }
+}
+
+/// Under the playing one's row: the rest of the list, folded. A click shows it whole.
+private struct RouterExplainerMore: View {
+    let model: RouterModel
+    let count: Int
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Router.Surface.row, style: .continuous)
+        RouterButton(model: model, hit: .showMe("more"), action: { model.showMe?.expanded = true }) { hot, _ in
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(CDS.Text.muted)
+                    .frame(width: 14, height: 14)
+                Text("\(count) more").font(CDS.sans(12)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: RouterShowMeLayout.rowHeight - 4)
+            .background { shape.fill(hot ? Router.Surface.hover : .clear).hoverMotion(hot) }
+        }
+        .accessibilityLabel("\(count) more explainers")
     }
 }
 
 /// The thread an explainer explains: its name on its state's tint, as its line's name; a grey Done on the quiet ground.
+/// A thread that has no line now keeps T3's title, quiet.
 private struct RouterExplainerSource: View {
     let model: RouterModel
-    let thread: String
+    let explainer: ExplainerItem
 
     var body: some View {
-        if let t = model.thread(thread) {
-            let look = t.look
-            Text(t.name).font(CDS.sans(CDS.Badge.font, .medium))
-                .foregroundStyle(look.ground ? look.tint : CDS.Badge.ink)
+        let t = model.thread(explainer.source)
+        let name = t?.name ?? explainer.thread
+        if !name.isEmpty {
+            let look = t?.look
+            let ground = look?.ground == true
+            Text(name).font(CDS.sans(CDS.Badge.font, .medium))
+                .foregroundStyle(ground ? look!.tint : CDS.Badge.ink)
                 .lineLimit(1).fixedSize()
                 .padding(.horizontal, CDS.Badge.padX)
                 .frame(height: CDS.Badge.height)
                 .background(RoundedRectangle(cornerRadius: Router.Surface.token, style: .continuous)
-                    .fill(look.ground ? look.tint.opacity(Router.Line.ground) : Router.Surface.quiet))
+                    .fill(ground ? look!.tint.opacity(Router.Line.ground) : Router.Surface.quiet))
         }
     }
 }
 
-/// The selected explainer: its answer, the stage, the scene's caption, the controls. While it is made: its latest
-/// draft with a tag, and what the agent is fixing in the caption's place.
+/// The selected explainer. Ready in the app: the page plays in the web view, drawing its own answer, caption, scene bar,
+/// time and Sources, with Open in T3 under it. Otherwise the held frame (a demo, a shot, one being made), with the answer
+/// over it and, under it, the last scene's caption and the film's length; while it's made, its latest draft with a tag and
+/// what the agent is fixing in the caption's place.
 struct RouterExplainerPlayer: View {
     let model: RouterModel
-    let explainer: RouterExplainer
-    @Environment(\.colorScheme) private var scheme
+    let explainer: ExplainerItem
 
-    private var fixing: String? {
-        if case .making(_, let fixing) = explainer.stage { return fixing }
+    private var ready: Bool { explainer.stage == .ready }
+    private var draft: Int? {
+        if case .making(let n, _) = explainer.stage { return max(n, 1) }
         return nil
     }
+    private var web: Bool { ExplainerStage.mode(page: explainer.page, ready: ready) != .still }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(explainer.answer).font(CDS.sans(14, .semibold)).foregroundStyle(CDS.Text.primary)
-                .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 10)
-            stage
-            caption.padding(.top, 10)
-            controls.padding(.top, 8)
+            if !web, !explainer.answer.isEmpty {
+                Text(explainer.answer).font(CDS.sans(14, .semibold)).foregroundStyle(CDS.Text.primary)
+                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 10)
+            }
+            ExplainerStage(page: explainer.page, posterLight: explainer.posterLight, posterDark: explainer.posterDark,
+                           draft: draft, ready: ready)
+            if web {
+                footer.padding(.top, 8)
+            } else {
+                caption.padding(.top, 10)
+                controls.padding(.top, 8)
+            }
         }
     }
 
-    private var stage: some View {
-        let shape = RoundedRectangle(cornerRadius: Router.Surface.card, style: .continuous)
-        return ZStack(alignment: .topLeading) {
-            if let picture = RouterShowMeDemo.picture(explainer.picture, dark: scheme == .dark) {
-                Image(nsImage: picture).resizable().interpolation(.high).aspectRatio(16 / 9, contentMode: .fit)
-            } else {
-                Rectangle().fill(Router.Surface.quiet).aspectRatio(16 / 9, contentMode: .fit)
+    /// Under the playing page: whether it's only a draft, and Open in T3.
+    private var footer: some View {
+        HStack(spacing: 10) {
+            if explainer.draft {
+                Text("A draft: it stopped before its final").font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).lineLimit(1)
             }
-            if case .making(let draft, _) = explainer.stage {
-                HStack(spacing: 6) {
-                    RouterThinking(tint: CDS.Text.secondary, size: 12, label: "Correcting")
-                    Text("Draft \(draft) · correcting").font(CDS.sans(12)).foregroundStyle(CDS.Text.secondary)
-                }
-                .padding(.horizontal, 8)
-                .frame(height: 24)
-                .background(RoundedRectangle(cornerRadius: Router.Surface.control, style: .continuous).fill(CDS.Surface.s3.opacity(0.94)))
-                .padding(10)
-            }
+            Spacer(minLength: 0)
+            openButton
         }
-        .clipShape(shape)
-        .overlay(shape.strokeBorder(CDS.border, lineWidth: 1))
-        .accessibilityLabel(fixing == nil ? "Scene \(explainer.scene + 1)" : "Draft")
+        .frame(height: 24)
+    }
+
+    private var openButton: some View {
+        RouterTextButton(model: model, hit: .showMe("open"), title: "Open in T3") { model.explainers?.open(explainer: explainer.id) }
     }
 
     @ViewBuilder private var caption: some View {
-        if let fixing {
-            (Text("Fixing: ").foregroundColor(CDS.Text.muted) + Text(fixing).foregroundColor(CDS.Text.secondary))
-                .font(CDS.sans(13)).lineLimit(1)
+        switch explainer.stage {
+        case .making(let n, let fixing):
+            Group {
+                if n == 0 {
+                    Text("Writing the first draft").foregroundColor(CDS.Text.muted)
+                } else if fixing.isEmpty {
+                    Text("Checking draft \(n)").foregroundColor(CDS.Text.muted)
+                } else {
+                    Text("Fixing: ").foregroundColor(CDS.Text.muted) + Text(fixing).foregroundColor(CDS.Text.secondary)
+                }
+            }
+            .font(CDS.sans(13)).lineLimit(1)
+            .frame(height: 20, alignment: .leading)
+        case .queued:
+            Text("Starts when \(model.threadName(explainer)) answers").font(CDS.sans(13)).foregroundStyle(CDS.Text.muted)
                 .frame(height: 20, alignment: .leading)
-        } else {
-            Text(explainer.captions[min(explainer.scene, explainer.captions.count - 1)])
-                .font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.primary).lineLimit(2)
+        case .failed(let why):
+            Text(why).font(CDS.sans(13)).foregroundStyle(CDS.Text.secondary).lineLimit(2)
+                .frame(minHeight: 20, alignment: .leading)
+        case .ready:
+            // The held frame is the last scene's.
+            Text(explainer.captions.last ?? "").font(CDS.sans(13, .medium)).foregroundStyle(CDS.Text.primary).lineLimit(2)
                 .frame(minHeight: 20, alignment: .leading)
         }
     }
 
-    private var controls: some View {
-        let making = fixing != nil
-        return HStack(spacing: 10) {
-            RouterButton(model: model, hit: .showMe("play"), action: {}) { hot, pressed in
-                Image(systemName: making ? "play.fill" : "pause.fill").font(.system(size: 10, weight: .semibold))
+    /// The held frame's bar: every scene watched, the film's length. A picture of the page's, not controls: only the
+    /// page plays.
+    @ViewBuilder private var controls: some View {
+        switch explainer.stage {
+        case .queued, .failed:
+            HStack { Spacer(minLength: 0); openButtonIfRun }.frame(height: 24)
+        case .making, .ready:
+            let making = draft != nil
+            HStack(spacing: 10) {
+                Image(systemName: "play.fill").font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(CDS.Text.primary)
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(pressed ? Router.Surface.pressed : hot ? Router.Surface.chosenHover : Router.Surface.chosen))
+                    .background(Circle().fill(Router.Surface.chosen))
+                    .accessibilityHidden(true)
+                segments
+                Text(making ? "Draft" : Self.clock(explainer.length))
+                    .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted).fixedSize()
+                openButton
             }
-            .accessibilityLabel(making ? "Play the draft" : "Pause")
-            segments
-            Text(making ? "Draft" : "\(Self.clock(explainer.elapsed)) / \(Self.clock(explainer.length))")
-                .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted).fixedSize()
-            RouterTextButton(model: model, hit: .showMe("sources"), title: "Sources") {}
-            RouterTextButton(model: model, hit: .showMe("open"), title: "Open in T3") {}
+            .opacity(making ? 0.55 : 1)
+            .frame(height: 24)
         }
-        .opacity(making ? 0.55 : 1)
-        .frame(height: 24)
     }
 
-    /// One segment a scene: watched whole, the current one part way.
+    /// A failed run still has a thread to look at; a queued request has none yet.
+    @ViewBuilder private var openButtonIfRun: some View {
+        if explainer.launched { openButton }
+    }
+
     private var segments: some View {
         let n = max(explainer.captions.count, 1)
-        let per = Double(explainer.length) / Double(n)
-        let into = min(max((Double(explainer.elapsed) - per * Double(explainer.scene)) / per, 0), 1)
         return HStack(spacing: 3) {
-            ForEach(0..<n, id: \.self) { i in
-                let share = i < explainer.scene ? 1 : i == explainer.scene ? into : 0
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(CDS.alpha(0.12))
-                        Capsule().fill(CDS.Text.secondary).frame(width: proxy.size.width * share)
-                    }
-                }
-                .frame(height: 4)
+            ForEach(0..<n, id: \.self) { _ in
+                Capsule().fill(draft == nil ? CDS.Text.secondary : CDS.alpha(0.12)).frame(height: 4)
             }
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement()
-        .accessibilityLabel("Scene \(explainer.scene + 1) of \(n)")
+        .accessibilityLabel("\(n) scenes")
     }
 
     static func clock(_ seconds: Int) -> String { String(format: "%d:%02d", seconds / 60, seconds % 60) }

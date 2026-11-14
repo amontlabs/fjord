@@ -228,6 +228,11 @@ enum RouterKeys {
                 if !empty { model.send(queue: true) }
                 return true
             }
+            // ⌘Return: send, then Show me; on a Done card with nothing typed, Show me its reply.
+            if flags == .command, model.showMe != nil {
+                model.showMeReturn()
+                return true
+            }
             if flags.isEmpty {
                 model.send()
                 return true

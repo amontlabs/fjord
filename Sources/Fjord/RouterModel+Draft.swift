@@ -10,6 +10,9 @@ extension RouterModel {
         guard text != draft else { return }
         let wasEmpty = draft.isEmpty
         let grew = text.count > draft.count
+        // Other words: a ⌘Return held for its read is taken back, and a follow-up's refusal is said.
+        if !text.isEmpty { showMeOnce = false }
+        if showMe?.note != nil { showMe?.note = nil }
         // Typing again takes the words back from a held Return.
         unhold()
         // The page's own writes (Return emptying the composer, a prefill) never untick a card: only a pill you take out
@@ -58,11 +61,21 @@ extension RouterModel {
     /// The Router's model reads the draft: its mark shows in the row until the read lands. A thread pill is an explicit
     /// place (1.5): nothing is read for it.
     private func startRead() {
-        // Answer pills alone go to their threads as picks: nothing to read.
-        if pilled || draftEmpty { reading = false; return }
+        // Answer pills alone go to their threads as picks: nothing to read. Words for an explainer aren't the threads'
+        // (SHOWME.md §7): no read either.
+        if pilled || draftEmpty || showMe?.target != nil { reading = false; return }
         reading = true
         let plain = RouterMentions.plain(draft, marks: mentions)
         source?.read(plain.text, selected: selectedThread?.id, mentions: plain.mentions)
+    }
+
+    /// The panel took the draft for an explainer, or gave it back to the threads: read it again (or stop reading it).
+    func draftTargetChanged() {
+        if showMe?.target != nil {
+            reading = false
+        } else if !draftEmpty {
+            startRead()
+        }
     }
 
     /// The draft as the Router and the thread get it: each pill as "@name", a thread pill leading the words (an
@@ -345,12 +358,19 @@ extension RouterModel {
     func send(queue: Bool = false) {
         // Every pill in the draft is the Return's until its sends hold theirs.
         returning { sendNow(queue: queue) }
+        // ⌘Return's Show me was this send's, unless it waits for its read.
+        if !held { showMeOnce = false }
     }
 
     private func sendNow(queue: Bool) {
         // Return to the commit of what it changed (the Sent line, the counts, the next card).
         let interval = RouterSignposts.begin("Send")
         defer { RouterSignposts.end(interval, afterCommit: true) }
+        // The panel on an explainer: the words are its follow-up, wherever the threads would take them.
+        if let explainer = showMe?.target, !draftEmpty {
+            followUp(explainer)
+            return
+        }
         // A split goes whole: once the read of these very words is in (else held until it lands).
         if let split {
             if connectionLost || held { return }
@@ -447,7 +467,7 @@ extension RouterModel {
                 lastSends[id] = (words, .words)
                 let hold = holdSend(attached.compactMap(\.pointer.attachment), words: words, kind: .words, attached: attached)
                 source?.send(RouterOutgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown,
-                                            attached: attached, hold: hold))
+                                            attached: attached, hold: hold, showMe: sendsShowMe))
             } else {
                 dispatch(words, to: t, kind: kind, read: shown, attached: attached)
             }
@@ -462,7 +482,8 @@ extension RouterModel {
             animate(.spatial) { threads.append(t) }
             lastSends[id] = (words, .words)
             let hold = holdSend(attached.compactMap(\.pointer.attachment), words: words, kind: .words, attached: attached)
-            source?.start(id, words: words, attached: attached, hold: hold, project: project, launch: launch, read: shown)
+            source?.start(id, words: words, attached: attached, hold: hold, project: project, launch: launch, read: shown,
+                          showMe: sendsShowMe)
         case .here:
             return
         }
@@ -512,7 +533,7 @@ extension RouterModel {
         if stays { animate(.spatial, change) } else { move(id, change) }
         if let next { advanced(to: next) }
         source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: steering, queue: false, read: shown,
-                                    attached: attached, hold: hold))
+                                    attached: attached, hold: hold, showMe: sendsShowMe))
     }
 
     /// Your act moved the selection on: the card is shown; its "new" dot waits for your next key or pointer move.
