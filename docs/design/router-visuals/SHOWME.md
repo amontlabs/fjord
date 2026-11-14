@@ -600,3 +600,51 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
   `index.html` links and that aren't the current stamp; if any page can't be read it deletes nothing, and the shared
   `kit/` files stay.
 - Open: explainers made before 0d2d6bb6 load the shared `kit/`.
+
+### Live panel fixes (2026-11-14)
+The owner's first live look: two timelines, the logo twice, rows under the panel lighting, a big scrollbar, an iframe feel,
+no room on a wide screen, no way to make it bigger.
+- **One set of controls, native.** `?embed=1` is now the stage alone: `.ask`, `.answer`, `.caption`, `.source`, `nav` and
+  `#errors` are hidden, the stage fills the view with no radius or shadow, `html`/`body` are transparent with
+  `overflow: hidden` and no scrollbars, the page's own keys are off and a click on the stage plays or pauses. Standalone
+  (render.sh, the renderer's frames) is unchanged. SwiftUI draws the answer, caption, play, scene bar, time, Sources,
+  Open in T3 and the size controls (`RouterExplainerPlayer`, `RouterExplainerControls`, `RouterSceneBar`).
+- **The bridge.** Native → page: `evaluateJavaScript` with fixed strings only (`ExplainerWebHost.Command`: `play`, `pause`,
+  `toggle`, `seek(t)` formatted `%.3f`, `scene(i)`), against the kit's `window.__player`. Page → native: one
+  `WKScriptMessageHandler`, `fjordPlayer`, in the page world, main frame only, held weakly; `ExplainerPlayback.State.parse`
+  takes exactly `{t, scene, playing, total, scenes:[{caption, source, start}]}` (finite seconds ≤ 3600, scene in the list,
+  ≤ 24 scenes, caption ≤ 200 and source ≤ 400 characters, nothing else) and drops anything else. **Deviation:** each scene
+  carries `start` too, because the scene bar can't fill or scrub without it. The page posts on a change of scene or of
+  playing, after a jump, and once a second while playing; SwiftUI runs the clock between (a `TimelineView` paused unless
+  it plays). The renderer's configuration still has no handler; the network rule list and file-only navigation are shared.
+- **One web view across sizes.** The page model owns it (`RouterModel.showMeHost()`, closed when the panel closes);
+  `ExplainerWebView` only adopts its container wherever the player is drawn, so moving between panel, page and window
+  keeps the film's time. The container rounds itself (layer radius) and the view draws no background, so the poster shows
+  under it until the film's first state arrives. The view is exactly 16:9, so the stage scales with the viewBox.
+- **Posters are the stage alone** (`ExplainerRenderer.stageRect`), so the still no longer shows the page's chrome inside the
+  panel. Versions rendered before this keep their whole-page posters.
+- **Making:** the shimmer logo is on the list row only; the stage tag says "Draft N" with no logo; the only line under the
+  stage is "Fixing: …" (or "Writing the first draft", or a queued/failed reason), with Open in T3. "Checking draft N" and the
+  dead controls are gone.
+- **Hover and clicks under the panel.** Rows live in their own hosting views, whose tracking areas and hit tests didn't know
+  a SwiftUI overlay covered them. `RouterShield` (behind the panel and the bigger player) registers its window rect: the
+  rows' slots refuse hits inside it (`RouterGlideView.shielded`), and its tracking area tells the model
+  (`shieldHover`), which keeps rows under it unlit and lights again the one the pointer is over when it leaves.
+- **The scrollbar.** Not reproducible offscreen. The likely cause was the page's own scroller: the old embed page was
+  sized by a guessed chrome height (132 pt) and overflowed. The embed page can no longer scroll (the live check asserts
+  `scrollHeight == clientHeight`). Re-check live.
+- **Wide windows:** in the pane layout (`RouterWide` `.pane`) the open panel sits at the bottom of the pane's column, as
+  wide as the pane, on the pane's ground with no shadow (`routerPaneHoldsShowMe` keeps the dock from floating it).
+  Narrower layouts keep the floating panel.
+- **Bigger.** `RouterShowMeState.size`: `.panel`, `.page` (fills the page under the title line: title, answer, the stage as
+  big as fits, caption, controls) and `.window` (the stage alone on black, the caption and controls floating over its
+  bottom; the window goes native full screen while it shows and comes back if it wasn't). ⌥⌘Return toggles the page,
+  ⇧⌘Return the window; Esc steps back (window → where it came from, page → panel); the controls do the same. Bigger, the web
+  view takes the keyboard and ← → Space play it while nothing is typed; back in the panel the composer gets it again.
+  **Deviation:** the window size covers Fjord's page, not the app's sidebar; native full screen makes that the screen.
+- **Shots:** `v2-show-wide` (1900 × 1150, the panel in the pane), `v2-show-expanded`, `v2-show-window`.
+- **Live check:** `FJORD_EXPLAINER_LIVE=1 swift test --filter ExplainerPlayerLive` also checks that embed hides every piece
+  of chrome, the stage fills the view, nothing scrolls, the state arrives over the bridge, pause/seek/scene move it, the
+  page's own keys do nothing, and a malformed message is dropped.
+- Not seen yet (needs the live app): the web view's hover and clicks inside the panel, the shield over real rows, native
+  full screen with the stage, the theme rebuilding in place.
