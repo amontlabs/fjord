@@ -278,6 +278,7 @@ struct RouterWidePane: View {
     /// The chosen height when the drag started; nil while not dragging.
     @State private var dragFrom: CGFloat?
     @State private var gripHot = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private typealias L = Router.Line
     private typealias I = Router.Items
@@ -377,7 +378,7 @@ struct RouterWidePane: View {
                     .onEnded { _ in dragFrom = nil }
             )
             .onTapGesture(count: 2) { historyChosen = Double(Self.historyDefault) }
-            .animation(.easeOut(duration: 0.15), value: gripHot)
+            .animation(Motion.hover(on: gripHot).resolved(reduce: reduceMotion), value: gripHot)
             .accessibilityElement()
             .accessibilityLabel("History height")
             .accessibilityValue("\(Int(historyCap)) points")
