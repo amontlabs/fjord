@@ -199,6 +199,32 @@ import Testing
         #expect(model.draft == "ask \(MentionText.markString) rebase on main")
     }
 
+    /// A 2×2 PNG.
+    private func png() -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        return rep.representation(using: .png, properties: [:])!
+    }
+
+    @Test func wordsCopiedWithAPictureGoInAsWordsAndAPictureAloneAsItsPill() {
+        let v = view()
+        var made: [String] = []
+        v.attach = { name, _, _ in made.append(name); return .attachment("image_\(made.count)") }
+        let board = NSPasteboard(name: .init("fjord-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        // A page's text copied with its picture: the words, not a pill (pasted or dropped).
+        board.declareTypes([.png, .string], owner: nil)
+        board.setData(png(), forType: .png)
+        board.setString("see this", forType: .string)
+        #expect(v.readSelection(from: board, type: .png))
+        #expect(v.string == "see this" && made.isEmpty)
+        // A screenshot to the clipboard, no words with it: its pill.
+        board.clearContents()
+        board.setData(png(), forType: .png)
+        #expect(v.readSelection(from: board, type: .png))
+        #expect(made == ["Pasted image.png"] && v.string == "see this" + MentionText.markString + " ")
+    }
+
     @Test func aMarkThatComesInAsTextIsNoPill() {
         let v = view()
         let m = MentionText.markString

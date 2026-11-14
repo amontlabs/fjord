@@ -171,8 +171,9 @@ final class MentionTextView: NSTextView {
             let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
             found.append((url.lastPathComponent, mime, data))
         }
-        if found.isEmpty, urls.isEmpty {
-            // A picture copied as one (a screenshot to the clipboard, an image copied from a page): PNG as it is, else TIFF.
+        // A picture copied as one (a screenshot to the clipboard): PNG as it is, else TIFF. Words copied with a picture (a
+        // page's text, a rich document's) are the words: they go in as text, and the picture is left out.
+        if found.isEmpty, urls.isEmpty, pboard.string(forType: .string)?.isEmpty != false {
             if let png = pboard.data(forType: .png) { found.append(("Pasted image.png", "image/png", png)) }
             else if let tiff = pboard.data(forType: .tiff) { found.append(("Pasted image.tiff", "image/tiff", tiff)) }
         }
