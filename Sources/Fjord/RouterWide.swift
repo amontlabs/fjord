@@ -279,15 +279,17 @@ struct RouterWidePane: View {
 
     /// The thread card's history over an open item, at its shortest: two rows (19 tall, 3 apart).
     static let historyFloor: CGFloat = 2 * 19 + 3
+    /// …and at its tallest, however much room is left.
+    static let historyCeiling: CGFloat = 420
     /// Between the thread's card and the item's ground.
     static let itemGap: CGFloat = 12
 
     /// The thread card's history over an open item: all the room the pane has left over the whole item's card, never
-    /// under `historyFloor`. Not measured yet: its usual height.
+    /// under `historyFloor` nor over `historyCeiling`. Not measured yet: its usual height.
     private var historyCap: CGFloat {
         guard paneHeight > 0, itemHeight > 0 else { return Router.Work.timelineHeight }
         let room = paneHeight - Self.itemGap - itemHeight - (threadHeight - historyShown)
-        return max(Self.historyFloor, room.rounded(.down))
+        return min(Self.historyCeiling, max(Self.historyFloor, room.rounded(.down)))
     }
 
     var body: some View {
