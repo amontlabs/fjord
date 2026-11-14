@@ -1,0 +1,16 @@
+npm/
+out-*/
+cases*/*/v*
+cases*/*/stream.jsonl
+cases*/*/mcp.json
+shots/
+*.png
+kit.v*/
+kit.before/
+audit/
+explainer-dock.html
+system1*
+system.v2*
+runs*.log
+__pycache__/
+cases*/
