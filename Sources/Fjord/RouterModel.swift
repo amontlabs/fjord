@@ -197,7 +197,14 @@ final class RouterModel {
     /// The Router's model is reading the draft: Fjord's mark is in the row's arrow slot.
     var reading = false
     /// The composer's @ pills: they go with each read of the draft.
-    @ObservationIgnored var mentions: [RouterMention] = [] { didSet { if mentions != oldValue { pillsChanged(from: oldValue) } } }
+    @ObservationIgnored var mentions: [RouterMention] = [] {
+        didSet {
+            guard mentions != oldValue else { return }
+            pillsChanged(from: oldValue)
+            // The page's draft keeps its pictures' and files' uploads too (Edit on a failure puts them back here first).
+            attachments?.holds(Set(mentions.compactMap(\.pointer.attachment)), by: "page")
+        }
+    }
     /// The draft's answer pills are being written from the picks (or the picks from them): neither follows the other.
     @ObservationIgnored var syncingAnswers = false
 
@@ -281,9 +288,9 @@ final class RouterModel {
     @ObservationIgnored private var nextID = 0
     /// Each thread's last send from here, its words and kind: a refusal that comes after T3's row already moved on still
     /// has them for its failure line.
-    @ObservationIgnored var lastSends: [String: (words: String, kind: RouterOutgoing.Kind)] = [:]
+    @ObservationIgnored var lastSends: [String: (words: String, kind: RouterOutgoing.Kind, attached: [RouterMention])] = [:]
     /// What a send in flight changed, to put back if it is refused, and what it was.
-    @ObservationIgnored var backups: [String: (thread: RouterThread, picks: [Int: Int]?, kind: RouterOutgoing.Kind)] = [:]
+    @ObservationIgnored var backups: [String: (thread: RouterThread, picks: [Int: Int]?, kind: RouterOutgoing.Kind, attached: [RouterMention])] = [:]
     @ObservationIgnored var toastLife: Task<Void, Never>?
     /// The pointer's last move over a line-removing button, by generation: a button is armed only by a move made after
     /// the last removal (the 2026-10-12 rule, without a timer).
@@ -1109,9 +1116,19 @@ final class RouterModel {
     /// Your send is refused, or T3 drops: the line returns to the state and place it had, a failure line enters.
     private func sendRefused(_ id: String, reason: String, offline: Bool) {
         let last = lastSends.removeValue(forKey: id)
-        guard thread(id) != nil, let words = thread(id)?.sent?.words ?? last?.words else { return }
+        guard thread(id) != nil, let words = thread(id)?.sent?.words ?? last?.words else {
+            // No line to offer Send again on: the send's uploads go, unless something else keeps them.
+            attachments?.holds([], by: Self.sending(id))
+            return
+        }
         let failure = RouterFailure(id: fresh(), thread: id, words: words, reason: reason,
-                                      kind: backups[id]?.kind ?? last?.kind ?? .words, offline: offline)
+                                      kind: backups[id]?.kind ?? last?.kind ?? .words,
+                                      attached: backups[id]?.attached ?? last?.attached ?? [], offline: offline)
+        // Its Send again needs the uploads: the failure line keeps them now.
+        if let attachments {
+            attachments.holds(attachments.held(by: Self.sending(id)), by: Self.failing(failure.id))
+            attachments.holds([], by: Self.sending(id))
+        }
         if let backup = backups[id] {
             move(id) {
                 update(id) { $0 = backup.thread }

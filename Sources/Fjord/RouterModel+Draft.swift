@@ -428,25 +428,28 @@ extension RouterModel {
         let plain = RouterMentions.plain(draft, marks: mentions)
         if !draft.isEmpty { returnPills = plain.mentions.filter { $0.pointer.attachment != nil } }
         let attached = !draft.isEmpty && words == plain.text ? returnPills : RouterAttachments.pills(in: words, of: returnPills)
-        // Sent: the draft emptying doesn't delete their uploads.
-        attachments?.sent(attached.compactMap(\.pointer.attachment))
+        // Their uploads are the send's until T3 takes it (then never deleted) or refuses it (then its failure line's, for
+        // Send again): the draft emptying doesn't delete them.
+        let newID: String? = if case .newThread = place { source?.mintThread() ?? "new-\(fresh())" } else { nil }
+        let holder: String? = if case .thread(let id) = place { id } else { newID }
+        if let holder { holdSending(attached.compactMap(\.pointer.attachment), thread: holder) }
         // The composer empties first: the row leaves saying what it said at Return, not what the send made of the thread.
         setDraft("")
         switch place {
         case .thread(let id):
-            guard let t = thread(id) else { return }
+            guard let t = thread(id) else { attachments?.holds([], by: Self.sending(id)); return }
             // Pictures or files in words to a T3 request's card go as its answer, which says plainly if it can't take them.
             let kind = kind == .words ? attachedAnswer(words, to: t, attached: attached) ?? kind : kind
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
-                lastSends[id] = (words, .words)
+                lastSends[id] = (words, .words, attached)
                 source?.send(RouterOutgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown,
                                             attached: attached))
             } else {
                 dispatch(words, to: t, kind: kind, read: shown, attached: attached)
             }
         case .newThread(let project):
-            let id = source?.mintThread() ?? "new-\(fresh())"
+            guard let id = newID else { return }
             var t = RouterThread(id: id, name: name ?? Router.firstWords(words), title: words, project: project, state: .sent,
                                    sentence: .init(text: ""), since: now)
             t.naming = true
@@ -454,7 +457,7 @@ extension RouterModel {
             t.sent = .init(words: words, status: .sending)
             t.launch = launch
             animate(.spatial) { threads.append(t) }
-            lastSends[id] = (words, .words)
+            lastSends[id] = (words, .words, attached)
             source?.start(id, words: words, attached: attached, project: project, launch: launch, read: shown)
         case .here:
             return
@@ -466,12 +469,14 @@ extension RouterModel {
     func dispatch(_ words: String, to t: RouterThread, kind: RouterOutgoing.Kind, read shown: RouterRead? = nil,
                   attached: [RouterMention] = []) {
         let id = t.id
-        // An answer's pictures and files are its thread's now: nothing deletes their uploads.
-        if case .answer(_, _, let attached) = kind { attachments?.sent(attached.values.joined()) }
+        // The pictures and files it carries (in the words, with an answer) are the send's until T3 takes or refuses it.
+        var carried = attached.compactMap(\.pointer.attachment)
+        if case .answer(_, _, let byQuestion) = kind { carried += byQuestion.values.joined() }
+        holdSending(carried, thread: id)
         // Into a run only when one is under way: a line still Sent has no run yet, and the words go as a message.
         let steering = t.state == .working
-        backups[id] = (t, picks[id], kind)
-        lastSends[id] = (words, kind)
+        backups[id] = (t, picks[id], kind, attached)
+        lastSends[id] = (words, kind, attached)
         let next: RouterSelection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
         // A thread with open items stays where its most urgent one puts it: your words show in its block, nothing moves,
         // and the next card opens at once (a line marked in flight held the card's words back for a flight that wasn't).

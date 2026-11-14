@@ -82,4 +82,37 @@ extension RouterModel {
         }
         return .answer(picks: [:], typed: said.isEmpty ? [:] : [0: said], attached: [0: ids])
     }
+
+    // MARK: Uploads in flight
+
+    /// What holds the uploads of a send to `thread` in flight (`RouterAttachments.holds`).
+    static func sending(_ thread: String) -> String { "sending:" + thread }
+    /// What holds the uploads of a refused send while its failure line offers Send again and Edit.
+    static func failing(_ failure: Int) -> String { "failure:\(failure)" }
+
+    /// A send to `thread` carries these uploads: kept until T3 takes it (`RouterActs`, then they are sent and never
+    /// deleted) or refuses it (then its failure line keeps them; `sendRefused`). Several sends to one thread add up.
+    func holdSending(_ ids: [String], thread: String) {
+        guard let attachments, !ids.isEmpty else { return }
+        attachments.holds(attachments.held(by: Self.sending(thread)).union(ids), by: Self.sending(thread))
+    }
+
+    /// Words with pills where they read ("[image: name]", ranges in `words`) as the composer holds them: a mark for each
+    /// pill, and the marks.
+    static func draft(_ words: String, pills: [RouterMention]) -> (text: String, marks: [RouterMention]) {
+        let chars = Array(words)
+        var text = ""
+        var pointers: [RouterPointer] = []
+        var names: [RouterPointer: String] = [:]
+        var at = 0
+        for p in pills.sorted(by: { $0.range.lowerBound < $1.range.lowerBound })
+        where p.range.lowerBound >= at && p.range.upperBound <= chars.count {
+            text += String(chars[at..<p.range.lowerBound]) + MentionText.markString
+            pointers.append(p.pointer)
+            names[p.pointer] = p.name
+            at = p.range.upperBound
+        }
+        text += String(chars[at...])
+        return (text, RouterMentions.marks(text, pointers: pointers, name: { names[$0] ?? "" }))
+    }
 }

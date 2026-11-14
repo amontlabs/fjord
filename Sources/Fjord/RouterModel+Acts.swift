@@ -12,17 +12,29 @@ extension RouterModel {
             failures.removeAll { $0.id == failure }
             if selection == .failure(failure) { selection = nil }
         }
-        dispatch(f.words, to: t, kind: f.kind)
+        // With the pictures and files it carried: the same uploads (T3 keeps a pending one, and copies it on a send).
+        dispatch(f.words, to: t, kind: f.kind, attached: f.attached)
+        attachments?.holds([], by: Self.failing(failure))
     }
 
-    /// Edit: the words go back to the composer, the line goes.
+    /// Edit: the words go back to the composer, with their pictures' and files' pills where they stood, and the line goes.
     func edit(_ failure: Int) {
         guard let f = failures.first(where: { $0.id == failure }) else { return }
         animate(.spatial) {
             failures.removeAll { $0.id == failure }
             if selection == .failure(failure) { selection = nil }
         }
-        if !f.continuing { setDraft(f.words) }
+        if !f.continuing {
+            let pills = f.attached.filter { $0.pointer.attachment != nil }
+            if pills.isEmpty {
+                setDraft(f.words)
+            } else {
+                let (text, marks) = Self.draft(f.words, pills: pills)
+                edit(text, marks: marks)
+            }
+        }
+        // The draft keeps them now (or nothing does, and their uploads go).
+        attachments?.holds([], by: Self.failing(failure))
         focusTick &+= 1
     }
 

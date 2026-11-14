@@ -146,10 +146,22 @@ final class RouterAttachments {
         for id in after.subtracting(before) { restore(id) }
     }
 
-    /// Return took these pills with a message: their uploads go to its thread (or threads: T3 copies a pending upload
-    /// into each thread it is sent to and keeps it until its own sweep), and nothing deletes them.
+    /// The pills `holder` keeps now.
+    func held(by holder: String) -> Set<String> { held[holder] ?? [] }
+
+    /// T3 took these pills with a message or an answer: their uploads are its thread's (or threads': T3 copies a pending
+    /// upload into each thread it is sent to and keeps it until its own sweep), nothing deletes them, and their bytes are
+    /// let go (nothing will post them again). Until then a send in flight, or a refused one offering Send again, holds them.
     func sent(_ ids: some Sequence<String>) {
+        let ids = Set(ids).filter { items[$0] != nil }
+        guard !ids.isEmpty else { return }
         sentIDs.formUnion(ids)
+        for id in ids { items[id]?.data = nil }
+        // Nothing needs to hold them any more.
+        for (holder, kept) in held {
+            let left = kept.subtracting(ids)
+            held[holder] = left.isEmpty ? nil : left
+        }
     }
 
     /// A click on a failed pill: its upload again.
@@ -177,7 +189,8 @@ final class RouterAttachments {
     }
 
     /// The uploads of a message's attachments, by id, once each is done: waits only for those still posting. Throws for
-    /// one that failed, was taken out or isn't known, saying which. A sent message's bytes are let go.
+    /// one that failed, was taken out or isn't known, saying which. The bytes stay until T3 takes the send (`sent`): a
+    /// refused one may be sent again, or its pill put back and taken out and back again.
     func uploads(_ ids: [String]) async throws -> [String: T3Attachment] {
         var out: [String: T3Attachment] = [:]
         for id in ids where out[id] == nil {
@@ -195,8 +208,6 @@ final class RouterAttachments {
             }
             out[id] = item.t3(attachmentId)
         }
-        // Sent: nothing posts them again, and only the pill's picture is kept for the history.
-        for id in out.keys { items[id]?.data = nil }
         return out
     }
 

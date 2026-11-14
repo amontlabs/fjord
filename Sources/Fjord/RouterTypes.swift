@@ -534,6 +534,9 @@ struct RouterFailure: Identifiable, Equatable {
     var reason: String
     /// What it was: your words, picked options, or Continue on a Stopped card.
     var kind: RouterOutgoing.Kind = .words
+    /// The pictures' and files' pills in `words` (each where its "[image: name]" stands): Send again sends them, Edit puts
+    /// them back in the draft.
+    var attached: [RouterMention] = []
     /// T3 was away: the reason is said only while it still is.
     var offline = false
 

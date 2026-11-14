@@ -196,7 +196,9 @@ import Testing
         let uploads = try await send.value
         #expect(events == ["posted", "sent"])
         #expect(uploads[id]?.id == "att-1")
-        // Sent: its bytes are let go.
+        // Kept until T3 takes the send (a refused one is sent again); then let go.
+        #expect(attachments.items[id]?.data != nil)
+        attachments.sent([id])
         #expect(attachments.items[id]?.data == nil)
     }
 

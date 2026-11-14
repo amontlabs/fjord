@@ -70,8 +70,9 @@ import Testing
         #expect(val.attached == [RouterMention(range: 4..<21, pointer: .attachment(id), name: "shot.png")])
         let settings = try #require(source.sends.first { $0.thread == ID.settings })
         #expect(settings.attached.isEmpty)
-        // Sent: the draft emptying deletes nothing.
-        #expect(attachments.sentIDs == [id])
+        // In flight: the send to its thread keeps it (sent once T3 takes it), so the draft emptying deletes nothing.
+        #expect(attachments.held(by: RouterModel.sending(ID.valCenis)) == [id])
+        #expect(attachments.held(by: RouterModel.sending(ID.settings)).isEmpty)
     }
 
     @Test func aPictureNoPartSaysGoesWithThePartBeforeIt() throws {
@@ -175,6 +176,8 @@ import Testing
         _ = try await attachments.uploads([id])
         await settle()
         #expect(counted.deletes.isEmpty)
+        // T3 took it (`RouterActs`): sent, and nothing deletes it now.
+        attachments.sent([id])
         attachments.remove(id)
         await settle()
         #expect(counted.deletes.isEmpty)
