@@ -59,13 +59,22 @@ struct T3ShellState: Equatable, Sendable {
     /// explainers, ExplainerProject.swift).
     func without(projectRoot root: String?) -> T3ShellState {
         guard let root else { return self }
-        let wanted = Self.standardized(root)
-        let gone = Set(projects.values.filter { Self.standardized($0.workspaceRoot) == wanted }.map(\.id))
-        guard !gone.isEmpty else { return self }
+        return without(projects: projectIDs(atRoot: root), threads: [])
+    }
+
+    /// This shell without these projects, every thread in them, and these threads.
+    func without(projects gone: Set<String>, threads: Set<String>) -> T3ShellState {
+        guard !gone.isEmpty || !threads.isEmpty else { return self }
         var out = self
         for id in gone { out.projects[id] = nil }
-        out.threads = threads.filter { !gone.contains($0.value.projectId) }
+        out.threads = self.threads.filter { !gone.contains($0.value.projectId) && !threads.contains($0.key) }
         return out
+    }
+
+    /// The ids of the projects whose folder is `root`.
+    func projectIDs(atRoot root: String) -> Set<String> {
+        let wanted = Self.standardized(root)
+        return Set(projects.values.filter { Self.standardized($0.workspaceRoot) == wanted }.map(\.id))
     }
 
     static func standardized(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
@@ -154,14 +163,70 @@ final class T3Store {
     @ObservationIgnored var hiddenRoot: String? {
         didSet {
             guard hiddenRoot != oldValue else { return }
-            let next = hidden.without(projectRoot: hiddenRoot)
-            guard next != shell else { return }
-            shell = next
-            onShell?(nil)
+            hiddenProjects = hiddenRoot.map { hidden.projectIDs(atRoot: $0) } ?? []
+            hiddenThreads = Set(hidden.threads.values.filter { hiddenProjects.contains($0.projectId) }.map(\.id))
+            refilter(notify: true)
         }
     }
-    /// Whether `id` is a thread of the hidden project: in T3's shell, kept out of the Router's.
-    func isHidden(thread id: String) -> Bool { hidden.threads[id] != nil && shell.threads[id] == nil }
+    /// Every project id seen at `hiddenRoot`, and every thread id seen in one of them: kept when T3 archives a thread or
+    /// removes the project, so a thread that left the shell is still known as Fjord's (T3's search and reads still find it).
+    @ObservationIgnored private var hiddenProjects: Set<String> = []
+    @ObservationIgnored private var hiddenThreads: Set<String> = []
+    /// Threads Fjord says are its own (the explainers' runs), whether or not the shell ever showed them.
+    @ObservationIgnored private var ownThreads: Set<String> = []
+
+    /// Whether `id` is a thread of the hidden project (or one Fjord named): kept out of the Router's shell, its search and reads.
+    func isHidden(thread id: String) -> Bool { hiddenThreads.contains(id) || ownThreads.contains(id) }
+
+    /// Fjord's own threads (the explainers'), hidden from the Router whatever project T3 files them in.
+    func hide(threads ids: some Sequence<String>) {
+        let new = Set(ids).subtracting(ownThreads)
+        guard !new.isEmpty else { return }
+        ownThreads.formUnion(new)
+        refilter(notify: true)
+    }
+
+    /// Learns the hidden project's ids and threads from one item; true when it learned a project (the shell is filtered again).
+    private func learn(_ item: T3ShellItem) -> Bool {
+        guard let hiddenRoot else { return false }
+        let root = T3ShellState.standardized(hiddenRoot)
+        var newProject = false
+        func project(_ p: T3Project) {
+            if T3ShellState.standardized(p.workspaceRoot) == root, hiddenProjects.insert(p.id).inserted { newProject = true }
+        }
+        func thread(_ t: T3ThreadShell) { if hiddenProjects.contains(t.projectId) { hiddenThreads.insert(t.id) } }
+        switch item {
+        case .snapshot(let s):
+            s.projects.forEach(project)
+            if newProject { hiddenThreads.formUnion(hidden.threads.values.filter { hiddenProjects.contains($0.projectId) }.map(\.id)) }
+            s.threads.forEach(thread); s.archivedThreads.forEach(thread)
+        case .projectUpdated(_, let p):
+            project(p)
+            if newProject { hiddenThreads.formUnion(hidden.threads.values.filter { $0.projectId == p.id }.map(\.id)) }
+        case .threadUpdated(_, _, let t): thread(t)
+        default: break
+        }
+        return newProject
+    }
+
+    /// Whether an item is only about the hidden project: it changes nothing the Router's shell holds.
+    private func onlyHidden(_ item: T3ShellItem) -> Bool {
+        switch item {
+        case .projectUpdated(_, let p): hiddenProjects.contains(p.id)
+        case .projectRemoved(_, let id): hiddenProjects.contains(id)
+        case .threadUpdated(_, _, let t): isHidden(thread: t.id)
+        case .threadRemoved(_, _, let id): isHidden(thread: id)
+        default: false
+        }
+    }
+
+    /// `shell` made again from the whole shell, in full: on a snapshot or when what's hidden changed.
+    private func refilter(notify: Bool = false) {
+        let next = hidden.without(projects: hiddenProjects, threads: hiddenThreads.union(ownThreads))
+        guard next != shell else { return }
+        shell = next
+        if notify { onShell?(nil) }
+    }
     private(set) var projections: [String: T3Projection] = [:]
     private(set) var connection: T3ConnectionState = .connecting
     /// This T3's environment id (from its descriptor, read once connected): the middle of a thread's deep link.
@@ -205,15 +270,24 @@ final class T3Store {
 
     /// One shell item into the whole shell, then the Router's shell made from it again. Items about the hidden project's
     /// threads still reach `onShell`: every consumer reads the row from `shell` by id, finds none and drops nothing it had.
+    /// Only a snapshot or a newly seen hidden project filters the whole shell; any other item lands in `shell` alone, so an
+    /// item costs the same however many threads T3 holds.
     func apply(_ item: T3ShellItem) {
         hidden.apply(item)
-        shell = hidden.without(projectRoot: hiddenRoot)
+        if learn(item) || { if case .snapshot = item { true } else { false } }() { return refilter() }
+        if onlyHidden(item) {
+            if shell.sequence != hidden.sequence { shell.sequence = hidden.sequence }
+        } else {
+            shell.apply(item)
+        }
     }
 
     /// A shell with no server behind it: demo data, shots and tests (`notify: false` leaves telling `onShell` to the test).
     func seed(_ shell: T3ShellState, notify: Bool = true) {
         hidden = shell
-        self.shell = shell.without(projectRoot: hiddenRoot)
+        hiddenProjects.formUnion(hiddenRoot.map { shell.projectIDs(atRoot: $0) } ?? [])
+        hiddenThreads.formUnion(shell.threads.values.filter { hiddenProjects.contains($0.projectId) }.map(\.id))
+        self.shell = shell.without(projects: hiddenProjects, threads: hiddenThreads.union(ownThreads))
         if notify { onShell?(nil) }
     }
 

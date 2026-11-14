@@ -57,6 +57,25 @@ import Testing
         #expect(Set(t3.shell.threads.keys) == ["ta"])
     }
 
+    @Test func aHiddenThreadStaysHiddenWhenArchivedOrItsProjectIsRemoved() {
+        let t3 = T3Store()
+        t3.hiddenRoot = root
+        t3.seed(T3Fixture.state(threads, projects: projects), notify: false)
+        // Archived in T3: it leaves the shell, but search and reads still find it, so it's still Fjord's.
+        t3.apply(T3ShellItem(json: ["kind": "thread.updated", "sequence": 300, "location": "archive",
+                                    "thread": T3Fixture.shell("tx", project: "px")]))
+        #expect(t3.hidden.threads["tx"] == nil && t3.isHidden(thread: "tx"))
+        // The project removed: its threads that still come are kept out.
+        t3.apply(T3ShellItem(json: ["kind": "project.removed", "sequence": 301, "projectId": "px"]))
+        t3.apply(T3ShellItem(json: ["kind": "thread.updated", "sequence": 302, "location": "active",
+                                    "thread": T3Fixture.shell("tz", project: "px")]))
+        #expect(Set(t3.shell.threads.keys) == ["ta"] && t3.isHidden(thread: "tz"))
+        #expect(t3.shell.sequence == 302)
+        // A thread Fjord names is hidden wherever T3 files it.
+        t3.hide(threads: ["ta"])
+        #expect(t3.shell.threads.isEmpty && t3.isHidden(thread: "ta"))
+    }
+
     @Test func noRouterSurfaceListsTheHiddenProject() async {
         let s = Store.reading(threads, projects: projects)
         s.agents.enabled = true
