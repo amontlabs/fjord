@@ -51,7 +51,7 @@ import Testing
         let (model, source, attachments, id, deletes) = await page()
         // Not sent until T3 takes it: the send in flight keeps it.
         #expect(!attachments.sentIDs.contains(id))
-        model.apply(.refused(ID.bar, reason: "T3 refused it", offline: false))
+        model.apply(.refused(ID.bar, reason: "T3 refused it", offline: false, hold: source.sends.last?.hold))
         let failure = try #require(model.failures.first)
         #expect(failure.attached.map(\.pointer) == [.attachment(id)])
         await settle()
@@ -67,8 +67,8 @@ import Testing
     }
 
     @Test func editOnARefusedSendPutsThePictureBackInTheDraft() async {
-        let (model, _, attachments, id, deletes) = await page()
-        model.apply(.refused(ID.bar, reason: "T3 refused it", offline: false))
+        let (model, source, attachments, id, deletes) = await page()
+        model.apply(.refused(ID.bar, reason: "T3 refused it", offline: false, hold: source.sends.last?.hold))
         guard let failure = model.failures.first else { Issue.record("no failure line"); return }
         model.edit(failure.id)
         #expect(model.plainDraft == "fix " + Self.pill + " now")
@@ -85,7 +85,7 @@ import Testing
         let f = RouterActsTests.Fake()
         let acts = f.acts()
         var sent: [[String]] = []
-        acts.env.sent = { sent.append($0) }
+        acts.env.sent = { ids, _ in sent.append(ids) }
         let pill = RouterMention(range: 4..<21, pointer: .attachment("image_a"), name: "shot.png")
         acts.send(RouterOutgoing(thread: "t1", words: "see " + Self.pill, kind: .words, steering: false, queue: false, read: nil,
                                  attached: [pill]))
@@ -104,9 +104,9 @@ import Testing
         let attachments = RouterAttachments(uploader: .init(upload: { _, _ in "att-1" }, delete: { deletes.append($0) }))
         let id = attachments.add(name: "shot.png", mimeType: "image/png", data: Data(count: 9)).attachment!
         await waitUntil { attachments.states[id] == .ready("att-1") }
-        attachments.holds([id], by: RouterModel.sending("t1"))
-        attachments.sent([id])
-        #expect(attachments.items[id]?.data == nil && attachments.held(by: RouterModel.sending("t1")).isEmpty)
+        attachments.holds([id], by: "send:1")
+        attachments.sent([id], by: "send:1")
+        #expect(attachments.items[id] == nil && attachments.held(by: "send:1").isEmpty)
         attachments.holds([], by: "draft")
         attachments.remove(id)
         await settle()
@@ -126,7 +126,7 @@ import Testing
         model.apply(.read(RouterRead(draft: "like this " + Self.pill, places: [.thread(ID.settings)], sure: true)))
         model.send()
         #expect(source.sends.first?.kind == .answer(picks: [:], typed: [0: "like this"], attached: [0: [id]]))
-        model.apply(.refused(ID.settings, reason: "That isn't waiting anymore", offline: false))
+        model.apply(.refused(ID.settings, reason: "That isn't waiting anymore", offline: false, hold: source.sends.last?.hold))
         await settle()
         #expect(deletes.isEmpty && model.failures.count == 1)
         model.sendAgain(model.failures[0].id)

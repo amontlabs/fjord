@@ -140,7 +140,7 @@ import Testing
         acts.send(out())
         #expect(f.log == ["began", "submit", "ended"])
         #expect(f.emitted.count == 1)
-        guard case .refused("t1", let reason, let offline)? = f.emitted.first else { Issue.record("no refusal"); return }
+        guard case .refused("t1", let reason, let offline, _)? = f.emitted.first else { Issue.record("no refusal"); return }
         #expect(reason.contains("Router is off") && offline)
     }
 

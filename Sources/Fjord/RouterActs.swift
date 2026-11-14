@@ -54,6 +54,8 @@ extension RouterActsRecords {
         var at: Date
         /// The pictures' and files' uploads it carries (their pill ids): sent once T3 takes it, never before.
         var attachments: [String] = []
+        /// The key holding them (`RouterOutgoing.hold`).
+        var hold: String? = nil
     }
 
     /// Everything an act does outside Fjord's own state. `live(store:)` has the real ones.
@@ -87,8 +89,9 @@ extension RouterActsRecords {
         var now: () -> Date
         /// A split's one decision log entry: the words, the decider's decision for them (nil: pills alone), every send.
         var logSplit: (_ draft: String, _ decision: RouterProjectDecision?, _ sends: [[String: Any]]) -> Void = { _, _, _ in }
-        /// T3 took a send carrying these uploads (pill ids): they are its thread's now (`RouterAttachments.sent`).
-        var sent: (_ attachments: [String]) -> Void = { _ in }
+        /// T3 took a send carrying these uploads (pill ids), held by `hold`: they are its thread's now
+        /// (`RouterAttachments.sent`).
+        var sent: (_ attachments: [String], _ hold: String?) -> Void = { _, _ in }
     }
 
     var env: Environment
@@ -133,7 +136,7 @@ extension RouterActsRecords {
         }
         var carried = out.attached.compactMap(\.pointer.attachment)
         if case .answer(_, _, let byQuestion) = out.kind { carried += byQuestion.values.joined() }
-        let send = Send(thread: out.thread, words: out.words, kind: kind, at: env.now(), attachments: carried)
+        let send = Send(thread: out.thread, words: out.words, kind: kind, at: env.now(), attachments: carried, hold: out.hold)
         if kind == .queue { queuedWords[out.thread] = out.words }
         records?.began(send: send)
         switch out.kind {
@@ -219,14 +222,14 @@ extension RouterActsRecords {
 
     private func took(_ send: Send) {
         // Only now are the uploads the thread's: a refusal before this leaves them to Send again, or to be deleted.
-        if !send.attachments.isEmpty { env.sent(send.attachments) }
+        if !send.attachments.isEmpty { env.sent(send.attachments, send.hold) }
         records?.took(send: send)
     }
 
     /// The send didn't go: its pending act ends at once and the page puts the line back with a failure line.
     private func refuse(_ send: Send, _ reason: String, offline: Bool? = nil) {
         records?.ended(send: send)
-        emit(.refused(send.thread, reason: reason, offline: offline ?? env.away()))
+        emit(.refused(send.thread, reason: reason, offline: offline ?? env.away(), hold: send.hold))
     }
 
     private static func words(_ error: Error) -> String {
@@ -266,12 +269,13 @@ extension RouterActsRecords {
     func mintThread() -> String { UUID().uuidString.lowercased() }
 
     func start(_ thread: String, words: String, project: String, launch: RouterLaunch, read: RouterRead?) {
-        start(thread, words: words, attached: [], project: project, launch: launch, read: read)
+        start(thread, words: words, attached: [], hold: nil, project: project, launch: launch, read: read)
     }
 
-    func start(_ thread: String, words: String, attached: [RouterMention], project: String, launch: RouterLaunch, read: RouterRead?) {
+    func start(_ thread: String, words: String, attached: [RouterMention], hold: String?, project: String, launch: RouterLaunch,
+               read: RouterRead?) {
         let send = Send(thread: thread, words: words, kind: .start(project: project, launch: launch, name: read?.name), at: env.now(),
-                        attachments: attached.compactMap(\.pointer.attachment))
+                        attachments: attached.compactMap(\.pointer.attachment), hold: hold)
         records?.began(send: send)
         guard let id = env.projectID(project) else { return refuse(send, "That project isn't in T3 anymore: nothing was started") }
         var context = RouterContext(target: RouterAskBack.newThread + id)
@@ -381,7 +385,7 @@ extension RouterActs {
             logSplit: { [weak store] draft, decision, sends in
                 store?.routerDispatcher.decisionLog?.split(id: UUID(), message: draft, decision: decision, sends: sends)
             },
-            sent: { [weak store] ids in store?.attachments.sent(ids) })
+            sent: { [weak store] ids, hold in store?.attachments.sent(ids, by: hold) })
         let acts = RouterActs(env: env, records: records, emit: emit)
         store.routerDispatcher.onSend = { [weak acts] entry, event in acts?.sendEvent(entry, event) }
         return acts

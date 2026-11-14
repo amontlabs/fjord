@@ -258,8 +258,13 @@ final class RouterModel {
     // MARK: Plumbing
 
     @ObservationIgnored weak var source: RouterSource?
-    /// The pasted pictures and files: Return marks those it takes as sent, so the draft emptying never deletes them.
+    /// The pasted pictures and files: a Return and each send hold those they carry, so the draft emptying never deletes them.
     @ObservationIgnored weak var attachments: RouterAttachments?
+    /// The holder of the draft's pills for the Return under way (`returning`).
+    @ObservationIgnored var returnHold: String?
+    /// Each send in flight carrying pictures or files, by the key that holds them: its words, kind and pills, for its own
+    /// failure line if T3 refuses it.
+    @ObservationIgnored var inFlight: [String: (words: String, kind: RouterOutgoing.Kind, attached: [RouterMention])] = [:]
     /// The draft's pictures and files at the Return under way (their ranges in its words as the Router read them): the
     /// parts of a split, sent after the draft emptied, take theirs from these.
     @ObservationIgnored var returnPills: [RouterMention] = []
@@ -288,9 +293,9 @@ final class RouterModel {
     @ObservationIgnored private var nextID = 0
     /// Each thread's last send from here, its words and kind: a refusal that comes after T3's row already moved on still
     /// has them for its failure line.
-    @ObservationIgnored var lastSends: [String: (words: String, kind: RouterOutgoing.Kind, attached: [RouterMention])] = [:]
+    @ObservationIgnored var lastSends: [String: (words: String, kind: RouterOutgoing.Kind)] = [:]
     /// What a send in flight changed, to put back if it is refused, and what it was.
-    @ObservationIgnored var backups: [String: (thread: RouterThread, picks: [Int: Int]?, kind: RouterOutgoing.Kind, attached: [RouterMention])] = [:]
+    @ObservationIgnored var backups: [String: (thread: RouterThread, picks: [Int: Int]?, kind: RouterOutgoing.Kind)] = [:]
     @ObservationIgnored var toastLife: Task<Void, Never>?
     /// The pointer's last move over a line-removing button, by generation: a button is armed only by a move made after
     /// the last removal (the 2026-10-12 rule, without a timer).
@@ -992,8 +997,8 @@ final class RouterModel {
             animate(.fade) { update(id) { $0.name = name; $0.naming = false } }
         case .read(let read):
             readLanded(read)
-        case .refused(let id, let reason, let offline):
-            sendRefused(id, reason: reason, offline: offline)
+        case .refused(let id, let reason, let offline, let hold):
+            sendRefused(id, reason: reason, offline: offline, hold: hold)
         case .actRefused(let id, let reason):
             actRefused(id, reason: reason)
         case .note(let id, let words):
@@ -1113,21 +1118,23 @@ final class RouterModel {
         update(id) { if $0.sentence.stream == stream, $0.sentence.phase == .streaming { $0.sentence.phase = .settled } }
     }
 
-    /// Your send is refused, or T3 drops: the line returns to the state and place it had, a failure line enters.
-    private func sendRefused(_ id: String, reason: String, offline: Bool) {
+    /// Your send is refused, or T3 drops: the line returns to the state and place it had, a failure line enters. `hold`:
+    /// the key holding the send's pictures and files: its failure line takes them over (with that send's own words), for
+    /// Send again and Edit.
+    private func sendRefused(_ id: String, reason: String, offline: Bool, hold: String? = nil) {
         let last = lastSends.removeValue(forKey: id)
-        guard thread(id) != nil, let words = thread(id)?.sent?.words ?? last?.words else {
+        let carried = hold.flatMap { inFlight.removeValue(forKey: $0) }
+        guard thread(id) != nil, let words = carried?.words ?? thread(id)?.sent?.words ?? last?.words else {
             // No line to offer Send again on: the send's uploads go, unless something else keeps them.
-            attachments?.holds([], by: Self.sending(id))
+            if let hold { attachments?.holds([], by: hold) }
             return
         }
         let failure = RouterFailure(id: fresh(), thread: id, words: words, reason: reason,
-                                      kind: backups[id]?.kind ?? last?.kind ?? .words,
-                                      attached: backups[id]?.attached ?? last?.attached ?? [], offline: offline)
-        // Its Send again needs the uploads: the failure line keeps them now.
-        if let attachments {
-            attachments.holds(attachments.held(by: Self.sending(id)), by: Self.failing(failure.id))
-            attachments.holds([], by: Self.sending(id))
+                                      kind: carried?.kind ?? backups[id]?.kind ?? last?.kind ?? .words,
+                                      attached: carried?.attached ?? [], offline: offline)
+        if let hold, let attachments {
+            attachments.holds(attachments.held(by: hold), by: Self.failing(failure.id))
+            attachments.holds([], by: hold)
         }
         if let backup = backups[id] {
             move(id) {

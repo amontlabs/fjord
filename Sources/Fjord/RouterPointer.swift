@@ -151,7 +151,9 @@ extension MentionLook {
         let upload: Upload = switch state {
         case .uploading?: .uploading
         case .failed?: .failed
-        case .ready?, nil: .done
+        case .ready?: .done
+        // Forgotten (an undo after a send brought back a pill whose bytes went): it can't go.
+        case nil: item == nil ? .failed : .done
         }
         return MentionLook(label: RouterDecision.clip(item?.name ?? name ?? (image ? "image" : "file"), 32),
                            symbol: image ? "photo" : "doc", tint: CDS.Text.secondary, attachment: true,

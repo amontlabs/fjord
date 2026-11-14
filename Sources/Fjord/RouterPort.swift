@@ -25,7 +25,8 @@ enum RouterChange: Equatable {
     /// A draft's destination landed.
     case read(RouterRead)
     /// A send didn't go: the line returns to what it was, a failure line enters.
-    case refused(String, reason: String, offline: Bool)
+    /// `hold`: the key that holds the send's pictures and files (`RouterOutgoing.hold`).
+    case refused(String, reason: String, offline: Bool, hold: String? = nil)
     /// T3 refused a settle or a snooze: the thread is back (its record says so), the toast says why, and the act has
     /// nothing left to revert.
     case actRefused(String, reason: String)
@@ -64,6 +65,8 @@ struct RouterOutgoing: Equatable {
     var read: RouterRead?
     /// The pictures' and files' pills in `words` (each where its "[image: name]" stands): they go with the words.
     var attached: [RouterMention] = []
+    /// The key holding the pictures and files it carries until T3 takes or refuses it (`RouterModel.holdSend`); nil: none.
+    var hold: String? = nil
 }
 
 /// What takes the page's acts: the demo's fake T3 (RouterDemoSource), or the real one (RouterActs). The page has
@@ -83,8 +86,9 @@ struct RouterOutgoing: Equatable {
     func mintThread() -> String
     /// Starts a thread with your words and the settings the row showed.
     func start(_ thread: String, words: String, project: String, launch: RouterLaunch, read: RouterRead?)
-    /// The same with the pictures' and files' pills in the words (`RouterOutgoing.attached`).
-    func start(_ thread: String, words: String, attached: [RouterMention], project: String, launch: RouterLaunch, read: RouterRead?)
+    /// The same with the pictures' and files' pills in the words (`RouterOutgoing.attached`), held by `hold`.
+    func start(_ thread: String, words: String, attached: [RouterMention], hold: String?, project: String, launch: RouterLaunch,
+               read: RouterRead?)
     func stop(_ thread: String)
     /// A card opened here: T3's `thread.visit`.
     func visit(_ thread: String)
@@ -100,7 +104,8 @@ struct RouterOutgoing: Equatable {
 
 extension RouterSource {
     /// A source that sends nothing anywhere (the demo's) has no use for the attachments.
-    func start(_ thread: String, words: String, attached: [RouterMention], project: String, launch: RouterLaunch, read: RouterRead?) {
+    func start(_ thread: String, words: String, attached: [RouterMention], hold: String?, project: String, launch: RouterLaunch,
+               read: RouterRead?) {
         start(thread, words: words, project: project, launch: launch, read: read)
     }
     func itemDone(_ thread: String, item: String, on: Bool) {}

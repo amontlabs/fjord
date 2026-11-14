@@ -155,7 +155,7 @@ extension RouterModel {
         unhold()
         // A split: every part goes when each is sure or lit by you; else the rows show the places and Return is asked again.
         if let split {
-            if split.allSatisfy({ $0.sure || $0.mine }) { sendSplit(split) }
+            if split.allSatisfy({ $0.sure || $0.mine }) { returning { sendSplit(split) } }
             return
         }
         let goes: Bool
@@ -343,6 +343,11 @@ extension RouterModel {
     /// Return (⌥Return: `queue`): sends what the destination row shows. With no row: Send again on a focused failure
     /// line, otherwise nothing. It never settles.
     func send(queue: Bool = false) {
+        // Every pill in the draft is the Return's until its sends hold theirs.
+        returning { sendNow(queue: queue) }
+    }
+
+    private func sendNow(queue: Bool) {
         // Return to the commit of what it changed (the Sent line, the counts, the next card).
         let interval = RouterSignposts.begin("Send")
         defer { RouterSignposts.end(interval, afterCommit: true) }
@@ -428,23 +433,21 @@ extension RouterModel {
         let plain = RouterMentions.plain(draft, marks: mentions)
         if !draft.isEmpty { returnPills = plain.mentions.filter { $0.pointer.attachment != nil } }
         let attached = !draft.isEmpty && words == plain.text ? returnPills : RouterAttachments.pills(in: words, of: returnPills)
-        // Their uploads are the send's until T3 takes it (then never deleted) or refuses it (then its failure line's, for
-        // Send again): the draft emptying doesn't delete them.
+        // The Return holds them while the draft empties (`returning`); each send then holds its own.
         let newID: String? = if case .newThread = place { source?.mintThread() ?? "new-\(fresh())" } else { nil }
-        let holder: String? = if case .thread(let id) = place { id } else { newID }
-        if let holder { holdSending(attached.compactMap(\.pointer.attachment), thread: holder) }
         // The composer empties first: the row leaves saying what it said at Return, not what the send made of the thread.
         setDraft("")
         switch place {
         case .thread(let id):
-            guard let t = thread(id) else { attachments?.holds([], by: Self.sending(id)); return }
+            guard let t = thread(id) else { return }
             // Pictures or files in words to a T3 request's card go as its answer, which says plainly if it can't take them.
             let kind = kind == .words ? attachedAnswer(words, to: t, attached: attached) ?? kind : kind
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
-                lastSends[id] = (words, .words, attached)
+                lastSends[id] = (words, .words)
+                let hold = holdSend(attached.compactMap(\.pointer.attachment), words: words, kind: .words, attached: attached)
                 source?.send(RouterOutgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown,
-                                            attached: attached))
+                                            attached: attached, hold: hold))
             } else {
                 dispatch(words, to: t, kind: kind, read: shown, attached: attached)
             }
@@ -457,8 +460,9 @@ extension RouterModel {
             t.sent = .init(words: words, status: .sending)
             t.launch = launch
             animate(.spatial) { threads.append(t) }
-            lastSends[id] = (words, .words, attached)
-            source?.start(id, words: words, attached: attached, project: project, launch: launch, read: shown)
+            lastSends[id] = (words, .words)
+            let hold = holdSend(attached.compactMap(\.pointer.attachment), words: words, kind: .words, attached: attached)
+            source?.start(id, words: words, attached: attached, hold: hold, project: project, launch: launch, read: shown)
         case .here:
             return
         }
@@ -472,11 +476,11 @@ extension RouterModel {
         // The pictures and files it carries (in the words, with an answer) are the send's until T3 takes or refuses it.
         var carried = attached.compactMap(\.pointer.attachment)
         if case .answer(_, _, let byQuestion) = kind { carried += byQuestion.values.joined() }
-        holdSending(carried, thread: id)
+        let hold = holdSend(carried, words: words, kind: kind, attached: attached)
         // Into a run only when one is under way: a line still Sent has no run yet, and the words go as a message.
         let steering = t.state == .working
-        backups[id] = (t, picks[id], kind, attached)
-        lastSends[id] = (words, kind, attached)
+        backups[id] = (t, picks[id], kind)
+        lastSends[id] = (words, kind)
         let next: RouterSelection?? = selection == .line(id) && t.section == .needsYou ? .some(nextNeedsYou(after: id)) : nil
         // A thread with open items stays where its most urgent one puts it: your words show in its block, nothing moves,
         // and the next card opens at once (a line marked in flight held the card's words back for a flight that wasn't).
@@ -508,7 +512,7 @@ extension RouterModel {
         if stays { animate(.spatial, change) } else { move(id, change) }
         if let next { advanced(to: next) }
         source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: steering, queue: false, read: shown,
-                                    attached: attached))
+                                    attached: attached, hold: hold))
     }
 
     /// Your act moved the selection on: the card is shown; its "new" dot waits for your next key or pointer move.

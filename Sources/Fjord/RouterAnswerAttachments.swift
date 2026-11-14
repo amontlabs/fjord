@@ -85,16 +85,37 @@ extension RouterModel {
 
     // MARK: Uploads in flight
 
-    /// What holds the uploads of a send to `thread` in flight (`RouterAttachments.holds`).
-    static func sending(_ thread: String) -> String { "sending:" + thread }
     /// What holds the uploads of a refused send while its failure line offers Send again and Edit.
     static func failing(_ failure: Int) -> String { "failure:\(failure)" }
 
-    /// A send to `thread` carries these uploads: kept until T3 takes it (`RouterActs`, then they are sent and never
-    /// deleted) or refuses it (then its failure line keeps them; `sendRefused`). Several sends to one thread add up.
-    func holdSending(_ ids: [String], thread: String) {
-        guard let attachments, !ids.isEmpty else { return }
-        attachments.holds(attachments.held(by: Self.sending(thread)).union(ids), by: Self.sending(thread))
+    /// A send carrying these pictures and files (pill ids): they are held under a key of the send's own until T3 takes it
+    /// (`RouterActs`: `RouterAttachments.sent` with the key) or refuses it (its failure line takes them over:
+    /// `sendRefused`), and its words, kind and pills are kept by the key, so a refusal's failure line is that send's
+    /// whatever else went to the thread meanwhile. The key, nil when it carries none.
+    func holdSend(_ ids: [String], words: String, kind: RouterOutgoing.Kind, attached: [RouterMention]) -> String? {
+        guard let attachments, !ids.isEmpty else { return nil }
+        // Sends T3 took since let their keys go.
+        inFlight = inFlight.filter { !attachments.held(by: $0.key).isEmpty }
+        let key = "send:\(fresh())"
+        attachments.holds(Set(ids), by: key)
+        inFlight[key] = (words, kind, attached)
+        return key
+    }
+
+    /// One Return, whatever it sends (a message, a split's parts, answers): every pill in the draft is held by it from
+    /// before the draft empties until its last send holds its own, so none is let go between parts. After it, a pill no
+    /// send took is let go (its upload deleted). A Return that emptied the draft ends the composer's undo of what was
+    /// taken out before: those pills' bytes go.
+    func returning(_ body: () -> Void) {
+        guard let attachments, returnHold == nil else { body(); return }
+        let key = "return:\(fresh())"
+        let hadWords = !draft.isEmpty
+        returnHold = key
+        attachments.holds(Set(mentions.compactMap(\.pointer.attachment)), by: key)
+        body()
+        returnHold = nil
+        attachments.holds([], by: key)
+        if hadWords, draft.isEmpty { attachments.undoEnded() }
     }
 
     /// Words with pills where they read ("[image: name]", ranges in `words`) as the composer holds them: a mark for each

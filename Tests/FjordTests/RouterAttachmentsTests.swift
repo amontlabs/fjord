@@ -252,10 +252,10 @@ extension NSImage {
         let uploads = try await send.value
         #expect(events == ["posted", "sent"])
         #expect(uploads[id]?.id == "att-1")
-        // Kept until T3 takes the send (a refused one is sent again); then let go.
+        // Kept until T3 takes the send (a refused one is sent again); then, held by nothing, forgotten.
         #expect(attachments.items[id]?.data != nil)
-        attachments.sent([id])
-        #expect(attachments.items[id]?.data == nil)
+        attachments.sent([id], by: nil)
+        #expect(attachments.items[id] == nil)
     }
 
     @Test func takingThePillOutMidPostDeletesTheUploadAndAnUndoUploadsAgain() async throws {

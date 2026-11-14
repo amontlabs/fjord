@@ -18,7 +18,8 @@ struct RouterAttachment {
     var name: String
     var mimeType: String
     var sizeBytes: Int
-    /// The bytes, until a sent message has the upload (then they are let go: nothing will post them again).
+    /// The bytes, for as long as the attachment is kept: a refused send may upload them again, a send near T3's sweep
+    /// too. Once sent and held by nothing (`RouterAttachments.sent`) it is forgotten, bytes and all.
     var data: Data?
     /// A picture's small copy, for its pill.
     var thumbnail: NSImage?
@@ -160,8 +161,9 @@ final class RouterAttachments {
         revision &+= 1
     }
 
-    /// A name no other attachment has ("image.png", then "image 2.png"): each pill reads as its own words
-    /// (`RouterPointer.said`), so a split's part says which picture it carries.
+    /// A name no other attachment kept has ("image.png", then "image 2.png"): each pill reads as its own words
+    /// (`RouterPointer.said`), so a split's part says which picture it carries. Only pills that are, or may come back
+    /// (an undo), count: those sent and let go, or forgotten, are no longer `items`.
     private func unique(_ name: String) -> String {
         let taken = Set(items.values.map(\.name))
         guard taken.contains(name) else { return name }
@@ -175,38 +177,46 @@ final class RouterAttachments {
         }
     }
 
-    // MARK: The one rule: a pill that leaves the draft unsent is deleted on T3
+    // MARK: The one rule: what holds a pill keeps it; one nothing holds is deleted on T3, or forgotten once sent
 
     /// The draft's pills now, whatever changed them (typing, a cut, an undo, Return or Esc emptying it, a prefill
     /// replacing it): a pill gone that wasn't sent has its upload deleted, once; one back (an undo) is uploaded again.
     func draftHolds(_ ids: Set<String>) { holds(ids, by: "draft") }
 
-    /// The pills `holder` keeps now (the draft, answers typed on a card waiting to go). A pill no holder keeps any more
-    /// and that wasn't sent has its upload deleted, once; one kept again (an undo) is uploaded again.
+    /// The pills `holder` keeps now: the draft, answers typed on a card waiting to go, a Return while it sends, a send in
+    /// flight, a refused send's failure line. A pill no holder keeps any more: sent, it is forgotten (T3 has it; its bytes
+    /// and picture go); unsent, its upload is deleted, once, its bytes kept for an undo that brings it back
+    /// (`undoEnded`). One kept again (an undo) is uploaded again.
     func holds(_ ids: Set<String>, by holder: String) {
         let before = Set(held.values.joined())
         held[holder] = ids.isEmpty ? nil : ids
         let after = Set(held.values.joined())
-        for id in before.subtracting(after) where !sentIDs.contains(id) { remove(id) }
+        for id in before.subtracting(after) {
+            if sentIDs.contains(id) { forget(id) } else { remove(id) }
+        }
         for id in after.subtracting(before) { restore(id) }
     }
 
     /// The pills `holder` keeps now.
     func held(by holder: String) -> Set<String> { held[holder] ?? [] }
 
-    /// T3 took these pills with a message or an answer: their uploads are its thread's (or threads': T3 copies a pending
-    /// upload into each thread it is sent to and keeps it until its own sweep), nothing deletes them, and their bytes are
-    /// let go (nothing will post them again). Until then a send in flight, or a refused one offering Send again, holds them.
-    func sent(_ ids: some Sequence<String>) {
+    /// T3 took these pills with the send `holder` is (a message, an answer): their uploads are its thread's (T3 copies a
+    /// pending upload into each thread it is sent to and keeps it until its own sweep) and nothing deletes them. That send
+    /// lets them go; once nothing else holds them (another part of a split still in flight may), they are forgotten.
+    func sent(_ ids: some Sequence<String>, by holder: String?) {
         let ids = Set(ids).filter { items[$0] != nil }
         guard !ids.isEmpty else { return }
         sentIDs.formUnion(ids)
-        for id in ids { items[id]?.data = nil }
-        // Nothing needs to hold them any more.
-        for (holder, kept) in held {
-            let left = kept.subtracting(ids)
-            held[holder] = left.isEmpty ? nil : left
-        }
+        let unheld = ids.filter { id in !held.values.contains { $0.contains(id) } }
+        unheld.forEach(forget)
+        if let holder { holds(held(by: holder).subtracting(ids), by: holder) }
+    }
+
+    /// The composer's undo can't bring back what was taken out of the draft any more (a send emptied it): the bytes of
+    /// those pills go, and nothing of them is kept.
+    func undoEnded() {
+        let gone = removed
+        gone.forEach(forget)
     }
 
     /// A click on a failed pill: its upload again.
