@@ -444,3 +444,33 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
 - Launches send `runtimeMode` explicitly. The Explainers project is archived in T3 (`archived: true`) so T3's sidebar
   hides it too; launches still work.
 - `ExplainerWeb.configuration()` is written in P1; P2 and P4 only read it.
+
+## Build notes
+
+### P1 (2026-11-14)
+- **No `settings.local.json`.** `enabledMcpjsonServers: ["fjord"]` sits in `.claude/settings.json` with the deny list and
+  the hook, which is what spike B1 loaded.
+- **Fonts have one source.** `Resources/Explainer/kit/` has no `fonts/`: `ExplainerProject.sync()` copies `Resources/Fonts`
+  into `kit/fonts/`, and the stamp covers those files too. `Resources/Explainer/kit/` is the shipped kit now. `EX/kit` stays
+  the eval copy.
+- **The guard parses JSON with `/usr/bin/plutil`**, not sed. A `tool_name` inside a call's input can't pass as the tool's
+  name, and input it can't read is denied.
+- **Ticket.** The prompt tells the creator to call `mcp__fjord__preview` with `code` and the input's `ticket` (plus `at`).
+  The input's first line is `<ticket>…</ticket>` (P3 writes it; the example input in the prompt shows it). P2's tool takes
+  `code`, `ticket` and an optional `at`. `EX/preview_server.py` needs a `ticket` argument it ignores before evals run on
+  the new prompt.
+- **`ExplainerWeb.configuration()` is `async throws`**, because compiling the rule list is async (it's compiled once per
+  run). The rule list blocks every load that isn't `file:`, not only http(s)/ws(s). `ExplainerWeb.LocalOnly` is a ready
+  navigation and UI delegate for P4. P2's renderer calls `ExplainerWeb.policy(for:)` from its own delegate.
+- **P1 wires nothing at launch**, because `Store*.swift` belongs to P3. P3's `ExplainerEngine.start()` must:
+  (1) set `t3.store.hiddenRoot = project.root.path` before T3's shell arrives, whenever `ExplainerProject.at(support:)` is
+  non-nil, whether the Router is on or off (Triage's lists read the shell too);
+  (2) run `sync()` off the main actor;
+  (3) on the first `t3.store.hidden.answered`, call `ensure(in: t3.store.hidden, mutate: ExplainerProject.liveMutate)` for
+  the project id;
+  (4) in `routerThreadChanged`, ignore ids where `t3.store.isHidden(thread:)` is true.
+- **Archived projects.** T3's shell still lists archived projects (it drops only deleted ones), so `ensure` finds the
+  archived project by its folder. `Store.t3Project(forFolder:)` and `Store.launchThread` refuse archived projects, which
+  is one more reason P3 dispatches `.launchThread` directly.
+- **`.mcp.json` is P1's file to write.** `writeServer(_:)` writes it with mode 0600, and only when it changes. `server()`
+  reads back the port and token, so P2 can bind the same port next launch.

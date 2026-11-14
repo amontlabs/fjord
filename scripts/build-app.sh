@@ -23,6 +23,10 @@ xcrun actool Resources/AppIcon.icon --compile "$ICON_OUT" --app-icon AppIcon --p
   --minimum-deployment-target 14.0 --output-partial-info-plist "$ICON_OUT/partial.plist" >/dev/null
 cp "$ICON_OUT/Assets.car" "$APP/Contents/Resources/"
 cp -R Resources/Fonts "$APP/Contents/Resources/"   # Geist and Geist Mono (OFL), registered at launch by Brand
+# Show me: the creator's instructions, tool lock and kit, copied into Application Support/Fjord/Explainers at launch
+# (ExplainerProject.sync; the kit's fonts come from Fonts above), and the demo's stills (RouterShowMeDemo).
+cp -R Resources/Explainer "$APP/Contents/Resources/"
+cp -R Resources/ShowMeDemo "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

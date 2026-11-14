@@ -58,7 +58,8 @@ extension RouterTools {
             guard let t3 = store?.t3.store else { throw Failure("T3 isn't connected") }
             return try await t3.search(q, limit: n)
         })(String(query.prefix(200)), limit)
-        let rows = matches.prefix(limit).map { m -> [String: Any] in
+        // T3's search covers every project, Fjord's hidden one too (Show me's explainers): its threads aren't the user's.
+        let rows = matches.filter { !store.t3.store.isHidden(thread: $0.threadId) }.prefix(limit).map { m -> [String: Any] in
             var fields: [String: Any] = ["thread": m.threadId, "source": m.source, "snippet": Self.fenced(m.snippet, 240)]
             fields.merge(threadFields(store, m.threadId)) { a, _ in a }
             if let at = m.createdAt { fields["when"] = ThreadRow.duration(Self.bounded(Date().timeIntervalSince(at))) + " ago" }
@@ -70,6 +71,7 @@ extension RouterTools {
     func readThread(_ store: Store, _ args: [String: Any]) async throws -> String {
         let id = try Self.string(args, "thread")
         let count = min(max((args["messages"] as? NSNumber)?.intValue ?? Self.readDefault, 1), Self.readMax)
+        guard !store.t3.store.isHidden(thread: id) else { throw Failure("No thread \(id) could be read; call search_threads or board for ids") }
         let projection = await (threadRead ?? { [weak store] id in await store?.t3.store.readProjection(id) })(id)
         guard let projection else { throw Failure("No thread \(id) could be read; call search_threads or board for ids") }
         let said = Self.messages(in: projection).suffix(count).map { role, text -> [String: Any] in

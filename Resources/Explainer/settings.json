@@ -1,0 +1,14 @@
+{
+  "enabledMcpjsonServers": ["fjord"],
+  "permissions": {
+    "deny": [
+      "Bash", "Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS", "WebFetch", "WebSearch",
+      "Task", "Agent", "TodoWrite", "mcp__t3-code"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.fjord/guard.sh" }] }
+    ]
+  }
+}

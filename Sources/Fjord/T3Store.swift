@@ -53,6 +53,22 @@ struct T3ShellState: Equatable, Sendable {
     var statusCounts: [String: Int] {
         listedThreads.reduce(into: [:]) { $0[$1.status.rawValue, default: 0] += 1 }
     }
+
+    /// This shell without the projects whose folder is `root` (paths compared standardized) and every thread in them,
+    /// subagents and side chats included: what the Router sees of T3 while Fjord keeps a project of its own there (Show me's
+    /// explainers, ExplainerProject.swift).
+    func without(projectRoot root: String?) -> T3ShellState {
+        guard let root else { return self }
+        let wanted = Self.standardized(root)
+        let gone = Set(projects.values.filter { Self.standardized($0.workspaceRoot) == wanted }.map(\.id))
+        guard !gone.isEmpty else { return self }
+        var out = self
+        for id in gone { out.projects[id] = nil }
+        out.threads = threads.filter { !gone.contains($0.value.projectId) }
+        return out
+    }
+
+    static func standardized(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
 }
 
 extension T3Projection {
@@ -128,7 +144,24 @@ extension T3Projection {
 /// Live state for views: the shell plus the thread projections someone asked for.
 @MainActor @Observable
 final class T3Store {
+    /// The shell every Router surface reads: `hidden` without the project at `hiddenRoot`. Filtering here, at the one place
+    /// the shell comes in, keeps that project off every list, board, tally and search built from it with no filter of their own.
     private(set) var shell = T3ShellState()
+    /// The whole shell as T3 sent it, the hidden project included (for the code that keeps that project).
+    @ObservationIgnored private(set) var hidden = T3ShellState()
+    /// The folder of the project Fjord keeps for itself in T3 (Show me's explainers), kept out of `shell`. Setting it filters
+    /// the shell again and tells `onShell` (as a whole new shell) when that changed what it holds.
+    @ObservationIgnored var hiddenRoot: String? {
+        didSet {
+            guard hiddenRoot != oldValue else { return }
+            let next = hidden.without(projectRoot: hiddenRoot)
+            guard next != shell else { return }
+            shell = next
+            onShell?(nil)
+        }
+    }
+    /// Whether `id` is a thread of the hidden project: in T3's shell, kept out of the Router's.
+    func isHidden(thread id: String) -> Bool { hidden.threads[id] != nil && shell.threads[id] == nil }
     private(set) var projections: [String: T3Projection] = [:]
     private(set) var connection: T3ConnectionState = .connecting
     /// This T3's environment id (from its descriptor, read once connected): the middle of a thread's deep link.
@@ -156,7 +189,7 @@ final class T3Store {
         shellTask = Task { [weak self] in
             for await item in await client.subscribeShell() {
                 guard let self else { return }
-                self.shell.apply(item)
+                self.apply(item)
                 self.onShell?(item)
             }
         }
@@ -170,9 +203,17 @@ final class T3Store {
         }
     }
 
+    /// One shell item into the whole shell, then the Router's shell made from it again. Items about the hidden project's
+    /// threads still reach `onShell`: every consumer reads the row from `shell` by id, finds none and drops nothing it had.
+    func apply(_ item: T3ShellItem) {
+        hidden.apply(item)
+        shell = hidden.without(projectRoot: hiddenRoot)
+    }
+
     /// A shell with no server behind it: demo data, shots and tests (`notify: false` leaves telling `onShell` to the test).
     func seed(_ shell: T3ShellState, notify: Bool = true) {
-        self.shell = shell
+        hidden = shell
+        self.shell = shell.without(projectRoot: hiddenRoot)
         if notify { onShell?(nil) }
     }
 
