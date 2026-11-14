@@ -33,6 +33,8 @@ struct ThreadMessage: Equatable, Sendable {
     /// What T3 gets as the text.
     var text: String
     var records: [T3JSON] = []
+    /// The uploads of the pictures and files the text points at (`ThreadWords.attachments`).
+    var attachments: [T3Attachment] = []
 }
 
 /// How a send is dispatched to the thread it finds.
@@ -152,7 +154,8 @@ extension Store {
         let plan = ThreadSender.plan(running: thread.running, mode: mode, steers: threadSteers(id), unattended: unattended)
         if let refusal = gate?() { throw ThreadSendFailure(refusal) }
         let command = T3Command.messageDispatch(threadId: id, messageId: message.messageID, text: message.text,
-                                                dispatch: plan.dispatch, context: message.records)
+                                                dispatch: plan.dispatch, attachments: message.attachments,
+                                                context: message.records)
         try await dispatch(command, commandId: message.commandID)
         // Your words went there: you have read what it said (T3's read state, which its sidebar and phone share). Fjord marks a
         // thread read only then and on Mark read, never for showing it. An action's message isn't yours: nothing is marked.

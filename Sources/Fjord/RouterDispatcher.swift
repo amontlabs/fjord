@@ -224,10 +224,19 @@ struct RouterAskBack: Identifiable, Equatable {
         // An action's message: only while Triage and the Router are both on.
         if context.action != nil, !store.toolsLinked { return nil }
         // Sent as written (`RouterComposerModel.sendable`): code keeps the indentation of its first line. Trimmed only to see it isn't empty.
-        let text = RouterComposerModel.sendable(text)
+        let (text, lead) = RouterComposerModel.sendableCut(text)
         guard !text.isEmpty else { return nil }
         var seen = Set<String>()
         var context = context
+        // The pills where they are in the words as sent (blank lines cut before them).
+        if lead > 0 {
+            context.pills = context.pills.map { ($0.lowerBound - lead)..<($0.upperBound - lead) }
+            context.mentions = context.mentions.map { m in
+                var m = m
+                m.range = (m.range.lowerBound - lead)..<(m.range.upperBound - lead)
+                return m
+            }
+        }
         context.projects = context.projects.filter { seen.insert($0).inserted }
         // A pill is an "@name" where it was said; anything else given as one isn't.
         let chars = Array(text)
@@ -399,8 +408,10 @@ struct RouterAskBack: Identifiable, Equatable {
         let chars = Array(text)
         var end = 0
         return mentions.sorted { $0.range.lowerBound < $1.range.lowerBound }.filter { m in
-            guard m.range.lowerBound >= end, m.range.upperBound <= chars.count, !m.range.isEmpty,
-                  chars[m.range.lowerBound] == "@" else { return false }
+            // A picture's or a file's reads as "[image: name]" (`RouterPointer.said`); any other as "@name".
+            guard m.range.lowerBound >= end, m.range.lowerBound >= 0, m.range.upperBound <= chars.count, !m.range.isEmpty,
+                  m.pointer.attachment == nil ? chars[m.range.lowerBound] == "@"
+                      : String(chars[m.range]) == m.pointer.said(m.name) else { return false }
             end = m.range.upperBound
             return true
         }
@@ -709,9 +720,12 @@ struct RouterAskBack: Identifiable, Equatable {
             }
             // The request moved on while it was read: nothing is answered on a read of another one, and the words go on as text.
         }
+        let uploads = try await uploads(job)
         stage(job, "sending")
-        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store)
-        let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records),
+        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
+                                                     uploads: uploads)
+        let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records,
+                                                                        attachments: words.attachments),
                                 body: words.words, original: words.original, rephrased: words.rephrased,
                                 mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
         let sent = try await effects.send(job.tools, delivery)

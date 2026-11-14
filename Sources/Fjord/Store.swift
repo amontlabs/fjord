@@ -394,6 +394,15 @@ final class Store {
         dispatcher.claudePath = { [weak self] in self?.routerStatus.latestPath() }
         return dispatcher
     }()
+    /// The pictures and files pasted or dropped in the Router composer, and their uploads to T3 (none in a demo or a
+    /// playground: nothing leaves, and each is done at once).
+    @ObservationIgnored lazy var attachments: RouterAttachments = {
+        guard !routerIsPretend else { return RouterAttachments() }
+        return RouterAttachments(uploader: .t3(call: { [weak self] tag, payload in
+            guard let self else { throw ThreadSendFailure("Fjord is closing") }
+            return try await self.t3.store.call(tag: tag, payload: payload)
+        }))
+    }()
     /// A shot's model usage, shown in Settings instead of the log.
     @ObservationIgnored var modelUsageShown: [ModelUsageLog.Entry]?
     /// Every thread's turns and Haiku card, the BM25 index and the day's archive: the decider's context, kept off its path

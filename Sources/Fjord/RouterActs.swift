@@ -139,6 +139,7 @@ extension RouterActsRecords {
 
     private func words(_ out: RouterOutgoing, _ send: Send) {
         var context = RouterContext(target: RouteTarget.thread(out.thread).targetID)
+        context.mentions = out.attached
         context.queue = out.queue
         context.decided = out.read.flatMap { decision($0.draft) }
         guard let entry = env.submit(out.words, context) else {
@@ -255,10 +256,15 @@ extension RouterActsRecords {
     func mintThread() -> String { UUID().uuidString.lowercased() }
 
     func start(_ thread: String, words: String, project: String, launch: RouterLaunch, read: RouterRead?) {
+        start(thread, words: words, attached: [], project: project, launch: launch, read: read)
+    }
+
+    func start(_ thread: String, words: String, attached: [RouterMention], project: String, launch: RouterLaunch, read: RouterRead?) {
         let send = Send(thread: thread, words: words, kind: .start(project: project, launch: launch, name: read?.name), at: env.now())
         records?.began(send: send)
         guard let id = env.projectID(project) else { return refuse(send, "That project isn't in T3 anymore: nothing was started") }
         var context = RouterContext(target: RouterAskBack.newThread + id)
+        context.mentions = attached
         // No settings until T3's config is read: the page showed none, and T3 starts it with its own defaults.
         context.launch = RouterLaunchPlan(thread: thread, settings: models.isEmpty ? nil : settings(launch))
         context.decided = read.flatMap { decision($0.draft) }

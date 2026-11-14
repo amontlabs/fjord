@@ -154,7 +154,8 @@ struct RouterDetail: Equatable {
         // T3's own "continue" once a usage limit resets is stamped as yours; its id is the recovery's
         // (`UsageLimitRecoveryWorker`: `limit-resume:<thread>:<run>:<request>`).
         if m.creationSource == "server", m.id.hasPrefix(limitResumePrefix) { return .usageLimit }
-        let words = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A picture or a file in it reads as its name where it sat.
+        let words = RouterPointers.readable(m.text).trimmingCharacters(in: .whitespacesAndNewlines)
         return words.isEmpty ? nil : .asked(words)
     }
 

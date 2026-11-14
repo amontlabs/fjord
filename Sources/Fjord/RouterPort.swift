@@ -61,6 +61,8 @@ struct RouterOutgoing: Equatable {
     var queue: Bool
     /// The read the row showed, for the decision log; nil for a picked answer or Continue.
     var read: RouterRead?
+    /// The pictures' and files' pills in `words` (each where its "[image: name]" stands): they go with the words.
+    var attached: [RouterMention] = []
 }
 
 /// What takes the page's acts: the demo's fake T3 (RouterDemoSource), or the real one (RouterActs). The page has
@@ -80,6 +82,8 @@ struct RouterOutgoing: Equatable {
     func mintThread() -> String
     /// Starts a thread with your words and the settings the row showed.
     func start(_ thread: String, words: String, project: String, launch: RouterLaunch, read: RouterRead?)
+    /// The same with the pictures' and files' pills in the words (`RouterOutgoing.attached`).
+    func start(_ thread: String, words: String, attached: [RouterMention], project: String, launch: RouterLaunch, read: RouterRead?)
     func stop(_ thread: String)
     /// A card opened here: T3's `thread.visit`.
     func visit(_ thread: String)
@@ -94,6 +98,10 @@ struct RouterOutgoing: Equatable {
 }
 
 extension RouterSource {
+    /// A source that sends nothing anywhere (the demo's) has no use for the attachments.
+    func start(_ thread: String, words: String, attached: [RouterMention], project: String, launch: RouterLaunch, read: RouterRead?) {
+        start(thread, words: words, project: project, launch: launch, read: read)
+    }
     func itemDone(_ thread: String, item: String, on: Bool) {}
     func logSplit(_ draft: String, sends: [RouterSend]) {}
 }

@@ -28,6 +28,9 @@ enum RouterPointer: Hashable, Codable {
     /// In the Router v2 composer: a card's answer (its picks' key, `RouterModel.picks`), mirrored from the card
     /// (`RouterAnswerPills`). It leads the draft; taking it out unticks the card.
     case answer(String)
+    /// In the Router composer: a picture or a file pasted or dropped, by its id (`RouterAttachments`, `image_…` or `file_…`).
+    /// It goes in the words as "[image: name]" where it sat, and to the thread as T3's own reference there (ThreadContext.swift).
+    case attachment(String)
 
     /// Whether it says where the message goes (a T3 place): such a pill is taken out of your words where they start
     /// with it, as an address (`RouterContext.pills`). A local project, a notification or a category is what you talk about,
@@ -37,6 +40,7 @@ enum RouterPointer: Hashable, Codable {
     func said(_ name: String) -> String {
         switch self {
         case .item, .answer: name
+        case .attachment(let id): "[\(RouterAttachment.kind(of: id).rawValue): \(name)]"
         default: "@" + name
         }
     }
@@ -44,14 +48,17 @@ enum RouterPointer: Hashable, Codable {
     /// An answer's pill (`RouterAnswerPills`): the card's picks, not words.
     var isAnswer: Bool { if case .answer = self { true } else { false } }
 
+    /// A pasted or dropped picture's or file's pill: its id.
+    var attachment: String? { if case .attachment(let id) = self { id } else { nil } }
+
     var addresses: Bool {
         switch self {
         case .t3: true
-        case .project, .notification, .category, .thisItem, .setting, .item, .answer: false
+        case .project, .notification, .category, .thisItem, .setting, .item, .answer, .attachment: false
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem, setting, item, answer }
+    private enum CodingKeys: String, CodingKey { case project, t3, claude, notification, category, thisItem, setting, item, answer, attachment }
 
     /// `{"project": "/code/lookout"}` and so on; a bare string, a project's folder (as the pills were kept before there
     /// were other kinds), is a project.
@@ -69,6 +76,7 @@ enum RouterPointer: Hashable, Codable {
         else if let v = try c.decodeIfPresent(RouterSetting.self, forKey: .setting) { self = .setting(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .item) { self = .item(v) }
         else if let v = try c.decodeIfPresent(String.self, forKey: .answer) { self = .answer(v) }
+        else if let v = try c.decodeIfPresent(String.self, forKey: .attachment) { self = .attachment(v) }
         else { throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "Not a pointer")) }
     }
 
@@ -83,6 +91,7 @@ enum RouterPointer: Hashable, Codable {
         case .setting(let v): try c.encode(v, forKey: .setting)
         case .item(let v): try c.encode(v, forKey: .item)
         case .answer(let v): try c.encode(v, forKey: .answer)
+        case .attachment(let v): try c.encode(v, forKey: .attachment)
         }
     }
 }
@@ -114,6 +123,14 @@ struct MentionLook: Equatable {
     /// An answer's pill (Router v2): after the label (the item's short words), an arrow and this, your answer; on the accent's
     /// tint (it came from you), the kind's mark first.
     var answer: String? = nil
+    /// A pasted or dropped attachment's pill: no "@"; a picture's small copy in place of a symbol.
+    var attachment = false
+    var thumbnail: NSImage? = nil
+    /// An attachment still uploading (its label quieter, an upload mark after it), or one that failed (a warning mark;
+    /// a click tries again).
+    var upload: Upload = .done
+
+    enum Upload: Equatable { case done, uploading, failed }
 }
 
 extension MentionLook {
@@ -125,6 +142,20 @@ extension MentionLook {
                                answer: String(name[cut.upperBound...]))
         }
         return MentionLook(label: name, symbol: "circle.fill", tint: CDS.Text.muted, item: true)
+    }
+
+    /// An attachment's pill: a picture's small copy (else a photo's symbol) or a file's document, its name, and how its
+    /// upload stands. `name`: the one it was sent with, once the attachment itself is gone (a history entry).
+    static func attachment(_ id: String, item: RouterAttachment?, state: RouterAttachmentState?, name: String?) -> MentionLook {
+        let image = RouterAttachment.kind(of: id) == .image
+        let upload: Upload = switch state {
+        case .uploading?: .uploading
+        case .failed?: .failed
+        case .ready?, nil: .done
+        }
+        return MentionLook(label: RouterDecision.clip(item?.name ?? name ?? (image ? "image" : "file"), 32),
+                           symbol: image ? "photo" : "doc", tint: CDS.Text.secondary, attachment: true,
+                           thumbnail: item?.thumbnail, upload: upload)
     }
 }
 
@@ -150,6 +181,8 @@ extension Store {
             return setting.label
         case .item, .answer:
             return RouterPillLooks.names[pointer] ?? "item"
+        case .attachment(let id):
+            return attachments.items[id]?.name ?? RouterAttachment.kind(of: id).rawValue
         }
     }
 
@@ -179,6 +212,8 @@ extension Store {
             return setting.look
         case .item, .answer:
             return RouterPillLooks.looks[pointer] ?? MentionLook.fallback(pointer, name: name ?? "item")
+        case .attachment(let id):
+            return MentionLook.attachment(id, item: attachments.items[id], state: attachments.states[id], name: name)
         }
     }
 
@@ -264,7 +299,8 @@ enum RouterPointers {
         for c in draft {
             if c == MentionText.mark, let pointer = next.next() {
                 let said = name(pointer)
-                let chars = Array("@" + said)
+                // A picture or a file reads as "[image: name]"; every other pill as "@name".
+                let chars = Array(pointer.attachment != nil ? pointer.said(said) : "@" + said)
                 mentions.append(RouterMention(range: out.count..<(out.count + chars.count), pointer: pointer, name: said))
                 out += chars
             } else {
@@ -347,7 +383,7 @@ enum RouterPointers {
                 let open = store.entries(in: c.id)
                 blocks.append(category(name: m.name, rules: RuleWords(store: store).summary(c), open: open.count,
                                        unread: open.filter(\.isUnread).count))
-            case .project, .t3, .thisItem, .setting, .item, .answer:
+            case .project, .t3, .thisItem, .setting, .item, .answer, .attachment:
                 continue
             }
         }
@@ -463,6 +499,7 @@ struct MentionSuggestion: Identifiable, Equatable {
         case .pointer(.setting(let v)): "setting:" + v.kind.rawValue + ":" + v.value
         case .pointer(.item(let v)): "item:" + v
         case .pointer(.answer(let v)): "answer:" + v
+        case .pointer(.attachment(let v)): "attachment:" + v
         case .text(let v): snippet.map { "snippet:" + $0.uuidString } ?? "text:\(section.rawValue):" + name + ":" + String(v.hashValue)
         }
     }
@@ -653,10 +690,10 @@ enum MentionPill {
     /// The pill: "@label" on a rounded fill, after its symbol in its tint (or its tint's dot), in `font` a point smaller.
     /// A setting's and an item's have no "@" (neither is a place in the message); an answer's adds an arrow and the answer.
     static func image(_ look: MentionLook, font: NSFont, dark: Bool? = nil) -> NSImage {
-        let label = (look.setting || look.item || look.answer != nil ? "" : "@") + look.label
+        let label = (look.setting || look.item || look.answer != nil || look.attachment ? "" : "@") + look.label
         let pillFont = NSFont(descriptor: font.fontDescriptor, size: font.pointSize - 1) ?? font
         // An answer's item words are a step quieter than the answer, which is what you said.
-        let labelInk = look.answer != nil ? NSColor(CDS.Text.secondary) : NSColor(CDS.Text.primary)
+        let labelInk = look.answer != nil || look.upload == .uploading ? NSColor(CDS.Text.secondary) : NSColor(CDS.Text.primary)
         let ink = NSAttributedString(string: label, attributes: [.font: pillFont, .foregroundColor: labelInk])
         let answerFont = NSFont(descriptor: pillFont.fontDescriptor.addingAttributes(
             [.traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.medium]]), size: pillFont.pointSize) ?? pillFont
@@ -669,18 +706,26 @@ enum MentionPill {
         let tint = look.tint.map(NSColor.init)
         // An item's or an answer's kind mark as the page draws it: a filled circle's glyph in white on its tint.
         let marked = (look.item || look.answer != nil) && look.symbol?.hasSuffix(".fill") == true
-        let glyph = look.symbol.flatMap {
+        // A picture's small copy stands in for its symbol, a rounded square the pill's height less a margin.
+        let glyph = look.thumbnail.map(Self.thumb) ?? look.symbol.flatMap {
             symbol($0, size: marked ? 10 : 9, weight: .medium, color: tint ?? NSColor(CDS.Text.secondary), on: marked)
+        }
+        // An upload's state after the name: still posting, or failed (a click tries again).
+        let status: NSImage? = switch look.upload {
+        case .done: nil
+        case .uploading: symbol("arrow.up.circle", size: 9, weight: .medium, color: NSColor(CDS.Text.muted))
+        case .failed: symbol("exclamationmark.arrow.circlepath", size: 9, weight: .semibold, color: .systemRed)
         }
         let dot: CGFloat = glyph == nil && tint != nil ? 6 : 0
         let lead: CGFloat = glyph.map { ceil($0.size.width) } ?? dot
-        let tail: CGFloat = arrow.map { 4 + ceil($0.size.width) + 4 + answerWidth } ?? 0
+        let tail: CGFloat = (arrow.map { 4 + ceil($0.size.width) + 4 + answerWidth } ?? 0) + (status.map { 4 + ceil($0.size.width) } ?? 0)
         let width = 6 + (lead > 0 ? lead + 4 : 0) + textWidth + tail + 6
         let height = Self.height
         return NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             // `dark`: drawn for that appearance, where the picture is shown by SwiftUI's text (it draws with the process's own).
             let paint = {
-                Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink, arrow: arrow, answer: answer)
+                Self.paint(look, rect: rect, glyph: glyph, lead: lead, dot: dot, tint: tint, ink: ink, arrow: arrow, answer: answer,
+                           status: status)
             }
             let appearance = dark.flatMap { NSAppearance(named: $0 ? .darkAqua : .aqua) }
             appearance.map { $0.performAsCurrentDrawingAppearance(paint) } ?? paint()
@@ -694,8 +739,18 @@ enum MentionPill {
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
     }
 
+    /// A picture's small copy as a pill's lead: 14 points square, its corners rounded.
+    private static func thumb(_ picture: NSImage) -> NSImage {
+        let side: CGFloat = 14
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).addClip()
+            picture.draw(in: rect)
+            return true
+        }
+    }
+
     private static func paint(_ look: MentionLook, rect: NSRect, glyph: NSImage?, lead: CGFloat, dot: CGFloat, tint: NSColor?,
-                              ink: NSAttributedString, arrow: NSImage?, answer: NSAttributedString?) {
+                              ink: NSAttributedString, arrow: NSImage?, answer: NSAttributedString?, status: NSImage?) {
         let height = Self.height
         // The Surfaces system's grounds at a token's radius, no outline (Router v2 DESIGN 1.0): a setting on the quiet
         // fill; an item on its kind's tint at 12 %, as its name sits on the page; an answer on the accent's tint at 12 %
@@ -706,6 +761,9 @@ enum MentionPill {
             NSBezierPath(roundedRect: rect, xRadius: token, yRadius: token).fill()
         } else if look.item {
             (tint ?? NSColor(CDS.Text.secondary)).withAlphaComponent(Router.Surface.tint).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: token, yRadius: token).fill()
+        } else if look.upload == .failed {
+            NSColor.systemRed.withAlphaComponent(Router.Surface.tint).setFill()
             NSBezierPath(roundedRect: rect, xRadius: token, yRadius: token).fill()
         } else if look.setting {
             NSColor(Router.Surface.quiet).setFill()
@@ -730,6 +788,11 @@ enum MentionPill {
             arrow.draw(in: NSRect(x: x, y: (height - arrow.size.height) / 2, width: arrow.size.width, height: arrow.size.height))
             x += ceil(arrow.size.width) + 4
             answer.draw(at: NSPoint(x: x, y: (height - answer.size().height) / 2))
+            x += ceil(answer.size().width)
+        }
+        if let status {
+            x += 4
+            status.draw(in: NSRect(x: x, y: (height - status.size.height) / 2, width: status.size.width, height: status.size.height))
         }
     }
 }

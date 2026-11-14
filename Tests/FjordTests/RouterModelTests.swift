@@ -272,6 +272,19 @@ import Testing
                                                   steering: false, queue: false, read: read)])
     }
 
+    @Test func aPastedPictureGoesWithTheWordsWhereItSat() {
+        let (model, source) = recorded()
+        model.select(nil)
+        let pill = RouterMention(range: 4..<5, pointer: .attachment("image_abc"), name: "shot.png")
+        model.edit("fix " + MentionText.markString + " now", marks: [pill])
+        let words = "fix [image: shot.png] now"
+        let read = RouterRead(draft: words, places: [.thread(ID.bar)], sure: true)
+        model.apply(.read(read))
+        model.send()
+        #expect(source.sends.map(\.words) == [words])
+        #expect(source.sends.first?.attached == [RouterMention(range: 4..<21, pointer: .attachment("image_abc"), name: "shot.png")])
+    }
+
     @Test func aRunningThreadIsSteeredOrQueuedAndAQueueCanBeCancelled() {
         let (model, source) = recorded()
         model.select(nil)

@@ -118,6 +118,7 @@ struct ActionPrompt: Hashable, ExpressibleByStringLiteral {
         case .setting(let s): s.label
         case .item: "an item"
         case .answer: "an answer"
+        case .attachment(let id): RouterAttachment.kind(of: id) == .image ? "an image" : "a file"
         }
     }
 }

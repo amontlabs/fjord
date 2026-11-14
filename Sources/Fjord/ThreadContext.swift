@@ -4,7 +4,9 @@ import Foundation
 // pill points to travels as a T3 context record, and the text points at it where the pill sat with a
 // `[@name](t3-context://v1/<kind>/<id>)` reference. Your words stay as you typed them (the reference's label is the pill's
 // own "@name"); what GitHub wrote is data in a record, which T3 escapes in the `<t3_context>` envelope it gives the agent, so
-// a comment can't forge another record or give an instruction.
+// a comment can't forge another record or give an instruction. A picture or a file pasted in the composer goes as T3's own
+// composer sends one: `![name](t3-context://v1/image/<id>)` (a file's with no "!") where its pill sat, an `image` or `file`
+// record bound to its upload, and the upload in the message's `attachments`, so the agent sees it in place.
 
 /// A message for a thread, ready to dispatch.
 struct ThreadWords: Equatable {
@@ -16,6 +18,8 @@ struct ThreadWords: Equatable {
     /// The text T3 gets: `words` with a reference at each pill that has a record.
     var text: String
     var records: [T3JSON]
+    /// The uploads the text's pictures and files are, in the order they stand.
+    var attachments: [T3Attachment] = []
 }
 
 extension RouterPointers {
@@ -24,9 +28,11 @@ extension RouterPointers {
     static let categoryKind = "fjord-category"
 
     /// Your message for a thread: the addressing taken out, a reference and a record for each notification or category pill
-    /// that is still where it was after that. Throws when nothing is left of it (`Addressing.NothingLeft`).
+    /// that is still where it was after that, and for each picture or file whose upload is in `uploads` (by its id). Throws
+    /// when nothing is left of it (`Addressing.NothingLeft`).
     @MainActor
-    static func threadMessage(_ original: String, pills: [Range<Int>], mentions: [RouterMention], store: Store) throws -> ThreadWords {
+    static func threadMessage(_ original: String, pills: [Range<Int>], mentions: [RouterMention], store: Store,
+                              uploads: [String: T3Attachment] = [:]) throws -> ThreadWords {
         let (prepared, origins) = try Addressing.editMapped(original, pills: pills)
         let chars = Array(prepared.text)
         var newIndex: [Int: Int] = [:]
@@ -34,6 +40,7 @@ extension RouterPointers {
         var ids: [RouterPointer: String] = [:]
         var records: [T3JSON] = []
         var spans: [(range: Range<Int>, reference: String)] = []
+        var attachments: [T3Attachment] = []
         var end = 0
         for m in mentions.sorted(by: { $0.range.lowerBound < $1.range.lowerBound }) {
             guard !m.range.isEmpty, let first = newIndex[m.range.lowerBound], let last = newIndex[m.range.upperBound - 1],
@@ -42,6 +49,17 @@ extension RouterPointers {
             switch m.pointer {
             case .notification: kind = notificationKind
             case .category: kind = categoryKind
+            case .attachment(let id):
+                guard let upload = uploads[id] else { continue }
+                let (reference, record) = attachment(id: id, upload: upload)
+                if ids[m.pointer] == nil {
+                    ids[m.pointer] = id
+                    records.append(record)
+                    attachments.append(upload)
+                }
+                spans.append((first..<(last + 1), reference))
+                end = last + 1
+                continue
             case .project, .t3, .thisItem, .setting, .item, .answer: continue
             }
             let label = String(chars[first...last])
@@ -63,7 +81,51 @@ extension RouterPointers {
             at = span.range.upperBound
         }
         text += String(chars[at...])
-        return ThreadWords(words: prepared.text, original: original, rephrased: prepared.rephrased, text: text, records: records)
+        return ThreadWords(words: prepared.text, original: original, rephrased: prepared.rephrased, text: text, records: records,
+                           attachments: attachments)
+    }
+
+    /// A picture's or a file's reference and record, as T3's composer makes them (`formatComposerContextReference`,
+    /// `attachmentContextRecord`): the context id is the attachment's own (`image_…`, `file_…`), the record bound to the upload.
+    static func attachment(id: String, upload: T3Attachment) -> (reference: String, record: T3JSON) {
+        let kind = RouterAttachment.kind(of: id).rawValue
+        let label = attachmentLabel(upload.name, kind: kind)
+        let reference = (kind == "image" ? "!" : "") + "[\(label)](t3-context://v1/\(kind)/\(id))"
+        let record: T3JSON = ["version": 1, "contextId": .string(id), "kind": .string(kind), "label": .string(label),
+                              "attachmentId": .string(upload.id), "name": .string(upload.name), "mimeType": .string(upload.mimeType),
+                              "sizeBytes": .number(Double(upload.sizeBytes))]
+        return (reference, record)
+    }
+
+    /// An attachment's name as T3 cleans a label (`sanitizeComposerContextLabel`): no brackets, backslashes or line breaks,
+    /// spaces run together, at most 200 characters, never empty.
+    static func attachmentLabel(_ name: String, kind: String) -> String {
+        let spaced = String(name.map { $0.isNewline || "[]\\".contains($0) ? " " : $0 })
+        let label = String(spaced.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(200))
+        return label.isEmpty ? kind : label
+    }
+
+    /// A message's text as it reads: each `t3-context://` reference T3's text holds as its label alone (a picture's name,
+    /// a pill's "@name"), for a quote of it.
+    static func readable(_ text: String) -> String {
+        let marker = "](t3-context://"
+        guard text.contains(marker) else { return text }
+        var out = ""
+        var rest = Substring(text)
+        while let open = rest.firstIndex(of: "[") {
+            let head = rest[..<open]
+            guard let close = rest[open...].range(of: marker),
+                  !rest[rest.index(after: open)..<close.lowerBound].contains(where: { $0 == "[" || $0 == "]" || $0.isNewline }),
+                  let end = rest[close.upperBound...].firstIndex(where: { $0 == ")" || $0.isWhitespace }), rest[end] == ")" else {
+                out += rest[...open]
+                rest = rest[rest.index(after: open)...]
+                continue
+            }
+            out += head.hasSuffix("!") ? head.dropLast() : head
+            out += rest[rest.index(after: open)..<close.lowerBound]
+            rest = rest[rest.index(after: end)...]
+        }
+        return out + rest
     }
 
     /// A pill's name as a link label: no brackets or line breaks, at most 200 characters, never empty.
@@ -128,7 +190,7 @@ extension RouterPointers {
             return ["source": "Fjord's Triage inbox", "name": .string(UntrustedText.clean(c.title, limit: 80)),
                     "open": .number(Double(open.count)), "unread": .number(Double(open.filter(\.isUnread).count)),
                     "rules": .array(RuleWords(store: store).summary(c).prefix(20).map { .string(UntrustedText.clean($0, limit: 300)) })]
-        case .project, .t3, .thisItem, .setting, .item, .answer:
+        case .project, .t3, .thisItem, .setting, .item, .answer, .attachment:
             return [:]
         }
     }

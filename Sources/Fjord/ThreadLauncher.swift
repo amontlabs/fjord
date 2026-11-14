@@ -53,7 +53,8 @@ struct ThreadLaunchSettings: Equatable, Sendable {
 enum ThreadLauncher {
     /// The title the thread starts with; T3 writes the real one from the message (`generateTitle`).
     static func provisionalTitle(_ text: String) -> String {
-        let line = text.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+        // A reference reads as its label (a picture's name), not as its link.
+        let line = RouterPointers.readable(text).split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
         guard !line.isEmpty else { return "New thread" }
         return line.count > 60 ? String(line.prefix(59)) + "…" : line
     }
@@ -104,7 +105,8 @@ enum ThreadLauncher {
                         workspace: ThreadLaunchWorkspace) -> T3LaunchRequest {
         T3LaunchRequest(threadId: thread, projectId: project, title: provisionalTitle(message.text), generateTitle: true,
                         instanceId: model.instanceId, model: model.model, runtimeMode: runtimeMode, interactionMode: interactionMode,
-                        options: options, workspaceStrategy: workspace.json, messageId: message.messageID, text: message.text, context: message.records)
+                        options: options, workspaceStrategy: workspace.json, messageId: message.messageID, text: message.text,
+                        attachments: message.attachments, context: message.records)
     }
 
     /// The workspace for a launch: unattended work never touches your checkout.
@@ -291,6 +293,16 @@ extension Store {
 }
 
 extension RouterDispatcher {
+    /// The uploads of the message's pictures and files: those still posting are waited for (the stage says so), and
+    /// nothing goes when one failed or was taken out.
+    func uploads(_ job: Job) async throws -> [String: T3Attachment] {
+        guard let store else { return [:] }
+        let ids = job.context.mentions.compactMap(\.pointer.attachment)
+        guard !ids.isEmpty else { return [:] }
+        if ids.contains(where: { store.attachments.states[$0] == .uploading }) { stage(job, "uploading") }
+        do { return try await store.attachments.uploads(ids) } catch { throw RouterTools.Failure(error.localizedDescription) }
+    }
+
     /// "New thread in <project>" (or in a folder T3 has no project for yet): your words start a thread, in one
     /// `launchThread`. An action's message starts it in a worktree of its own with the action's runtime mode. The entry
     /// records the delivery, so queued edits and Revert (which archives the thread) work as for any other send.
@@ -306,9 +318,11 @@ extension RouterDispatcher {
         } else {
             throw RouterTools.Failure("That project isn't in T3 anymore: nothing was started")
         }
+        let uploads = try await uploads(job)
         stage(job, "starting a thread")
-        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store)
-        let message = ThreadMessage(text: words.text, records: words.records)
+        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
+                                                     uploads: uploads)
+        let message = ThreadMessage(text: words.text, records: words.records, attachments: words.attachments)
         try job.tools.live(job.tools.ticket())
         let launched: LaunchedThread
         do {

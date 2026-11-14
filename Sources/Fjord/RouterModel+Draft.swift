@@ -420,6 +420,8 @@ extension RouterModel {
         // What the row showed, for the decision log.
         let shown = read
         let launch = launch ?? self.launch
+        // The pictures and files pasted in the draft go with its words (none with other words: a picked answer's).
+        let attached = words == plainDraft ? RouterMentions.plain(draft, marks: mentions).mentions.filter { $0.pointer.attachment != nil } : []
         // The composer empties first: the row leaves saying what it said at Return, not what the send made of the thread.
         setDraft("")
         switch place {
@@ -428,9 +430,10 @@ extension RouterModel {
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
                 lastSends[id] = (words, .words)
-                source?.send(RouterOutgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown))
+                source?.send(RouterOutgoing(thread: id, words: words, kind: .words, steering: false, queue: true, read: shown,
+                                            attached: attached))
             } else {
-                dispatch(words, to: t, kind: kind, read: shown)
+                dispatch(words, to: t, kind: kind, read: shown, attached: attached)
             }
         case .newThread(let project):
             let id = source?.mintThread() ?? "new-\(fresh())"
@@ -442,7 +445,7 @@ extension RouterModel {
             t.launch = launch
             animate(.spatial) { threads.append(t) }
             lastSends[id] = (words, .words)
-            source?.start(id, words: words, project: project, launch: launch, read: shown)
+            source?.start(id, words: words, attached: attached, project: project, launch: launch, read: shown)
         case .here:
             return
         }
@@ -450,7 +453,8 @@ extension RouterModel {
 
     /// The thread's line becomes Sent, at the top of Working, in the same frame; the selection goes on to the next line
     /// that needs you when the words went from its card.
-    func dispatch(_ words: String, to t: RouterThread, kind: RouterOutgoing.Kind, read shown: RouterRead? = nil) {
+    func dispatch(_ words: String, to t: RouterThread, kind: RouterOutgoing.Kind, read shown: RouterRead? = nil,
+                  attached: [RouterMention] = []) {
         let id = t.id
         // Into a run only when one is under way: a line still Sent has no run yet, and the words go as a message.
         let steering = t.state == .working
@@ -485,7 +489,8 @@ extension RouterModel {
         }
         if stays { animate(.spatial, change) } else { move(id, change) }
         if let next { advanced(to: next) }
-        source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: steering, queue: false, read: shown))
+        source?.send(RouterOutgoing(thread: id, words: words, kind: kind, steering: steering, queue: false, read: shown,
+                                    attached: attached))
     }
 
     /// Your act moved the selection on: the card is shown; its "new" dot waits for your next key or pointer move.
