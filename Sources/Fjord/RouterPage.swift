@@ -482,10 +482,8 @@ struct RouterFloating: View {
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
             if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {
-                // The glyphs sit at the line's end: the line's hover hangs back from their trailing edge, inside the page.
-                hung(from: frame, width: Router.Peek.width, trailing: true) {
-                    RouterSummaryView(model: model, thread: thread, item: nil, layer: .hover)
-                }
+                // The glyphs sit at the row's end: their peek hangs back from their trailing edge, inside the page.
+                hung(from: frame, width: Router.Peek.width, trailing: true) { RouterActivityPeek(model: model, thread: thread) }
                     .id("activity-" + id)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }

@@ -165,9 +165,12 @@ struct RouterWideMarginThread: View {
             }
         } trail: {
             if reading { RouterThinking().frame(height: I.lineHeight) }
+        } end: {
+            // What it has running, at the row's trailing end: the glyphs hold still however its words change.
             if !thread.activity.isEmpty {
                 RouterActivityMark(model: model, thread: thread.id, activity: thread.activity)
                     .fixedSize().frame(height: I.lineHeight)
+                    .transition(.opacity)
             }
         }
     }
@@ -214,14 +217,16 @@ struct RouterWideMarginName: View {
 }
 
 /// A row of the column: its mark, its words flowing with the age right after the last of them (they wrap under their
-/// own start, the mark hung before them), then what trails them.
-struct RouterWideWords<Mark: View, Trail: View>: View {
+/// own start, the mark hung before them), then what trails them, then at the row's trailing end its acts and what it
+/// has running (an item's Done under the pointer, a thread's activity glyphs), on its first line.
+struct RouterWideWords<Mark: View, Trail: View, End: View>: View {
     let words: Text
     var age: Text?
     /// The card's quote mark, between the words and the age.
     var quote: RouterQuoteMarkSpec? = nil
     @ViewBuilder let mark: () -> Mark
     @ViewBuilder let trail: () -> Trail
+    @ViewBuilder let end: () -> End
 
     private typealias I = Router.Items
 
@@ -240,7 +245,8 @@ struct RouterWideWords<Mark: View, Trail: View>: View {
             .font(CDS.sans(14))
             .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Router.Thinking.gap) { trail() }.padding(.leading, Router.Thinking.gap)
-            Spacer(minLength: 0)
+            Spacer(minLength: Router.Activity.lead)
+            end().layoutPriority(1)
         }
         .padding(.leading, Router.Margin.mark).padding(.trailing, Router.Line.reach)
         .padding(.vertical, (I.rowHeight - I.lineHeight) / 2)
@@ -259,8 +265,9 @@ struct RouterWideWords<Mark: View, Trail: View>: View {
 }
 
 /// An item's row in the margin grammar: its kind's mark, its sentence, its age after it; struck with how it closed.
-/// Under the pointer the age gives way to a quiet Done in its place, right after the words (the row's own act: struck
-/// "done by you", Revert in the toast; a request's is the thread's Settle, off while T3 holds it).
+/// Under the pointer a quiet Done shows at the row's trailing end, the age staying after the words (the row's own act:
+/// struck "done by you", Revert in the toast; a request's is the thread's Settle, off while T3 holds it). It arms on a
+/// pointer move over it (`RouterButton`), so a row sliding under a still pointer isn't done by it.
 struct RouterWideItemWords: View {
     let model: RouterModel
     let thread: String
@@ -278,10 +285,12 @@ struct RouterWideItemWords: View {
         } else {
             Text(item.sentence).foregroundColor(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
         }
-        RouterWideWords(words: words, age: item.closing || done ? nil : RouterWideAge.text(model, item.since), quote: quote) {
+        RouterWideWords(words: words, age: item.closing ? nil : RouterWideAge.text(model, item.since), quote: quote) {
             Image(systemName: item.kind.symbol).font(.system(size: Router.Items.mark, weight: .semibold))
                 .foregroundStyle(item.kind.tint).opacity(item.closing ? 0.45 : 1)
         } trail: {
+            EmptyView()
+        } end: {
             if done, let held {
                 Text(Router.Items.Copy.done).font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).opacity(0.45)
                     .lineLimit(1).fixedSize()
@@ -298,8 +307,8 @@ struct RouterWideItemWords: View {
                             .fill(hot ? Router.Surface.chosen : .clear))
                         .opacity(pressed ? 0.7 : 1)
                 }
-                // Its word where the age was.
-                .padding(.leading, -6)
+                // Its word's end on the row's words' edge, its ground around it.
+                .padding(.trailing, -6)
                 .accessibilityLabel("Mark done")
             }
         }

@@ -1,8 +1,8 @@
 import SwiftUI
 
-// A thread's subagents, background commands and waits (docs/design/router-v2/DESIGN.md 1.4, 1.5, 1.6): on the line, a
-// few muted glyphs at the end of the sentence's place, a count beside one only when it is more than one; the pointer on them shows
-// the line's hover, whose facts say them (`RouterSummaryView`).
+// A thread's subagents, background commands and waits (docs/design/router-v2/DESIGN.md 1.4, 1.6 R5, R11): on the line, a
+// few muted glyphs at its trailing end, a count beside one only when it is more than one; the pointer on them shows their
+// peek, one row per subagent (title, model, age), background command and wait (`RouterActivityPeek`).
 
 extension Router {
     enum Activity {
@@ -16,15 +16,17 @@ extension Router {
         static let groupGap: CGFloat = 7
         /// The least room between the sentence's words and the glyphs.
         static let lead: CGFloat = 8
+        /// The peek's glyph column.
+        static let glyphBox: CGFloat = 14
     }
 }
 
 extension RouterModel {
-    /// The line whose hover shows from its glyphs: the pointer is on them, its card isn't open, and the hover says more
-    /// than the line. A working line's shows from anywhere on its row (`peeked`).
+    /// The line whose activity peek shows: the pointer is on its glyphs and its card isn't open. On the glyphs it takes
+    /// the place of the line's own hover, a working line's too (`peeked`).
     var activityPeeked: String? {
-        guard case .activity(let id)? = hoverControl, selection != .line(id), let t = thread(id), !t.activity.isEmpty,
-              !t.peeksWork, RouterSummaryView.peeks(t, nil) else { return nil }
+        guard case .activity(let id)? = hoverControl, selection != .line(id), let t = thread(id), !t.activity.isEmpty
+        else { return nil }
         return id
     }
 }
@@ -99,6 +101,56 @@ struct RouterActivityMark: View {
                 }
             }
             .transition(.opacity)
+        }
+    }
+}
+
+/// The activity glyphs' peek: read-only, the page's floating shell, one row per subagent (its title · its model as a
+/// person says it · its age), background command (in mono · its age) and wait (what · its age), in that order.
+struct RouterActivityPeek: View {
+    let model: RouterModel
+    let thread: RouterThread
+
+    private typealias A = Router.Activity
+
+    var body: some View {
+        let _ = model.clock.minute
+        let activity = thread.activity
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(activity.agents) { a in
+                row(A.subagent, Text(a.name), meta: [a.model.map(RouterActivity.modelName), age(a.since)])
+            }
+            ForEach(activity.processes) { p in
+                row(A.process, Text(p.command).font(p.mono ? CDS.mono(12) : nil), meta: [age(p.since)])
+            }
+            ForEach(activity.waits) { w in
+                row(A.wait, Text(what(w)).font(w.mono ? CDS.mono(12) : nil), meta: [age(w.since)])
+            }
+        }
+        .routerPeekShell()
+        .allowsHitTesting(false)
+    }
+
+    /// A thread wait by the waited thread's page name.
+    private func what(_ w: RouterActivity.Wait) -> String {
+        guard w.kind == .thread else { return w.what }
+        return w.thread.flatMap { model.thread($0)?.name } ?? w.what
+    }
+
+    private func age(_ since: Date?) -> String? {
+        since.map { BriefAge.short(model.now.timeIntervalSince($0)) }
+    }
+
+    private func row(_ symbol: String, _ text: Text, meta: [String?]) -> some View {
+        let meta = meta.compactMap { $0 }.joined(separator: " · ")
+        return HStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: A.glyph, weight: .medium)).foregroundStyle(CDS.Text.muted)
+                .frame(width: A.glyphBox)
+            text.cdsText(CDS.Density.compact.body, .regular, CDS.Text.primary).lineLimit(1).truncationMode(.tail)
+            if !meta.isEmpty {
+                Spacer(minLength: 8)
+                Text(meta).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
+            }
         }
     }
 }

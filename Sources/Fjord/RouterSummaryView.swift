@@ -4,8 +4,8 @@ import SwiftUI
 // One layered structure for every thread and item (docs/design/router-v2/DESIGN.md 1.5, 1.6, R10): the hover is the line
 // plus more, the card is the hover plus more, and nothing jumps between them or repeats.
 // - Line: the sentence (what matters now), whole, wrapping under the name.
-// - Hover: the sentence, then the detail (a sentence or two, if any), the facts (quiet chips: `#41 merged`, `4 files
-//   +96 −212`, `2 subagents · Opus 5.5`, `waiting on CI`) and the quote's first lines (the agent's own words).
+// - Hover: the sentence, then the detail (a sentence or two, if any) and the facts (quiet chips: `#41 merged`, `4 files
+//   +96 −212`, `2 subagents · Opus 5.5`, `waiting on CI`); no quote (the card's quote mark has the agent's words).
 // - Card, under its line (which says the sentence): the detail with the quote mark after it (with no detail, the mark
 //   trails the line's sentence; the agent's words on hover, `RouterQuoteMark`), the facts, then the source (a plan, a permission's command, your words), the controls (options,
 //   Continue), the thread's history (its timeline; for Working that is the source), then the footer's acts.
@@ -44,15 +44,15 @@ struct RouterSummaryView: View {
                 .fixedSize(horizontal: false, vertical: true)
             RouterLayerDetail(detail: layers.detail)
             RouterFacts(model: model, thread: thread, facts: layers.facts, live: false)
-            if let quote = layers.quote { RouterQuoteExcerpt(text: quote, lines: Router.Card.hoverQuoteLines) }
+            // No quote: the agent's own words are the card's quote mark's (R11).
         }
         .routerPeekShell()
     }
 
-    /// Whether a hover has more than the line says: a detail, a fact or a quote. A line that says it all has none.
+    /// Whether a hover has more than the line says: a detail or a fact. A line that says it all has none.
     static func peeks(_ thread: RouterThread, _ item: RouterItem? = nil) -> Bool {
         let layers = RouterLayers(thread, item)
-        return layers.detail != nil || !layers.facts.isEmpty || layers.quote != nil
+        return layers.detail != nil || !layers.facts.isEmpty
     }
 }
 

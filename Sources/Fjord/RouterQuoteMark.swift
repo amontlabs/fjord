@@ -218,33 +218,6 @@ struct RouterQuoteSlotRenderer: TextRenderer {
     }
 }
 
-/// The quote's words behind the card's rail, cut by whole lines at `lines` with a bottom fade; never ending on the blank
-/// line between two paragraphs (`RouterQuoteStops`).
-struct RouterQuoteExcerpt: View {
-    let text: String
-    let lines: Int
-
-    var body: some View {
-        let d = CDS.Density.compact
-        let quoted = RouterItem.quoted(text)
-        let words = Text(RouterInline.text(quoted, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
-        RouterQuoteCut() {
-            words.fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
-                .clipped()
-            words.lineLimit(lines).fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .hidden()
-            LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
-                .blendMode(.destinationOut)
-                .allowsHitTesting(false)
-            Rectangle().fill(CDS.Settings.railLine)
-            RouterQuoteStops.views(quoted)
-        }
-        .compositingGroup()
-    }
-}
-
 /// The mark's hover: the quote whole, 14 lines tall at most, the rest scrolled to (a fade at an end with more past it).
 /// The pointer can move from the mark onto it (`RouterQuoteHold`); its links are clickable.
 struct RouterQuotePeek: View {

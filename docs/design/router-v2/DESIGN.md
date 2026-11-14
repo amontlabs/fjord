@@ -262,7 +262,7 @@ between them and nothing repeats. Where an older rule below says otherwise (1.5'
 - **Line.** The sentence: what matters now, never cut. It flows from after the name and wraps under it (`RouterFlow`,
   3 lines at most, a guard); the mark, the name, the activity glyphs, the pill and the age stay on its first line. A Sent
   line keeps to one.
-- **Hover** (one peek for every line, item row and the activity glyphs: 360 wide, the floating shell): the sentence
+- **Hover** (one peek for every line and item row: 360 wide, the floating shell; the activity glyphs have their own, R11): the sentence
   (prose 14 medium, primary), the detail (prose 14, primary; a real stop's error on the danger ground), the facts as quiet
   chips (18 tall, radius 4, the quiet fill, 11 medium; a PR as its tinted badge, the diff in the git inks, a fact's kind
   glyph 9 pt muted, its tone's ink; cut in the middle past 300). Only when there is a detail or a fact: a line that says
@@ -320,8 +320,19 @@ quote and link buttons, the footers' Open in T3, the clock times) says otherwise
   in the steps' column, its age in the ages column (clock time under the pointer); on the thread's card over an open
   item too (`RouterCardActivity.swift`). The facts' chips that only count them (`2 subagents`, `1 background command`,
   `waiting on 2`) give way to the rows; the hover keeps them.
-- **Hover rule.** A row has a hover when its card has anything but acts: a detail, facts or a quote; it ends with the
-  quote's first 4 lines.
+- **Hover rule.** (2026-11-14, owner: "why can I still see quotes on card hover?") A row has a hover only when it has a
+  detail or facts; the hover is the sentence, the detail and the facts, never the quote (the agent's words are the
+  card's quote mark's alone).
+- **The row's trailing end** (wide ledger rows; `RouterWideWords`'s end slot, shots `v2-trail-*`). An item row's quiet
+  `Done` under the pointer sits at the row's trailing end, where the column ends, its words' end on the glyphs'; the
+  age stays after the sentence's words. A line's activity glyphs sit there too, so they hold still however the words
+  change; an item row has no glyphs, so the two never meet. Done still arms only on a pointer move over it. In the
+  narrow layout both were already at the trailing side (Done takes the age column's place, the glyphs sit before the
+  pill and the age) and stay so.
+- **The glyphs' peek** (R5 1.6, restored): the pointer on the activity glyphs shows their own peek, one row per subagent
+  (title · model · age), background command (mono · age) and wait (what · age), hung from the glyphs' trailing edge
+  (`RouterActivityPeek`). It wins over the line's own hover there, a working line's too; the rest of the row keeps the
+  line's hover.
 - **Weights.** Medium only for names on their ground and a form's question titles; sentences, details and a hover's
   first line are regular. Focus is the selected ground, not weight.
 
