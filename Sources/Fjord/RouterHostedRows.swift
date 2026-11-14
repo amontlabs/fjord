@@ -114,7 +114,7 @@ final class RouterRowSlotView<Root: View>: RouterGlideView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else { return nil }
+        guard frame.contains(point), !shielded(point) else { return nil }
         return super.hitTest(point)
     }
 }

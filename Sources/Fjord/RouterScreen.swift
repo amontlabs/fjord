@@ -48,6 +48,12 @@ struct RouterScreen: View {
     private var wide: (layout: RouterWide.Layout, frame: RouterWide.Frame)? { RouterWide.frame(page: width) }
 
     var body: some View {
+        screen
+            // Show me's player, the stage alone, filling the window.
+            .overlay { if let showMe = model.showMe, showMe.open, showMe.size == .window { RouterShowMeBig(model: model, state: showMe) } }
+    }
+
+    @ViewBuilder private var screen: some View {
         if let store {
             HStack(spacing: 0) {
                 page(store).frame(maxWidth: .infinity)
@@ -102,6 +108,12 @@ struct RouterScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { CDS.Surface.s1.padding(.top, AppContent.groundTop) }
         .overlay(alignment: .topLeading) { RouterFloating(model: model) }
+        // Show me's player filling the page under the title line.
+        .overlay {
+            if let showMe = model.showMe, showMe.open, showMe.size == .page {
+                RouterShowMeBig(model: model, state: showMe).padding(.top, CDS.TitleBar.header)
+            }
+        }
         .overlay(alignment: .topLeading) { if let stage { RouterPointerView(stage: stage) } }
         .coordinateSpace(.named(Router.space))
         .onGeometryChange(for: CGSize.self, of: \.size) {

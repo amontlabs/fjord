@@ -4,7 +4,8 @@ import WebKit
 // The one WebKit configuration Show me's explainers run in: the offscreen renderer that takes `preview`'s frames
 // (ExplainerRenderer.swift) and the player in the panel (ExplainerPlayer.swift) both make their web view from it, so a page
 // the model wrote is sandboxed the same way wherever it runs. An explainer is a local file reading the local kit: it needs no
-// network, no way to talk to Fjord and nothing kept between loads, so it gets none of them.
+// network and nothing kept between loads, so it gets neither. The renderer's view has no way to talk to Fjord; the panel's
+// player has one message handler (`bridge`), which takes only the film's state, checked (`ExplainerPlayback.State.parse`).
 
 @MainActor
 enum ExplainerWeb {
@@ -13,14 +14,19 @@ enum ExplainerWeb {
         + #"{"trigger":{"url-filter":"^file:"},"action":{"type":"ignore-previous-rules"}}]"#
     static let rulesID = "fjord-explainer-local-only"
 
+    /// The player's one message handler: `window.webkit.messageHandlers.fjordPlayer` in the kit (embed mode only).
+    static let bridgeName = "fjordPlayer"
+
     private static var compiled: WKContentRuleList?
 
-    /// A fresh configuration for an explainer's web view: the local-only rule list, no script message handlers, a data store
+    /// A fresh configuration for an explainer's web view: the local-only rule list, no script message handlers but the
+    /// player's `bridge` when given, a data store
     /// that keeps nothing, no windows opened by script. Pair the view with `LocalOnly` (or call `policy(for:)` from your own
     /// navigation delegate), which refuses any navigation that isn't to a file.
-    static func configuration() async throws -> WKWebViewConfiguration {
+    static func configuration(bridge: WKScriptMessageHandler? = nil) async throws -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         config.userContentController = WKUserContentController()
+        if let bridge { config.userContentController.add(bridge, contentWorld: .page, name: bridgeName) }
         config.userContentController.add(try await ruleList())
         config.websiteDataStore = .nonPersistent()
         config.preferences.javaScriptCanOpenWindowsAutomatically = false

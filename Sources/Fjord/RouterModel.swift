@@ -227,7 +227,15 @@ final class RouterModel {
 
     var toast: RouterToast?
     /// Show me's dock and toggle (RouterShowMe.swift): the engine's explainers, or the demo's; nil, nothing of it shows.
-    var showMe: RouterShowMeState?
+    var showMe: RouterShowMeState? {
+        didSet { if showMe?.open != true, showMePlayer != nil { showMeClosed() } }
+    }
+    /// The open panel's web view (`showMeHost()`), kept across selections and sizes.
+    @ObservationIgnored var showMePlayer: ExplainerWebHost?
+    /// The pointer is over Show me's panel (`RouterShield`): the rows under it don't light, and what it covered is kept
+    /// to light again when the pointer leaves it.
+    @ObservationIgnored var shielded = false
+    @ObservationIgnored var covered: [RouterHit: Bool] = [:]
     /// ⌘Return: this send (held until its read lands, too) goes with Show me; Return's end, typing or Esc clears it.
     @ObservationIgnored var showMeOnce = false
     /// Show me's engine (the store); nil in a demo or a shot.
@@ -618,8 +626,30 @@ final class RouterModel {
     /// The real pointer's; not read while the script holds the pointer.
     func realHover(_ hit: RouterHit, _ inside: Bool) {
         guard !scripted else { return }
+        // Under Show me's panel: AppKit's tracking areas see through it, so a row under it is kept unlit.
+        if shielded, !hit.isShowMe {
+            covered[hit] = inside
+            if !inside { hover(hit, false) }
+            return
+        }
         if inside { ownerActed() }
         hover(hit, inside)
+    }
+
+    /// The pointer came onto Show me's panel, or left it.
+    func shieldHover(_ inside: Bool) {
+        guard !scripted, inside != shielded else { return }
+        shielded = inside
+        if inside {
+            covered = [:]
+            if let id = hoverRow { covered[.row(id)] = true; hoverRow = nil }
+            if let id = hoverName { covered[.name(id)] = true; hoverName = nil }
+            if let hit = hoverControl, !hit.isShowMe { covered[hit] = true; hoverControl = nil }
+        } else {
+            let lit = covered.filter(\.value).map(\.key)
+            covered = [:]
+            for hit in lit { hover(hit, true) }
+        }
     }
 
     func isHot(_ hit: RouterHit) -> Bool {

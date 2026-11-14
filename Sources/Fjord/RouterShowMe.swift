@@ -20,7 +20,15 @@ struct RouterShowMeState: Equatable {
     var expanded = false
     /// Why the words didn't go to the explainer, in the destination row until the draft changes.
     var note: String?
+    /// How big the player is: in the panel, filling the page, or the stage alone filling the window.
+    var size: Size = .panel
+    /// The size the stage-only view goes back to.
+    var back: Size = .panel
+    /// The player shows each scene's source under its caption.
+    var sources = false
     var explainers: [ExplainerItem] = []
+
+    enum Size: Equatable { case panel, page, window }
 
     var chosen: ExplainerItem? { explainers.first { $0.id == selected } }
     var making: ExplainerItem? { explainers.first { if case .making = $0.stage { true } else { false } } }
@@ -69,6 +77,11 @@ enum RouterShowMeLayout {
     static let rowHeight: CGFloat = 30
     /// ⌘Return: send, then Show me; on a Done card with nothing typed, Show me its reply.
     static let keys = ["cmd", "enter"]
+    /// ⌥⌘Return: the player fills the page, or goes back to the panel. ⇧⌘Return: the stage alone fills the window.
+    static let pageKeys = ["alt", "cmd", "enter"]
+    static let windowKeys = ["shift", "cmd", "enter"]
+    /// The page's room around the player that fills it, and the most it grows to.
+    static let pageMaxWidth: CGFloat = 1180
     /// Words a follow-up can't carry.
     static let wordsOnly = "Explainers take words only"
 }
@@ -102,6 +115,7 @@ extension RouterModel {
         guard var state = showMe else { return }
         let targeted = state.target != nil
         state.open.toggle()
+        state.size = .panel
         if state.open {
             state.expanded = false
             if state.chosen == nil { state.selected = state.explainers.first?.id }
@@ -120,6 +134,72 @@ extension RouterModel {
         state.note = nil
         showMe = state
         if targeted != (state.target != nil) { draftTargetChanged() }
+    }
+
+    // MARK: The player
+
+    /// The open panel's web view, made when a ready explainer first plays and kept across selections and sizes; nil in a
+    /// still (a shot) or a demo, which draw the poster.
+    func showMeHost() -> ExplainerWebHost? {
+        guard !still, !Store.isDemo, showMe?.open == true else { return nil }
+        if let showMePlayer { return showMePlayer }
+        let host = ExplainerWebHost()
+        showMePlayer = host
+        return host
+    }
+
+    /// The panel closed or went away: its web view goes.
+    func showMeClosed() {
+        showMePlayer?.close()
+        showMePlayer = nil
+    }
+
+    /// The player's size. Bigger, it takes the keyboard (← → Space play it, Esc steps back); back in the panel the composer
+    /// has it again.
+    func resizeShowMe(_ size: RouterShowMeState.Size) {
+        guard var state = showMe, state.open, state.chosen != nil, state.size != size else { return }
+        if size == .window { state.back = state.size == .window ? .panel : state.size }
+        animate(.spatial) { state.size = size; showMe = state }
+        // Bigger, the player takes the keyboard; back in the panel the shield gives it to the composer (`RouterShield`).
+        if size != .panel { showMePlayer?.focus() }
+    }
+
+    /// ⌥⌘Return or the panel's expand control: the page, or the panel again.
+    func toggleShowMePage() {
+        guard let state = showMe else { return }
+        resizeShowMe(state.size == .page ? .panel : .page)
+    }
+
+    /// ⇧⌘Return or the stage control: the stage alone, or back where it came from.
+    func toggleShowMeWindow() {
+        guard let state = showMe else { return }
+        resizeShowMe(state.size == .window ? state.back : .window)
+    }
+
+    /// Esc on a bigger player: one step back (the window to where it came from, the page to the panel).
+    func shrinkShowMe() -> Bool {
+        guard let state = showMe, state.open, state.size != .panel else { return false }
+        resizeShowMe(state.size == .window ? state.back : .panel)
+        return true
+    }
+
+    /// The player has the keyboard when its web view has it, or when it fills the page or the window with nothing typed.
+    func showMePlayerKeys(focused: Bool) -> Bool {
+        guard let state = showMe, state.open, state.chosen?.stage == .ready else { return false }
+        return focused || (state.size != .panel && draftEmpty)
+    }
+
+    /// Space for the player: play or pause.
+    func playerKey(_ command: ExplainerWebHost.Command) {
+        showMePlayer?.send(command)
+    }
+
+    /// → the next scene; ← this scene's start, or the one before when it has only just begun (as the kit's own keys did).
+    func playerStep(forward: Bool) {
+        guard let host = showMePlayer, let state = host.playback.state else { return }
+        let t = host.playback.time(Date()), i = state.scene(at: t)
+        let to = forward ? i + 1 : (t - state.scenes[i].start < 0.8 ? i - 1 : i)
+        host.send(.scene(min(max(to, 0), state.scenes.count - 1)))
     }
 
     /// Return with the panel on an explainer: the words go to its thread, outside the Router (no decider, no log, no

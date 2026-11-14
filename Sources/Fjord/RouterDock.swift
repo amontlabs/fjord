@@ -9,6 +9,7 @@ struct RouterDock: View {
     let model: RouterModel
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.routerWaiting) private var waiting
+    @Environment(\.routerPaneHoldsShowMe) private var paneHoldsShowMe
 
     var body: some View {
         VStack(alignment: .leading, spacing: CDS.Composer.dockGap) {
@@ -62,9 +63,10 @@ struct RouterDock: View {
                 }
             }
         }
-        // Open, its panel floats over the page with its bottom right on the dock's top right.
+        // Open, its panel floats over the page with its bottom right on the dock's top right; not when a wide page's pane
+        // holds it, nor while its player fills the page or the window.
         .overlay(alignment: .top) {
-            if let showMe = model.showMe, showMe.open {
+            if let showMe = model.showMe, showMe.open, showMe.size == .panel, !paneHoldsShowMe {
                 // A strip with no height on the dock's top edge: the panel hangs from it, upward.
                 Color.clear.frame(height: 0)
                     .overlay(alignment: .bottomTrailing) {

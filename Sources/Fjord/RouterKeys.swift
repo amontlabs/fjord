@@ -37,7 +37,10 @@ enum RouterKeys {
                               isRepeat: event.isARepeat)
         if let field { key.caretAtStart = field.selectedRange() == NSRange(location: 0, length: 0) }
         // "Key" to the commit of what the key changed, "Key work" to this handler's return (docs: the budgets).
-        if RouterSignposts.key({ handle(key, model: model, inField: responder is NSText, composer: composer) }) { return true }
+        let player = responder is ExplainerPlayerWebView
+        if RouterSignposts.key({ handle(key, model: model, inField: responder is NSText, composer: composer, inPlayer: player) }) {
+            return true
+        }
         // A dead key (^, ¨) with no field focused: the composer takes the keyboard and this key, so the accent composes there.
         if !(responder is NSText), Self.typed(flags), event.characters?.isEmpty == true,
            let base = event.charactersIgnoringModifiers, !base.isEmpty, base.unicodeScalars.allSatisfy({ $0.value < 0xF700 }),
@@ -60,14 +63,16 @@ enum RouterKeys {
     nonisolated static func typed(_ flags: NSEvent.ModifierFlags) -> Bool { flags.intersection([.command, .control]).isEmpty }
 
     /// The composer's text view in the window.
-    private static func composerField(_ view: NSView) -> MentionTextView? {
+    static func composerField(_ view: NSView) -> MentionTextView? {
         if let field = view as? MentionTextView { return field }
         for sub in view.subviews { if let field = composerField(sub) { return field } }
         return nil
     }
 
     /// `inField`: the composer has the keyboard (its text view types what isn't handled here).
-    static func handle(_ key: RouterKey, model: RouterModel, inField: Bool, composer: RouterComposerHost? = nil) -> Bool {
+    /// `inPlayer`: Show me's web view has the keyboard (the page's own keys are off; these play it).
+    static func handle(_ key: RouterKey, model: RouterModel, inField: Bool, composer: RouterComposerHost? = nil,
+                       inPlayer: Bool = false) -> Bool {
         let code = key.code
         let flags = key.flags
         let letter = key.characters?.lowercased()
@@ -108,6 +113,22 @@ enum RouterKeys {
                 }
             }
             return true
+        }
+
+        // Show me's player, with the keyboard or filling the page or the window: ← → a scene back or on, Space plays or
+        // pauses. Esc steps it back (`escape`).
+        if model.showMePlayerKeys(focused: inPlayer), flags.isEmpty {
+            switch code {
+            case kVK_Space: model.playerKey(.toggle); return true
+            case kVK_LeftArrow: model.playerStep(forward: false); return true
+            case kVK_RightArrow: model.playerStep(forward: true); return true
+            default: break
+            }
+        }
+        // ⌥⌘Return: the player fills the page or goes back to the panel; ⇧⌘Return: the stage alone fills the window.
+        if isReturn, model.showMe?.open == true, model.showMe?.chosen != nil, !key.isRepeat {
+            if flags == [.command, .option] { model.toggleShowMePage(); return true }
+            if flags == [.command, .shift] { model.toggleShowMeWindow(); return true }
         }
 
         // The @ list over the caret comes first: ↑↓ move in it, Return or Tab picks, Esc closes it.

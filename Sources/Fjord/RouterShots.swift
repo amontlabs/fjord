@@ -560,5 +560,21 @@ enum RouterShots {
             model.select(nil)
             RouterShowMeDemo.open(model, selected: RouterShowMeDemo.lastdrop)
         },
+        // A wide window: the panel at the bottom of the pane's column, under the selected row's card.
+        State(name: "v2-show-wide", make: { model in
+            model.select(.line(ID.guide))
+            RouterShowMeDemo.open(model, selected: RouterShowMeDemo.token)
+        }, size: CGSize(width: 1900, height: 1150)),
+        // The player filling the page (⌥⌘Return), and the stage alone filling the window (⇧⌘Return).
+        State(name: "v2-show-expanded") { model in
+            model.select(nil)
+            RouterShowMeDemo.open(model, selected: RouterShowMeDemo.token)
+            model.showMe?.size = .page
+        },
+        State(name: "v2-show-window") { model in
+            model.select(nil)
+            RouterShowMeDemo.open(model, selected: RouterShowMeDemo.token)
+            model.showMe?.size = .window
+        },
     ]
 }

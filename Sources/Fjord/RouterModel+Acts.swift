@@ -254,6 +254,8 @@ extension RouterModel {
     /// (back to the words), the row's guess or your place, the picked options, the selection, the filters. It never
     /// clears a draft. False when there was nothing to step out of.
     func escape() -> Bool {
+        // Show me's player, bigger than its panel: one step back.
+        if shrinkShowMe() { return true }
         if snoozeMenu != nil { animate(.fade) { snoozeMenu = nil }; return true }
         if placesMenu { animate(.fade) { placesMenu = false }; return true }
         if launchMenu != nil { animate(.fade) { launchMenu = nil }; return true }

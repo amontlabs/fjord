@@ -999,8 +999,11 @@
   const $ = s => document.querySelector(s);
   const query = new URLSearchParams(location.search);
   if (/^(dark|light)$/.test(query.get("theme") || "")) root.dataset.theme = query.get("theme");
-  // `?embed=1`: the page sits in Fjord's panel, which draws the question itself (player.css `.embed`).
-  if (query.has("embed")) root.classList.add("embed");
+  // `?embed=1`: the page is the stage alone in Fjord's Show me panel (player.css `.embed`). Fjord draws the answer, caption,
+  // controls and Sources natively, drives the film through `window.__player`, and hears its state through the
+  // `fjordPlayer` message handler, the page's only way out. The page's own keys are off: Fjord handles them.
+  const embed = query.has("embed");
+  if (embed) root.classList.add("embed");
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   const themeNow = () => (/^(dark|light)$/.test(root.dataset.theme || "") ? root.dataset.theme : scheme.matches ? "dark" : "light");
   // Errors stop the film and show under it. Layout notes are for the creator's preview only: they stay in the page, unseen.
@@ -1043,6 +1046,23 @@
       pp.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="${GLYPH[state]}" ${state === "Replay" ? 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"' : 'fill="currentColor"'}/></svg>`;
     }
     $(".time").textContent = clock(t) + " / " + clock(tl.duration());
+    post();
+  }
+  // The film's state for Fjord: on every change of scene or of playing, after a jump, and once a second while it plays
+  // (Fjord runs the clock between). Numbers and short strings only: `{t, scene, playing, total, scenes: [{caption, source,
+  // start}]}`.
+  let sent = null;
+  function post(force) {
+    const h = embed && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.fjordPlayer;
+    if (!h || !tl || !spec) return;
+    const t = tl.time(), total = tl.duration(), playing = !tl.paused() && t < total - 0.01, scene = sceneAt(t);
+    if (!force && sent && sent.scene === scene && sent.playing === playing && sent.total === total
+        && (playing ? Math.abs(t - sent.t) < 1 : Math.abs(t - sent.t) < 0.001)) return;
+    sent = { t, scene, playing, total };
+    const cut = (v, n) => (typeof v === "string" ? v : "").slice(0, n);
+    h.postMessage({ t, scene, playing, total,
+      scenes: spec.scenes.slice(0, 24).map((x, i) => ({ caption: cut(x && x.caption, 200), source: cut(x && x.source, 400),
+        start: Math.max(0, Math.min(starts[i] || 0, total)) })) });
   }
   function construct(measure) {
     setStage();
@@ -1121,19 +1141,30 @@
     };
     segs.addEventListener("pointerup", drop);
     segs.addEventListener("pointercancel", () => { drag = null; });
+    // Fjord's calls (fixed ones: play, pause, toggle, seek to seconds, scene by index).
+    window.__player = {
+      play() { if (tl.time() >= tl.duration() - 0.01) tl.restart(); else tl.play(); show(); },
+      pause() { tl.pause(); show(); },
+      toggle,
+      seek(t) { if (Number.isFinite(t)) { tl.seek(Math.max(0, Math.min(t, tl.duration() - 0.02))); show(); } },
+      scene(i) { if (Number.isInteger(i)) go(i); },
+    };
+    // Embedded, a click on the stage plays or pauses.
+    if (embed) stage.addEventListener("click", toggle);
     addEventListener("keydown", e => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (embed || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === " " && e.target === document.body) { e.preventDefault(); toggle(); }
       if (e.key === "ArrowRight") go(sceneAt(tl.time()) + 1);
       if (e.key === "ArrowLeft") { const i = sceneAt(tl.time()); go(tl.time() - starts[i] < 0.8 ? i - 1 : i); }
     });
-    const retheme = () => { if (themeNow() !== theme) { mount(); show(); } };
+    const retheme = () => { if (themeNow() !== theme) { mount(); show(); post(true); } };
     new MutationObserver(retheme).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
     scheme.addEventListener("change", retheme);
     if (query.has("t")) tl.seek(Math.min(+query.get("t"), tl.duration()));
     else if (query.has("scene")) tl.seek(ends[Math.min(+query.get("scene"), n - 1)]);
     else tl.play();
     show();
+    post(true);
     document.body.dataset.ready = "1";
   }
 })();

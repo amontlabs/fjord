@@ -153,10 +153,12 @@ final class ExplainerRenderer {
         }
         if let held = timing.scenes.last.map({ $0.count > 1 ? $0[1] : $0[0] }) {
             let light = dir.appendingPathComponent(Self.posterLight), dark = dir.appendingPathComponent(Self.posterDark)
-            _ = try await shoot(view, at: held, to: light)
+            // The posters are the stage alone: the panel draws the answer, caption and controls itself.
+            let stage = try await stageRect(view)
+            _ = try await shoot(view, at: held, rect: stage, to: light)
             // The kit rebuilds the film in the new theme where it stands (`retheme`, a MutationObserver on data-theme).
             _ = try await js(view, #"document.documentElement.dataset.theme = "dark"; await null; await null;"#)
-            _ = try await shoot(view, at: held, to: dark)
+            _ = try await shoot(view, at: held, rect: stage, to: dark)
             result.posterLight = light
             result.posterDark = dark
         }
@@ -217,10 +219,12 @@ final class ExplainerRenderer {
     /// frames are 1×: they cost the same tokens at 2× and say no more). `time()` (not `seek`, which skips callbacks) runs the
     /// player's update, so the caption matches the frame; GSAP applies the state at once, and the snapshot paints after it.
     /// Scaling, encoding and writing run off the main thread.
-    private func shoot(_ view: WKWebView, at seconds: Double, pixelWidth: Int? = nil, to file: URL) async throws -> Data {
+    private func shoot(_ view: WKWebView, at seconds: Double, pixelWidth: Int? = nil, rect: CGRect? = nil,
+                       to file: URL) async throws -> Data {
         _ = try await js(view, "window.__film.timeline.time(t, false); await null;", ["t": seconds])
         let config = WKSnapshotConfiguration()
-        config.snapshotWidth = NSNumber(value: Double(Self.size.width))
+        if let rect { config.rect = rect }
+        config.snapshotWidth = NSNumber(value: Double(rect?.width ?? Self.size.width))
         config.afterScreenUpdates = true
         let image = try await snapshot(view, config)
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { throw CocoaError(.fileWriteUnknown) }
@@ -229,6 +233,16 @@ final class ExplainerRenderer {
             try jpeg.write(to: file, options: .atomic)
             return jpeg
         }.value
+    }
+
+    /// Where the stage is in the page, in points; nil (the whole view) when it can't be read.
+    private func stageRect(_ view: WKWebView) async throws -> CGRect? {
+        let box = try await js(view, """
+            const r = document.getElementById("stage").getBoundingClientRect();
+            return [r.left, r.top, r.width, r.height];
+            """) as? [Double]
+        guard let box, box.count == 4, box[2] > 1, box[3] > 1 else { return nil }
+        return CGRect(x: box[0], y: box[1], width: box[2], height: box[3])
     }
 
     nonisolated static func jpeg(_ image: NSImage, pixelWidth: Int? = nil, quality: Double = 0.8) -> Data? {

@@ -217,6 +217,12 @@ class RouterGlideView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// Under Show me's panel (`RouterShield`): the panel takes the click, not the row it covers.
+    func shielded(_ point: NSPoint) -> Bool {
+        guard let window, let superview else { return false }
+        return RouterShield.covers(superview.convert(point, to: nil), in: window)
+    }
+
     // A hosting view inside asks for an update (`NSHostingView.setNeedsUpdate` → `setNeedsUpdateConstraints`), and AppKit
     // tells each container up the chain, so the window's next pass reaches it. SwiftUI's host of this view (its
     // `_NSConstraintBasedLayoutHostingView` override of that message) also takes it as "the hosted view's size may have
@@ -617,7 +623,7 @@ final class RouterLineSlotView: RouterGlideView {
 
     // The overflow is drawn, never hit: only the slot can be pointed at.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else { return nil }
+        guard frame.contains(point), !shielded(point) else { return nil }
         return super.hitTest(point)
     }
 

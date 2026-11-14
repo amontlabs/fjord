@@ -1,3 +1,5 @@
+import AppKit
+import Carbon
 import Foundation
 import Testing
 @testable import Fjord
@@ -116,5 +118,54 @@ import Testing
         var state = RouterShowMeState(selected: "gone", explainers: [])
         state.update([Self.ready("new"), Self.ready("old")])
         #expect(state.selected == "new")
+    }
+
+    private func key(_ model: RouterModel, _ code: Int, _ flags: NSEvent.ModifierFlags = []) -> Bool {
+        RouterKeys.handle(RouterKey(code: code, flags: flags), model: model, inField: true)
+    }
+
+    @Test func thePlayerGrowsToThePageAndTheWindowAndEscStepsBack() {
+        let (model, _, _) = page(RouterShowMeState(open: true, selected: "e1", explainers: [Self.ready()]))
+        #expect(key(model, kVK_Return, [.command, .option]))
+        #expect(model.showMe?.size == .page)
+        #expect(key(model, kVK_Return, [.command, .shift]))
+        #expect(model.showMe?.size == .window)
+        #expect(key(model, kVK_Escape))
+        #expect(model.showMe?.size == .page)
+        #expect(key(model, kVK_Escape))
+        #expect(model.showMe?.size == .panel && model.showMe?.open == true)
+        // From the panel, the stage alone goes back to the panel.
+        model.toggleShowMeWindow()
+        #expect(key(model, kVK_Escape))
+        #expect(model.showMe?.size == .panel)
+        // Closing the panel forgets the size.
+        model.toggleShowMePage()
+        model.toggleShowMeDock()
+        model.toggleShowMeDock()
+        #expect(model.showMe?.size == .panel)
+    }
+
+    @Test func withThePanelClosedTheSizeKeysDoNothing() {
+        let (model, _, _) = page(RouterShowMeState(open: false, selected: "e1", explainers: [Self.ready()]))
+        _ = key(model, kVK_Return, [.command, .option])
+        #expect(model.showMe?.size == .panel)
+    }
+
+    @Test func rowsUnderThePanelStayUnlitAndLightAgainWhenThePointerLeavesIt() {
+        let (model, _, _) = page(RouterShowMeState(open: true, selected: "e1", explainers: [Self.ready()]))
+        model.realHover(.row(ID.guide), true)
+        #expect(model.hoverRow == ID.guide)
+        model.shieldHover(true)
+        #expect(model.hoverRow == nil)
+        // Under the panel: tracking areas still report the rows, and none lights; the panel's own controls do.
+        model.realHover(.row(ID.guide), false)
+        model.realHover(.row(ID.tab), true)
+        #expect(model.hoverRow == nil)
+        model.realHover(.showMe("play"), true)
+        #expect(model.hoverControl == .showMe("play"))
+        model.realHover(.showMe("play"), false)
+        // Off the panel onto the row it was over: that row lights.
+        model.shieldHover(false)
+        #expect(model.hoverRow == ID.tab)
     }
 }

@@ -75,14 +75,31 @@ struct RouterWidePage: View {
 
     var body: some View {
         if layout == .pane {
+            pane.environment(\.routerPaneHoldsShowMe, true)
+        } else {
+            scroll(width: page) { ledger(cards: true) }
+        }
+    }
+
+    private var pane: some View {
+        SwiftUI.Group {
             // The ledger and its composer on the left; the selected row's card beside them, level with the first row.
             let split = frame.start + frame.column + frame.gap / 2
             HStack(alignment: .top, spacing: 0) {
                 scroll(width: split) { ledger(cards: false) }
                     .frame(width: split)
-                ZStack(alignment: .topLeading) {
-                    if case .line(let id)? = model.selection, model.thread(id) != nil {
-                        RouterWidePane(model: model, box: model.box(id)).id(id)
+                // Show me's panel, open, at the pane's bottom: level with the composer, the card above it.
+                VStack(alignment: .leading, spacing: 12) {
+                    ZStack(alignment: .topLeading) {
+                        if case .line(let id)? = model.selection, model.thread(id) != nil {
+                            RouterWidePane(model: model, box: model.box(id)).id(id)
+                        }
+                    }
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
+                    if let showMe = model.showMe, showMe.open, showMe.size == .panel {
+                        RouterShowMePanel(model: model, state: showMe, width: frame.side, docked: true)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.opacity)
                     }
                 }
                 .frame(width: frame.side, alignment: .topLeading)
@@ -91,8 +108,6 @@ struct RouterWidePage: View {
                 .padding(.bottom, Router.Dock.bottom)
                 Spacer(minLength: 0)
             }
-        } else {
-            scroll(width: page) { ledger(cards: true) }
         }
     }
 
@@ -253,6 +268,8 @@ struct RouterTimelineShown: PreferenceKey {
 }
 
 extension EnvironmentValues {
+    /// A wide page's pane holds Show me's open panel, so the dock doesn't float it.
+    @Entry var routerPaneHoldsShowMe = false
     /// The history's height on a card that shares the room (nil: `Router.Work.timelineHeight`).
     @Entry var routerTimelineCap: CGFloat? = nil
     /// The thread's own acts (Snooze, Settle, Stop) on its card; off over an open item, where Open in T3 alone stays.

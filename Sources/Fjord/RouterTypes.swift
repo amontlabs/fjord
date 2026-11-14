@@ -575,6 +575,9 @@ enum RouterHit: Hashable {
     case itemDone(String)
     /// Show me's controls (RouterShowMe.swift): the toggle, the dock's pill, a panel row, "N more", Open in T3.
     case showMe(String)
+
+    /// One of Show me's own controls: the pointer on Show me's panel lights these, never what's under it.
+    var isShowMe: Bool { if case .showMe = self { true } else { false } }
 }
 
 enum RouterFooterAct: Hashable {
