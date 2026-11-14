@@ -120,6 +120,39 @@ import Testing
         #expect(state.selected == "new")
     }
 
+    private static func making(_ id: String) -> ExplainerItem {
+        var e = ready(id); e.stage = .making(draft: 1, fixing: ""); return e
+    }
+
+    @Test func theDockOpensOnWhatsMadeElseWhatsNewElseTheNewestNeverAnOldOne() {
+        var unseen = Self.ready("unseen"); unseen.unseen = true
+        let (model, _, _) = page(RouterShowMeState(selected: "old", explainers: [Self.ready("new"), unseen, Self.ready("old")]))
+        model.toggleShowMeDock()
+        #expect(model.showMe?.selected == "unseen")
+        model.toggleShowMeDock()
+        model.showMe?.explainers.insert(Self.making("making"), at: 0)
+        model.toggleShowMeDock()
+        #expect(model.showMe?.selected == "making")
+        model.toggleShowMeDock()
+        model.showMe?.explainers = [Self.ready("new"), Self.ready("old")]
+        model.showMe?.selected = "old"
+        model.toggleShowMeDock()
+        #expect(model.showMe?.selected == "new")
+    }
+
+    @Test func oneThatFinishesWhileThePanelIsOpenIsShownUnlessAnotherFinishedOneIs() {
+        var state = RouterShowMeState(open: true, selected: "a", explainers: [Self.making("b"), Self.making("a")])
+        state.update([Self.ready("b"), Self.making("a")])
+        #expect(state.selected == "b")
+        // Watching b: a finishing doesn't take the stage.
+        state.update([Self.ready("b"), Self.ready("a")])
+        #expect(state.selected == "b")
+        // Closed: nothing moves.
+        var closed = RouterShowMeState(selected: "a", explainers: [Self.making("b"), Self.making("a")])
+        closed.update([Self.ready("b"), Self.making("a")])
+        #expect(closed.selected == "a")
+    }
+
     private func key(_ model: RouterModel, _ code: Int, _ flags: NSEvent.ModifierFlags = []) -> Bool {
         RouterKeys.handle(RouterKey(code: code, flags: flags), model: model, inField: true)
     }

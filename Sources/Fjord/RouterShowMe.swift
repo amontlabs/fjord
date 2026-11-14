@@ -45,10 +45,23 @@ struct RouterShowMeState: Equatable {
         }
     }
 
-    /// The engine's newest list, keeping what the page holds; a selection that left the list goes to the newest.
+    /// The one the dock opens on (the list is newest first): one being made, else the newest not watched, else the newest.
+    var preferred: ExplainerItem? { making ?? explainers.first(where: \.unseen) ?? explainers.first }
+
+    /// The engine's newest list, keeping what the page holds. A selection that left the list goes to the preferred one.
+    /// One that finishes while the panel is open is shown, unless a finished one other than it is on the stage.
     mutating func update(_ items: [ExplainerItem]) {
+        let before = explainers
         explainers = items
-        if let s = selected, !items.contains(where: { $0.id == s }) { selected = items.first?.id }
+        if let s = selected, !items.contains(where: { $0.id == s }) { selected = preferred?.id }
+        guard open else { return }
+        let finished = items.first { e in
+            e.stage == .ready && before.contains { $0.id == e.id && $0.stage != .ready }
+        }
+        guard let finished, finished.id != selected else { return }
+        if let chosen = before.first(where: { $0.id == selected }), chosen.stage == .ready { return }
+        selected = finished.id
+        expanded = false
     }
 }
 
@@ -109,7 +122,7 @@ extension RouterModel {
         explainers?.explain(reply: thread)
     }
 
-    /// The pill: the panel opens on the selected one (else the newest), or closes. The draft is read again for the
+    /// The pill: the panel opens on `preferred`, or closes. The draft is read again for the
     /// threads when the panel no longer targets an explainer.
     func toggleShowMeDock() {
         guard var state = showMe else { return }
@@ -118,7 +131,8 @@ extension RouterModel {
         state.size = .panel
         if state.open {
             state.expanded = false
-            if state.chosen == nil { state.selected = state.explainers.first?.id }
+            // Never an old one left selected: what's being made, else what's new, else the newest.
+            state.selected = state.preferred?.id
         }
         state.note = nil
         showMe = state

@@ -661,3 +661,6 @@ no room on a wide screen, no way to make it bigger.
   style notification, and AppKit set it back to legacy without one (the wide legacy bar in the owner's screenshot; not
   reproducible offscreen, where the style is overlay). The page's, the wide ledger's and the pane's scroll views now use
   `.scrollIndicators(.never)` and drop `.overlayScrollers()`: no bar in any setting; wheel, trackpad and keys still scroll.
+- **The dock opens on the right explainer.** `RouterShowMeState.preferred`: one being made, else the newest not watched,
+  else the newest; opening always selects it (an old selection is never kept). One that finishes while the panel is open is
+  selected, unless another finished one is on the stage (`update`).
