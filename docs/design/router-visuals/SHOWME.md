@@ -654,3 +654,10 @@ no room on a wide screen, no way to make it bigger.
   own `env.dispatch`, not `RouterPort.settle`: that path logs a History change with Revert, and explainer threads are
   hidden from the Router. It sends nothing when T3 already has the thread settled, while a follow-up's run is live (its next
   finalize settles it), or while a settle for it is on its way. A failed settle is logged and left alone.
+
+### Owner's second look (2026-11-15)
+- **No scroller on the Router's list.** The Mac's "Show scroll bars" is Automatic, which means legacy scrollers once a mouse
+  is connected; the list kept overlay ones only through `.overlayScrollers()`, which sets the style once and again on the
+  style notification, and AppKit set it back to legacy without one (the wide legacy bar in the owner's screenshot; not
+  reproducible offscreen, where the style is overlay). The page's, the wide ledger's and the pane's scroll views now use
+  `.scrollIndicators(.never)` and drop `.overlayScrollers()`: no bar in any setting; wheel, trackpad and keys still scroll.

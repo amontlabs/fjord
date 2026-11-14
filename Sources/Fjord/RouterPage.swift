@@ -49,8 +49,10 @@ struct RouterList: View {
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .allowsHitTesting(ProcessInfo.processInfo.environment["FJORD_E1"] == nil)
-                .overlayScrollers()
             }
+            // No scroller, whatever the Mac's "Show scroll bars" setting: with a mouse, "Automatic" means legacy scrollers,
+            // and the overlay style forced on the scroll view didn't stay. The wheel, the trackpad and the keys scroll it.
+            .scrollIndicators(.never)
             .trackUnderBar(model)
             .safeAreaInset(edge: .top, spacing: 0) {
                 // With no thread the bar goes, and its place stays: the sentence under it doesn't jump.

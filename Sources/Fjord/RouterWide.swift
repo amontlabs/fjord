@@ -120,8 +120,9 @@ struct RouterWidePage: View {
             rows()
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .overlayScrollers()
         }
+        // No scroller, as the narrow page (RouterPage).
+        .scrollIndicators(.never)
         .trackUnderBar(model)
         .safeAreaInset(edge: .top, spacing: 0) {
             ZStack {
@@ -363,6 +364,7 @@ struct RouterWidePane: View {
                 }
             }
         }
+        .scrollIndicators(.never)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(thread.name), open")
