@@ -336,7 +336,11 @@ private struct RouterSummaryCard: View {
                 RouterLayerDetail(detail: layers.detail, mark: mark)
             }
             // No detail: the mark trails the sentence the card is about, where that is drawn (`RouterQuoteMark.onSentence`).
-            RouterFacts(model: model, thread: thread, facts: layers.facts, live: true)
+            // A working thread's chips that only count its subagents, commands or waits give way to their rows.
+            RouterFacts(model: model, thread: thread,
+                        facts: RouterCardActivity.shows(thread, item: item)
+                            ? layers.facts.filter { !RouterCardActivity.covers($0, thread.activity) } : layers.facts,
+                        live: true)
             source
             // What answers it comes before the past: the controls, then the thread's history, newest first, on every
             // thread's card but an item's in a block (its header's card has it); for a summed-up working thread it
@@ -403,6 +407,8 @@ private struct RouterSummaryCard: View {
             }
             // T3's to-do steps, when the thread has a list (Claude sends one only with T3's to-do setting on).
             if thread.state == .working, !thread.steps.isEmpty { steps.prose() }
+            // Then its subagents, background commands and waits, each on a row with its age.
+            if RouterCardActivity.shows(thread, item: item) { RouterCardActivity(model: model, thread: thread) }
         }
     }
 

@@ -246,6 +246,12 @@ struct RouterWidePage: View {
 
 // MARK: - The pane
 
+/// How tall a card's history shows (`RouterTimeline`), for the pane that fits it to the room it has left.
+struct RouterTimelineShown: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 extension EnvironmentValues {
     /// The history's height on a card that shares the room (nil: `Router.Work.timelineHeight`).
     @Entry var routerTimelineCap: CGFloat? = nil
@@ -255,19 +261,34 @@ extension EnvironmentValues {
 
 /// The selected row and its card, beside the list. A thread (or a block's header): the line as the list has it (name,
 /// project, age), the thread's own words, then the card, on the selected ground. A block's item: the thread's card the
-/// same way but with no ground, its history shorter and no footer (Open in T3 an icon in its name row), then the item (its mark and
-/// sentence, then its card) on the selected ground under it. As tall as what it says; past the page's height it scrolls.
+/// same way but with no ground and no footer (Open in T3 an icon in its name row), then the item (its mark and sentence,
+/// then its card) on the selected ground under it. The thread's history takes the room the pane has left over the whole
+/// item, so the item is never pushed off. As tall as what it says; past the page's height it scrolls.
 struct RouterWidePane: View {
     let model: RouterModel
     let box: RouterLineBox
 
+    /// The pane's height, the item's part, the thread's part and its history as shown: the room the history has left.
+    @State private var paneHeight: CGFloat = 0
+    @State private var itemHeight: CGFloat = 0
+    @State private var threadHeight: CGFloat = 0
+    @State private var historyShown: CGFloat = 0
+
     private typealias L = Router.Line
     private typealias I = Router.Items
 
-    /// The thread card's history over an open item: about four rows (19 tall, 3 apart).
-    static let itemTimelineCap: CGFloat = 4 * 19 + 3 * 3
+    /// The thread card's history over an open item, at its shortest: two rows (19 tall, 3 apart).
+    static let historyFloor: CGFloat = 2 * 19 + 3
     /// Between the thread's card and the item's ground.
     static let itemGap: CGFloat = 12
+
+    /// The thread card's history over an open item: all the room the pane has left over the whole item's card, never
+    /// under `historyFloor`. Not measured yet: its usual height.
+    private var historyCap: CGFloat {
+        guard paneHeight > 0, itemHeight > 0 else { return Router.Work.timelineHeight }
+        let room = paneHeight - Self.itemGap - itemHeight - (threadHeight - historyShown)
+        return max(Self.historyFloor, room.rounded(.down))
+    }
 
     var body: some View {
         let thread = box.head
@@ -281,9 +302,11 @@ struct RouterWidePane: View {
                         RouterSummaryView(model: model, thread: thread, item: nil, layer: .card(box))
                             .environment(\.routerCardLeading, Router.Card.leading)
                             .environment(\.routerLive, true)
-                            .environment(\.routerTimelineCap, Self.itemTimelineCap)
+                            .environment(\.routerTimelineCap, historyCap)
                             .environment(\.routerThreadActs, false)
                     }
+                    .onPreferenceChange(RouterTimelineShown.self) { historyShown = $0 }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { threadHeight = $0 }
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(alignment: .top, spacing: L.markGap) {
                             Image(systemName: item.kind.symbol).font(.system(size: I.mark, weight: .semibold))
@@ -298,6 +321,7 @@ struct RouterWidePane: View {
                         RouterWideCard(model: model, box: box)
                     }
                     .background(RoundedRectangle(cornerRadius: L.selectedRadius, style: .continuous).fill(Router.Surface.quiet))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { itemHeight = $0 }
                     .padding(.top, Self.itemGap)
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
@@ -308,6 +332,7 @@ struct RouterWidePane: View {
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(thread.name), open")
     }

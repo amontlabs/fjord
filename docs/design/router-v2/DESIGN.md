@@ -309,10 +309,17 @@ quote and link buttons, the footers' Open in T3, the clock times) says otherwise
   "Yesterday 13:58", "12 Nov 13:58") is under the pointer, on the line's own age too.
 - **No Open in T3 on an item.** It can't open at the item's place: an item's card (and a request shown as an item) ends
   in `Done ⌘⌫` only; ⌘O still opens the thread; a request T3 can no longer answer keeps its Open in T3 button.
-- **Wide windows: an open item has its thread's card above it.** The thread's card (no ground, history capped at about
-  four rows, no footer: Open in T3 is a small muted ↗ in its name row, "Open in T3 ⌘O" under the pointer), 12 pt, then
-  the item's row and card on the selected ground. With the header selected, the pane is the thread's card as before.
+- **Wide windows: an open item has its thread's card above it.** The thread's card (no ground, no footer: Open in T3 is
+  a small muted ↗ in its name row, "Open in T3 ⌘O" under the pointer), 12 pt, then the item's row and card on the
+  selected ground. The thread's history takes all the room the pane has left over the whole item's card (2026-11-14:
+  the four-row cap left the pane empty), two rows at the least, so the item is never pushed off (shots
+  `v2-wide-1650-working-item[-short]`). With the header selected, the pane is the thread's card as before.
   Narrow windows open no second card (the item sits under its header line already).
+- **A working card lists its activity** (2026-11-14, R5 back): under the steps and before the history, each subagent
+  (its title, then its model at 70 %), background command (mono) and wait on a footnote row in `Text.muted`, its glyph
+  in the steps' column, its age in the ages column (clock time under the pointer); on the thread's card over an open
+  item too (`RouterCardActivity.swift`). The facts' chips that only count them (`2 subagents`, `1 background command`,
+  `waiting on 2`) give way to the rows; the hover keeps them.
 - **Hover rule.** A row has a hover when its card has anything but acts: a detail, facts or a quote; it ends with the
   quote's first 4 lines.
 - **Weights.** Medium only for names on their ground and a form's question titles; sentences, details and a hover's

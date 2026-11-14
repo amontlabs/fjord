@@ -55,6 +55,30 @@ enum RouterShots {
                             v2Pointer: state.pointer)
     }
 
+    /// Tab handover with its whole kept history, its subagents and dev server (and the chip that counts them), and a Know
+    /// open: the pane's thread card over an item.
+    private static func workingItem(_ model: RouterModel) {
+        RouterDemo.items(model)
+        guard var t = model.thread(ID.tab) else { return }
+        let keep = t.work
+        t.work = RouterDemo.longHistory(at: model.now)
+        t.work.now = keep.now
+        t.work.recent = keep.recent
+        t.work.lineReadsNewest = true
+        t.sentence = .init(text: t.work.summaries[0].text)
+        t.summary = RouterSummary(sentence: t.sentence.text,
+                                  facts: [.init(kind: .agents, text: "2 subagents"), .init(kind: .commands, text: "1 background command")])
+        RouterDemo.rehistory(&t)
+        t.ledger = RouterLedger(items: [
+            RouterItem(id: "scroll-per-window", kind: .know, sentence: "the scroll offset is kept per window, not per tab",
+                       since: model.now.addingTimeInterval(-6 * 60),
+                       detail: "Moving a tab keeps the window's offset, so a tab moved into a scrolled window lands scrolled too; the fix keeps it per tab."),
+        ])
+        model.apply(.upsert(t))
+        model.select(.line(ID.tab))
+        model.focusItem("scroll-per-window")
+    }
+
     private static func activity(_ model: RouterModel) {
         model.select(nil)
         for (id, a) in RouterDemo.activity(at: model.now) { model.activity(id, a) }
@@ -289,6 +313,14 @@ enum RouterShots {
             RouterDemo.items(model)
             model.select(.line(ID.checkpoint))
             model.focusItem(RouterDemo.Item.keep)
+        }, size: CGSize(width: 1650, height: 900)),
+        // A Know open on a Working thread with subagents, a dev server and a long history: the thread's card over it
+        // lists them under its sentence and its history takes the room left over the whole item, at any window height.
+        State(name: "v2-wide-1650-working-item", make: { model in
+            workingItem(model)
+        }, size: CGSize(width: 1650, height: 1000)),
+        State(name: "v2-wide-1650-working-item-short", make: { model in
+            workingItem(model)
         }, size: CGSize(width: 1650, height: 900)),
         // The owner's case: lastdrop's Do open in the pane, its Done thread's card over it; and the thread's own card.
         State(name: "v2-wide-1650-lastdrop-item", make: { model in

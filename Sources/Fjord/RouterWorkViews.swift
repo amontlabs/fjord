@@ -63,7 +63,7 @@ struct RouterTimeline: View {
     @State private var contentHeight: CGFloat = 0
     @State private var hot = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// A shorter history where its card shares the room (`RouterWidePane`'s thread card over an open item).
+    /// A shorter history where its card shares the room (`RouterWidePane`'s thread card over an open item, on a short window).
     @Environment(\.routerTimelineCap) private var capped
     private var cap: CGFloat { capped ?? W.timelineHeight }
 
@@ -125,6 +125,8 @@ struct RouterTimeline: View {
             .onChange(of: thread.work.pose?.toTop) { _, _ in toTop(proxy, shown) }
             .onAppear { pose(proxy) }
         }
+        // How tall it shows, for a pane that fits it to its room (`RouterWidePane`).
+        .background { GeometryReader { Color.clear.preference(key: RouterTimelineShown.self, value: $0.size.height) } }
         // The marks hang left of the card's column (inside the scroll view, so they aren't clipped); every row's words
         // start on it.
         .padding(.leading, -Router.Card.hang)
