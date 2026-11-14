@@ -15,8 +15,9 @@ import WebKit
 final class ExplainerRenderer {
     /// The stage's frame, in points: the Python preview server's window, which the prompt and evals were tuned on.
     static let size = CGSize(width: 1000, height: 760)
-    /// From load to ready, at most: a page that loops forever is given up on, and the view is made again.
-    static let deadline: TimeInterval = 20
+    /// A whole render, from load to the dark poster, at most: a page that loops forever (in its build or in an onUpdate) is
+    /// given up on, and the view is made again.
+    static let deadline: TimeInterval = 30
     nonisolated static let posterLight = "poster-light.jpg"
     nonisolated static let posterDark = "poster-dark.jpg"
 
@@ -48,6 +49,8 @@ final class ExplainerRenderer {
         var frames: [Frame] = []
         var posterLight: URL?
         var posterDark: URL?
+        /// The labels of frames the cap on frames left out.
+        var left: [String] = []
     }
 
     /// Where the project keeps its kit: a page at `runs/<run>/v<n>/index.html` reads it as `../../../kit/`.
@@ -65,7 +68,7 @@ final class ExplainerRenderer {
 
     /// The page's `index.html`: the kit's player with its links pointed at the project's kit and the question in
     /// `window.ASK`, `</` escaped so the question can't close the script (as `render.sh` does).
-    static func page(player: String, ask: String) -> String {
+    nonisolated static func page(player: String, ask: String) -> String {
         let json = (try? JSONSerialization.data(withJSONObject: ask, options: [.fragmentsAllowed])).flatMap {
             String(data: $0, encoding: .utf8)
         } ?? "\"\""
@@ -73,8 +76,33 @@ final class ExplainerRenderer {
             .replacingOccurrences(of: "ASK_JSON", with: json.replacingOccurrences(of: "</", with: "<\\/"))
     }
 
+    /// Frames for the model in one answer, at most: each costs about 900 input tokens, and the reply has a size cap.
+    nonisolated static let maxFrames = 8
+
+    /// One frame to shoot: its label for the model, the film's time and its file in the version's folder.
+    struct Job: Equatable {
+        var label: String
+        var time: Double
+        var file: String
+    }
+
+    /// The frames one render shoots, at most `maxFrames`: every `at` second asked for (the creator wanted those), then
+    /// scene ends in order while there's room. `left` is what didn't fit, named in the answer.
+    nonisolated static func plan(_ timing: Timing, at: [Double]) -> (shoot: [Job], left: [Job]) {
+        let scenes = timing.scenes.enumerated().map { i, scene in
+            let end = scene.count > 1 ? scene[1] : scene.first ?? 0
+            return Job(label: "End of scene \(i) (\(number(end)) s)", time: end, file: "f-scene-\(i).jpg")
+        }
+        let asked = at.map { Job(label: "At \(number($0)) s", time: min(max($0, 0), timing.total), file: "f-t-\(number($0)).jpg") }
+        let ats = Array(asked.prefix(maxFrames))
+        let room = maxFrames - ats.count
+        return (Array(scenes.prefix(room)) + ats, Array(scenes.dropFirst(room)) + Array(asked.dropFirst(maxFrames)))
+    }
+
     /// Writes `code` as the page in `dir` (`index.html`, `explainer.js`) and renders it: a frame at each scene's end and at
-    /// each of `at`'s seconds, then the last scene's held frame in light and dark (the posters). Frames are JPEG at 1×.
+    /// each of `at`'s seconds (at most `maxFrames`), then the last scene's held frame in light and dark (the posters). Frames
+    /// are JPEG at 1×. The whole render, from load to the dark poster, has `deadline`: past it the view is dropped (its
+    /// pending calls fail, so nothing waits on its page) and the next render makes a new one.
     func render(code: String, ask: String, into dir: URL, at: [Double] = []) async throws -> Result {
         let fm = FileManager.default
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -83,44 +111,52 @@ final class ExplainerRenderer {
         try Data(code.utf8).write(to: dir.appendingPathComponent("explainer.js"), options: .atomic)
 
         // WebKit hides a syntax error in another file's script ("Script error."); JavaScriptCore names it and its line.
-        if let error = Self.syntaxError(code) {
+        if let error = await Task.detached(operation: { Self.syntaxError(code) }).value {
             return Result(timing: nil, errors: error, broken: true, spec: nil)
         }
+        let progress = Progress()
+        let done = try await Self.within(Self.deadline) { [self] in
+            try await self.film(dir: dir, at: at, progress: progress)
+        }
+        if let done { return done }
+        drop()
+        let error = progress.ready
+            ? "The page got ready but its frames didn't render in \(Int(Self.deadline)) s: an onUpdate that never ends?"
+            : "The page didn't get ready in \(Int(Self.deadline)) s: a loop that never ends?"
+        return Result(timing: nil, errors: error, broken: true, spec: nil)
+    }
+
+    /// How far a render got, for the deadline's message.
+    @MainActor private final class Progress { var ready = false }
+
+    /// The render past the syntax check: load, wait for ready, read the state, shoot the frames and the posters.
+    private func film(dir: URL, at: [Double], progress: Progress) async throws -> Result {
         let view = try await webView()
         var components = URLComponents(url: dir.appendingPathComponent("index.html"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "theme", value: "light"), URLQueryItem(name: "scene", value: "0")]
-        let ready = await within(Self.deadline) { [delegate] in
-            await delegate.load(components.url!, in: view, readable: self.root)
-            _ = try? await view.callAsyncJavaScript(Self.waitReady, contentWorld: .page)
-        }
-        guard ready else {
-            drop()
-            return Result(timing: nil, errors: "The page didn't get ready in \(Int(Self.deadline)) s: a loop that never ends?",
-                          broken: true, spec: nil)
-        }
-        let state = try await view.callAsyncJavaScript(Self.readState, contentWorld: .page) as? String ?? "{}"
+        await delegate.load(components.url!, in: view, readable: root)
+        try Task.checkCancellation()
+        _ = try? await js(view, Self.waitReady)
+        try Task.checkCancellation()
+        progress.ready = true
+        let state = try await js(view, Self.readState) as? String ?? "{}"
         var result = Self.parse(state)
         result.errors = shorten(result.errors, page: dir)
         guard let timing = result.timing, !timing.scenes.isEmpty else { return result }
 
-        var jobs = timing.scenes.enumerated().map { i, scene in
-            (label: "End of scene \(i) (\(Self.number(scene.count > 1 ? scene[1] : scene[0])) s)",
-             time: scene.count > 1 ? scene[1] : scene[0], file: "f-scene-\(i).jpg")
-        }
-        jobs += at.map { (label: "At \(Self.number($0)) s", time: min(max($0, 0), timing.total), file: "f-t-\(Self.number($0)).jpg") }
-        for job in jobs {
-            let jpeg = try await shoot(view, at: job.time, pixelWidth: Int(Self.size.width))
+        let plan = Self.plan(timing, at: at)
+        result.left = plan.left.map(\.label)
+        for job in plan.shoot {
             let file = dir.appendingPathComponent(job.file)
-            try jpeg.write(to: file, options: .atomic)
+            let jpeg = try await shoot(view, at: job.time, pixelWidth: Int(Self.size.width), to: file)
             result.frames.append(Frame(label: job.label, file: file, jpeg: jpeg))
         }
         if let held = timing.scenes.last.map({ $0.count > 1 ? $0[1] : $0[0] }) {
             let light = dir.appendingPathComponent(Self.posterLight), dark = dir.appendingPathComponent(Self.posterDark)
-            try await shoot(view, at: held).write(to: light, options: .atomic)
+            _ = try await shoot(view, at: held, to: light)
             // The kit rebuilds the film in the new theme where it stands (`retheme`, a MutationObserver on data-theme).
-            _ = try await view.callAsyncJavaScript(#"document.documentElement.dataset.theme = "dark"; await null; await null;"#,
-                                                   contentWorld: .page)
-            try await shoot(view, at: held).write(to: dark, options: .atomic)
+            _ = try await js(view, #"document.documentElement.dataset.theme = "dark"; await null; await null;"#)
+            _ = try await shoot(view, at: held, to: dark)
             result.posterLight = light
             result.posterDark = dark
         }
@@ -139,7 +175,7 @@ final class ExplainerRenderer {
           broken: document.body.classList.contains("broken") || document.body.dataset.ready !== "1", spec: window.__spec || null });
         """
 
-    static func parse(_ json: String) -> Result {
+    nonisolated static func parse(_ json: String) -> Result {
         struct State: Decodable { var timing: Timing?; var errors: String?; var broken: Bool?; var spec: Spec? }
         guard let state = try? JSONDecoder().decode(State.self, from: Data(json.utf8)) else {
             return Result(timing: nil, errors: "page did not load", broken: true, spec: nil)
@@ -149,7 +185,7 @@ final class ExplainerRenderer {
     }
 
     /// Whether `code` parses as a script, checked without running it: nil, or the error with its line in `explainer.js`.
-    static func syntaxError(_ code: String) -> String? {
+    nonisolated static func syntaxError(_ code: String) -> String? {
         guard let context = JSContext() else { return nil }
         var exception: JSValueRef?
         let script = JSStringCreateWithCFString(code as CFString), url = JSStringCreateWithCFString("explainer.js" as CFString)
@@ -173,26 +209,34 @@ final class ExplainerRenderer {
     }
 
     /// Seconds as the Python server printed them: `12`, `3.2`.
-    static func number(_ value: Double) -> String {
+    nonisolated static func number(_ value: Double) -> String {
         value == value.rounded() && abs(value) < 1e9 ? String(Int(value)) : String(format: "%g", value)
     }
 
-    /// The film at `seconds`, as a JPEG: at the screen's scale, or `pixelWidth` pixels wide (the model's frames are 1×: they
-    /// cost the same tokens at 2× and say no more). `time()` (not `seek`, which skips callbacks) runs the player's update, so the
-    /// caption matches the frame; GSAP applies the state at once, and the snapshot paints after it.
-    private func shoot(_ view: WKWebView, at seconds: Double, pixelWidth: Int? = nil) async throws -> Data {
-        _ = try await view.callAsyncJavaScript("window.__film.timeline.time(t, false); await null;",
-                                               arguments: ["t": seconds], contentWorld: .page)
+    /// The film at `seconds`, written to `file` as a JPEG: at the screen's scale, or `pixelWidth` pixels wide (the model's
+    /// frames are 1×: they cost the same tokens at 2× and say no more). `time()` (not `seek`, which skips callbacks) runs the
+    /// player's update, so the caption matches the frame; GSAP applies the state at once, and the snapshot paints after it.
+    /// Scaling, encoding and writing run off the main thread.
+    private func shoot(_ view: WKWebView, at seconds: Double, pixelWidth: Int? = nil, to file: URL) async throws -> Data {
+        _ = try await js(view, "window.__film.timeline.time(t, false); await null;", ["t": seconds])
         let config = WKSnapshotConfiguration()
         config.snapshotWidth = NSNumber(value: Double(Self.size.width))
         config.afterScreenUpdates = true
-        let image = try await view.takeSnapshot(configuration: config)
-        guard let jpeg = Self.jpeg(image, pixelWidth: pixelWidth) else { throw CocoaError(.fileWriteUnknown) }
-        return jpeg
+        let image = try await snapshot(view, config)
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { throw CocoaError(.fileWriteUnknown) }
+        return try await Task.detached {
+            guard let jpeg = Self.jpeg(cg, pixelWidth: pixelWidth) else { throw CocoaError(.fileWriteUnknown) }
+            try jpeg.write(to: file, options: .atomic)
+            return jpeg
+        }.value
     }
 
-    static func jpeg(_ image: NSImage, pixelWidth: Int? = nil, quality: Double = 0.8) -> Data? {
-        guard var cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    nonisolated static func jpeg(_ image: NSImage, pixelWidth: Int? = nil, quality: Double = 0.8) -> Data? {
+        image.cgImage(forProposedRect: nil, context: nil, hints: nil).flatMap { jpeg($0, pixelWidth: pixelWidth, quality: quality) }
+    }
+
+    nonisolated static func jpeg(_ image: CGImage, pixelWidth: Int? = nil, quality: Double = 0.8) -> Data? {
+        var cg = image
         if let pixelWidth, cg.width > pixelWidth {
             let height = Int((Double(cg.height) * Double(pixelWidth) / Double(cg.width)).rounded())
             guard let context = CGContext(data: nil, width: pixelWidth, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -204,6 +248,38 @@ final class ExplainerRenderer {
             cg = scaled
         }
         return NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
+
+    // MARK: Calls into the page
+
+    /// Calls waiting on the page: `drop()` fails them all, so a render whose page hangs ends, and lets its view go.
+    private var pending: [UUID: (Error) -> Void] = [:]
+
+    private func js(_ view: WKWebView, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
+        try await waited { (done: @escaping (Swift.Result<Any?, Error>) -> Void) in
+            view.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page) { done($0.map { $0 as Any? }) }
+        }
+    }
+
+    private func snapshot(_ view: WKWebView, _ config: WKSnapshotConfiguration) async throws -> NSImage {
+        try await waited { (done: @escaping (Swift.Result<NSImage, Error>) -> Void) in
+            view.takeSnapshot(with: config) { image, error in
+                done(image.map { .success($0) } ?? .failure(error ?? CocoaError(.fileWriteUnknown)))
+            }
+        }
+    }
+
+    private func waited<T>(_ start: (@escaping (Swift.Result<T, Error>) -> Void) -> Void) async throws -> T {
+        let id = UUID()
+        return try await withCheckedThrowingContinuation { (done: CheckedContinuation<T, Error>) in
+            pending[id] = { done.resume(throwing: $0) }
+            start { result in
+                MainActor.assumeIsolated {
+                    guard self.pending.removeValue(forKey: id) != nil else { return }
+                    done.resume(with: result)
+                }
+            }
+        }
     }
 
     // MARK: The view
@@ -224,10 +300,13 @@ final class ExplainerRenderer {
         return view
     }
 
-    /// Lets go of a view whose page never got ready: its web content process may still be spinning.
+    /// Lets go of a view whose render ran past the deadline: its web content process may still be spinning.
     private func drop() {
         view?.stopLoading()
         delegate.cancel()
+        let calls = pending
+        pending = [:]
+        calls.values.forEach { $0(CancellationError()) }
         window?.contentView = nil
         window?.close()
         view = nil
@@ -237,19 +316,28 @@ final class ExplainerRenderer {
     /// Releases the view and its window (the next render makes them again).
     func close() { drop() }
 
-    /// Runs `work`; false if it hasn't finished within `seconds` (it's left to finish on its own, unawaited).
-    private func within(_ seconds: TimeInterval, _ work: @escaping @MainActor () async -> Void) async -> Bool {
+    /// Runs `work`: its value, or nil if it hasn't finished within `seconds` (it's cancelled then, and left to end on its own).
+    static func within<T>(_ seconds: TimeInterval, _ work: @escaping @MainActor () async throws -> T) async throws -> T? {
         let once = Once()
-        return await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
-            Task { @MainActor in
-                await work()
-                once.run { done.resume(returning: true) }
+        var worker: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+        let out: Swift.Result<T?, Error> = await withCheckedContinuation { done in
+            worker = Task { @MainActor in
+                do {
+                    let value = try await work()
+                    once.run { done.resume(returning: .success(value)) }
+                } catch {
+                    once.run { done.resume(returning: .failure(error)) }
+                }
             }
-            Task { @MainActor in
+            timer = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                once.run { done.resume(returning: false) }
+                once.run { done.resume(returning: .success(nil)) }
             }
         }
+        worker?.cancel()
+        timer?.cancel()
+        return try out.get()
     }
 
     @MainActor private final class Once {

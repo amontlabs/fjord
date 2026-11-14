@@ -12,10 +12,15 @@ import Foundation
 @MainActor
 final class ExplainerMCP: ExplainerRendering {
     static let tool = "preview"
-    /// Frames for `at`, at most: each costs about 900 input tokens.
-    static let maxAt = 8
-    /// Seven 1× JPEG frames are about 500 KB, 700 KB in base64; a reply may take this much.
-    static let maxResponse = 8 * 1024 * 1024
+    /// Seconds in `at`, at most: a reply holds `ExplainerRenderer.maxFrames` frames, `at`'s first.
+    nonisolated static let maxAt = ExplainerRenderer.maxFrames
+    /// Eight 1× JPEG frames are about 600 KB, 800 KB in base64; a reply may take this much.
+    nonisolated static let maxResponse = 8 * 1024 * 1024
+    /// What the answer's images may take: the rest is for its text and JSON, so the reply always fits `maxResponse` (a reply
+    /// over it would become "Response too large" after the version is saved, and a retry would save it twice).
+    nonisolated static let maxImages = maxResponse - 512 * 1024
+    /// The page's errors and notes in the answer, at most.
+    nonisolated static let maxErrors = 64 * 1024
     static let maxCode = 512 * 1024
 
     private(set) var project: ExplainerProject?
@@ -39,7 +44,9 @@ final class ExplainerMCP: ExplainerRendering {
             "properties": [
                 "code": ["type": "string", "description": "The full explainer({...}) call."],
                 "ticket": ["type": "string", "description": "The ticket from the <ticket> line at the top of your input."],
-                "at": ["type": "array", "items": ["type": "number"], "description": "Extra frames, at these seconds."],
+                "at": ["type": "array", "items": ["type": "number"], "maxItems": maxAt,
+                   "description": "Extra frames, at these seconds (at most \(maxAt)). A reply holds at most \(maxAt) frames: "
+                       + "these first, then scene ends while there's room."],
             ],
             "required": ["code", "ticket"],
         ] as [String: Any],
@@ -108,12 +115,16 @@ final class ExplainerMCP: ExplainerRendering {
             guard let list, numbers.count == list.count, numbers.allSatisfy(\.isFinite) else {
                 return .error("`at` is a list of seconds, like [3.2, 7]. Nothing was saved.")
             }
-            at = Array(numbers.prefix(Self.maxAt))
+            guard numbers.count <= Self.maxAt else {
+                return .error("`at` takes at most \(Self.maxAt) seconds; you passed \(numbers.count). Nothing was saved.")
+            }
+            at = numbers
         }
         do {
             let (version, result) = try await save(code, ticket: ticket, at: at)
             host?.versionSaved(version)
-            return Self.answer(version: version.number, result)
+            // Base64 of up to 8 frames: off the main thread.
+            return await Task.detached { Self.answer(version: version.number, result) }.value
         } catch {
             return .error("The preview couldn't render: \(error.localizedDescription). Nothing was saved; try again.")
         }
@@ -145,8 +156,10 @@ final class ExplainerMCP: ExplainerRendering {
     }
 
     /// The Python server's answer: "Version N. Total … Scenes start at …", the errors and notes, then a label and an image
-    /// per frame.
-    static func answer(version: Int, _ result: ExplainerRenderer.Result) -> RouterRPC.ToolResult {
+    /// per frame. It always fits the reply: images stop at `images` bytes of base64 and errors at `maxErrors`, and each frame
+    /// left out (by the frame cap or the size cap) is named with how to see it.
+    nonisolated static func answer(version: Int, _ result: ExplainerRenderer.Result, images budget: Int = maxImages)
+        -> RouterRPC.ToolResult {
         var text = "Version \(version). "
         if let timing = result.timing {
             text += "Total \(ExplainerRenderer.number(timing.total)) s. Scenes start at "
@@ -155,9 +168,25 @@ final class ExplainerMCP: ExplainerRendering {
         } else {
             text += "No timing: build() failed."
         }
-        text += result.errors.isEmpty ? "\nNo errors, no layout notes." : "\nErrors and layout notes to fix:\n" + result.errors
-        let images = result.frames.map {
-            RouterRPC.ToolResult.Image(label: $0.label, mime: "image/jpeg", base64: $0.jpeg.base64EncodedString())
+        var errors = result.errors
+        if errors.utf8.count > maxErrors {
+            errors = String(decoding: errors.utf8.prefix(maxErrors), as: UTF8.self) + "\n… (cut: fix these first)"
+        }
+        text += errors.isEmpty ? "\nNo errors, no layout notes." : "\nErrors and layout notes to fix:\n" + errors
+        var images: [RouterRPC.ToolResult.Image] = [], tooBig: [String] = [], room = budget
+        for frame in result.frames {
+            let size = (frame.jpeg.count + 2) / 3 * 4
+            guard tooBig.isEmpty, size <= room else { tooBig.append(frame.label); continue }
+            room -= size
+            images.append(.init(label: frame.label, mime: "image/jpeg", base64: frame.jpeg.base64EncodedString()))
+        }
+        if !result.left.isEmpty {
+            text += "\nA reply holds at most \(ExplainerRenderer.maxFrames) frames, so these were left out: "
+                + result.left.joined(separator: ", ") + ". To see them, call again with their seconds in `at`."
+        }
+        if !tooBig.isEmpty {
+            text += "\nThe reply's size cap left out these frames: " + tooBig.joined(separator: ", ")
+                + ". To see them, call again with fewer seconds in `at`."
         }
         return RouterRPC.ToolResult(text: text, images: images)
     }

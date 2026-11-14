@@ -23,6 +23,21 @@ final class ExplainerWebHost {
     private var dark = false
     private var making: Task<Void, Never>?
     private var closed = false
+    private var crashes = Crashes()
+    /// The page's web content process died again after its one reload: the panel shows the poster instead.
+    var onGaveUp: (@MainActor (URL) -> Void)?
+
+    /// A page's web content process may die once and be loaded again; the second time it stays down. A new page starts over.
+    struct Crashes {
+        private(set) var page: URL?
+        private var count = 0
+        /// Whether to load `page` again after its process died.
+        mutating func died(_ page: URL?) -> Bool {
+            if page != self.page { self.page = page; count = 0 }
+            count += 1
+            return count <= 1
+        }
+    }
 
     init() {
         making = Task { @MainActor [weak self] in
@@ -31,6 +46,7 @@ final class ExplainerWebHost {
             view.autoresizingMask = [.width, .height]
             view.navigationDelegate = self.delegate
             view.uiDelegate = self.delegate
+            self.delegate.terminated = { [weak self] view in self?.terminated(view) }
             view.allowsBackForwardNavigationGestures = false
             view.allowsMagnification = false
             self.container.addSubview(view)
@@ -69,6 +85,15 @@ final class ExplainerWebHost {
         view.loadFileURL(Self.embedded(page), allowingReadAccessTo: Self.readable(page))
     }
 
+    private func terminated(_ view: WKWebView) {
+        if crashes.died(page) {
+            view.reload()
+        } else if let page {
+            delegate.finish()
+            onGaveUp?(page)
+        }
+    }
+
     /// Waits for the page `show` last asked for to finish loading (or fail). Call it right after `show`.
     func loaded() async {
         guard view?.isLoading == true else { return }
@@ -85,10 +110,11 @@ final class ExplainerWebHost {
         view = nil
     }
 
-    /// `ExplainerWeb`'s file-only policy and no new windows (as `ExplainerWeb.LocalOnly`), and a crashed page loaded again
-    /// rather than left blank.
+    /// `ExplainerWeb`'s file-only policy and no new windows (as `ExplainerWeb.LocalOnly`), and a crashed page handed to the
+    /// host (loaded again once, then given up for the poster).
     @MainActor private final class Delegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         var waiting: [CheckedContinuation<Void, Never>] = []
+        var terminated: ((WKWebView) -> Void)?
         func finish() {
             let done = waiting
             waiting = []
@@ -104,7 +130,7 @@ final class ExplainerWebHost {
         }
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? { nil }
-        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { terminated?(webView) }
     }
 }
 
@@ -112,6 +138,8 @@ final class ExplainerWebHost {
 struct ExplainerWebView: NSViewRepresentable {
     /// `runs/<run>/v<n>/index.html`.
     let page: URL
+    /// The page crashed twice: show the poster.
+    var gaveUp: (URL) -> Void = { _ in }
     @Environment(\.colorScheme) private var scheme
 
     /// The page's own chrome, in points, at the panel's width: the answer (two lines), the caption and the scene bar. The
@@ -123,11 +151,13 @@ struct ExplainerWebView: NSViewRepresentable {
     func makeCoordinator() -> ExplainerWebHost { ExplainerWebHost() }
 
     func makeNSView(context: Context) -> NSView {
+        context.coordinator.onGaveUp = gaveUp
         context.coordinator.show(page, dark: scheme == .dark)
         return context.coordinator.container
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.onGaveUp = gaveUp
         context.coordinator.show(page, dark: scheme == .dark)
     }
 
@@ -148,20 +178,22 @@ struct ExplainerStage: View {
     /// The draft on show while the explainer is made; nil once it's ready.
     var draft: Int?
     var ready: Bool
+    /// A page whose web process died twice: it shows its poster from then on.
+    @State private var crashed: URL?
     @Environment(\.colorScheme) private var scheme
 
     enum Mode: Equatable { case web(URL), still }
 
-    /// The web view only for a ready explainer with a page, never in a demo or a shot.
-    static func mode(page: URL?, ready: Bool, demo: Bool = Store.isDemo) -> Mode {
-        if !demo, ready, let page { return .web(page) }
+    /// The web view only for a ready explainer with a page, never in a demo or a shot, nor for a page that crashed twice.
+    static func mode(page: URL?, ready: Bool, crashed: URL? = nil, demo: Bool = Store.isDemo) -> Mode {
+        if !demo, ready, let page, page != crashed { return .web(page) }
         return .still
     }
 
     var body: some View {
-        switch Self.mode(page: page, ready: ready && draft == nil) {
+        switch Self.mode(page: page, ready: ready && draft == nil, crashed: crashed) {
         case .web(let page):
-            WidthHeld(page: page)
+            WidthHeld(page: page) { crashed = $0 }
         case .still:
             still
         }
@@ -198,10 +230,11 @@ struct ExplainerStage: View {
 /// The web view at the width it's given and the height that width needs.
 private struct WidthHeld: View {
     let page: URL
+    let gaveUp: (URL) -> Void
     @State private var width: CGFloat = 0
 
     var body: some View {
-        ExplainerWebView(page: page)
+        ExplainerWebView(page: page, gaveUp: gaveUp)
             .frame(height: width > 0 ? ExplainerWebView.height(width: width) : 0)
             .frame(maxWidth: .infinity)
             .background(GeometryReader { proxy in

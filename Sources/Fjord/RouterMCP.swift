@@ -132,21 +132,22 @@ enum RouterRPC {
 
     /// One POST body, single or batch (at most `maxBatch` messages). `call` runs a tool by name, or returns nil for a name
     /// it doesn't know. The replies together stay under `maxResponse` bytes, but for the short error that stands in for each
-    /// reply that wouldn't fit.
-    static func handle(_ body: Data, tools: [[String: Any]], version: String = "1", maxResponse: Int = maxResponse,
-                       call: (String, [String: Any]) async -> ToolResult?) async -> Reply {
+    /// reply that wouldn't fit. Each reply is encoded once (a Show me reply is up to 8 MB), and, as a nonisolated async
+    /// function, off the main thread: only `call` hops to its own actor.
+    nonisolated static func handle(_ body: Data, tools: [[String: Any]], version: String = "1", maxResponse: Int = maxResponse,
+                                   call: (String, [String: Any]) async -> ToolResult?) async -> Reply {
         guard let json = try? JSONSerialization.jsonObject(with: body) else {
             return Reply(status: 400, body: encode(error(nil, parseError, "Parse error")))
         }
         var budget = maxResponse
-        func fit(_ reply: [String: Any], id: Any?) -> [String: Any] {
-            let size = encode(reply).count
-            if size <= budget {
-                budget -= size
-                return reply
+        func fit(_ reply: [String: Any], id: Any?) -> Data {
+            let data = encode(reply)
+            if data.count <= budget {
+                budget -= data.count
+                return data
             }
-            let small = error(id, internalError, "Response too large")
-            budget -= encode(small).count
+            let small = encode(error(id, internalError, "Response too large"))
+            budget -= small.count
             return small
         }
         if let batch = json as? [Any] {
@@ -154,16 +155,23 @@ enum RouterRPC {
             guard batch.count <= maxBatch else {
                 return Reply(status: 400, body: encode(error(nil, invalidRequest, "At most \(maxBatch) messages in a batch")))
             }
-            var out: [[String: Any]] = []
+            var out: [Data] = []
             for item in batch {
                 if let reply = await one(item, tools: tools, version: version, call: call) {
                     out.append(fit(reply, id: (item as? [String: Any])?["id"]))
                 }
             }
-            return out.isEmpty ? Reply(status: 202, body: nil) : Reply(status: 200, body: encode(out))
+            guard !out.isEmpty else { return Reply(status: 202, body: nil) }
+            var joined = Data("[".utf8)
+            for (i, data) in out.enumerated() {
+                if i > 0 { joined.append(UInt8(ascii: ",")) }
+                joined.append(data)
+            }
+            joined.append(UInt8(ascii: "]"))
+            return Reply(status: 200, body: joined)
         }
         guard let reply = await one(json, tools: tools, version: version, call: call) else { return Reply(status: 202, body: nil) }
-        return Reply(status: 200, body: encode(fit(reply, id: (json as? [String: Any])?["id"])))
+        return Reply(status: 200, body: fit(reply, id: (json as? [String: Any])?["id"]))
     }
 
     /// The reply to one message; nil for a notification or a client's response, which get none.

@@ -117,6 +117,48 @@ final class StubRenderHost: ExplainerRenderHost {
         #expect(failed.images.isEmpty)
     }
 
+    @Test func aReplyHoldsEightFramesAtFirstAndNamesTheRestAndTooManyAtIsAnError() async throws {
+        let timing = ExplainerRenderer.Timing(total: 40, scenes: (0..<10).map { [Double($0 * 4), Double($0 * 4 + 3)] })
+        let plain = ExplainerRenderer.plan(timing, at: [])
+        #expect(plain.shoot.count == 8 && plain.shoot.first?.label == "End of scene 0 (3 s)")
+        #expect(plain.left.map(\.label) == ["End of scene 8 (35 s)", "End of scene 9 (39 s)"])
+        let asked = ExplainerRenderer.plan(timing, at: [1.5, 99])
+        #expect(asked.shoot.suffix(2).map(\.label) == ["At 1.5 s", "At 99 s"] && asked.shoot.last?.time == 40)
+        #expect(asked.shoot.count == 8 && asked.left.count == 4)
+        #expect(ExplainerRenderer.plan(.init(total: 5, scenes: [[0, 5]]), at: []).left.isEmpty)
+
+        let frame = ExplainerRenderer.Frame(label: "End of scene 0 (3 s)", file: URL(fileURLWithPath: "/x"), jpeg: Data(count: 300))
+        var result = ExplainerRenderer.Result(timing: timing, errors: "", broken: false, spec: nil,
+                                              frames: [frame, frame, frame])
+        result.left = plain.left.map(\.label)
+        let answer = ExplainerMCP.answer(version: 1, result, images: 900)
+        #expect(answer.images.count == 2)
+        #expect(answer.text.contains("at most 8 frames, so these were left out: End of scene 8 (35 s), End of scene 9 (39 s)."))
+        #expect(answer.text.contains("size cap left out these frames: End of scene 0 (3 s)."))
+
+        let dir = TempDir()
+        let host = StubRenderHost()
+        host.tickets["run-1"] = ExplainerTicket(run: "run-1", ask: "Why?")
+        let mcp = try await started(dir, host: host)
+        defer { mcp.stop() }
+        let many = try #require(await mcp.call("preview", ["code": "explainer({})", "ticket": "run-1", "at": Array(0...8)]))
+        #expect(many.isError && many.text.contains("at most 8 seconds"))
+        #expect(host.saved.isEmpty && runsAreEmpty(dir))
+    }
+
+    @Test func theDeadlineGivesUpOnWorkThatNeverEndsAndCancelsIt() async throws {
+        var cancelled = false
+        let hung: Int? = try await ExplainerRenderer.within(0.05) {
+            do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { cancelled = true; throw error }
+            return 1
+        }
+        #expect(hung == nil)
+        await Task.yield(); try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(cancelled)
+        #expect(try await ExplainerRenderer.within(5) { 7 } == 7)
+        await #expect(throws: CocoaError.self) { _ = try await ExplainerRenderer.within(5) { () -> Int in throw CocoaError(.fileWriteUnknown) } }
+    }
+
     @Test func thePageReadsTheProjectsKitAndCannotBeClosedByTheQuestion() {
         let page = ExplainerRenderer.page(player: #"<link href="KIT/player.css"><script>window.ASK = ASK_JSON;</script>"#,
                                           ask: "Why </script><b>?")

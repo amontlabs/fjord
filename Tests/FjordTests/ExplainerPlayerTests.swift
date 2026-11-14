@@ -16,6 +16,17 @@ import WebKit
         #expect(ExplainerStage.mode(page: page, ready: true, demo: true) == .still)
     }
 
+    @Test func aPageThatCrashesReloadsOnceThenShowsItsPoster() {
+        var crashes = ExplainerWebHost.Crashes()
+        let first = crashes.died(page), second = crashes.died(page), third = crashes.died(page)
+        #expect(first && !second && !third)
+        let other = page.deletingLastPathComponent().appendingPathComponent("../v4/index.html").standardizedFileURL
+        let fresh = crashes.died(other)
+        #expect(fresh)
+        #expect(ExplainerStage.mode(page: page, ready: true, crashed: page, demo: false) == .still)
+        #expect(ExplainerStage.mode(page: page, ready: true, crashed: other, demo: false) == .web(page))
+    }
+
     @Test func thePageLoadsEmbeddedAndReadsOnlyTheProjectFolder() {
         #expect(ExplainerWebHost.embedded(page).absoluteString == "file:///S/Fjord/Explainers/runs/run-1/v3/index.html?embed=1")
         #expect(ExplainerWebHost.readable(page).path == "/S/Fjord/Explainers")
