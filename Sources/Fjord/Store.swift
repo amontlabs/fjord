@@ -408,6 +408,9 @@ final class Store {
     /// Every thread's turns and Haiku card, the BM25 index and the day's archive: the decider's context, kept off its path
     /// (ThreadCards.swift). On disk under Application Support/Fjord/thread-cards; in memory only in a test or a demo.
     @ObservationIgnored lazy var threadCards = ThreadCardStore(folder: routerFiles?.support)
+    /// Show me's explainers: the queue, the Opus creator threads, their finals and the dock's list (ExplainerEngine.swift).
+    /// No project in a test or a demo, so it does nothing there.
+    @ObservationIgnored lazy var explainers = ExplainerEngine.live(self, renderer: ExplainerMCP())
     /// The Router v2 page's records: one per T3 thread, what the page, the bar, the palette and the badge read
     /// (RouterRecords.swift). Not observed by views.
     @ObservationIgnored lazy var routerRecords: RouterRecords = makeRouterRecords()
@@ -527,6 +530,8 @@ final class Store {
         // The Router is the only reader of T3's threads, and they have no switch of their own: they follow it.
         if agents.enabled != router.enabled { agents.enabled = router.enabled }
         if !UnderTest.isRunning, !Store.isDemo {
+            // Before T3's first shell, so the explainers' project never reaches a list (SHOWME.md §5).
+            explainers.start()
             t3.start()
             // Routing waits for T3's first word, unless there is no T3 to hear from.
             if t3.installed { threadsReadAsked = true }

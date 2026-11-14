@@ -179,6 +179,7 @@ extension Store {
     /// A shell change reaches the records first (one row, at most one change for the page), then the rest of the app.
     func routerShellChanged(_ item: T3ShellItem?) {
         if agents.enabled { routerRecords.shell(item) }
+        explainers.shell(item)
         if case .synchronized? = item {
             routerPurposes?.keep(only: Set(t3.store.shell.projects.keys))
         }
@@ -186,7 +187,8 @@ extension Store {
 
     /// A watched thread's projection changed: its detail for its record, and a steer that landed in a run ends.
     func routerThreadChanged(_ id: String) {
-        guard agents.enabled else { return }
+        // An explainer's thread is Fjord's own: no record, no line (SHOWME.md §5).
+        guard agents.enabled, !t3.store.isHidden(thread: id) else { return }
         guard let projection = t3.store.projections[id] else {
             routerRecords.detail(id, nil)
             return

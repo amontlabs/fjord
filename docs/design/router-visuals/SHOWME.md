@@ -503,3 +503,28 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
   updating before evals run on the new prompt.
 - **Live check:** `FJORD_EXPLAINER_LIVE=1 swift test --filter ExplainerRenderLive` (offscreen, about 2 s);
   `FJORD_EXPLAINER_KEEP=<dir>` keeps the frames. It isn't listed in DEVELOPMENT.md yet, because P2 doesn't own that file.
+
+### P3 (2026-11-14)
+- **Creators run in parallel (§13), so the queue holds only requests that haven't launched.** `ExplainerRequest.State` is
+  `waitingForTurn` / `waitingForCreator`; a launched request leaves `queue.json` and is a run from then on
+  (`runs/<id>/run.json`: ticket, source, ask, final, draft, failed, `watchedAt`, `completedThrough`). There's no `followUp`
+  field: `ExplainerEngine.followUp(id, words:)` steers the explainer's thread at once (`startImmediately(.steer)`, unwrapped).
+  The renderer owns `meta.json` and `v<n>.*`; the engine never writes them.
+- **The ticket is 8 hex characters minted per run**, not the thread id, so it copies cleanly. `host.ticket(_:)` resolves any
+  run Fjord knows, so a follow-up's previews save into the same run.
+- **Every follow-up run is finalized again.** A run is finalized when its hidden row has no live run and
+  `latestRunCompletedAt` (or `updatedAt` for a stopped run) is newer than `completedThrough`.
+- **Redaction is the Python's (`build_case2.py`), not `RouterTools.redacted`.** Jev's rule for long mixed strings cut paths,
+  branch names and ids the explainer needs (and broke the golden files). This input goes to the provider that ran the thread,
+  not to a third party. `at=` times are in the Mac's time zone (the Python's were UTC).
+- **Golden files:** `ExplainerInputTests.theEvalMomentsBuildAgain` reads each `cases2/*/user.md` back into a projection and
+  builds it again. All 8 match byte for byte, except the dynamic-tool briefs the Python cut: T3's JSON keeps no key order
+  (`pythonJSON` sorts keys), so those lines are compared up to the tool's name. The test skips when the files are absent.
+- **The dock type is `ExplainerItem`** (in `ExplainerEngine.swift`), not `RouterExplainer`, which lives in P5's
+  `RouterShowMe.swift`. `ExplainerEngine.onChange` hands P5 the newest 20; P5 maps them onto `RouterExplainer` (or replaces
+  it) and sets `routerPage.showMe`.
+- **For P5:** call `store.explainers.requested(source:ask:sentAt:)` on `.taken` with the delivered message id,
+  `requested(reply:)` for a Done card's Show me, `followUp(_:words:)` for the composer while the panel targets an
+  explainer, and `watched(_:)` when the panel shows one with the window key. `start()` runs in `startServices` before
+  `t3.start()` (not in tests or demos); `routerShellChanged` calls `explainers.shell(item)`, and `routerThreadChanged`
+  ignores hidden ids.
