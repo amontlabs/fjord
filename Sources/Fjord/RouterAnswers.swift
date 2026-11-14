@@ -82,7 +82,11 @@ extension Store {
             let checked = try request.validate(answers, attached: Set(attached.keys))
             guard request.live else { throw RequestFailure.notLive }
             try await attachments.sending(attached.values.flatMap { $0 }) { done in
-                let uploads = attached.mapValues { ids in ids.compactMap { done[$0] } }
+                // Each upload once a question, where it first stands (T3 refuses one listed twice), as a message's are.
+                let uploads = attached.mapValues { ids in
+                    var seen = Set<String>()
+                    return ids.filter { seen.insert($0).inserted }.compactMap { done[$0] }
+                }
                 guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
                 else { throw RequestFailure.moved }
                 try await sendCommands([.respondAnswers(threadId: target.thread, requestId: request.id, answers: checked,

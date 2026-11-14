@@ -95,6 +95,19 @@ import Testing
                                            attachments: ["q2": [shot]])])
     }
 
+    @Test func aPicturePastedTwiceInAnAnswerGoesOnceAsT3Requires() async {
+        let (s, sent) = store(form())
+        s.attachments.put(item("image_a"), state: .ready("att-1"))
+        s.attachments.put(item("image_c"), state: .ready("att-3"))
+        // The same pill twice in the words ("this [image] and [image] again"), another between them.
+        let result = await s.answerQuestion(form(), ["q1": .one("Dark"), "q2": .one("Moss")],
+                                            attachments: ["q2": ["image_a", "image_c", "image_a"]],
+                                            target: ThreadTarget(project: "", thread: "t1"))
+        #expect((try? result.get()) != nil)
+        guard case .respondAnswers(_, _, _, let attachments)? = sent().first else { Issue.record("nothing sent"); return }
+        #expect(attachments["q2"]?.map(\.id) == ["att-1", "att-3"])
+    }
+
     @Test func nothingGoesForANoCustomQuestionOrAFailedUpload() async {
         let (s, sent) = store(question(custom: false))
         s.attachments.put(item("image_a"), state: .ready("att-1"))
