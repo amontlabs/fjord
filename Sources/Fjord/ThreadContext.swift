@@ -90,11 +90,41 @@ extension RouterPointers {
     static func attachment(id: String, upload: T3Attachment) -> (reference: String, record: T3JSON) {
         let kind = RouterAttachment.kind(of: id).rawValue
         let label = attachmentLabel(upload.name, kind: kind)
-        let reference = (kind == "image" ? "!" : "") + "[\(label)](t3-context://v1/\(kind)/\(id))"
+        let reference = attachmentReference(id: id, name: upload.name)
         let record: T3JSON = ["version": 1, "contextId": .string(id), "kind": .string(kind), "label": .string(label),
                               "attachmentId": .string(upload.id), "name": .string(upload.name), "mimeType": .string(upload.mimeType),
                               "sizeBytes": .number(Double(upload.sizeBytes))]
         return (reference, record)
+    }
+
+    /// A picture's or a file's reference in a message's text, where its pill sat: `![label](t3-context://v1/image/<id>)`, a
+    /// file's without the "!".
+    static func attachmentReference(id: String, name: String) -> String {
+        let kind = RouterAttachment.kind(of: id).rawValue
+        return (kind == "image" ? "!" : "") + "[\(attachmentLabel(name, kind: kind))](t3-context://v1/\(kind)/\(id))"
+    }
+
+    /// The words of a queued message edited in place, its pictures' and files' references put back where their names
+    /// read ("[image: name]", `pills`: the message's): T3 keeps the run's attachments and their records when the edit
+    /// names none (`queued-run.edit`), so the edit only needs each reference in its text. Nil when the edit drops one or
+    /// says one more often than the message did: what it carries can't change in place.
+    @MainActor
+    static func queuedEdit(_ words: String, pills: [RouterMention]) -> String? {
+        let pills = pills.filter { $0.pointer.attachment != nil }
+        guard !pills.isEmpty else { return words }
+        let found = RouterAttachments.pills(in: words, of: pills)
+        // Each as many times as the message had it.
+        func counts(_ ms: [RouterMention]) -> [RouterPointer: Int] { ms.reduce(into: [:]) { $0[$1.pointer, default: 0] += 1 } }
+        guard counts(found) == counts(pills) else { return nil }
+        let chars = Array(words)
+        var out = ""
+        var at = 0
+        for m in found {
+            guard let id = m.pointer.attachment else { continue }
+            out += String(chars[at..<m.range.lowerBound]) + attachmentReference(id: id, name: m.name)
+            at = m.range.upperBound
+        }
+        return out + String(chars[at...])
     }
 
     /// An attachment's name as T3 cleans a label (`sanitizeComposerContextLabel`): no brackets, backslashes or line breaks,

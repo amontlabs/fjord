@@ -226,13 +226,20 @@ extension Store {
     }
 
     /// The queued message's words changed in place: `queued-run.edit`. The agent gets the edited text when its turn comes.
+    /// Its pictures and files stay, each where its name reads in the words; an edit that takes one out or says one twice
+    /// is refused, saying so (cancel it and send it again).
     @discardableResult
     func editQueued(_ entryID: UUID, to words: String) async -> Bool {
         let words = words.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, let entry = router.record(entryID), let sent = entry.delivered,
               case .cancelAndEdit(let run) = changeOfMind(entry) else { return false }
+        guard let text = RouterPointers.queuedEdit(words, pills: entry.mentions ?? []) else {
+            noteFailure(entryID, "couldn't edit: ", ThreadSendFailure(
+                "its pictures and files can't change in place: keep each one's name in the words, or cancel it and send it again"))
+            return false
+        }
         do {
-            try await dispatch(.queuedRunEdit(threadId: sent.thread, runId: run, text: words))
+            try await dispatch(.queuedRunEdit(threadId: sent.thread, runId: run, text: text))
             updateDecision(entryID) {
                 $0.delivered?.editedTo = words
                 $0.add(.edited(words))

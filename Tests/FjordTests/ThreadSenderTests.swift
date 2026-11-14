@@ -278,6 +278,28 @@ import Testing
         #expect(s.router.record(id)?.delivered?.editedTo == "after the tests, please")
     }
 
+    @Test func aQueuedMessagesPictureStaysAReferenceWhenItsWordsAreEditedAndCantBeTakenOutInPlace() async throws {
+        let p = projection(runs: [run("r2", status: "queued", message: "um1", position: 1)])
+        let (s, sent) = store(projection: p)
+        let id = entry(s, outcome: .queued)
+        s.updateDecision(id) { $0.mentions = [RouterMention(range: 4..<21, pointer: .attachment("image_abc"), name: "shot.png")] }
+        // Its name kept in the words: the reference goes back where it reads (T3 keeps the run's upload and record).
+        let edited = await s.editQueued(id, to: "fix [image: shot.png] after the tests")
+        #expect(edited)
+        #expect(dispatchObject(sent)["text"] == "fix ![shot.png](t3-context://v1/image/image_abc) after the tests")
+        #expect(dispatchObject(sent)["attachments"] == nil && dispatchObject(sent)["context"] == nil)
+        #expect(s.router.record(id)?.delivered?.editedTo == "fix [image: shot.png] after the tests")
+        // Taken out of the words (or said twice): refused plainly, nothing sent.
+        let count = sent.commands.count
+        let dropped = await s.editQueued(id, to: "fix it after the tests")
+        let twice = await s.editQueued(id, to: "[image: shot.png] and [image: shot.png]")
+        #expect(!dropped && !twice && sent.commands.count == count)
+        let said: [String] = s.router.record(id)?.done.compactMap { done -> String? in
+            if case .failed(let why) = done { why } else { nil }
+        } ?? []
+        #expect(said.count == 2 && said.allSatisfy { $0.contains("pictures and files can't change in place") })
+    }
+
     @Test func aSteeredMessageCantBeTakenBackButItsRunCanBeStopped() async throws {
         let p = projection(runs: [run("r1", status: "running", message: "um0")],
                            messages: [["id": "um1", "threadId": "t1", "runId": "r1", "role": "user", "createdBy": "user", "text": "now", "streaming": false]])
