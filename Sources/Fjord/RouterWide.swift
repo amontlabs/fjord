@@ -107,6 +107,7 @@ struct RouterWidePage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .overlayScrollers()
         }
+        .trackUnderBar(model)
         .safeAreaInset(edge: .top, spacing: 0) {
             ZStack {
                 if model.hasThreads {

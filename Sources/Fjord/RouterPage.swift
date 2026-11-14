@@ -51,6 +51,7 @@ struct RouterList: View {
                 .allowsHitTesting(ProcessInfo.processInfo.environment["FJORD_E1"] == nil)
                 .overlayScrollers()
             }
+            .trackUnderBar(model)
             .safeAreaInset(edge: .top, spacing: 0) {
                 // With no thread the bar goes, and its place stays: the sentence under it doesn't jump.
                 ZStack {
@@ -343,6 +344,8 @@ struct RouterFilterBar: View {
                 CDS.Surface.s1
                 LinearGradient(colors: [CDS.Surface.s1, CDS.Surface.s1.opacity(0)], startPoint: .top, endPoint: .bottom)
                     .frame(height: M.fade)
+                    .opacity(model.underBar ? 1 : 0)
+                    .motion(.fade, value: model.underBar)
             }
             .padding(.horizontal, -Self.groundReach)
             .padding(.bottom, -M.fade)
@@ -554,6 +557,20 @@ struct BriefPanelPlacement: Layout {
             let size = view.sizeThatFits(.unspecified)
             let y = below ? bounds.maxY + gap : bounds.minY - gap - size.height
             view.place(at: CGPoint(x: bounds.minX + dx, y: y), proposal: ProposedViewSize(size))
+        }
+    }
+}
+
+extension View {
+    /// Tells the model when rows have scrolled under the filter bar (`RouterModel.underBar`); it flips only at the edge.
+    /// Before macOS 15 it can't tell, and the fade always shows.
+    @ViewBuilder func trackUnderBar(_ model: RouterModel) -> some View {
+        if #available(macOS 15, *) {
+            onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 0.5 } action: { _, under in
+                if model.underBar != under { model.underBar = under }
+            }
+        } else {
+            onAppear { model.underBar = true }
         }
     }
 }

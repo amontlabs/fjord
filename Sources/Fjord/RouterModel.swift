@@ -176,6 +176,9 @@ final class RouterModel {
     var lit = 0
     var waved = false
     var placesMenu = false
+    /// Rows have scrolled under the filter bar: the fade under it shows. At rest it doesn't, so the first row's ground
+    /// isn't washed out at its top.
+    var underBar = false
     /// The places menu's row under the keyboard (Tab opens it from the row).
     var placesIndex = 0
     /// Return came before the read: the words wait in the composer (it shows them held) and go when the read lands
