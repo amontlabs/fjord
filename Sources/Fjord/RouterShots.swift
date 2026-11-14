@@ -560,6 +560,15 @@ enum RouterShots {
             model.select(nil)
             RouterShowMeDemo.open(model, selected: RouterShowMeDemo.lastdrop)
         },
+        // An explainer in three versions, the newest on show; the newest being made, its latest draft on the stage.
+        State(name: "v2-show-versions") { model in
+            model.select(nil)
+            RouterShowMeDemo.open(model, selected: RouterShowMeDemo.token)
+        },
+        State(name: "v2-show-versions-making") { model in
+            model.select(nil)
+            RouterShowMeDemo.makingVersion(model)
+        },
         // A wide window: the panel at the bottom of the pane's column, under the selected row's card.
         State(name: "v2-show-wide", make: { model in
             model.select(.line(ID.guide))

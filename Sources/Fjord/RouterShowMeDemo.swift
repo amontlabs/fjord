@@ -11,7 +11,8 @@ enum RouterShowMeDemo {
 
     static let token = "why-token", lastdrop = "lastdrop-empty", restore = "restore", chalet = "chalet", guide = "guide-forks"
 
-    /// The five explainers of the open dock: one ready and selected, one being made, one queued, two watched.
+    /// The five explainers of the open dock: one ready and selected (in three versions: the original, "simpler", "show the
+    /// processes"), one being made, one queued, two watched.
     static func explainers(at now: Date) -> [ExplainerItem] {
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         func item(_ id: String, _ title: String, _ source: String, since: Date, stage: ExplainerItem.Stage, answer: String = "",
@@ -20,15 +21,24 @@ enum RouterShowMeDemo {
                           stage: stage, length: length, page: nil, posterLight: poster.map { file($0, dark: false) },
                           posterDark: poster.map { file($0, dark: true) })
         }
-        return [
-            item(token, "Why the token", ID.settings, since: ago(4), stage: .ready,
+        var token = item(Self.token, "Why the token", ID.settings, since: ago(4), stage: .ready,
                  answer: "Making the video means running Claude, and they want that run billed to your account, not theirs.",
                  captions: ["A release starts their action. It needs your token.",
                             "Their action runs Claude. Your subscription pays.",
                             "On PRs, their plugin rides your @claude session.",
                             "They host the result on bisque.today.",
                             "@v1 can change. Your token could go anywhere."],
-                 length: 27, poster: "token"),
+                 length: 27, poster: "token")
+        token.versions = [
+            version("Original", ago(48), poster: "token", length: 41,
+                    answer: "Making the video means running Claude, so the action needs a token, and they chose yours: your subscription pays for the run."),
+            version("simpler", ago(31), poster: "token", length: 22,
+                    answer: "Their action runs Claude to make the video, and your token makes your account pay."),
+            version("show the processes", ago(4), poster: "token", length: 27, answer: token.answer),
+        ]
+        for i in token.versions.indices { token.versions[i].captions = token.captions }
+        return [
+            token,
             item(lastdrop, "Why subagents look empty", ID.tab, since: ago(1), stage: .making(draft: 2, fixing: "label overlaps the arrow"),
                  answer: "A native subagent's steps are written into your session; lastdrop's run elsewhere, so T3 only gets the final report.",
                  captions: ["Native: each step is written, and T3 shows it.",
@@ -40,6 +50,21 @@ enum RouterShowMeDemo {
             item(chalet, "What five costs over four", ID.valCenis, since: ago(52), stage: .ready, length: 19),
             item(guide, "Where the install forks", ID.guide, since: ago(180), stage: .ready, length: 24),
         ]
+    }
+
+    private static func version(_ label: String, _ at: Date, poster: String, length: Int, answer: String,
+                                making: Bool = false) -> ExplainerItem.Version {
+        ExplainerItem.Version(label: label, at: at, making: making, answer: answer, length: length,
+                              posterLight: file(poster, dark: false), posterDark: file(poster, dark: true))
+    }
+
+    /// The token explainer's third version being made: the stage shows its latest draft.
+    static func makingVersion(_ model: RouterModel) {
+        open(model, selected: token)
+        guard var state = model.showMe, let i = state.explainers.firstIndex(where: { $0.id == token }) else { return }
+        state.explainers[i].stage = .making(draft: 2, fixing: "")
+        state.explainers[i].versions[2].making = true
+        model.showMe = state
     }
 
     /// The dock with every explainer, the panel open on `selected`.

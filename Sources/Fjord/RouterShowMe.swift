@@ -16,6 +16,8 @@ struct RouterShowMeState: Equatable {
     /// The dock's panel is open.
     var open = false
     var selected: String?
+    /// The selected one's version on show (`ExplainerItem.versions`); nil: the newest, which a new one then replaces.
+    var version: Int?
     /// While one plays the list is its row and "N more"; this shows the whole list again.
     var expanded = false
     /// Why the words didn't go to the explainer, in the destination row until the draft changes.
@@ -31,11 +33,13 @@ struct RouterShowMeState: Equatable {
     enum Size: Equatable { case panel, page, window }
 
     var chosen: ExplainerItem? { explainers.first { $0.id == selected } }
+    /// The selected one as its version on show plays it.
+    var shown: ExplainerItem? { chosen?.version(version) }
     var making: ExplainerItem? { explainers.first { if case .making = $0.stage { true } else { false } } }
     var queued: ExplainerItem? { explainers.first { $0.stage == .queued } }
     var unseen: Bool { explainers.contains(where: \.unseen) }
     /// The selected one plays: the list folds to its row.
-    var playing: Bool { open && chosen?.stage == .ready }
+    var playing: Bool { open && shown?.stage == .ready }
     /// Where Return sends the words: the panel's explainer, open on one that's made or being made (a thread of its own).
     var target: ExplainerItem? {
         guard open, let chosen else { return nil }
@@ -53,7 +57,7 @@ struct RouterShowMeState: Equatable {
     mutating func update(_ items: [ExplainerItem]) {
         let before = explainers
         explainers = items
-        if let s = selected, !items.contains(where: { $0.id == s }) { selected = preferred?.id }
+        if let s = selected, !items.contains(where: { $0.id == s }) { selected = preferred?.id; version = nil }
         guard open else { return }
         let finished = items.first { e in
             e.stage == .ready && before.contains { $0.id == e.id && $0.stage != .ready }
@@ -61,6 +65,7 @@ struct RouterShowMeState: Equatable {
         guard let finished, finished.id != selected else { return }
         if let chosen = before.first(where: { $0.id == selected }), chosen.stage == .ready { return }
         selected = finished.id
+        version = nil
         expanded = false
     }
 }
@@ -133,6 +138,7 @@ extension RouterModel {
             state.expanded = false
             // Never an old one left selected: what's being made, else what's new, else the newest.
             state.selected = state.preferred?.id
+            state.version = nil
         }
         state.note = nil
         showMe = state
@@ -142,12 +148,29 @@ extension RouterModel {
     func selectExplainer(_ id: String) {
         guard var state = showMe else { return }
         let targeted = state.target != nil
+        if state.selected != id { state.version = nil }
         state.selected = id
         // Picked from the whole list: it plays, and the list folds again.
         state.expanded = false
         state.note = nil
         showMe = state
         if targeted != (state.target != nil) { draftTargetChanged() }
+    }
+
+    /// A version of the selected one, at the player's size; the newest follows the next one made.
+    func selectVersion(_ index: Int) {
+        guard var state = showMe, let chosen = state.chosen, chosen.versions.indices.contains(index) else { return }
+        state.version = index == chosen.versions.count - 1 ? nil : index
+        guard state != showMe else { return }
+        animate(.fade) { showMe = state }
+    }
+
+    /// ⌥⌘← ⌥⌘→: the version before or after. False when there's no other.
+    func stepVersion(forward: Bool) -> Bool {
+        guard let state = showMe, state.open, let chosen = state.chosen, chosen.versions.count > 1 else { return false }
+        let now = state.version ?? chosen.versions.count - 1
+        selectVersion(min(max(now + (forward ? 1 : -1), 0), chosen.versions.count - 1))
+        return true
     }
 
     // MARK: The player
@@ -199,7 +222,7 @@ extension RouterModel {
 
     /// The player has the keyboard when its web view has it, or when it fills the page or the window with nothing typed.
     func showMePlayerKeys(focused: Bool) -> Bool {
-        guard let state = showMe, state.open, state.chosen?.stage == .ready else { return false }
+        guard let state = showMe, state.open, state.shown?.stage == .ready else { return false }
         return focused || (state.size != .panel && draftEmpty)
     }
 
@@ -226,6 +249,8 @@ extension RouterModel {
         let words = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty else { return }
         setDraft("")
+        // The version it makes is the newest: the stage shows it as it's made.
+        showMe?.version = nil
         guard let explainers else { return }
         Task { @MainActor [weak self] in
             do {

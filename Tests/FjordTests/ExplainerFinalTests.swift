@@ -168,6 +168,39 @@ import Testing
         #expect(settles(rig) == [id, id])
     }
 
+    @Test func eachFollowUpIsAVersionNamedByItsWordsWithItsOwnFinalAndNoDrafts() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let id = try await launched(rig)
+        save(rig, ExplainerVersion(run: id, number: 1, code: "a(", broken: true))
+        save(rig, ExplainerVersion(run: id, number: 2, code: "a()", broken: false, answer: "First"))
+        #expect(rig.engine.items.first?.versions.map(\.making) == [true])
+        rig.replies[id] = "```js\na()\n```"
+        await end(rig, id)
+        var item = try #require(rig.engine.items.first)
+        #expect(item.versions.map(\.label) == ["Original"] && item.versions.map(\.making) == [false])
+        // A follow-up: a version being made at once, named by its words; the original still plays.
+        try await rig.engine.followUp(id, words: "simpler")
+        item = try #require(rig.engine.items.first)
+        #expect(item.versions.map(\.label) == ["Original", "simpler"] && item.versions.map(\.making) == [false, true])
+        #expect(item.version(0).stage == .ready && item.version(0).answer == "First")
+        #expect(item.version(nil).stage == .making(draft: 0, fixing: ""))
+        save(rig, ExplainerVersion(run: id, number: 3, code: "b()", broken: false, answer: "Draft"))
+        #expect(rig.engine.items.first?.versions.last?.answer == "Draft")
+        save(rig, ExplainerVersion(run: id, number: 4, code: "c()", broken: false, answer: "Simpler"))
+        rig.replies[id] = "```js\nc()\n```"
+        await end(rig, id, at: 200)
+        item = try #require(rig.engine.items.first)
+        #expect(item.versions.map(\.label) == ["Original", "simpler"] && item.versions.map(\.answer) == ["First", "Simpler"])
+        #expect(item.stage == .ready && item.versions.allSatisfy { !$0.making })
+        // A follow-up that ends with nothing new isn't listed.
+        try await rig.engine.followUp(id, words: "slower")
+        rig.replies[id] = "I ran out of time."
+        rig.renderer.fails = true
+        await end(rig, id, at: 300, status: "interrupted")
+        #expect(rig.engine.items.first?.versions.map(\.label) == ["Original", "simpler"])
+    }
+
     @Test func aRunWithNothingToShowFails() async throws {
         let rig = Rig()
         defer { rig.clean() }

@@ -39,6 +39,37 @@ struct ExplainerItem: Identifiable, Equatable, Sendable {
     var unseen = false
     /// It has a thread in T3 (a run, not a request that never launched): Open in T3 has somewhere to go.
     var launched = false
+    /// What was asked of it, oldest first: the original, then one per follow-up. Each finished one is its final; the one being
+    /// made shows its latest draft. Drafts are never listed.
+    var versions: [Version] = []
+
+    struct Version: Equatable, Sendable {
+        /// "Original", or the follow-up's words.
+        var label: String
+        var at: Date
+        var making = false
+        var answer = ""
+        var captions: [String] = []
+        var length = 0
+        var page: URL?
+        var posterLight: URL?
+        var posterDark: URL?
+    }
+
+    static let original = "Original"
+
+    /// The explainer as its version `index` shows it (nil, or one it doesn't have: the newest): that version's film, ready
+    /// unless it's the one being made.
+    func version(_ index: Int?) -> ExplainerItem {
+        guard let last = versions.indices.last else { return self }
+        let v = versions[index.map { min(max($0, 0), last) } ?? last]
+        var out = self
+        out.answer = v.answer.isEmpty ? answer : v.answer
+        out.captions = v.captions; out.length = v.length; out.page = v.page
+        out.posterLight = v.posterLight; out.posterDark = v.posterDark
+        if !v.making { out.stage = .ready } else if out.stage == .ready { out.stage = .making(draft: 0, fixing: "") }
+        return out
+    }
 }
 
 /// An explainer thread Fjord started, kept in `runs/<id>/run.json` (the renderer keeps `meta.json` beside it).
@@ -61,6 +92,19 @@ struct ExplainerRun: Codable, Equatable, Sendable {
     var draft = false
     var failed: String?
     var watchedAt: Date?
+    /// What was asked, oldest first: the original, then each follow-up, with its final once a run ended. nil in a run saved
+    /// before versions were kept: its one final is the original.
+    var asks: [Ask]?
+
+    struct Ask: Codable, Equatable, Sendable {
+        /// The follow-up's words; nil for the original.
+        var words: String?
+        var at: Date
+        var final: Int?
+    }
+
+    /// `asks`, the original included for a run saved before.
+    var versions: [Ask] { asks ?? [Ask(words: nil, at: createdAt, final: final)] }
 
     var unseen: Bool {
         guard final != nil, let finalAt else { return false }
@@ -272,6 +316,14 @@ final class ExplainerEngine: ExplainerRenderHost {
         // Read again: a final may have landed while T3 took the words.
         guard var run = runs[id] else { return }
         run.failed = nil
+        var asks = run.versions
+        if let last = asks.last, last.final == nil, last.words != nil {
+            // Steered into a follow-up still being made: one version answers both.
+            asks[asks.count - 1].words = (last.words ?? "") + ", " + words
+        } else {
+            asks.append(ExplainerRun.Ask(words: words, at: env.now().toMilliseconds))
+        }
+        run.asks = asks
         runs[id] = run
         save(run)
         publish()
@@ -381,8 +433,9 @@ final class ExplainerEngine: ExplainerRenderHost {
         }
         let title = shell.threads[r.source]?.title ?? source.thread.title
         env.hideThreads([r.id])
-        let run = ExplainerRun(id: r.id, ticket: Self.mintTicket(), source: r.source, sourceTitle: title, ask: r.ask,
+        var run = ExplainerRun(id: r.id, ticket: Self.mintTicket(), source: r.source, sourceTitle: title, ask: r.ask,
                                askText: input.askText, createdAt: env.now().toMilliseconds)
+        run.asks = [ExplainerRun.Ask(words: nil, at: run.createdAt)]
         let text = Self.message(ticket: run.ticket, input: input)
         let folder = project.runs.appendingPathComponent(r.id, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -441,26 +494,38 @@ final class ExplainerEngine: ExplainerRenderHost {
         defer { finalizing.remove(id) }
         guard var run = runs[id] else { return }
         let before = (run.final, run.draft)
+        let asked = run.versions.count
+        var answered: Int?
         let reply = await env.snapshot(id).flatMap(Self.lastReply)
         let saved = versions[id] ?? []
         switch ExplainerFinal.decide(lastReply: reply, versions: saved) {
-        case .version(let n): run.final = n; run.draft = false; run.failed = nil
-        case .draft(let n): run.final = n; run.draft = true; run.failed = nil
+        case .version(let n): run.final = n; run.draft = false; run.failed = nil; answered = n
+        case .draft(let n): run.final = n; run.draft = true; run.failed = nil; answered = n
         case .failed: run.failed = "The explainer didn't finish"
         case .render(let code):
             if let renderer, let v = try? await renderer.render(code, ticket: ExplainerTicket(run: id, ask: run.askText)) {
                 record(v)
-                run.final = v.number; run.draft = false; run.failed = nil
+                run.final = v.number; run.draft = false; run.failed = nil; answered = v.number
             } else if let good = saved.last(where: { !$0.broken }) {
-                run.final = good.number; run.draft = true; run.failed = nil
+                run.final = good.number; run.draft = true; run.failed = nil; answered = good.number
             } else {
                 run.failed = "The explainer didn't finish"
             }
         }
         // Only a new final is news: the same one read again keeps its time (and whether it was seen).
         if run.final != nil, (run.final, run.draft) != before { run.finalAt = env.now().toMilliseconds }
-        // A follow-up that ran meanwhile keeps the newer state.
-        if let current = runs[id] { run.watchedAt = current.watchedAt; run.finalizedRun = current.finalizedRun }
+        // A follow-up that ran meanwhile keeps the newer state, its words included.
+        if let current = runs[id] { run.watchedAt = current.watchedAt; run.finalizedRun = current.finalizedRun; run.asks = current.asks }
+        // The newest ask when the run ended is this run's: a final newer than the versions before answers it; with nothing
+        // new (no code, or an older version's) the ask goes. An ask before it that never got one goes too; one made since (a
+        // follow-up while this was read) stays, still to answer.
+        var asks = run.versions
+        if asked > 0, asked <= asks.count {
+            let i = asked - 1
+            let floor = asks[..<i].compactMap(\.final).max() ?? 0
+            if let answered, answered > floor { asks[i].final = answered } else { asks[i].final = -1 }
+            run.asks = asks.enumerated().filter { $0.element.final.map { $0 > 0 } ?? ($0.offset > i) }.map(\.element)
+        }
         runs[id] = run
         save(run)
         publish()
@@ -548,9 +613,35 @@ final class ExplainerEngine: ExplainerRenderHost {
                                      answer: shown?.answer ?? "", captions: shown?.captions ?? [], since: run.createdAt,
                                      stage: stage, length: Int((shown?.length ?? 0).rounded()), page: shown?.page,
                                      posterLight: shown?.posterLight, posterDark: shown?.posterDark, draft: run.draft,
-                                     unseen: run.unseen, launched: true))
+                                     unseen: run.unseen, launched: true,
+                                     versions: Self.versions(run, saved: saved, live: live)))
         }
         return Array(out.sorted { ($0.since, $0.id) > ($1.since, $1.id) }.prefix(Self.listed))
+    }
+
+    /// What was asked of a run, each its final's film; the newest, while its run is live, its latest draft (or nothing yet).
+    /// An ask that ended with no final isn't listed.
+    static func versions(_ run: ExplainerRun, saved: [ExplainerVersion], live: Bool) -> [ExplainerItem.Version] {
+        let asks = run.versions
+        return asks.enumerated().compactMap { i, ask in
+            let newest = i == asks.count - 1
+            // From the send on: T3's row turns live a moment later. A run that ended with nothing new fails it.
+            let making = newest && ask.final == nil && (live || run.failed == nil)
+            let film: ExplainerVersion?
+            if let n = ask.final {
+                film = saved.first { $0.number == n }
+            } else if making {
+                // The drafts saved since the version before: the newest of them.
+                let floor = asks[..<i].compactMap(\.final).max() ?? 0
+                film = saved.last { $0.number > floor }
+            } else {
+                return nil
+            }
+            return ExplainerItem.Version(label: ask.words ?? ExplainerItem.original, at: ask.at, making: making,
+                                         answer: film?.answer ?? "", captions: film?.captions ?? [],
+                                         length: Int((film?.length ?? 0).rounded()), page: film?.page,
+                                         posterLight: film?.posterLight, posterDark: film?.posterDark)
+        }
     }
 
     /// T3 has the project: Show me can be asked for (the page's toggle and dock show only then).

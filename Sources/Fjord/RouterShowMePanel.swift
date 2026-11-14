@@ -22,7 +22,7 @@ struct RouterShowMePanel: View {
         VStack(alignment: .leading, spacing: 10) {
             list
             // One place in the tree whatever the list does.
-            if let e = state.chosen {
+            if let e = state.shown {
                 RouterExplainerPlayer(model: model, explainer: e, state: state, size: .panel)
                     .padding(.horizontal, 6)
                     .padding(.bottom, 4)
@@ -68,7 +68,7 @@ struct RouterShowMeBig: View {
     let state: RouterShowMeState
 
     var body: some View {
-        if let e = state.chosen {
+        if let e = state.shown {
             Group {
                 if state.size == .window {
                     RouterExplainerPlayer(model: model, explainer: e, state: state, size: .window)
@@ -228,8 +228,8 @@ private struct RouterExplainerRow: View {
     @ViewBuilder private var words: some View {
         let font = CDS.sans(12)
         switch explainer.stage {
-        case .making(let draft, _):
-            Text(draft == 0 ? "Making" : "Making · draft \(draft)").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
+        case .making:
+            Text("Making").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
         case .queued:
             Text("Queued").font(font).foregroundStyle(CDS.Text.muted).lineLimit(1).fixedSize()
         case .ready:
@@ -296,10 +296,6 @@ struct RouterExplainerPlayer: View {
     @Environment(\.controlActiveState) private var active
 
     private var ready: Bool { explainer.stage == .ready }
-    private var draft: Int? {
-        if case .making(let n, _) = explainer.stage { return n > 0 ? n : nil }
-        return nil
-    }
     /// The web view, when this one plays in it.
     private var host: ExplainerWebHost? {
         guard ready, explainer.page != nil else { return nil }
@@ -320,7 +316,7 @@ struct RouterExplainerPlayer: View {
 
     @ViewBuilder private var content: some View {
         let stage = ExplainerStage(page: explainer.page, posterLight: explainer.posterLight, posterDark: explainer.posterDark,
-                                   draft: draft, ready: ready, host: host, radius: radius)
+                                   ready: ready, host: host, radius: radius)
         switch size {
         case .window:
             ZStack(alignment: .bottom) {
@@ -346,6 +342,7 @@ struct RouterExplainerPlayer: View {
                 .frame(height: 28)
                 .padding(.bottom, 8)
                 answer.padding(.bottom, 12)
+                versions.padding(.bottom, 12)
                 // As big as the room left over the caption and controls allows, which stay right under it.
                 stage.frame(maxWidth: .infinity)
                 below.padding(.top, 12)
@@ -354,6 +351,7 @@ struct RouterExplainerPlayer: View {
         case .panel:
             VStack(alignment: .leading, spacing: 0) {
                 answer.padding(.bottom, 10)
+                versions.padding(.bottom, 10)
                 stage
                 below.padding(.top, 10)
             }
@@ -364,6 +362,13 @@ struct RouterExplainerPlayer: View {
         if !explainer.answer.isEmpty {
             Text(explainer.answer).font(CDS.sans(size == .page ? 17 : 14, .semibold)).foregroundStyle(CDS.Text.primary)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// What was asked of it, when more than the original: one chip each, the one on show chosen.
+    @ViewBuilder private var versions: some View {
+        if let all = state.chosen?.versions, all.count > 1 {
+            RouterExplainerVersions(model: model, versions: all, on: state.version ?? all.count - 1)
         }
     }
 
@@ -400,16 +405,18 @@ struct RouterExplainerPlayer: View {
         RouterExplainerControls(model: model, explainer: explainer, host: host, state: state, size: size)
     }
 
-    /// Being made, queued or failed: what's happening, when the row and the stage's tag don't already say it, and Open in T3.
+    /// Being made, queued or failed: one quiet line, and Open in T3. Being made, the stage shows its latest draft, and only
+    /// that it's being made is said: drafts and their fixes are the agent's process.
     private var status: some View {
         HStack(spacing: 10) {
             Group {
                 switch explainer.stage {
-                case .making(let n, let fixing):
-                    if n == 0 {
-                        Text("Writing the first draft").foregroundColor(CDS.Text.muted)
-                    } else if !fixing.isEmpty {
-                        Text("Fixing: ").foregroundColor(CDS.Text.muted) + Text(fixing).foregroundColor(CDS.Text.secondary)
+                case .making:
+                    let label = state.chosen?.versions.last?.label
+                    if let label, label != ExplainerItem.original {
+                        Text("Making “\(label)”").foregroundColor(CDS.Text.muted)
+                    } else {
+                        Text("Making the explainer").foregroundColor(CDS.Text.muted)
                     }
                 case .queued:
                     Text("Starts when \(model.threadName(explainer)) answers").foregroundColor(CDS.Text.muted)
@@ -430,6 +437,62 @@ struct RouterExplainerPlayer: View {
 
     static func clock(_ seconds: Int) -> String { String(format: "%d:%02d", seconds / 60, seconds % 60) }
     static func clock(_ seconds: Double) -> String { clock(Int(seconds.isFinite ? max(0, seconds) : 0)) }
+}
+
+/// An explainer's versions, under its answer: the original, then one per follow-up, named by what was asked and when, the
+/// one on show chosen; the one being made has the making mark. A press, or ⌥⌘← ⌥⌘→, shows another at the player's size.
+private struct RouterExplainerVersions: View {
+    let model: RouterModel
+    let versions: [ExplainerItem.Version]
+    let on: Int
+
+    var body: some View {
+        let ground = RoundedRectangle(cornerRadius: Router.Surface.control + 2, style: .continuous)
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                ForEach(versions.indices, id: \.self) { i in chip(i) }
+            }
+            .padding(2)
+            .background(ground.fill(Router.Surface.quiet))
+            Spacer(minLength: 0)
+            RouterKeyHint(keys: ["alt", "cmd", "left", "right"])
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Versions")
+    }
+
+    /// A follow-up's words as its chip's name: the first 24 characters (the whole words on hover).
+    static func short(_ label: String) -> String {
+        let line = label.split(whereSeparator: \.isNewline).first.map(String.init) ?? label
+        return line.count > 24 ? line.prefix(23).trimmingCharacters(in: .whitespaces) + "…" : line
+    }
+
+    private func chip(_ i: Int) -> some View {
+        let v = versions[i], selected = i == on
+        let shape = RoundedRectangle(cornerRadius: Router.Surface.control, style: .continuous)
+        return RouterButton(model: model, hit: .showMe("version-\(i)"), action: { model.selectVersion(i) }) { hot, pressed in
+            HStack(spacing: 5) {
+                if v.making {
+                    RouterThinking(tint: CDS.Text.secondary, size: Router.Thinking.line, label: "Making")
+                        .frame(width: 12, height: 12)
+                }
+                Text(Self.short(v.label)).font(CDS.sans(12, selected ? .medium : .regular))
+                    .foregroundStyle(selected ? CDS.Text.primary : hot ? CDS.Text.primary : CDS.Text.secondary)
+                    .lineLimit(1).fixedSize()
+                Text(BriefAge.short(model.now.timeIntervalSince(v.at))).font(CDS.sans(11)).monospacedDigit()
+                    .foregroundStyle(CDS.Text.muted).fixedSize()
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(shape.fill(selected ? CDS.Surface.s1 : pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear)
+                .hoverMotion(hot))
+            .overlay { if selected { shape.strokeBorder(CDS.border, lineWidth: 1) } }
+        }
+        .help(v.label)
+        .accessibilityLabel(v.label + (v.making ? ", being made" : ""))
+        .layoutPriority(Double(i == on ? 1 : 0))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
 }
 
 /// Play, the scene bar, the time, Sources, Open in T3 and the size controls. With the page's state they drive it: a press on

@@ -115,6 +115,11 @@ enum RouterKeys {
             return true
         }
 
+        // ⌥⌘← ⌥⌘→: the open explainer's version before or after, at any size.
+        if flags == [.command, .option], code == kVK_LeftArrow || code == kVK_RightArrow,
+           model.stepVersion(forward: code == kVK_RightArrow) {
+            return true
+        }
         // Show me's player, with the keyboard or filling the page or the window: ← → a scene back or on, Space plays or
         // pauses. Esc steps it back (`escape`).
         if model.showMePlayerKeys(focused: inPlayer), flags.isEmpty {

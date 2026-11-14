@@ -342,8 +342,8 @@ struct ExplainerStage: View {
     /// The held last frame in each appearance (`poster-light.jpg`, `poster-dark.jpg`).
     var posterLight: URL?
     var posterDark: URL?
-    /// The draft on show while the explainer is made; nil once it's ready.
-    var draft: Int?
+    /// Ready: the version's final. Not ready, it's being made and the poster is its latest draft's, under no tag: drafts are
+    /// process, and the line under the stage says it's being made.
     var ready: Bool
     /// The page's web view (nil in demos, shots and tests).
     var host: ExplainerWebHost?
@@ -362,23 +362,16 @@ struct ExplainerStage: View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         ZStack(alignment: .topLeading) {
             still
-            if let host, case .web(let page) = Self.mode(page: page, ready: ready && draft == nil, crashed: host.playback.crashed) {
+            if let host, case .web(let page) = Self.mode(page: page, ready: ready, crashed: host.playback.crashed) {
                 ExplainerWebView(host: host, page: page, radius: radius)
                     .opacity(host.playback.state == nil ? 0 : 1)
-            }
-            if let draft {
-                Text("Draft \(draft)").font(CDS.sans(12)).foregroundStyle(CDS.Text.secondary)
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(RoundedRectangle(cornerRadius: Router.Surface.control, style: .continuous).fill(CDS.Surface.s3.opacity(0.94)))
-                    .padding(10)
             }
         }
         .aspectRatio(16 / 9, contentMode: .fit)
         .clipShape(shape)
         .overlay { if radius > 0 { shape.strokeBorder(CDS.border, lineWidth: 1).allowsHitTesting(false) } }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(draft.map { "Draft \($0), being corrected" } ?? "Explainer")
+        .accessibilityLabel(ready ? "Explainer" : "Explainer, being made")
     }
 
     /// The held frame, at full opacity.

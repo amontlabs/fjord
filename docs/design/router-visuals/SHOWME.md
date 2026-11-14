@@ -664,3 +664,13 @@ no room on a wide screen, no way to make it bigger.
 - **The dock opens on the right explainer.** `RouterShowMeState.preferred`: one being made, else the newest not watched,
   else the newest; opening always selects it (an old selection is never kept). One that finishes while the panel is open is
   selected, unless another finished one is on the stage (`update`).
+- **Versions.** `ExplainerRun.asks` keeps what was asked: the original, then each follow-up's words (steered into one still
+  being made, they join it), each with its final once its run ends; a run that ends with nothing new drops its ask, and a
+  run saved before has one "Original". `ExplainerItem.versions` lists them with each final's film; the newest, while made,
+  carries its latest draft. The panel (and the page size) shows a segmented row of chips under the answer when there's more
+  than the original: each named by its words (24 characters, all on hover) with its age, the one on show on the raised
+  ground, the one being made with the making mark, and ⌥⌘← → at the end. A press or ⌥⌘← ⌥⌘→ switches at the player's size;
+  the newest is the default and follows the next one made (`RouterShowMeState.version` nil). Drafts are gone from view: no
+  "Draft N" tag on the stage, no "Fixing: …" line, no "Making · draft N" in the row; while a version is made the stage shows
+  its latest draft and one quiet line says "Making “simpler”" (or "Making the explainer"). Shots: `v2-show-versions`,
+  `v2-show-versions-making`; the demo's token explainer has three versions.

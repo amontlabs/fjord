@@ -140,6 +140,24 @@ import Testing
         #expect(model.showMe?.selected == "new")
     }
 
+    @Test func versionsSwitchByPressOrOptionCommandArrowsKeepingTheSizeAndTheNewestIsTheDefault() {
+        var e = Self.ready()
+        e.versions = ["Original", "simpler", "show the processes"].map {
+            ExplainerItem.Version(label: $0, at: Date(), answer: $0)
+        }
+        let (model, _, _) = page(RouterShowMeState(open: true, selected: "e1", explainers: [e]))
+        #expect(model.showMe?.shown?.answer == "show the processes")
+        model.resizeShowMe(.page)
+        #expect(key(model, kVK_LeftArrow, [.command, .option]))
+        #expect(model.showMe?.version == 1 && model.showMe?.shown?.answer == "simpler" && model.showMe?.size == .page)
+        model.selectVersion(0)
+        #expect(model.showMe?.shown?.answer == "Original")
+        #expect(key(model, kVK_RightArrow, [.command, .option]))
+        #expect(key(model, kVK_RightArrow, [.command, .option]))
+        // Back on the newest: nil, so the next version made is the one shown.
+        #expect(model.showMe?.version == nil)
+    }
+
     @Test func oneThatFinishesWhileThePanelIsOpenIsShownUnlessAnotherFinishedOneIs() {
         var state = RouterShowMeState(open: true, selected: "a", explainers: [Self.making("b"), Self.making("a")])
         state.update([Self.ready("b"), Self.making("a")])
