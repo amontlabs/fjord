@@ -571,8 +571,7 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
   isn't a target). Opening, closing or changing the selection reads the draft again when the target changes.
 - **Queue fix (P3's file):** a source thread missing from the shell waits instead of dropping as gone, because a new
   thread's row arrives after T3 took the send. `ExplainerRequest.seen` marks a row that was there; only a row that was
-  seen and then left is "Its thread is gone". Known limit: a ⌥Return (queued) send with Show me is ready at the end of
-  the turn it waits behind, so its input can find no answer to its message yet and fails "There's no answer to explain yet".
+  seen and then left is "Its thread is gone". (A ⌥Return send's known limit here is fixed: see Review fixes.)
 - **Toggle:** the glyph alone (`RouterShowMeLayout.toggle` = `CDS.Composer.row`). The hint is part of the toggle's button,
   on the composer's ground so it covers words on hover; while on, the field keeps `RouterShowMeLayout.hint` (92 pt) free.
 - **Player:** `ExplainerStage` sits at one place in `RouterExplainerPlayer`. With the web view the panel draws only Open in
@@ -594,4 +593,7 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
 - 0d2d6bb6: the guard is restored each launch; a request launches only once the server is up and its message has a
   reply; each run is finalized once; each version keeps the kit it was made with (`kit/<stamp>/`); runs are read off
   the main thread.
+- ⌥Return with Show me: the request waits until its queued run was delivered and ended, and the input orders a queued
+  message by its run's `startedAt` (T3 stamps `createdAt` at the send, mid-turn), so the answer is its own run's reply,
+  not the tail of the turn it waited behind.
 - Open: old kit stamps are never deleted; explainers made before 0d2d6bb6 load the shared `kit/`.

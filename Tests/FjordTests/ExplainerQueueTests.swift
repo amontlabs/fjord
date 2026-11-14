@@ -235,6 +235,58 @@ import Testing
         #expect(!ExplainerQueue.answered(p, ask: "missing"))
     }
 
+    /// ⌥Return: the message is queued (stamped 10:02) behind a turn that keeps talking until 10:04. It waits through that
+    /// turn's end and its own run's start, and the explainer explains its own run's reply, not the turn it waited behind.
+    @Test func aQueuedSendWaitsForItsDeliveryAndItsReply() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let engine = rig.engine
+        engine.start()
+        rig.whole = T3Fixture.state([Self.row("t1", status: "running", active: "r1", completed: Self.sent - 60)], projects: rig.projects)
+        engine.shell(.synchronized)
+        await settle()
+        let at = ExplainerInputTests.at
+        func source(_ r2: [String: T3JSON], answered: Bool) -> T3Projection {
+            var messages = [
+                ExplainerInputTests.message("u1", "user", "Why is it slow?", at: at("10:00", 0), extra: ["runId": "r1"]),
+                ExplainerInputTests.message("a1", "assistant", "Looking.", at: at("10:01", 0), extra: ["runId": "r1"]),
+                ExplainerInputTests.message("u2", "user", "And the fix?", at: at("10:02", 0), extra: ["runId": "r2"]),
+                ExplainerInputTests.message("a1b", "assistant", "The cache misses.", at: at("10:03", 0), extra: ["runId": "r1"]),
+            ]
+            if answered { messages.append(ExplainerInputTests.message("a2", "assistant", "Warm it.", at: at("10:05", 0), extra: ["runId": "r2"])) }
+            var run2: [String: T3JSON] = ["id": "r2", "ordinal": 2, "userMessageId": "u2"]
+            for (k, v) in r2 { run2[k] = v }
+            return T3Projection(json: ["thread": T3Fixture.thread("t1"), "messages": .array(messages),
+                                       "runs": [["id": "r1", "ordinal": 1, "status": "completed", "userMessageId": "u1",
+                                                 "startedAt": .string(at("10:00", 0)), "completedAt": .string(at("10:04", 0))],
+                                                .object(run2)]])
+        }
+        engine.requested(source: "t1", ask: "u2", sentAt: Self.sent)
+        // The turn it waits behind ends; T3 hasn't delivered it yet (its run is still queued): no launch.
+        rig.source = source(["status": "queued", "queuePosition": 1], answered: false)
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent + 10)], projects: rig.projects)
+        engine.shell(nil)
+        await settle()
+        #expect(rig.launches.isEmpty && engine.items.map(\.stage) == [.queued])
+        // Delivered, its run working: still no launch.
+        rig.source = source(["status": "running", "startedAt": .string(at("10:04", 1))], answered: false)
+        rig.whole = T3Fixture.state([Self.row("t1", status: "running", active: "r2", completed: Self.sent + 10)], projects: rig.projects)
+        engine.shell(nil)
+        await settle()
+        #expect(rig.launches.isEmpty)
+        // Its run ends with its reply: one launch, on its own answer.
+        rig.source = source(["status": "completed", "startedAt": .string(at("10:04", 1)), "completedAt": .string(at("10:05", 1))],
+                            answered: true)
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent + 60)], projects: rig.projects)
+        engine.shell(nil)
+        await settle()
+        let text = try #require(rig.launches.first?.text)
+        #expect(rig.launches.count == 1)
+        #expect(text.contains("<ask>And the fix?</ask>"))
+        #expect(text.contains("focus=\"true\">Warm it.</turn>"))
+        #expect(!text.contains("The cache misses.\n\nWarm it."))
+    }
+
     @Test func nothingLaunchesBeforeThePreviewServerIsUp() async throws {
         let rig = Rig()
         defer { rig.clean() }

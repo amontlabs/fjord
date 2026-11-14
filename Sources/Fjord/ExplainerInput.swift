@@ -24,8 +24,14 @@ enum ExplainerInput {
     ///   - user: the short name swapped for `user` in every text.
     static func make(_ p: T3Projection, project: String, ask: String?, zone: TimeZone = .current,
                      user: String = NSUserName()) -> Input? {
+        // A message queued behind a turn (⌥Return) is stamped when it was sent, mid-turn; it reaches the agent when its run
+        // starts. Ordered by that delivery, the turn it waited behind comes before it, and its answer is its own run's.
+        var delivered: [String: Date] = [:]
+        for run in p.runs {
+            if let m = run.userMessageId, let at = run.startedAt?.date { delivered[m] = at }
+        }
         let messages = p.messages.filter { $0.role == "user" || $0.role == "assistant" }
-            .map { (date: $0.createdAt?.date ?? .distantPast, message: $0) }
+            .map { m in (date: max(m.createdAt?.date ?? .distantPast, delivered[m.id] ?? .distantPast), message: m) }
             .enumerated().sorted { ($0.element.date, $0.offset) < ($1.element.date, $1.offset) }.map(\.element)
         // Yours: T3's typed fields say what a message is, with no word rule (the Python's "doesn't start with `<`").
         func yours(_ m: T3Message) -> Bool {
