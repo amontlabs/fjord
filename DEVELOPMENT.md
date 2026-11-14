@@ -110,6 +110,7 @@ The T3 and Anthropic tests are skipped unless you opt in; run one suite at a tim
 ```sh
 FJORD_T3_LIVE=1 swift test --filter T3Live            # reads your real T3 server's shell; prints counts only
 FJORD_ANTHROPIC_LIVE=1 swift test --filter AnthropicLive   # a few tiny real API calls with your Keychain key
+FJORD_T3_LIVE=1 swift test --filter T3AttachmentLive  # NOT read-only: uploads a picture, starts one Haiku thread in "No project", archives it
 ```
 
 `FJORD_ANTHROPIC_LIVE=1` also enables the live decider smoke in `RouterProjectDecideTests`. Everything else in the T3 tests runs on stubs (`T3HTTPStub`, fixtures in `T3Fixtures.swift`) and never touches your T3 or the network.
