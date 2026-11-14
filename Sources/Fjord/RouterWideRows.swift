@@ -97,7 +97,7 @@ struct RouterWideMarginThread: View {
             let focused = open && (box.item == nil || !thread.ledger.block)
             VStack(alignment: .leading, spacing: 0) {
                 RouterButton(model: model, hit: .row(id), action: { model.click(row: id) }) { _, _ in
-                    own(thread)
+                    own(thread, quote: focused && cards ? RouterQuoteMark.onSentence(model, box, item: nil) : nil)
                 }
                 .background { ground(focused: focused, hot: flags.hot, pressed: flags.pressed) }
                 if focused && cards { RouterWideCard(model: model, box: box) }
@@ -109,7 +109,8 @@ struct RouterWideMarginThread: View {
             let focused = open && box.item == item.id
             VStack(alignment: .leading, spacing: 0) {
                 RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
-                    RouterWideItemWords(model: model, thread: id, item: item, hot: flags.hot && !focused)
+                    RouterWideItemWords(model: model, thread: id, item: item, hot: flags.hot && !focused,
+                                        quote: focused && cards ? RouterQuoteMark.onSentence(model, box, item: item) : nil)
                 }
                 .disabled(!item.live)
                 .background { ground(focused: focused, hot: flags.hot, pressed: flags.pressed) }
@@ -136,8 +137,9 @@ struct RouterWideMarginThread: View {
     }
 
     /// The thread's own words: a line's sentence, or a block's (the run's newest summary after the working dots, Done's
-    /// outcome after its check), its age right after them, then what it has running.
-    private func own(_ thread: RouterThread) -> some View {
+    /// outcome after its check), its age right after them, then what it has running. Open with no detail on its card, the
+    /// quote mark after the words.
+    private func own(_ thread: RouterThread, quote: RouterQuoteMarkSpec?) -> some View {
         let block = thread.ledger.block
         let s = box.sentence
         let words: Text = if block {
@@ -150,7 +152,7 @@ struct RouterWideMarginThread: View {
         }
         let empty = block && RouterBlockHeader.words(thread, sentence: s).isEmpty
         let reading = block ? thread.ledger.read != nil : s.phase == .reassessing
-        return RouterWideWords(words: words, age: empty ? nil : RouterWideAge.text(model, thread.since)) {
+        return RouterWideWords(words: words, age: empty ? nil : RouterWideAge.text(model, thread.since), quote: empty ? nil : quote) {
             if block, thread.ledger.top != nil {
                 // Its name has its most urgent item's colour: its own state is the mark by its own words.
                 if thread.isRunning {
@@ -216,6 +218,8 @@ struct RouterWideMarginName: View {
 struct RouterWideWords<Mark: View, Trail: View>: View {
     let words: Text
     var age: Text?
+    /// The card's quote mark, between the words and the age.
+    var quote: RouterQuoteMarkSpec? = nil
     @ViewBuilder let mark: () -> Mark
     @ViewBuilder let trail: () -> Trail
 
@@ -226,8 +230,15 @@ struct RouterWideWords<Mark: View, Trail: View>: View {
             ZStack { mark() }
                 .frame(width: Router.Line.markBox, height: I.lineHeight)
                 .padding(.trailing, Router.Line.markGap)
-            ((age.map { words + $0 }) ?? words).font(CDS.sans(14))
-                .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
+            Group {
+                if let quote {
+                    RouterQuoteTrail(model: quote.model, hit: quote.hit, thread: quote.thread, words: words, after: age)
+                } else {
+                    (age.map { words + $0 }) ?? words
+                }
+            }
+            .font(CDS.sans(14))
+            .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Router.Thinking.gap) { trail() }.padding(.leading, Router.Thinking.gap)
             Spacer(minLength: 0)
         }
@@ -255,6 +266,7 @@ struct RouterWideItemWords: View {
     let thread: String
     let item: RouterItem
     let hot: Bool
+    var quote: RouterQuoteMarkSpec? = nil
 
     var body: some View {
         let hit = RouterHit.itemDone(RouterModel.itemKey(thread, item.id))
@@ -266,7 +278,7 @@ struct RouterWideItemWords: View {
         } else {
             Text(item.sentence).foregroundColor(item.state == .checking ? CDS.Text.muted : CDS.Text.secondary)
         }
-        RouterWideWords(words: words, age: item.closing || done ? nil : RouterWideAge.text(model, item.since)) {
+        RouterWideWords(words: words, age: item.closing || done ? nil : RouterWideAge.text(model, item.since), quote: quote) {
             Image(systemName: item.kind.symbol).font(.system(size: Router.Items.mark, weight: .semibold))
                 .foregroundStyle(item.kind.tint).opacity(item.closing ? 0.45 : 1)
         } trail: {

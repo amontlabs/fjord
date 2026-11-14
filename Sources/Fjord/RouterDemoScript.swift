@@ -483,8 +483,7 @@ final class RouterDemoScript {
         await pause(1.0)
     }
 
-    /// A card whose reply is longer than its quote (a line both shapes keep, so no row folds in): → rolls the quote open
-    /// to its whole text and it stays so until ←; then the same by its "Show all" and "Show less".
+    /// A card whose reply is longer than its quote (a line both shapes keep, so no row folds in): opened, then shut.
     private func longReply() async {
         guard var t = model.thread(ID.settings) else { return }
         t.lastLines = RouterDemo.longReply
@@ -493,20 +492,6 @@ final class RouterDemoScript {
         RouterFrames.note("open long reply")
         await click(.row(t.id))
         await pause(1.0)
-        RouterFrames.note("right")
-        key(["right"], code: kVK_RightArrow)
-        await pause(1.5)
-        RouterFrames.note("left")
-        key(["left"], code: kVK_LeftArrow)
-        await pause(1.2)
-        RouterFrames.note("show all")
-        await click(.longText(t.id))
-        await pause(1.5)
-        RouterFrames.note("show less")
-        // The quote shuts from under the pointer, which stays put: rows gliding under it would light and peek over the
-        // rows checked.
-        await click(.longText(t.id), rehover: false)
-        await pause(1.2)
         RouterFrames.note("escape")
         escape()
         await pause(1.2)
@@ -642,7 +627,7 @@ final class RouterDemoScript {
         await beat(15, "A PR merges: T3 sees it within a minute")
         model.pr(ID.guide, 41, .merged)
         // Merged is not "live": the words stay, only the state word and the ground change.
-        source.verdict(ID.guide, line: "rewritten for the Chrome setup; PR #41") { $0.verdict(ID.guide, worth: .quiet) }
+        source.verdict(ID.guide, line: "guide rewritten around the Chrome setup; ready for review in PR #41") { $0.verdict(ID.guide, worth: .quiet) }
     }
 
     private func beat16() async {
@@ -997,7 +982,7 @@ final class RouterDemoScript {
         // The bar's: done, quiet. The reading row goes with it.
         if var bar = model.thread(ID.bar) {
             bar.judging = false
-            bar.sentence = .init(text: "counts only unread; tests pass, not pushed")
+            bar.sentence = .init(text: "the bar counts only unread entries now; tests pass; nothing pushed yet")
             model.apply(.upsert(bar))
         }
         await pause(1.0)

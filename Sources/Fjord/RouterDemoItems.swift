@@ -43,19 +43,43 @@ extension RouterDemo {
     }
 
     /// The items' look with what a line leaves out (shots `v2-item-*`): the owner's real case as a Do on a thread of its own
-    /// (its sentence wraps, its card quotes the release with its page as a button), Checkpoint boot's Decide in a sentence
+    /// (its sentence wraps, its detail links the release on its version, so the card has no button for it; its history
+    /// is the fix's run and the release's), Checkpoint boot's Decide in a sentence
     /// long enough to wrap in its block, its Know with the words it came from.
     static func itemsLook(_ model: RouterModel) {
         items(model)
         let now = model.now
         func ago(_ m: Double) -> Date { now.addingTimeInterval(-m * 60 - 20) }
+        typealias S = RouterWork.Summary
+        let line = "fix committed and pushed; lastdrop 0.8.13 released; installed app still 0.8.12"
+        let update = "Install the lastdrop 0.8.13 update from its panel; you still run 0.8.12"
         var gap = RouterThread(id: ID.transcriptGap, name: "Subagent transcript gap", title: "Subagent transcript gap",
-                               project: "lastdrop", state: .done, sentence: .init(text: "released as 0.8.13"), since: ago(13))
+                               project: "lastdrop", state: .done, sentence: .init(text: line), since: ago(13))
         gap.lastLines = lastdropRelease
+        gap.summary = RouterSummary(
+            sentence: line,
+            detail: "The fix is on main (d24947a) and shipped as [0.8.13](\(lastdropReleasePage)), signed and notarized; the installed app still runs 0.8.12, so it isn't live until you update.",
+            facts: [.init(kind: .tests, text: "tested: both subagent transcripts kept", tone: .good)],
+            source: lastdropRelease)
+        gap.work = RouterWork(
+            summaries: [S(id: 6, text: "Publishing the 0.8.13 release on GitHub with the notarized app", at: ago(14), run: "l2"),
+                        S(id: 5, text: "Building, signing and notarizing the 0.8.13 universal app", at: ago(19), run: "l2"),
+                        S(id: 4, text: "Committing the transcript fix and pushing it to main", at: ago(24), run: "l2"),
+                        S(id: 3, text: "Checking a run with two subagents keeps both transcripts whole", at: ago(33), run: "l1"),
+                        S(id: 2, text: "Keeping each subagent's turns in its own transcript as they arrive", at: ago(41), run: "l1"),
+                        S(id: 1, text: "Tracing where the second subagent's transcript loses its turns", at: ago(52), run: "l1")],
+            run: "l2",
+            starts: ["l2": .asked("Commit push and make a new release"),
+                     "l1": .asked("subagent transcripts have a gap when two run at once, find out why and fix it")])
+        gap.history = history(gap.work, extra: [
+            RouterEvent(id: "raised:\(Item.update)", at: ago(13), run: "l2", kind: .raised(.do, update)),
+            RouterEvent(id: "f-l2", at: ago(13.1), run: "l2", kind: .finished(line)),
+            RouterEvent(id: "f-l1", at: ago(31), run: "l1",
+                        kind: .finished("transcripts kept whole with two subagents; the fix not committed yet")),
+        ])
         gap.ledger = RouterLedger(items: [
-            RouterItem(id: Item.update, kind: .do, sentence: "Install the lastdrop 0.8.13 update from its panel; you still run 0.8.12",
-                       since: ago(13),
-                       detail: "The subagent transcript fix ships in 0.8.13: it isn't live until the installed app is updated.",
+            RouterItem(id: Item.update, kind: .do, sentence: update, since: ago(13),
+                       detail: "The subagent transcript fix ships in [0.8.13](\(lastdropReleasePage)): it isn't live until you accept the update in the app's panel.",
                        quote: lastdropInstall),
         ])
         var changes: [RouterChange] = [.upsert(gap)]
@@ -74,6 +98,9 @@ extension RouterDemo {
         }
         model.apply(.batch(changes))
     }
+
+    /// The 0.8.13 release's page, as the agent's message gives it.
+    static let lastdropReleasePage = "https://github.com/amontlabs/lastdrop/releases/tag/v0.8.13"
 
     /// The agent's last message on the transcript gap thread (the owner's real case, 2026-11-13).
     static let lastdropRelease = """

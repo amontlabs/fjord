@@ -544,6 +544,9 @@ final class RouterModel {
         switch hit {
         case .row(let id): if inside { hoverRow = id } else if hoverRow == id { hoverRow = nil }
         case .name(let id): if inside { hoverName = id } else if hoverName == id { hoverName = nil }
+        case .quote:
+            // The quote mark's hover stays while the pointer is on the mark or on it (the pointer crosses between them).
+            RouterQuoteHold.over(self, hit, .mark, inside)
         default:
             if inside { hoverControl = hit } else if hoverControl == hit { hoverControl = nil }
             switch hit {
@@ -935,7 +938,7 @@ final class RouterModel {
         formAt[id] = nil
     }
 
-    /// → / ←: opens or closes the card's long text (a plan, the last lines).
+    /// → / ←: opens or closes the card's long text (a plan).
     func expand(_ open: Bool) {
         guard let t = selectedThread, expanded.contains(t.id) != open else { return }
         animate(.spatial) { if open { expanded.insert(t.id) } else { expanded.remove(t.id) } }

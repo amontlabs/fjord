@@ -284,6 +284,22 @@ enum RouterShots {
             }, size: CGSize(width: width, height: 1000)),
         ]
     } + [
+        // An item open on a laptop-tall wide window: the thread's card over it, the item's options above the fold.
+        State(name: "v2-wide-1650-item-short", make: { model in
+            RouterDemo.items(model)
+            model.select(.line(ID.checkpoint))
+            model.focusItem(RouterDemo.Item.keep)
+        }, size: CGSize(width: 1650, height: 900)),
+        // The owner's case: lastdrop's Do open in the pane, its Done thread's card over it; and the thread's own card.
+        State(name: "v2-wide-1650-lastdrop-item", make: { model in
+            RouterDemo.itemsLook(model)
+            model.select(.line(ID.transcriptGap))
+            model.focusItem(RouterDemo.Item.update)
+        }, size: CGSize(width: 1650, height: 1000)),
+        State(name: "v2-wide-1650-lastdrop-thread", make: { model in
+            RouterDemo.itemsLook(model)
+            model.select(.line(ID.transcriptGap))
+        }, size: CGSize(width: 1650, height: 1000)),
         State(name: "v2-reassessing") { model in
             model.select(nil)
             RouterDemo.askPermission(model)

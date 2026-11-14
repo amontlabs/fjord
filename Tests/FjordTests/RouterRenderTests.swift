@@ -114,14 +114,15 @@ import Testing
         #expect(ran["list"] == nil)
     }
 
-    @Test func aGrowingReplyRunsItsLastLinesOnly() async throws {
+    @Test func aGrowingReplyRunsNeitherTheCardNorTheLine() async throws {
+        // The reply is the card's quote mark's (R11): its words show only in the mark's hover, so their growing redraws
+        // nothing on the page.
         let (model, window) = await hosted()
         defer { window.close() }
         model.select(.line(ID.tab))
         model.apply(.reply(ID.tab, text: "The draft now survives", writing: true))
         await settle(model)
         let ran = await bodies(model) { model.apply(.reply(ID.tab, text: "The draft now survives the handover", writing: true)) }
-        #expect(ran["lastLines:" + ID.tab] == 1)
         #expect(ran["card"] == nil)
         #expect(ran["line"] == nil)
     }

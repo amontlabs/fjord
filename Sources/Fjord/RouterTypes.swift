@@ -94,8 +94,10 @@ enum Router {
         static let gap: CGFloat = 10
         static let maxWidth: CGFloat = 560
         static let railInset: CGFloat = 10
-        static let lastLines = 4
-        static let lastLinesDone = 6
+        /// A hover's quote: its first lines, then a fade.
+        static let hoverQuoteLines = 4
+        /// The quote mark's hover: the quote's first lines, then a fade (no scroll).
+        static let quoteLines = 14
         static let planLines = 8
         static let footerGap: CGFloat = 16
         static let steps = 5
@@ -549,6 +551,9 @@ enum RouterHit: Hashable {
     case activity(String)
     /// A history row of a card, cut on its line: the pointer on it shows its words whole. `threadID` + US + event id.
     case history(String)
+    /// A card's quote mark: the thread's id and the item's (nil for the thread's last message). The pointer on it shows
+    /// the quote whole.
+    case quote(String, String?)
     case project(String?), state(RouterSection), clear
     case header(RouterSection)
     case option(String, Int)

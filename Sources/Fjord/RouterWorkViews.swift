@@ -63,6 +63,9 @@ struct RouterTimeline: View {
     @State private var contentHeight: CGFloat = 0
     @State private var hot = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A shorter history where its card shares the room (`RouterWidePane`'s thread card over an open item).
+    @Environment(\.routerTimelineCap) private var capped
+    private var cap: CGFloat { capped ?? W.timelineHeight }
 
     private typealias W = Router.Work
     private var d: CDS.Density { .compact }
@@ -89,10 +92,10 @@ struct RouterTimeline: View {
         let live = Self.entries(thread)
         let shown = held ?? live
         let newer = held.map { Self.newer(live, since: $0) } ?? 0
-        let overflows = contentHeight > W.timelineHeight + 0.5
-        let more = overflows && offset + W.timelineHeight < contentHeight - 1
+        let overflows = contentHeight > cap + 0.5
+        let more = overflows && offset + cap < contentHeight - 1
         ScrollViewReader { proxy in
-            CappedHeight(cap: W.timelineHeight) {
+            CappedHeight(cap: cap) {
                 ScrollView(.vertical) {
                     column(shown)
                         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { r in
@@ -152,6 +155,9 @@ struct RouterTimeline: View {
         // An item still open is on the page already (the line, or its row): its raising isn't repeated.
         let open = Set(thread.ledger.live.map { "raised:" + $0.id })
         events = events.filter { !open.contains($0.id) }[...]
+        // The line says the newest run's outcome: its turn ending isn't repeated, so what started that run sits right
+        // under the facts.
+        if let said = saidOutcome(thread, events) { events = events.filter { $0.id != said }[...] }
         if dropping > 0 {
             var left = dropping
             while let e = events.first, left > 0 {
@@ -177,6 +183,17 @@ struct RouterTimeline: View {
             previous = e
         }
         return out
+    }
+
+    /// The newest turn's ending, when the line reads its outcome: the thread is done (its sentence is its last turn's
+    /// outcome) and the turn is its newest run's, or the line's words are the outcome's.
+    private static func saidOutcome(_ thread: RouterThread, _ events: ArraySlice<RouterEvent>) -> String? {
+        guard let i = events.firstIndex(where: { if case .finished = $0.kind { true } else { false } }),
+              case .finished(let outcome) = events[i].kind else { return nil }
+        let newestRun = events.first(where: { $0.run != nil })?.run
+        let sameRun = events[i].run != nil && events[i].run == newestRun
+        let sameWords = outcome.caseInsensitiveCompare(thread.sentence.text) == .orderedSame
+        return (thread.state == .done && sameRun) || sameWords ? events[i].id : nil
     }
 
     /// The rows in `live` that `held` doesn't show (a run's start isn't counted).
@@ -301,13 +318,13 @@ struct RouterTimeline: View {
         }
     }
 
-    /// A row with its clock time trailing in the ages column.
+    /// A row with its age trailing in the ages column, read as the line's own ("12m", "3d") and ticking with it; its clock
+    /// time under the pointer.
     private func timed<Words: View>(_ at: Date, @ViewBuilder words: () -> Words) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             words()
             Spacer(minLength: 8)
-            Text(RouterWorkTime.clock(at)).font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
-                .fixedSize()
+            RouterTimelineAge(model: model, at: at)
         }
     }
 
@@ -379,5 +396,34 @@ enum RouterWorkTime {
     /// "13:58", or "1:58 PM": the system's 12- or 24-hour clock, its own digits for the hour.
     static func clock(_ date: Date) -> String {
         date.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute(.twoDigits))
+    }
+
+    /// The clock time, with its day when it isn't today: "13:58", "Yesterday 13:58", "12 Nov 13:58".
+    static func moment(_ date: Date, now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        if calendar.isDate(date, inSameDayAs: now) { return clock(date) }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+            return Self.yesterday + " " + clock(date)
+        }
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+        let day = sameYear ? date.formatted(.dateTime.day().month(.abbreviated)) : date.formatted(.dateTime.day().month(.abbreviated).year())
+        return day + " " + clock(date)
+    }
+
+    private static let yesterday = String(localized: "Yesterday")
+}
+
+/// A timeline row's age: the line's age words and ink on its minute clock, read here so a tick redraws only this; plain
+/// text, so it keeps the row's baseline (`RouterAge`'s Core Animation tick has none). Its clock time under the pointer.
+struct RouterTimelineAge: View {
+    let model: RouterModel
+    let at: Date
+
+    var body: some View {
+        let _ = model.clock.minute
+        Text(BriefAge.short(model.now.timeIntervalSince(at)))
+            .font(CDS.sans(12)).monospacedDigit().foregroundStyle(CDS.Text.muted)
+            .lineLimit(1).fixedSize()
+            .help(RouterWorkTime.moment(at, now: model.now))
     }
 }

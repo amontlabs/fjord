@@ -72,7 +72,7 @@ struct RouterItem: Identifiable, Equatable {
     /// What the sentence leaves out, in a sentence or two, when there is more to say (the read's, `RouterItemsPrompt`).
     var detail: String? = nil
     /// The exact lines of the agent's message the item comes from (kept only when they are in it word for word): the
-    /// peek and the card quote them, their links clickable in the words.
+    /// hover quotes their first lines, the card's quote mark them whole; their links are the card's buttons.
     var quote: String? = nil
     var state: State = .open
     /// T3's own request on the thread (a question, a form, a plan, a permission) or its run's real stop: an item like any
@@ -117,11 +117,21 @@ struct RouterItem: Identifiable, Equatable {
         return out
     }
 
-    /// The links the card offers as buttons, in order, each once: those in the detail that the quote doesn't show. A
-    /// link in the quote is already there, a link in its words (no button doubling it).
+    /// The links the card offers as buttons, in order, each once: its detail's and its quote's (the card shows the quote
+    /// only on its mark's hover, which can't be clicked), but those the detail already carries on its words.
     var links: [URL] {
-        let shown = Set(Self.links(in: quote))
-        return Self.links(in: detail).filter { !shown.contains($0) }
+        let inline = Set(Self.inlineLinks(in: detail))
+        var seen = inline
+        return (Self.links(in: detail) + Self.links(in: quote)).filter { seen.insert($0).inserted }
+    }
+
+    /// A Markdown link to a web address: `[words](https://…)`, its words and its address.
+    nonisolated(unsafe) static let markdownLink = #/\[([^\[\]\n]+)\]\((https?:\/\/[^\s()]+)\)/#
+
+    /// The addresses a text links on its words (`[0.8.13](https://…)`), in order.
+    static func inlineLinks(in text: String?) -> [URL] {
+        guard let text else { return [] }
+        return text.matches(of: markdownLink).compactMap { URL(string: String($0.output.2)) }
     }
 
     /// The web links in a text, in order, each once.
@@ -434,6 +444,8 @@ struct RouterItemRow: View {
     let selected: Bool
     let hot: Bool
     let pressed: Bool
+    /// Its card open with no detail: the card's quote mark after the sentence (`RouterQuoteMark.onSentence`).
+    var quote: RouterQuoteMarkSpec? = nil
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private typealias M = Router.Line
@@ -450,6 +462,12 @@ struct RouterItemRow: View {
                 if case .closing(let how) = item.state {
                     (lead + Text(item.sentence).foregroundColor(CDS.Text.muted).strikethrough(true, color: CDS.Text.muted)
                         + Text(verbatim: "  ") + Text(how).font(CDS.sans(12)).foregroundColor(CDS.Text.secondary) + RouterFlow.end)
+                        .font(CDS.sans(14))
+                        .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
+                        .transition(.opacity)
+                } else if let quote, !checking {
+                    RouterQuoteTrail(model: model, hit: quote.hit, thread: quote.thread,
+                                     words: lead + Text(item.sentence).foregroundColor(CDS.Text.secondary))
                         .font(CDS.sans(14))
                         .lineLimit(I.sentenceLines).fixedSize(horizontal: false, vertical: true)
                         .transition(.opacity)
@@ -635,40 +653,6 @@ struct RouterLinkButton: View {
         for prefix in ["https://", "http://", "www."] where s.hasPrefix(prefix) { s.removeFirst(prefix.count) }
         while s.hasSuffix("/") { s.removeLast() }
         return s
-    }
-}
-
-/// An item's quote in its card: the agent's words behind a rail, its first lines with a fade and Show all when there is
-/// more (the card's last lines' cut, `RouterQuoteCut`).
-struct RouterItemQuote: View {
-    let model: RouterModel
-    let thread: String
-    let text: String
-
-    var body: some View {
-        let d = CDS.Density.compact
-        let open = model.expanded.contains(thread)
-        let quoted = RouterItem.quoted(text)
-        let words = Text(RouterInline.text(quoted, size: d.body.0)).cdsText(d.body, .regular, CDS.Text.secondary)
-        RouterQuoteCut(open: open) {
-            words.fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
-                .clipped()
-                .contentShape(Rectangle())
-                .onTapGesture { if !open { model.expand(true) } }
-            words.lineLimit(Router.Card.lastLines).fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .hidden()
-            LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
-                .blendMode(.destinationOut)
-                .allowsHitTesting(false)
-            Rectangle().fill(CDS.Settings.railLine)
-            RouterShowAll(model: model, id: thread, open: open)
-                .frame(minWidth: 0, minHeight: 0, alignment: .topLeading)
-                .clipped()
-            RouterQuoteStops.views(quoted)
-        }
-        .compositingGroup()
     }
 }
 

@@ -306,24 +306,6 @@ final class RouterCaretView: NSView {
     }
 }
 
-/// The 2 × 14 caret after an agent's last word, as a glyph in the text so it wraps with it.
-enum RouterTextCaret {
-    static let image: NSImage = {
-        let image = NSImage(size: NSSize(width: 2, height: 14), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
-            return true
-        }
-        image.isTemplate = true
-        return image
-    }()
-
-    /// Joined to the last word by a no-break space: the caret never wraps onto a line of its own.
-    static var text: Text {
-        Text("\u{00A0}") + Text(Image(nsImage: image)).foregroundColor(CDS.Text.muted).baselineOffset(-2)
-    }
-}
-
 // MARK: - Words streaming
 
 /// A line's words and what is drawn among them: a PR's link and, after it, its state word (the code's, from the board).
@@ -502,6 +484,8 @@ struct RouterStreamedText: View {
     var prState: RouterThread.PR.State?
     /// The blank the first line starts with (the line's name over it).
     var lead: CGFloat = 0
+    /// Drawn after the words, whole (the card's quote mark, `RouterQuoteTrail`).
+    var trailing: Text? = nil
     var done: () -> Void = {}
 
     /// The stream's clock, in words' time: word `i` starts to fade in at `max(i, the clock when it arrived)`. `shown` is
@@ -528,8 +512,9 @@ struct RouterStreamedText: View {
     static let all: Double = 100_000
 
     init(words: RouterWords, tint: Color, mono: Bool = false, arriving: Bool, complete: Bool = true,
-         prState: RouterThread.PR.State? = nil, lead: CGFloat = 0, done: @escaping () -> Void = {}) {
+         prState: RouterThread.PR.State? = nil, lead: CGFloat = 0, trailing: Text? = nil, done: @escaping () -> Void = {}) {
         self.lead = lead
+        self.trailing = trailing
         self.words = words
         self.tint = tint
         self.mono = mono
@@ -544,11 +529,11 @@ struct RouterStreamedText: View {
         if #available(macOS 15, *), !reduce {
             // Laid out from the words alone; the words as drawn sit over that place, so a word that fades in measures
             // nothing.
-            RouterSentenceText.text(words, tint: tint, mono: mono, attributed: false, lead: lead)
+            text(attributed: false)
                 .hidden()
                 .overlay(alignment: .topLeading) {
                     if !still, shown < Self.all {
-                        RouterFadingWords(text: RouterSentenceText.text(words, tint: tint, mono: mono, attributed: true, lead: lead, turn: turn),
+                        RouterFadingWords(text: text(attributed: true),
                                             lines: lines, pop: pop, scheme: scheme, plan: plan) { ended($0) }
                     } else {
                         drawn()
@@ -564,16 +549,22 @@ struct RouterStreamedText: View {
                     DispatchQueue.main.async { withAnimation(spring) { pop = 1 } }
                 }
         } else {
-            RouterSentenceText.text(words, tint: tint, mono: mono, attributed: false, lead: lead)
+            text(attributed: false)
                 .onAppear { if arriving, complete { done() } }
                 .onChange(of: complete) { _, complete in if complete, arriving { done() } }
         }
     }
 
+    /// The words, then what trails them.
+    private func text(attributed: Bool) -> Text {
+        let words = RouterSentenceText.text(words, tint: tint, mono: mono, attributed: attributed, lead: lead, turn: turn)
+        return trailing.map { words + $0 } ?? words
+    }
+
     /// The words that have arrived, drawn whole.
     @available(macOS 15, *)
     private func drawn() -> some View {
-        RouterSentenceText.text(words, tint: tint, mono: mono, attributed: true, lead: lead, turn: turn)
+        text(attributed: true)
             .textRenderer(RouterWordRenderer(shown: Self.all, pop: pop))
             // The words change in one frame (a PR's state word flips, a line mutes): never two strings at once.
             .contentTransition(.identity)

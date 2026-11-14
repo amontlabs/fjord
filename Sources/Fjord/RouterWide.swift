@@ -246,9 +246,17 @@ struct RouterWidePage: View {
 
 // MARK: - The pane
 
-/// The selected row and its card, beside the list: the line as the list has it (name, project, age), the thread's own
-/// words, the open item's sentence, then the card, on the selected ground. As tall as what it says; past the page's
-/// height it scrolls.
+extension EnvironmentValues {
+    /// The history's height on a card that shares the room (nil: `Router.Work.timelineHeight`).
+    @Entry var routerTimelineCap: CGFloat? = nil
+    /// The thread's own acts (Snooze, Settle, Stop) on its card; off over an open item, where Open in T3 alone stays.
+    @Entry var routerThreadActs = true
+}
+
+/// The selected row and its card, beside the list. A thread (or a block's header): the line as the list has it (name,
+/// project, age), the thread's own words, then the card, on the selected ground. A block's item: the thread's card the
+/// same way but with no ground, its history shorter and no footer (Open in T3 an icon in its name row), then the item (its mark and
+/// sentence, then its card) on the selected ground under it. As tall as what it says; past the page's height it scrolls.
 struct RouterWidePane: View {
     let model: RouterModel
     let box: RouterLineBox
@@ -256,50 +264,102 @@ struct RouterWidePane: View {
     private typealias L = Router.Line
     private typealias I = Router.Items
 
+    /// The thread card's history over an open item: about four rows (19 tall, 3 apart).
+    static let itemTimelineCap: CGFloat = 4 * 19 + 3 * 3
+    /// Between the thread's card and the item's ground.
+    static let itemGap: CGFloat = 12
+
     var body: some View {
         let thread = box.head
         let block = thread.ledger.block
         let item = block ? box.item.flatMap { focus in thread.ledger.items.first { $0.id == focus } } : nil
-        let s = box.sentence
-        let own = block ? RouterBlockHeader.words(thread, sentence: s) : s.text
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 0) {
-                    name(thread)
-                    Spacer(minLength: 12)
-                    if let project = thread.project { RouterProjectBadge(project: project) }
-                    RouterAge(model: model, since: thread.since).padding(.leading, L.ageGap)
-                }
-                .padding(.leading, L.nameLeading).padding(.trailing, L.reach)
-                .frame(minHeight: L.minHeight)
-                if !own.isEmpty {
-                    let words = block
-                        ? Text(own)
-                        : RouterSentenceText.text(RouterWords(s.text, prs: thread.prs, stateWord: s.stateWord),
-                                                  tint: item == nil ? CDS.Text.primary : CDS.Text.muted, mono: s.mono, attributed: false)
-                    words.font(CDS.sans(14, item == nil ? .medium : .regular))
-                        .foregroundStyle(item == nil ? CDS.Text.primary : CDS.Text.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, Router.Card.leading).padding(.trailing, L.reach)
-                        .padding(.bottom, 8)
-                }
                 if let item {
-                    HStack(alignment: .top, spacing: L.markGap) {
-                        Image(systemName: item.kind.symbol).font(.system(size: I.mark, weight: .semibold))
-                            .foregroundStyle(item.kind.tint)
-                            .frame(width: L.markBox, height: I.lineHeight)
-                        Text(item.sentence).font(CDS.sans(14, .medium)).foregroundStyle(CDS.Text.primary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 0) {
+                        head(thread, opener: true)
+                        RouterSummaryView(model: model, thread: thread, item: nil, layer: .card(box))
+                            .environment(\.routerCardLeading, Router.Card.leading)
+                            .environment(\.routerLive, true)
+                            .environment(\.routerTimelineCap, Self.itemTimelineCap)
+                            .environment(\.routerThreadActs, false)
                     }
-                    .padding(.leading, Router.Margin.mark).padding(.trailing, L.reach)
-                    .padding(.bottom, 8)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top, spacing: L.markGap) {
+                            Image(systemName: item.kind.symbol).font(.system(size: I.mark, weight: .semibold))
+                                .foregroundStyle(item.kind.tint)
+                                .frame(width: L.markBox, height: I.lineHeight)
+                            trailed(Text(item.sentence), RouterQuoteMark.onSentence(model, box, item: item))
+                                .font(CDS.sans(14)).foregroundStyle(CDS.Text.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.leading, Router.Margin.mark).padding(.trailing, L.reach)
+                        .padding(.top, 8).padding(.bottom, 8)
+                        RouterWideCard(model: model, box: box)
+                    }
+                    .background(RoundedRectangle(cornerRadius: L.selectedRadius, style: .continuous).fill(Router.Surface.quiet))
+                    .padding(.top, Self.itemGap)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        head(thread)
+                        RouterWideCard(model: model, box: box)
+                    }
+                    .background(RoundedRectangle(cornerRadius: L.selectedRadius, style: .continuous).fill(Router.Surface.quiet))
                 }
-                RouterWideCard(model: model, box: box)
             }
-            .background(RoundedRectangle(cornerRadius: L.selectedRadius, style: .continuous).fill(Router.Surface.quiet))
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(thread.name), open")
+    }
+
+    /// The thread's line as the list has it, then its own words in the primary ink.
+    /// `opener`: over an open item, where the thread's card has no footer, Open in T3 as an icon before the project.
+    @ViewBuilder private func head(_ thread: RouterThread, opener: Bool = false) -> some View {
+        let block = thread.ledger.block
+        let s = box.sentence
+        let own = block ? RouterBlockHeader.words(thread, sentence: s) : s.text
+        HStack(spacing: 0) {
+            name(thread)
+            Spacer(minLength: 12)
+            if opener, thread.live { openIcon(thread).padding(.trailing, 6) }
+            if let project = thread.project { RouterProjectBadge(project: project) }
+            RouterAge(model: model, since: thread.since).padding(.leading, L.ageGap)
+        }
+        .padding(.leading, L.nameLeading).padding(.trailing, L.reach)
+        .frame(minHeight: L.minHeight)
+        if !own.isEmpty {
+            let words = block
+                ? Text(own)
+                : RouterSentenceText.text(RouterWords(s.text, prs: thread.prs, stateWord: s.stateWord),
+                                          tint: CDS.Text.primary, mono: s.mono, attributed: false)
+            trailed(words, RouterQuoteMark.onSentence(model, box, item: nil))
+                .font(CDS.sans(14)).foregroundStyle(CDS.Text.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, Router.Card.leading).padding(.trailing, L.reach)
+                .padding(.bottom, 8)
+        }
+    }
+
+    /// Words with the card's quote mark after them, when the card has no detail for it to follow.
+    @ViewBuilder private func trailed(_ words: Text, _ quote: RouterQuoteMarkSpec?) -> some View {
+        if let quote {
+            RouterQuoteTrail(model: quote.model, hit: quote.hit, thread: quote.thread, words: words)
+        } else {
+            words
+        }
+    }
+
+    /// Open in T3 as a quiet icon: the footer's act, where the thread's card has no footer.
+    private func openIcon(_ thread: RouterThread) -> some View {
+        RouterButton(model: model, hit: .footer(thread.id, .open), action: { model.open(thread.id) }) { hot, pressed in
+            Image(systemName: "arrow.up.right.square").font(.system(size: 12, weight: .regular))
+                .foregroundStyle(hot ? CDS.Text.primary : CDS.Text.muted)
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: Router.Surface.token, style: .continuous)
+                    .fill(pressed ? Router.Surface.pressed : hot ? Router.Surface.hover : .clear))
+        }
+        .help("Open in T3 ⌘O")
+        .accessibilityLabel("Open in T3")
     }
 
     /// The name as its line has it: its mark and its colour's ground.

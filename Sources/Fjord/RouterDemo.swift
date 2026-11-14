@@ -171,7 +171,7 @@ enum RouterDemo {
                           lastStep: "running `swift test --filter SnapshotRestore`")
 
         var guide = T(id: ID.guide, name: "Install guide", title: "Rewrite the install guide", project: "docs-site", state: .done,
-                      sentence: .init(text: "rewritten for the Chrome setup; PR #41"), since: ago(10))
+                      sentence: .init(text: "guide rewritten around the Chrome setup; ready for review in PR #41"), since: ago(10))
         guide.worth = .look
         guide.isNew = true
         guide.lastLines = "Rewrote the guide around the Chrome extension setup and removed the old CLI path. Screenshots are updated."
@@ -179,7 +179,7 @@ enum RouterDemo {
         guide.diff = .init(files: 4, added: 96, removed: 212)
 
         var bar = T(id: ID.bar, name: "Bar count", title: "Count untold needs-you on the bar", project: "fjord", state: .done,
-                    sentence: .init(text: "counts only unread; tests pass, not pushed"), since: ago(50))
+                    sentence: .init(text: "the bar counts only unread entries now; tests pass; nothing pushed yet"), since: ago(50))
         bar.lastLines = "The bar now counts only the entries you have not read. The tests pass. Nothing is pushed yet."
         bar.diff = .init(files: 3, added: 41, removed: 12)
 

@@ -41,12 +41,13 @@ struct RouterHistoryPeek: View {
 }
 
 extension RouterModel {
-    /// The history row the pointer is on, with its words whole.
+    /// The history row the pointer is on, with its words whole and its clock time.
     var historyPeeked: (key: String, words: String)? {
         guard case .history(let key)? = hoverControl else { return nil }
         let parts = key.split(separator: "\u{1F}", maxSplits: 1).map(String.init)
         guard parts.count == 2, let t = thread(parts[0]), let event = t.history.first(where: { $0.id == parts[1] }) else { return nil }
-        return (key, RouterHistoryPeek.plain(event))
+        // Its clock time after the words: the row shows only its age.
+        return (key, RouterHistoryPeek.plain(event) + "  \u{00B7} " + RouterWorkTime.moment(event.at, now: now))
     }
 }
 

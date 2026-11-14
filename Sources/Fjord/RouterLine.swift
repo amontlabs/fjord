@@ -592,21 +592,33 @@ struct RouterSentenceView: View {
                 let stream = s.stream
                 let id = thread.id
                 let lines = Router.Items.sentenceLines
+                // Its card open with no detail: the card's quote mark after the words (drawn whole, not streaming).
+                let quote = box.selected && !thread.ledger.block && s.phase != .streaming && !reassessing
+                    ? RouterQuoteMark.onSentence(model, box, item: nil) : nil
                 HStack(alignment: .top, spacing: Router.Thinking.gap) {
-                    RouterStreamedText(words: words, tint: tint, mono: s.mono, arriving: s.phase == .streaming,
-                                         complete: box.complete,
-                                         prState: words.parts.contains { $0.kind == .link } ? thread.prs.first?.state : nil,
-                                         lead: lead) {
-                        model.streamed(id, stream: stream)
-                    }
-                    .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
-                    .overlay(alignment: .topLeading) {
-                        if reassessing {
-                            RouterSheen().mask(alignment: .topLeading) {
-                                RouterSentenceText.text(words, tint: .black, mono: s.mono, attributed: false, lead: lead)
-                                    .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                    let prState = words.parts.contains { $0.kind == .link } ? thread.prs.first?.state : nil
+                    if let quote {
+                        // Drawn as without the mark (its PR's link and state word, the same renderer), the mark after.
+                        RouterQuoteTrail(model: model, hit: quote.hit, thread: id,
+                                         words: RouterSentenceText.text(words, tint: tint, mono: s.mono, attributed: false, lead: lead)) { trail in
+                            RouterStreamedText(words: words, tint: tint, mono: s.mono, arriving: false, complete: box.complete,
+                                                 prState: prState, lead: lead, trailing: trail)
+                        }
+                        .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        RouterStreamedText(words: words, tint: tint, mono: s.mono, arriving: s.phase == .streaming,
+                                             complete: box.complete, prState: prState, lead: lead) {
+                            model.streamed(id, stream: stream)
+                        }
+                        .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                        .overlay(alignment: .topLeading) {
+                            if reassessing {
+                                RouterSheen().mask(alignment: .topLeading) {
+                                    RouterSentenceText.text(words, tint: .black, mono: s.mono, attributed: false, lead: lead)
+                                        .lineLimit(lines).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                                }
+                                .transition(.opacity)
                             }
-                            .transition(.opacity)
                         }
                     }
                     // The Router's model is reading the thread: Fjord's mark after the words it is about to replace.
@@ -657,7 +669,8 @@ struct RouterProjectBadge: View {
     }
 }
 
-/// "now", "4m", "2h", "3d": how long it has waited, run, or been finished. It ticks on the page's one minute clock.
+/// "now", "4m", "2h", "3d": how long it has waited, run, or been finished, its clock time under the pointer. It ticks on
+/// the page's one minute clock.
 struct RouterAge: View {
     let model: RouterModel
     let since: Date
@@ -674,6 +687,8 @@ struct RouterAge: View {
                 // Its column inside: the view keeps its frame as the age ticks.
                 .frame(minWidth: Router.Line.ageWidth, alignment: .trailing)
         }
+        // Its clock time under the pointer, as the card's history ages show it ("13:58", "Yesterday 13:58").
+        .help(RouterWorkTime.moment(since, now: model.now))
     }
 }
 

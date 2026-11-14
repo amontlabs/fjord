@@ -105,7 +105,8 @@ struct RouterBlockRowView: View {
             let pending = box.pendingItems[item.id]
             VStack(alignment: .leading, spacing: 0) {
                 RouterButton(model: model, hit: .row(key), action: { model.click(item: item.id, of: id) }) { _, _ in
-                    RouterItemRow(model: model, thread: id, item: item, selected: focused, hot: flags.hot, pressed: flags.pressed)
+                    RouterItemRow(model: model, thread: id, item: item, selected: focused, hot: flags.hot, pressed: flags.pressed,
+                                  quote: focused ? RouterQuoteMark.onSentence(model, box, item: item) : nil)
                 }
                 .disabled(!item.live)
                 // A split message: the item's arrow, and the answer it will receive (SPLIT.md).

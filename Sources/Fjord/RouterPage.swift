@@ -474,6 +474,13 @@ struct RouterFloating: View {
                     .id("history-" + key)
                     .transition(.scaleFade(0.98, reduce: reduce))
             }
+            if let (hit, text) = model.quotePeeked, let frame = frames[hit] {
+                // A card's quote mark: the agent's words, hung just under the mark (over it only when there's no room
+                // below), its rail at the mark's x: it never covers the line the mark is on.
+                quoteHung(from: frame) { RouterQuotePeek(model: model, hit: hit, text: text, start: RouterQuotePeek.shotStart) }
+                    .id(hit)
+                    .transition(.scaleFade(0.98, reduce: reduce))
+            }
             if let id = model.activityPeeked, let thread = model.thread(id), let frame = frames[.activity(id)] {
                 // The glyphs sit at the line's end: the line's hover hangs back from their trailing edge, inside the page.
                 hung(from: frame, width: Router.Peek.width, trailing: true) {
@@ -522,6 +529,24 @@ struct RouterFloating: View {
         // Your words or the placeholder under the items: a row each, with no target of their own.
         if thread.ledger.read != nil { bottom += Router.Items.rowHeight }
         return CGRect(x: name.minX, y: name.minY, width: name.width, height: bottom - name.minY)
+    }
+
+    /// The quote mark's hover: its rail starts at the mark's x (clamped inside the page), under the mark when it fits,
+    /// over it otherwise.
+    private func quoteHung<Content: View>(from frame: CGRect, @ViewBuilder content: () -> Content) -> some View {
+        let viewport = model.targets.viewport
+        let width = Router.Peek.width, margin: CGFloat = 16
+        // The rail sits `pad` in from the hover's edge; the glyph's leading edge is about 6 pt left of the target's centre.
+        let start = frame.midX - 6 - Router.Peek.pad
+        let x = max(margin, min(start, viewport.width - margin - width))
+        return Color.clear.frame(width: frame.width, height: frame.height)
+            .overlay(alignment: .topLeading) {
+                RouterQuotePlacement(dx: x - frame.minX, gap: 4, roomBelow: viewport.height - margin - frame.maxY,
+                                     roomAbove: frame.minY - margin) {
+                    content().fixedSize()
+                }
+            }
+            .offset(x: frame.minX, y: frame.minY)
     }
 
     /// `trailing`: the panel's trailing edge on its anchor's (a menu under a trailing button).

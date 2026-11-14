@@ -4,11 +4,11 @@ import SwiftUI
 // One layered structure for every thread and item (docs/design/router-v2/DESIGN.md 1.5, 1.6, R10): the hover is the line
 // plus more, the card is the hover plus more, and nothing jumps between them or repeats.
 // - Line: the sentence (what matters now), whole, wrapping under the name.
-// - Hover: the sentence, then the detail (a sentence or two, if any) and the facts (quiet chips: `#41 merged`, `4 files
-//   +96 −212`, `2 subagents · Opus 5.5`, `waiting on CI`).
-// - Card, under its line (which says the sentence): the detail and the facts as the hover has them, then the source (the
-//   agent's own words, quoted, Show all; a plan, a permission's command, your words), the thread's history (its
-//   timeline; for Working that is the source), then the controls in one place: options, Done/Settle/Snooze, Open in T3.
+// - Hover: the sentence, then the detail (a sentence or two, if any), the facts (quiet chips: `#41 merged`, `4 files
+//   +96 −212`, `2 subagents · Opus 5.5`, `waiting on CI`) and the quote's first lines (the agent's own words).
+// - Card, under its line (which says the sentence): the detail with the quote mark after it (with no detail, the mark
+//   trails the line's sentence; the agent's words on hover, `RouterQuoteMark`), the facts, then the source (a plan, a permission's command, your words), the controls (options,
+//   Continue), the thread's history (its timeline; for Working that is the source), then the footer's acts.
 // The engine fills `RouterThread.summary` and `RouterThread.history`; an item's comes from the item itself.
 
 struct RouterSummaryView: View {
@@ -40,18 +40,19 @@ struct RouterSummaryView: View {
         let layers = RouterLayers(thread, item)
         return VStack(alignment: .leading, spacing: 8) {
             Text(RouterInline.text(layers.sentence, size: d.prose.0))
-                .font(layers.mono ? CDS.mono(12) : CDS.sans(d.prose.0, .medium)).foregroundStyle(CDS.Text.primary)
+                .font(layers.mono ? CDS.mono(12) : CDS.sans(d.prose.0)).foregroundStyle(CDS.Text.primary)
                 .fixedSize(horizontal: false, vertical: true)
             RouterLayerDetail(detail: layers.detail)
             RouterFacts(model: model, thread: thread, facts: layers.facts, live: false)
+            if let quote = layers.quote { RouterQuoteExcerpt(text: quote, lines: Router.Card.hoverQuoteLines) }
         }
         .routerPeekShell()
     }
 
-    /// Whether a hover has more than the line says: a detail or a fact. A line that says it all has none.
+    /// Whether a hover has more than the line says: a detail, a fact or a quote. A line that says it all has none.
     static func peeks(_ thread: RouterThread, _ item: RouterItem? = nil) -> Bool {
         let layers = RouterLayers(thread, item)
-        return layers.detail != nil || !layers.facts.isEmpty
+        return layers.detail != nil || !layers.facts.isEmpty || layers.quote != nil
     }
 }
 
@@ -62,8 +63,8 @@ extension EnvironmentValues {
 
 // MARK: - The layers' words
 
-/// What a thread or an item says, layer by layer: the line's sentence, the detail and the facts. One reading for the
-/// hover and the card, so they never disagree.
+/// What a thread or an item says, layer by layer: the line's sentence, the detail, the facts and the quote. One reading
+/// for the hover and the card, so they never disagree.
 struct RouterLayers {
     enum Detail: Equatable {
         case words(String)
@@ -75,15 +76,23 @@ struct RouterLayers {
     var mono = false
     var detail: Detail?
     var facts: [RouterSummary.Fact] = []
+    /// The agent's own words behind it: an item's quote, else (and for a thread) the thread's last message. None for a
+    /// summed-up working thread (the last turn's words aren't news) or an ask whose card shows what it is about (a plan,
+    /// a permission's command, your words).
+    var quote: String?
 
-    init(_ thread: RouterThread, _ item: RouterItem?) {
+    /// `lastLines`: the thread's last message where the record is the card's (its line's box keeps them apart).
+    init(_ thread: RouterThread, _ item: RouterItem?, lastLines: String? = nil) {
+        let last = Self.words(lastLines ?? thread.lastLines)
         // T3's request or the stop says what the thread's line said: the thread's own words and detail.
         if let item, item.request == nil {
             sentence = item.sentence
             detail = item.extra.map(Detail.words)
             facts = item.summary.facts
+            quote = Self.words(item.quote) ?? last
             return
         }
+        quote = Self.quotes(thread, asks: item != nil || thread.ledger.request == nil) ? last : nil
         // The header over a request: the thread's own words; the request's item says the rest.
         if item == nil, thread.ledger.request != nil {
             sentence = RouterBlockHeader.words(thread)
@@ -102,20 +111,48 @@ struct RouterLayers {
             detail = .words(ask)
         }
     }
+
+    private static func words(_ text: String?) -> String? {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
+    }
+
+    /// Whether the thread's card quotes its last message: not while the Router's summaries say what it does, nor for an
+    /// ask that shows what it is about (`asks`: the card is the ask's, not the header's over it).
+    private static func quotes(_ thread: RouterThread, asks: Bool) -> Bool {
+        if thread.state == .working, thread.work.current { return false }
+        guard asks else { return true }
+        switch thread.state {
+        case .needsYou(.plan), .needsYou(.permission), .sent: return false
+        default: return true
+        }
+    }
+}
+
+/// Where a detail's quote mark goes: its thread and its item.
+struct RouterQuoteMarkSpec {
+    let model: RouterModel
+    let thread: String
+    let item: String?
+
+    var hit: RouterHit { RouterQuoteMark.hit(thread, item) }
 }
 
 /// The detail: prose in the primary ink; a stop's error in mono on the danger ground, its words on the column.
 struct RouterLayerDetail: View {
     let detail: RouterLayers.Detail?
+    /// In the card, with a quote: the mark after the detail's last word.
+    var mark: RouterQuoteMarkSpec?
 
     var body: some View {
         let d = CDS.Density.compact
         switch detail {
         case .words(let words)?:
-            Text(RouterInline.text(words, size: d.prose.0)).cdsText(d.prose, .regular, CDS.Text.primary)
+            trailed(Text(RouterInline.text(words, size: d.prose.0)))
+                .cdsText(d.prose, .regular, CDS.Text.primary)
                 .fixedSize(horizontal: false, vertical: true).prose()
         case .error(let error)?:
-            Text(error).font(CDS.mono(12)).foregroundStyle(CDS.Text.primary).lineLimit(6)
+            trailed(Text(error)).font(CDS.mono(12)).foregroundStyle(CDS.Text.primary).lineLimit(6)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .padding(10)
@@ -125,6 +162,14 @@ struct RouterLayerDetail: View {
                 .padding(.leading, -10)
         case nil:
             EmptyView()
+        }
+    }
+
+    @ViewBuilder private func trailed(_ words: Text) -> some View {
+        if let mark {
+            RouterQuoteTrail(model: mark.model, hit: mark.hit, thread: mark.thread, words: words)
+        } else {
+            words
         }
     }
 }
@@ -263,8 +308,9 @@ struct RouterChipFlow: Layout {
 
 // MARK: - The card
 
-/// The card layer: the detail and the facts as the hover shows them, the source, the history, the controls. Every kind's
-/// card is this one view; an item's in a block starts under its row's words and has no history (the header's card has it).
+/// The card layer: the detail (with the quote mark after it) and the facts as the hover shows them, the source, the
+/// controls, the history, the footer. Every kind's card is this one view; an item's in a block starts under its row's
+/// words and has no history (the header's card has it).
 private struct RouterSummaryCard: View {
     let model: RouterModel
     let box: RouterLineBox
@@ -272,16 +318,24 @@ private struct RouterSummaryCard: View {
     let item: RouterItem?
     @Namespace private var rail
     @Environment(\.routerCardLeading) private var leading
+    /// Off over an open item (`RouterWidePane`): no footer; the thread's acts wait for its header.
+    @Environment(\.routerThreadActs) private var threadActs
 
     private typealias M = Router.Card
     private var d: CDS.Density { .compact }
 
     var body: some View {
         let _ = RouterBodies.count("card", box.id, of: model)
-        let layers = RouterLayers(thread, item)
+        // Whether it quotes: the line's box has the last lines (the record's are blanked so the card doesn't redraw as they
+        // grow); the mark only needs to know there are some.
+        let layers = RouterLayers(thread, item, lastLines: box.talking ? "…" : "")
         let inBlock = item != nil && thread.ledger.block
+        let mark = layers.quote == nil ? nil : RouterQuoteMarkSpec(model: model, thread: thread.id, item: item?.id)
         return VStack(alignment: .leading, spacing: M.gap) {
-            RouterLayerDetail(detail: layers.detail)
+            if layers.detail != nil {
+                RouterLayerDetail(detail: layers.detail, mark: mark)
+            }
+            // No detail: the mark trails the sentence the card is about, where that is drawn (`RouterQuoteMark.onSentence`).
             RouterFacts(model: model, thread: thread, facts: layers.facts, live: true)
             source
             // What answers it comes before the past: the controls, then the thread's history, newest first, on every
@@ -289,10 +343,12 @@ private struct RouterSummaryCard: View {
             // is the source itself. Then the footer's acts.
             controls
             if !inBlock, RouterTimeline.has(thread) { RouterTimeline(model: model, thread: thread) }
-            footer
+            // Over an open item the thread's card has no footer: Open in T3 is an icon in the pane's name row.
+            if threadActs { footer }
         }
         .padding(.leading, leading ?? (inBlock ? Router.Items.indent + M.hang : M.leading))
-        .padding(.trailing, M.trailing).padding(.bottom, M.bottom)
+        // With no footer (over an open item) the history's own fade ends it: the item's gap is the only space under it.
+        .padding(.trailing, M.trailing).padding(.bottom, threadActs ? M.bottom : 0)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -301,18 +357,10 @@ private struct RouterSummaryCard: View {
     /// none, as in a test). The header's card over a request is the thread's: its words and history, not the request.
     private var asks: Bool { item.map { $0.request != nil } ?? (thread.ledger.request == nil) }
 
-    /// A working thread the Router's model has summed up: its history is what it says; the last turn's words aren't news.
-    private var summarized: Bool { thread.state == .working && thread.work.current }
-
-    // MARK: Source: the agent's own words, or what the ask is about
+    // MARK: Source: what the ask is about (the agent's own words are the quote mark's)
 
     @ViewBuilder private var source: some View {
         if let item, item.request == nil {
-            // The agent's words behind the item; with nothing else of its own, its thread's last lines.
-            let quote = item.quote ?? (item.extra == nil && item.options.isEmpty && !box.lastLines.isEmpty ? box.lastLines : nil)
-            if let quote {
-                RouterItemQuote(model: model, thread: thread.id, text: quote).prose().padding(.leading, -M.railInset)
-            }
             let links = item.links
             if !links.isEmpty {
                 let key = RouterModel.itemKey(thread.id, item.id)
@@ -343,10 +391,7 @@ private struct RouterSummaryCard: View {
                     Text(sent.words).cdsText(d.body, .regular, CDS.Text.primary).fixedSize(horizontal: false, vertical: true).prose()
                 }
             default:
-                if box.talking, !summarized {
-                    // Its rail hangs left of the column; its words start on it.
-                    RouterLastLines(model: model, box: box).prose().padding(.leading, -M.railInset).transition(.opacity)
-                }
+                EmptyView()
             }
             if asks, thread.state == .stopped, let step = thread.stop?.lastStep, !step.isEmpty {
                 (Text("Last step: ") + Text(RouterInline.text(step, size: d.footnote.0)))
@@ -485,7 +530,7 @@ private struct RouterSummaryCard: View {
             if let item, item.request == nil {
                 RouterTextButton(model: model, hit: .footer(RouterModel.itemKey(id, item.id), .settle), title: Router.Items.Copy.done,
                                  keys: ["cmd", "backspace"], removes: true) { model.itemDone(id, item.id) }
-                openButton
+                // No Open in T3: it can't open at the item's place (⌘O still opens the thread).
             } else if let item {
                 // T3's request or the stop: its Done is the thread's Settle, off while T3 holds the thread.
                 if let why = model.holdReason(thread) {
@@ -494,7 +539,7 @@ private struct RouterSummaryCard: View {
                     RouterTextButton(model: model, hit: .footer(RouterModel.itemKey(id, item.id), .settle), title: Router.Items.Copy.done,
                                      keys: ["cmd", "backspace"], removes: true) { model.itemDone(id, item.id) }
                 }
-                if thread.live { openButton }
+                // No Open in T3 (⌘O still opens the thread); a request T3 can no longer answer has it in its options' place.
             } else {
                 switch thread.state {
                 case .working:

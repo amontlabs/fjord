@@ -57,10 +57,10 @@ extension RouterDemo {
                 starts: ["g2": .asked("drop the CLI path entirely, nobody installs it that way now"),
                          "g1": .asked("rewrite the install guide around the Chrome extension")])
             t.history = history(t.work, extra: [
-                RouterEvent(id: "f-g2", at: ago(10), run: "g2", kind: .finished("rewritten for the Chrome setup; PR #41 open")),
+                RouterEvent(id: "f-g2", at: ago(10), run: "g2", kind: .finished("guide rewritten around the Chrome setup; ready for review in PR #41")),
                 RouterEvent(id: "c-cli", at: ago(19), run: "g2",
                             kind: .closed(.decide, "keep the CLI path as an appendix, or drop it?", how: Router.Items.Copy.answered)),
-                RouterEvent(id: "f-g1", at: ago(38), run: "g1", kind: .finished("Chrome setup drafted; the CLI path still there")),
+                RouterEvent(id: "f-g1", at: ago(38), run: "g1", kind: .finished("Chrome setup section drafted; the old CLI path is still in the guide")),
                 RouterEvent(id: "x-cli", at: ago(38.5), run: "g1",
                             kind: .raised(.decide, "keep the CLI path as an appendix, or drop it?")),
             ])

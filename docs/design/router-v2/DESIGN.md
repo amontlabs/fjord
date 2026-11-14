@@ -283,6 +283,41 @@ between them and nothing repeats. Where an older rule below says otherwise (1.5'
   still open isn't repeated there. Same height, scrolling, fade and `↑ new` pill as R6's timeline (the pill counts
   anything new but a run's start). An item's card in a block has none: its header's card has it.
 
+### 1.4.2 Quotes as a mark, the line leads its history (R11)
+
+**R11** (2026-11-14, owner-approved after real-app shots; `RouterQuoteMark.swift`, `RouterQuoteShots.swift`, shots
+`v2-quote-hover`, `v2-quote-hover-scrolled`, `v2-quote-mark-hot`, `v2-item-card-no-detail`, `v2-item-card-no-quote`,
+`v2-wide-1650-lastdrop-{item,thread}`, `v2-wide-1650-item-short`). Where an older rule (1.4.1, 1.5's last lines, R8's
+quote and link buttons, the footers' Open in T3, the clock times) says otherwise, this wins.
+
+- **The quote is a mark, never a block.** The agent's own words behind what a card says (an item's quote, else its
+  thread's last message; a thread's last message) are an outline `quote.bubble` mark, 11 pt regular, 70 % of
+  `Text.muted` at rest, primary on a small evenly padded ground (3 pt, token radius) under the pointer, inline after
+  the last word of what it backs: the detail; with no detail, the sentence the card is about (the line, the item's row
+  or the wide pane's sentence), and only while the card is open. No rail block, no Show all, no row of its own.
+- **Its hover** hangs under the mark (its rail at the mark's x, inside the window; above only without room), never
+  over the mark's line: the whole message behind a rail, 14 lines tall at most, scrolling inside (no bar; a fade at
+  the bottom while more is below, at the top once scrolled). The pointer can cross onto it (it closes 0.18 s after
+  leaving both); scrolling stops at its ends and never reaches the page; its links work. A click on the mark opens
+  the thread in T3 (T3 can't open at a message yet: the quote's message id is to be stored for when it can).
+- **Links sit on their words.** A detail carries the reply's links on the words that name them (`[0.8.13](url)`, only
+  addresses in the reply); a link button is left only for a link no text carries.
+- **The line is the newest entry of its history.** A thread's card: line → detail with its mark → facts → controls →
+  history → footer. The history drops the turn-ended row whose outcome the line already says, so it reads on from the
+  line. Summaries keep no marks (2026-11-13).
+- **Ages everywhere.** Every time in a card or peek reads as the line's age ("12m"); its clock time ("13:58",
+  "Yesterday 13:58", "12 Nov 13:58") is under the pointer, on the line's own age too.
+- **No Open in T3 on an item.** It can't open at the item's place: an item's card (and a request shown as an item) ends
+  in `Done ⌘⌫` only; ⌘O still opens the thread; a request T3 can no longer answer keeps its Open in T3 button.
+- **Wide windows: an open item has its thread's card above it.** The thread's card (no ground, history capped at about
+  four rows, no footer: Open in T3 is a small muted ↗ in its name row, "Open in T3 ⌘O" under the pointer), 12 pt, then
+  the item's row and card on the selected ground. With the header selected, the pane is the thread's card as before.
+  Narrow windows open no second card (the item sits under its header line already).
+- **Hover rule.** A row has a hover when its card has anything but acts: a detail, facts or a quote; it ends with the
+  quote's first 4 lines.
+- **Weights.** Medium only for names on their ground and a form's question titles; sentences, details and a hover's
+  first line are regular. Focus is the selected ground, not weight.
+
 ### 1.5 Card (the selected line's)
 
 One card component, inline under its line, inside the selected surface. Selection by ↑↓, click or page open shows the
