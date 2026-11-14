@@ -32,9 +32,18 @@ final class FakeClaude: @unchecked Sendable {
     /// The call whose input names this thread's title.
     func call(_ title: String) -> Int? { calls.firstIndex { $0.input.contains("Thread: \(title)\n") || $0.input.hasSuffix("Thread: \(title)") } }
 
-    func send(_ i: Int, _ lines: [String]) { for l in lines { calls[i].continuation.yield(Data(l.utf8)) } }
-    func close(_ i: Int) { calls[i].continuation.finish() }
-    func fail(_ i: Int) { calls[i].continuation.finish(throwing: ClaudePrint.Failure(message: "boom")) }
+    /// The `n`th call, or nil while it hasn't started: a wait that timed out on a loaded runner leaves it missing, and
+    /// reading it then must fail the test, not crash the whole run.
+    func call(_ n: Int) -> Call? { lock.withLock { all.indices.contains(n) ? all[n] : nil } }
+
+    func send(_ i: Int, _ lines: [String]) { for l in lines { call(i, "send to")?.continuation.yield(Data(l.utf8)) } }
+    func close(_ i: Int) { call(i, "close")?.continuation.finish() }
+    func fail(_ i: Int) { call(i, "fail")?.continuation.finish(throwing: ClaudePrint.Failure(message: "boom")) }
+
+    private func call(_ i: Int, _ what: String) -> Call? {
+        guard let c = call(i) else { Issue.record("no call \(i) to \(what): only \(calls.count) started"); return nil }
+        return c
+    }
 
     /// A whole stream-json answer: the typed answer's text cut in pieces of `size`, then the result line.
     static func answer(_ object: [String: Any], size: Int = 6, usage: (Int, Int) = (1600, 330)) -> [String] {
@@ -102,8 +111,8 @@ final class FakeClaude: @unchecked Sendable {
         e.ask(request("Snapshot"))
         // The shared watchdog, not `until`'s two seconds: under a full suite's load the stream's hops take longer.
         await waitUntil { fake.calls.count == 1 }
-        #expect(fake.calls[0].arguments.contains("stream-json"))
-        #expect(fake.calls[0].arguments.contains("claude-haiku-5-5"))
+        #expect(fake.call(0)?.arguments.contains("stream-json") == true)
+        #expect(fake.call(0)?.arguments.contains("claude-haiku-5-5") == true)
         fake.send(0, FakeClaude.answer(FakeClaude.step, size: 5))
         fake.close(0)
         await waitUntil { told.of("Snapshot").last.map { if case .done = $0 { true } else { false } } ?? false }
@@ -118,7 +127,7 @@ final class FakeClaude: @unchecked Sendable {
         #expect(e.runningCount == 0)
     }
 
-    @Test func atMostFourAtOnceAndTheFifthWaits() async {
+    @Test func atMostFourAtOnceAndTheFifthWaits() async throws {
         let fake = FakeClaude()
         let (e, told) = engine(fake)
         for i in 1...5 { e.ask(request("t\(i)", at: Double(i))) }
@@ -126,7 +135,7 @@ final class FakeClaude: @unchecked Sendable {
         #expect(e.runningCount == 4)
         #expect(e.queuedCount == 1)
         #expect(fake.call("t5") == nil)
-        let first = fake.call("t1")!
+        let first = try #require(fake.call("t1"))
         fake.send(first, FakeClaude.answer(FakeClaude.quiet))
         fake.close(first)
         await until(fake.calls.count == 5)
@@ -150,15 +159,14 @@ final class FakeClaude: @unchecked Sendable {
             let n = fake.calls.count
             fake.close(n - 1)
             await until(fake.calls.count == n + 1)
-            guard fake.calls.count > n else { break }
-            let input = fake.calls[n].input
+            guard let input = fake.call(n)?.input else { break }
             if let title = ["named", "older", "newer", "asks"].first(where: { input.contains("Thread: \($0)") }) {
                 order.append(title)
                 if title == "named" { named = n }
             }
         }
         #expect(order == ["asks", "newer", "older", "named"])
-        #expect(named.map { fake.calls[$0].arguments.contains { $0.contains(#""name""#) && !$0.contains(#""line""#) } } == true)
+        #expect(named.flatMap { fake.call($0)?.arguments.contains { $0.contains(#""name""#) && !$0.contains(#""line""#) } } == true)
     }
 
     @Test func aCancelStopsTheProcessAndTellsNothing() async {
@@ -167,8 +175,8 @@ final class FakeClaude: @unchecked Sendable {
         e.ask(request("t"))
         await until(fake.calls.count == 1)
         e.cancel("t")
-        await until(fake.calls[0].terminated)
-        #expect(fake.calls[0].terminated)
+        await until(fake.call(0)?.terminated == true)
+        #expect(fake.call(0)?.terminated == true)
         fake.send(0, FakeClaude.answer(FakeClaude.quiet))
         try? await Task.sleep(for: .milliseconds(30))
         #expect(told.events.isEmpty)
@@ -182,7 +190,7 @@ final class FakeClaude: @unchecked Sendable {
         #expect(told.of("u").first.map { if case .words = $0 { true } else { false } } == true)
         let before = told.events.count
         e.cancel("u")
-        await until(fake.calls[1].terminated)
+        await until(fake.call(1)?.terminated == true)
         fake.send(1, Array(lines.dropFirst(20)))
         try? await Task.sleep(for: .milliseconds(30))
         #expect(told.events.count == before)
@@ -198,7 +206,7 @@ final class FakeClaude: @unchecked Sendable {
         #expect(fake.calls.count == 1)
         e.ask(request("t", fingerprint: "b"))
         await until(fake.calls.count == 2)
-        #expect(fake.calls[0].terminated)
+        #expect(fake.call(0)?.terminated == true)
         fake.send(0, FakeClaude.answer(FakeClaude.step))
         fake.send(1, FakeClaude.answer(FakeClaude.quiet))
         fake.close(1)
@@ -256,7 +264,7 @@ final class FakeClaude: @unchecked Sendable {
         let (e, _) = engine(fake)
         e.ask(request("n", .name))
         await until(fake.calls.count == 1)
-        #expect(fake.calls[0].arguments.contains("claude-haiku-5-5"))
+        #expect(fake.call(0)?.arguments.contains("claude-haiku-5-5") == true)
     }
 
     @Test func usageIsLoggedAsVerdicts() async throws {
@@ -288,7 +296,7 @@ final class FakeClaude: @unchecked Sendable {
         await until(fake.calls.count == 1)
         // Claude Code names the wait: 600 ms (long enough that a loaded run still sees the hold).
         fake.send(0, [#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":600,"error":"rate_limit"}"#])
-        await until(fake.calls[0].terminated && e.held)
+        await until(fake.call(0)?.terminated == true && e.held)
         // Not failed: back in the queue, the line still being read.
         #expect(told.of("a").isEmpty)
         #expect(e.queuedCount == 2)
@@ -333,14 +341,14 @@ final class FakeClaude: @unchecked Sendable {
         await waitUntil { told.of("b").last.map { if case .done = $0 { true } else { false } } ?? false }
     }
 
-    @Test func anAskReadsItsLineAndANameItsName() async {
+    @Test func anAskReadsItsLineAndANameItsName() async throws {
         let fake = FakeClaude()
         let (e, told) = engine(fake)
         e.ask(request("q", .ask))
         e.ask(request("q", .name))
         await until(fake.calls.count == 2)
         #expect(e.runningCount == 2)
-        let ask = fake.calls.firstIndex { $0.arguments.contains { $0.contains(#""line""#) } }!
+        let ask = try #require(fake.calls.firstIndex { $0.arguments.contains { $0.contains(#""line""#) } })
         let name = 1 - ask
         fake.send(ask, FakeClaude.answer(["name": "Checkpoint boot", "line": "wants to remove the old checkpoint worktree, with --force"]))
         fake.close(ask)
@@ -400,9 +408,9 @@ final class FakeClaude: @unchecked Sendable {
         e.onItems = { told.append(($0, $1, $2)) }
         e.ask(items("t", open: Self.open))
         await waitUntil { fake.calls.count == 1 }
-        #expect(fake.calls[0].arguments.contains("claude-sonnet-5-5"))
-        #expect(fake.calls[0].input.contains("- id i1 (do, open 0 min): merge PR #12"))
-        #expect(fake.calls[0].input.contains("Its reply:\n<session-content"))
+        #expect(fake.call(0)?.arguments.contains("claude-sonnet-5-5") == true)
+        #expect(fake.call(0)?.input.contains("- id i1 (do, open 0 min): merge PR #12") == true)
+        #expect(fake.call(0)?.input.contains("Its reply:\n<session-content") == true)
         fake.send(0, FakeClaude.answer(FakeClaude.items, size: 7))
         fake.close(0)
         await waitUntil { told.last.map { if case .done = $0.2 { true } else { false } } ?? false }
@@ -439,8 +447,8 @@ final class FakeClaude: @unchecked Sendable {
         e.onItems = { _, _, ev in told.append(ev) }
         e.ask(items("t", turn: false, open: Self.open))
         await waitUntil { fake.calls.count == 1 }
-        #expect(fake.calls[0].arguments.contains { $0.contains(#""open""#) && !$0.contains(#""found""#) })
-        #expect(fake.calls[0].input.contains("The user's words to the thread now:"))
+        #expect(fake.call(0)?.arguments.contains { $0.contains(#""open""#) && !$0.contains(#""found""#) } == true)
+        #expect(fake.call(0)?.input.contains("The user's words to the thread now:") == true)
         // Ids it wasn't given are ignored.
         fake.send(0, FakeClaude.answer(["open": [["id": "i1", "verdict": "close", "how": "answered"], ["id": "zz", "verdict": "close", "how": "done"]]]))
         fake.close(0)

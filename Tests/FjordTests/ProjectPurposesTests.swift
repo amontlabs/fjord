@@ -21,9 +21,9 @@ import Testing
         purposes.onChange = { changed.append($0) }
         purposes.update(project: "p1", name: "fjord", firstAsks: ["write the install guide", "fix the bar count"])
         await until(fake.calls.count == 1)
-        #expect(fake.calls[0].input.contains("Project: fjord"))
-        #expect(fake.calls[0].input.contains("- write the install guide"))
-        #expect(fake.calls[0].arguments.contains { $0.contains(#""purpose""#) })
+        #expect(fake.call(0)?.input.contains("Project: fjord") == true)
+        #expect(fake.call(0)?.input.contains("- write the install guide") == true)
+        #expect(fake.call(0)?.arguments.contains { $0.contains(#""purpose""#) } == true)
         // The same set again, in another order, while it is asked: nothing more.
         purposes.update(project: "p1", name: "fjord", firstAsks: ["fix the bar count", "write the install guide"])
         answer(fake, 0, "A macOS app that routes messages to agent threads.")

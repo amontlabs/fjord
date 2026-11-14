@@ -380,10 +380,10 @@ import Testing
         e.onSummary = { _, fp, ev in #expect(fp == "f-s"); summaries.append(ev) }
         e.ask(request("s", .summary))
         await waitUntil { fake.calls.count == 1 }
-        #expect(fake.calls[0].arguments.contains("claude-haiku-5-5"))
-        #expect(fake.calls[0].arguments.contains { $0.contains(#""now""#) && $0.contains(#""line""#) })
-        #expect(fake.calls[0].input.contains("Its latest words:\n<session-content"))
-        #expect(fake.calls[0].input.contains("Running now:"))
+        #expect(fake.call(0)?.arguments.contains("claude-haiku-5-5") == true)
+        #expect(fake.call(0)?.arguments.contains { $0.contains(#""now""#) && $0.contains(#""line""#) } == true)
+        #expect(fake.call(0)?.input.contains("Its latest words:\n<session-content") == true)
+        #expect(fake.call(0)?.input.contains("Running now:") == true)
         fake.send(0, FakeClaude.answer(["done": "Found the gap", "now": "moving the copy", "line": "Moving the draft copy earlier."], size: 5))
         fake.close(0)
         await waitUntil { summaries.last.map { if case .done = $0 { true } else { false } } ?? false }
@@ -410,8 +410,7 @@ import Testing
             let n = fake.calls.count
             fake.close(n - 1)
             await until(fake.calls.count == n + 1)
-            guard fake.calls.count > n else { break }
-            let input = fake.calls[n].input
+            guard let input = fake.call(n)?.input else { break }
             if let title = ["summed", "named", "finished", "purpose"].first(where: { input.contains("Thread: \($0)") }) {
                 order.append(title)
             }
@@ -428,7 +427,7 @@ import Testing
         #expect(fake.calls.count == 3)
         e.ask(request("asks", .ask))
         await until(fake.calls.count == 4)
-        #expect(fake.calls.count > 3 && fake.calls[3].input.contains("Thread: asks"))
+        #expect(fake.call(3)?.input.contains("Thread: asks") == true)
     }
 
     @Test func aSummarysRateLimitHoldsOnlyTheSummaries() async {
@@ -445,7 +444,7 @@ import Testing
         await until(fake.calls.count == 2)
         try? await Task.sleep(for: .milliseconds(30))
         #expect(fake.calls.count == 2)
-        #expect(fake.calls.count > 1 && fake.calls[1].input.contains("Thread: asks"))
+        #expect(fake.call(1)?.input.contains("Thread: asks") == true)
     }
 
     @Test func aThreadsSummaryIsCancelledOnItsOwn() async {

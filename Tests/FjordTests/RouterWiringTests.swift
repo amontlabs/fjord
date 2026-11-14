@@ -108,8 +108,8 @@ import Testing
             reply: "Rewrote the install guide for the Chrome setup and opened PR #41. Merge it when you're happy.",
             status: "completed", live: false)]))
         await waitUntil { fake.calls.contains { $0.arguments.contains { $0.contains(#""found""#) } } }
-        for i in fake.calls.indices {
-            let items = fake.calls[i].arguments.contains { $0.contains(#""found""#) }
+        for (i, call) in fake.calls.enumerated() {
+            let items = call.arguments.contains { $0.contains(#""found""#) }
             fake.send(i, FakeClaude.answer(items ? ["open": [Any](), "found": [["kind": "do", "same_as": "", "sentence": "merge PR #41", "options": [String]()]],
                                                     "line": "install guide written; PR #41"] : ["name": "Install guide"]))
             fake.close(i)
