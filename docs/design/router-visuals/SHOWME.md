@@ -424,3 +424,23 @@ only read it). Each piece runs `scripts/test.sh` once before its commit. P5 chec
 - **S3:** can a thread launch into an archived T3 project (to hide it in T3's sidebar too)? Optional.
 - Cost: an Opus creator per Show me (the eight cases ran $0.22–0.43 each, `run.json`). It only runs when asked, which is the
   owner's trade-off; it's logged per thread in T3's usage, not in `model-usage.jsonl` (that file is for Fjord's own calls).
+
+## 12. Spike results (2026-11-14)
+
+The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). Nothing was committed, and the T3 project and threads were deleted.
+
+- **B5 settled: no fallback needed.** A borderless `NSWindow` that is never ordered in (and one at −20000,−20000, ordered back) paints fully with `takeSnapshot(afterScreenUpdates: true)`: Geist and Geist Mono, GSAP state at the seek, and the kit's chrome. The two modes give byte-identical PNGs. Each page loads `?scene=N` and waits for `body[data-ready="1"]` through a `MutationObserver` and a script message, with no polling. On `cases2/1-claude-token/final.js`, 5 scenes: about 58 ms from load to ready, 58 ms for the snapshot (2000×1520 at 2×), and about 165 ms per frame including the PNG encode. The process ran with `.prohibited` activation policy: no Dock icon and no focus change. Plan changes: drop the alpha-0.01 `NSPanel` fallback. Pass `theme=` explicitly, because the page otherwise follows the system appearance. Set `WKSnapshotConfiguration.snapshotWidth` to 1000 for 1× frames.
+- **B4 settled: 7 images arrive whole.** `claude -p --model sonnet` with a FastMCP stdio tool returning text plus 7 images at 1000×560 received all 7, with no warning or truncation. It read frame 7's headline and labels exactly. JPEG q80 was 61–84 KB per frame (about 485 KB total); PNG was 250–330 KB (about 2.1 MB). The token cost is the same, about 6.4k input tokens for the batch, because images are billed by pixels, so JPEG only saves bytes. Claude Code adds an `[Image: source: ~/.claude/projects/<cwd>/<session>/…]` text block per image and keeps a copy there. Plan change: JPEG at 1× is fine, and 7 frames per preview is within budget.
+- **B1 settled: the project's `.mcp.json` and settings load in a T3 Claude thread.** A project on a folder with `.mcp.json` (stdio `ping`), `.claude/settings.json` (`enabledMcpjsonServers: ["ping"]`, deny `Bash`/`Write`/`Edit`/`WebFetch`, allow `mcp__ping__ping`) and a `CLAUDE.md` loaded all three. The thread was launched with `orchestration.launchThread`, `claudeAgent`/`claude-sonnet-5-5`, `runtimeMode: "auto"` and `interactionMode: "default"`. The ping tool was called once (server log); the model reached it after 2 `ToolSearch` calls, because project MCP tools are deferred. Bash was removed from the toolset outright ("No such tool available: Bash"), with no approval request. The `CLAUDE.md` marker word showed in the reply. `enableAllProjectMcpServers` wasn't needed. Plan changes: P1 writes `enabledMcpjsonServers` plus the deny list in `.claude/settings.json`. `launchThread` must send `runtimeMode` (it's required: "Missing key runtimeMode"). The creator's prompt should name the full tool name (`mcp__fjord__preview`) so its ToolSearch is one hop.
+- **S3: yes.** `project.update {archived: true}` (a Boolean; `archivedAt` is silently ignored) archives the project, and `launchThread` into it is still accepted. P1 can archive the Explainers project to hide it from T3's sidebar.
+
+## 13. Decisions after the spikes (2026-11-14)
+- B2: creators run in parallel. The input gives each creator a `ticket` and the prompt tells it to pass `ticket` on
+  every `preview` call (`mcp__fjord__preview`, named in full). A missing or unknown ticket is an error that names the
+  fix.
+- B3: accept the user's `~/.claude` loading; eval the eight `cases2` moments through T3 once P3 lands and compare with
+  the `claude -p` runs.
+- B5: there's no panel fallback; render with an explicit `theme=` and 1× frames (snapshot width 1000).
+- Launches send `runtimeMode` explicitly. The Explainers project is archived in T3 (`archived: true`) so T3's sidebar
+  hides it too; launches still work.
+- `ExplainerWeb.configuration()` is written in P1; P2 and P4 only read it.
