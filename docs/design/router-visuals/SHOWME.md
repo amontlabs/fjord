@@ -584,3 +584,14 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
 - **`EX/run.py`** names its server `fjord` (tool `mcp__fjord__preview`), prefixes `<ticket>eval0001</ticket>` to inputs that
   lack one, and runs the shipped prompt (`Resources/Explainer/CLAUDE.md`; `PROMPT=<file>` for another), since `system.md`
   predates the ticket.
+
+### Review fixes (2026-11-14)
+- f4be9bee: one 30 s deadline around a whole render; at most 8 frames per reply with byte caps, so a reply can't fail
+  after its version is saved; syntax checks and JPEG work happen off the main thread; a crashed player reloads once,
+  then shows its poster.
+- 734f10f1: hiding goes by project and run ids, so archived explainer threads and threads of a removed project stay
+  hidden.
+- 0d2d6bb6: the guard is restored each launch; a request launches only once the server is up and its message has a
+  reply; each run is finalized once; each version keeps the kit it was made with (`kit/<stamp>/`); runs are read off
+  the main thread.
+- Open: old kit stamps are never deleted; explainers made before 0d2d6bb6 load the shared `kit/`.
