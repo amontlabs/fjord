@@ -191,6 +191,114 @@ import Testing
         #expect(thread == id && text == "Slower, please" && dispatch == .startImmediately(intent: .steer))
         await #expect(throws: (any Error).self) { try await engine.followUp("unknown", words: "x") }
     }
+
+    @Test func aRequestWaitsUntilItsMessageIsAnswered() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let engine = rig.engine
+        engine.start()
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent - 60)], projects: rig.projects)
+        engine.shell(.synchronized)
+        await settle()
+        // A turn ends right after the send, before the message landed: the clock says ready, the thread says not yet.
+        engine.requested(source: "t1", ask: "u2", sentAt: Self.sent)
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent + 1)], projects: rig.projects)
+        engine.shell(nil)
+        await settle()
+        #expect(rig.launches.isEmpty)
+        #expect(engine.queue.requests.first?.state == .waitingForTurn && engine.items.map(\.stage) == [.queued])
+        // The same completion read again still waits; the turn that answers it launches.
+        engine.shell(nil)
+        await settle()
+        #expect(rig.launches.isEmpty)
+        rig.source = ExplainerInputTests.projection([
+            ExplainerInputTests.message("u1", "user", "Why is it slow?", at: ExplainerInputTests.at("10:00")),
+            ExplainerInputTests.message("a1", "assistant", "The cache misses.", at: ExplainerInputTests.at("10:01")),
+            ExplainerInputTests.message("u2", "user", "And the fix?", at: ExplainerInputTests.at("10:02")),
+            ExplainerInputTests.message("a2", "assistant", "Warm it.", at: ExplainerInputTests.at("10:03")),
+        ])
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent + 30)], projects: rig.projects)
+        engine.shell(nil)
+        await settle()
+        #expect(rig.launches.count == 1 && rig.launches.first?.text.contains("<ask>And the fix?</ask>") == true)
+    }
+
+    @Test func aMessageInAQueuedRunIsNotAnswered() {
+        let p = T3Projection(json: [
+            "thread": T3Fixture.thread("t1"),
+            "messages": [ExplainerInputTests.message("u1", "user", "Go", at: ExplainerInputTests.at("10:00"), extra: ["runId": "r2"]),
+                         ExplainerInputTests.message("a0", "assistant", "Earlier", at: ExplainerInputTests.at("10:01"), extra: ["runId": "r1"])],
+            "runs": [["id": "r1", "status": "completed", "completedAt": "2026-11-14T10:01:00.000Z"],
+                     ["id": "r2", "status": "queued", "userMessageId": "u1"]],
+        ])
+        #expect(!ExplainerQueue.answered(p, ask: "u1"))
+        #expect(!ExplainerQueue.answered(p, ask: "missing"))
+    }
+
+    @Test func nothingLaunchesBeforeThePreviewServerIsUp() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        rig.renderer.startFails = true
+        let engine = rig.engine
+        engine.start()
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent - 60)], projects: rig.projects)
+        engine.shell(.synchronized)
+        engine.requested(reply: "t1")
+        await settle()
+        #expect(rig.renderer.started == 1 && rig.projectID != nil)
+        #expect(rig.launches.isEmpty && !engine.ready && engine.items.map(\.stage) == [.queued])
+    }
+
+    @Test func aLaunchingRequestIsListedOnceAndItsThreadIsHidden() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let engine = rig.engine
+        var during: [String] = []
+        rig.onDispatch = { _ in during = engine.list().map(\.id) }
+        engine.start()
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent - 60)], projects: rig.projects)
+        engine.shell(.synchronized)
+        engine.requested(reply: "t1")
+        await settle()
+        let id = try #require(rig.launches.first?.threadId)
+        #expect(during == [id])
+        #expect(rig.hiddenThreads.contains(id))
+    }
+
+    @Test func aFollowUpKeepsAFinalThatLandedWhileItWasSent() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let engine = rig.engine
+        engine.start()
+        rig.whole = T3Fixture.state([Self.row("t1", completed: Self.sent - 60)], projects: rig.projects)
+        engine.shell(.synchronized)
+        engine.requested(reply: "t1")
+        await settle()
+        let id = try #require(rig.launches.first?.threadId)
+        rig.renderer.saved[id] = [ExplainerVersion(run: id, number: 1, code: "a()", broken: false)]
+        engine.versionSaved(rig.renderer.saved[id]![0])
+        rig.replies[id] = "```js\na()\n```"
+        rig.onDispatch = { _ in await engine.finish(id) }
+        try await engine.followUp(id, words: "Slower")
+        #expect(engine.runs[id]?.final == 1)
+    }
+
+    @Test func theProjectIsMadeAgainWhenT3LosesIt() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let engine = rig.engine
+        engine.start()
+        rig.whole = T3Fixture.state([], projects: rig.projects)
+        engine.shell(.synchronized)
+        await settle()
+        let first = try #require(rig.projectID)
+        rig.whole = T3Fixture.state([], projects: rig.projects + [T3Fixture.project(first, root: rig.project.root.path)])
+        engine.shell(nil)
+        rig.whole = T3Fixture.state([], projects: rig.projects)
+        engine.shell(nil)
+        await settle()
+        #expect(rig.mutations.filter { $0.str("type") == "project.create" }.count == 2 && rig.projectID != first)
+    }
 }
 
 /// Lets the engine's tasks run: they only await the stubs, which answer at once.
@@ -207,6 +315,7 @@ final class Rig {
     var whole = T3ShellState()
     var hidden: [String] = []
     var hiddenRoot: String?
+    var hiddenThreads: Set<String> = []
     var synced = 0
     var mutations: [T3JSON] = []
     var commands: [T3Command] = []
@@ -217,6 +326,8 @@ final class Rig {
         ExplainerInputTests.message("a1", "assistant", "The cache misses.", at: ExplainerInputTests.at("10:01")),
     ])
     var replies: [String: String] = [:]
+    /// Runs while a dispatch is awaited: what else happens meanwhile.
+    var onDispatch: ((T3Command) async -> Void)?
     var projects: [T3JSON] { [T3Fixture.project("p1", root: "/code/app")] }
     var launches: [T3LaunchRequest] {
         commands.compactMap { if case .launchThread(let r) = $0 { r } else { nil } }
@@ -241,14 +352,18 @@ final class Rig {
                 return id.hasPrefix("t") ? source : nil
             },
             model: { [unowned self] slug, _ in modelAsked.append(slug); return ThreadLaunchModel(instanceId: "claudeAgent", model: slug) },
-            dispatch: { [unowned self] command in commands.append(command) },
+            dispatch: { [unowned self] command in
+                commands.append(command)
+                await onDispatch?(command)
+            },
             mutate: { [unowned self] body in
                 mutations.append(body)
                 if body.str("type") == "project.create" { projectID = body.str("projectId") }
                 return [:]
             },
             sync: { _ in await MainActor.run { [unowned self] in synced += 1 } },
-            zone: ExplainerInputTests.utc, user: "nobody")
+            zone: ExplainerInputTests.utc, user: "nobody",
+            hideThreads: { [unowned self] ids in hiddenThreads.formUnion(ids) })
         return ExplainerEngine(project: project, renderer: renderer, env: env)
     }()
 }
@@ -260,8 +375,12 @@ final class StubRenderer: ExplainerRendering {
     var saved: [String: [ExplainerVersion]] = [:]
     var rendered: [String] = []
     var fails = false
+    var startFails = false
 
-    func start(project: ExplainerProject, host: ExplainerRenderHost) async throws { started += 1 }
+    func start(project: ExplainerProject, host: ExplainerRenderHost) async throws {
+        started += 1
+        if startFails { throw ThreadLaunchFailure("the port is taken") }
+    }
     func versions(of run: String) -> [ExplainerVersion] { saved[run] ?? [] }
     func render(_ code: String, ticket: ExplainerTicket) async throws -> ExplainerVersion {
         if fails { throw ThreadLaunchFailure("render failed") }

@@ -93,6 +93,42 @@ import Testing
         #expect(rig.engine.items.first?.stage == .ready && rig.engine.items.first?.draft == true)
     }
 
+    @Test func aRunIsFinalizedOnceAndAStoppedFollowUpIsADraft() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let id = try await launched(rig)
+        save(rig, ExplainerVersion(run: id, number: 1, code: "a()", broken: false))
+        rig.replies[id] = "```js\na()\n```"
+        func row(_ run: String, status: String = "completed", updated: Double) {
+            rig.whole = T3Fixture.state([ExplainerQueueTests.row("t1", completed: ExplainerQueueTests.sent - 60),
+                                         T3Fixture.thread(id, status: status, project: "px", extra: [
+                                             "latestRunId": .string(run),
+                                             "updatedAt": .string(T3Timestamp.format(ExplainerQueueTests.sent + updated))])],
+                                        projects: rig.projects + [T3Fixture.project("px", root: rig.project.root.path)])
+            rig.engine.shell(nil)
+        }
+        row("r1", status: "interrupted", updated: 10)
+        await settle()
+        let finalAt = try #require(rig.engine.runs[id]?.finalAt)
+        rig.engine.watched(id)
+        // A later change to the row (no new run) reads nothing again.
+        row("r1", status: "interrupted", updated: 50)
+        await settle()
+        #expect(rig.engine.runs[id]?.finalAt == finalAt && rig.engine.items.first?.unseen == false)
+        // A follow-up stopped before replying: the earlier reply's code isn't its final.
+        save(rig, ExplainerVersion(run: id, number: 2, code: "b()", broken: false))
+        let p = ExplainerInputTests.projection([
+            ExplainerInputTests.message("i", "user", "<ticket>x</ticket>", at: ExplainerInputTests.at("10:00")),
+            ExplainerInputTests.message("r", "assistant", "```js\nold()\n```", at: ExplainerInputTests.at("10:01")),
+            ExplainerInputTests.message("f", "user", "Slower", at: ExplainerInputTests.at("10:02")),
+        ])
+        #expect(ExplainerEngine.lastReply(p) == nil)
+        rig.replies[id] = nil
+        row("r2", status: "interrupted", updated: 90)
+        await settle()
+        #expect(rig.renderer.rendered.isEmpty && rig.engine.runs[id]?.final == 2 && rig.engine.runs[id]?.draft == true)
+    }
+
     @Test func aRunWithNothingToShowFails() async throws {
         let rig = Rig()
         defer { rig.clean() }

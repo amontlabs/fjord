@@ -45,7 +45,16 @@ struct ExplainerProject: Sendable {
 
     // MARK: Paths
 
-    var kit: URL { root.appendingPathComponent("kit", isDirectory: true) }
+    /// Every kit the app shipped, one folder per stamp (`kit/<stamp>/`): a version's page links the kit it was made with, so
+    /// an update never changes an old explainer.
+    var kits: URL { root.appendingPathComponent("kit", isDirectory: true) }
+    /// The current kit: the one the last `sync()` wrote (`kits` itself before the first).
+    var kit: URL {
+        guard let stamp = try? String(contentsOf: stampFile, encoding: .utf8), !stamp.isEmpty else { return kits }
+        return kits.appendingPathComponent(Self.folder(stamp), isDirectory: true)
+    }
+    /// A kit's folder name: its stamp, shortened.
+    static func folder(_ stamp: String) -> String { String(stamp.prefix(12)) }
     var runs: URL { root.appendingPathComponent("runs", isDirectory: true) }
     var queue: URL { root.appendingPathComponent("queue.json") }
     var mcpConfig: URL { root.appendingPathComponent(".mcp.json") }
@@ -98,35 +107,60 @@ struct ExplainerProject: Sendable {
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Makes the folder and brings its managed files up to what the app ships, when the stamp says they differ. `runs/`,
-    /// `queue.json` and `.mcp.json` are never touched. The kit is built aside and swapped in whole, so a film never loads a
-    /// half-copied kit; the stamp is written last, so a sync that stops partway is done again next launch.
+    /// Makes the folder and brings its managed files up to what the app ships, checked against the copies on disk (bytes and
+    /// mode) every launch: a guard that was deleted or lost its execute bit would let every tool through, since a hook that
+    /// errors doesn't block. `runs/`, `queue.json` and `.mcp.json` are never touched. The kit goes into `kit/<stamp>/`, built
+    /// aside and moved in whole, so a film never loads a half-copied kit; older stamps' kits stay for the versions made on
+    /// them. The kit's `player.html` links `KIT/<stamp>/`, so a page made from it keeps that kit. The stamp is written last.
     /// Returns whether it wrote anything. Blocking file work: call it off the main actor.
     @discardableResult
     func sync() throws -> Bool {
         let fm = FileManager.default
-        let stamp = try stamp()
-        if let old = try? String(contentsOf: stampFile, encoding: .utf8), old == stamp,
-           fm.fileExists(atPath: kit.path) { return false }
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let stamp = try stamp(), folder = Self.folder(stamp)
         let files = try managed()
-        let fresh = root.appendingPathComponent(".fjord/kit.new", isDirectory: true)
-        try? fm.removeItem(at: fresh)
-        for file in files {
-            let kitPath = file.path.hasPrefix("kit/") ? String(file.path.dropFirst(4)) : nil
-            let target = kitPath.map { fresh.appendingPathComponent($0) } ?? root.appendingPathComponent(file.path)
-            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data(contentsOf: file.source).write(to: target, options: .atomic)
-            try fm.setAttributes([.posixPermissions: file.mode], ofItemAtPath: target.path)
+        let kitDir = kits.appendingPathComponent(folder, isDirectory: true)
+        func content(_ file: Managed) throws -> Data {
+            let data = try Data(contentsOf: file.source)
+            guard file.path == "kit/player.html" else { return data }
+            return Data(String(decoding: data, as: UTF8.self).replacingOccurrences(of: "KIT/", with: "KIT/\(folder)/").utf8)
         }
-        if fm.fileExists(atPath: kit.path) {
-            _ = try fm.replaceItemAt(kit, withItemAt: fresh)
-        } else {
-            try fm.moveItem(at: fresh, to: kit)
+        func target(_ file: Managed, kit: URL) -> URL {
+            file.path.hasPrefix("kit/") ? kit.appendingPathComponent(String(file.path.dropFirst(4))) : root.appendingPathComponent(file.path)
         }
-        try fm.createDirectory(at: stampFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(stamp.utf8).write(to: stampFile, options: .atomic)
-        return true
+        func matches(_ file: Managed) -> Bool {
+            let url = target(file, kit: kitDir)
+            guard let mode = (try? fm.attributesOfItem(atPath: url.path))?[.posixPermissions] as? NSNumber,
+                  mode.int16Value == file.mode, let data = try? Data(contentsOf: url) else { return false }
+            return (try? content(file)) == data
+        }
+        func write(_ file: Managed, to url: URL) throws {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try content(file).write(to: url, options: .atomic)
+            try fm.setAttributes([.posixPermissions: file.mode], ofItemAtPath: url.path)
+        }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        var wrote = false
+        for file in files where !file.path.hasPrefix("kit/") && !matches(file) {
+            try write(file, to: target(file, kit: kitDir))
+            wrote = true
+        }
+        let kitFiles = files.filter { $0.path.hasPrefix("kit/") }
+        if !kitFiles.allSatisfy(matches) {
+            let fresh = root.appendingPathComponent(".fjord/kit.new", isDirectory: true)
+            try? fm.removeItem(at: fresh)
+            for file in kitFiles { try write(file, to: target(file, kit: fresh)) }
+            try fm.createDirectory(at: kits, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: kitDir.path) { _ = try fm.replaceItemAt(kitDir, withItemAt: fresh) } else {
+                try fm.moveItem(at: fresh, to: kitDir)
+            }
+            wrote = true
+        }
+        if (try? String(contentsOf: stampFile, encoding: .utf8)) != stamp {
+            try fm.createDirectory(at: stampFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(stamp.utf8).write(to: stampFile, options: .atomic)
+            wrote = true
+        }
+        return wrote
     }
 
     // MARK: The preview server's address

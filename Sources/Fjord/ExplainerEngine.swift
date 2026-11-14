@@ -52,8 +52,9 @@ struct ExplainerRun: Codable, Equatable, Sendable {
     var ask: String?
     var askText: String
     var createdAt: Date
-    /// The latest completion of its thread's runs that was read for a final: a follow-up's run completes later.
-    var completedThrough: String?
+    /// The thread's latest run that was read for a final (its id; its completion time when T3 names no run): a follow-up
+    /// is a new run, read again when it ends.
+    var finalizedRun: String?
     /// The final version, once a run ended.
     var final: Int?
     var finalAt: Date?
@@ -129,6 +130,28 @@ final class ExplainerEngine: ExplainerRenderHost {
         /// The clock `at=` times are read in, and the short name the input swaps for `user`.
         var zone = TimeZone.current
         var user = NSUserName()
+        /// Fjord's own threads (the runs), kept off the Router whatever T3 does with their project (`T3Store.hide(threads:)`).
+        var hideThreads: @MainActor (Set<String>) -> Void = { _ in }
+        /// The queue, the runs and their versions read back from disk, off the main actor.
+        var load: @Sendable (ExplainerProject) async -> Loaded = ExplainerEngine.loadDetached
+    }
+
+    /// What `start()` reads back: the queue, the runs, and each run's versions (the code of its latest only, the one a final is
+    /// compared with: a run's older code can be megabytes and nothing reads it).
+    struct Loaded: Sendable {
+        var queue = ExplainerQueue()
+        var runs: [String: ExplainerRun] = [:]
+        var versions: [String: [ExplainerVersion]] = [:]
+    }
+
+    nonisolated static func loadDetached(_ project: ExplainerProject) async -> Loaded {
+        await Task.detached(priority: .userInitiated) { () -> Loaded in
+            let runs = loadRuns(project.runs)
+            let store = ExplainerVersions(runs: project.runs)
+            var versions: [String: [ExplainerVersion]] = [:]
+            for id in runs.keys { versions[id] = store.versions(of: id, code: .latest) }
+            return Loaded(queue: ExplainerQueue.load(project.queue), runs: runs, versions: versions)
+        }.value
     }
 
     nonisolated static func syncDetached(_ project: ExplainerProject) async throws {
@@ -150,6 +173,13 @@ final class ExplainerEngine: ExplainerRenderHost {
     /// Requests that left the queue with no explainer, until the dock is told: shown failed for this app run.
     private(set) var dropped: [String: (ExplainerRequest, ExplainerQueue.Dropped)] = [:]
     private(set) var started = false
+    /// The queue and runs were read back from disk.
+    private(set) var loaded = false
+    /// The preview server is up, and `.mcp.json` names it: a creator launched before would never get its tool (Claude Code
+    /// reads the file once per session).
+    private(set) var serving = false
+    /// The project's row was in T3's shell since `ensure` answered: once it leaves, T3 lost the project and it's made again.
+    private var projectSeen = false
     /// T3 has answered with its shell once since start: the queue was read against it.
     private(set) var evaluated = false
     private var ensuring = false
@@ -163,29 +193,44 @@ final class ExplainerEngine: ExplainerRenderHost {
 
     // MARK: Start
 
-    /// Once per app run, before T3's shell arrives: hides the project, reads the queue and the runs back, refreshes the
-    /// project's files and starts the renderer's preview server. Nothing happens without a project (a test, a demo).
+    /// Once per app run, before T3's shell arrives: hides the project, reads the queue and the runs back (off the main actor),
+    /// refreshes the project's files and starts the renderer's preview server. Nothing happens without a project (a test, a
+    /// demo). Nothing launches until the files are fresh and the server is up.
     func start() {
         guard let project, !started else { return }
         started = true
         // Before T3's first shell, Router on or off: Triage's lists read the shell too.
         env.hide(project.root.path)
-        queue = ExplainerQueue.load(project.queue)
-        runs = Self.loadRuns(project.runs)
-        for id in runs.keys { versions[id] = renderer?.versions(of: id) ?? [] }
-        publish()
-        let sync = env.sync
+        let load = env.load, sync = env.sync
+        Task { [weak self] in
+            let disk = await load(project)
+            guard let self else { return }
+            // A request made while the disk was read is kept after the ones read back.
+            var queue = disk.queue
+            for r in self.queue.requests where !queue.requests.contains(where: { $0.id == r.id }) { queue.requests.append(r) }
+            self.queue = queue
+            self.runs.merge(disk.runs) { now, _ in now }
+            self.versions.merge(disk.versions) { now, _ in now }
+            self.loaded = true
+            self.env.hideThreads(Set(self.runs.keys).union(self.queue.requests.map(\.id)))
+            self.publish()
+            if self.env.hidden().answered { self.shell(nil) }
+        }
         Task { [weak self] in
             do { try await sync(project) } catch { Self.log.error("the project's files weren't refreshed: \(String(describing: error), privacy: .public)") }
-            guard let self, let renderer = self.renderer else { return }
-            do { try await renderer.start(project: project, host: self) } catch {
-                Self.log.error("the preview server didn't start: \(String(describing: error), privacy: .public)")
+            guard let self else { return }
+            if let renderer = self.renderer {
+                do { try await renderer.start(project: project, host: self) } catch {
+                    return Self.log.error("the preview server didn't start: \(String(describing: error), privacy: .public)")
+                }
             }
+            self.serving = true
+            self.pump()
+            self.publish()
         }
-        if env.hidden().answered { shell(nil) }
     }
 
-    static func loadRuns(_ folder: URL) -> [String: ExplainerRun] {
+    nonisolated static func loadRuns(_ folder: URL) -> [String: ExplainerRun] {
         let fm = FileManager.default
         var out: [String: ExplainerRun] = [:]
         for dir in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] {
@@ -202,6 +247,7 @@ final class ExplainerEngine: ExplainerRenderHost {
     func requested(source: String, ask: String?, sentAt: Date) {
         guard started else { return }
         queue.afterTurn(source: source, ask: ask, sentAt: sentAt)
+        if let r = queue.requests.last { env.hideThreads([r.id]) }
         saveQueue()
         shell(nil)
     }
@@ -210,6 +256,7 @@ final class ExplainerEngine: ExplainerRenderHost {
     func requested(reply source: String) {
         guard started else { return }
         queue.now(source: source, at: env.now())
+        if let r = queue.requests.last { env.hideThreads([r.id]) }
         saveQueue()
         shell(nil)
     }
@@ -217,9 +264,11 @@ final class ExplainerEngine: ExplainerRenderHost {
     /// The owner's words for an explainer: a new version that answers them. They go as the owner's, unwrapped, into its
     /// thread (steering a run still making one); creators run in parallel, so nothing waits for another.
     func followUp(_ id: String, words: String) async throws {
-        guard var run = runs[id] else { throw ThreadSendFailure("That explainer isn't Fjord's anymore") }
+        guard runs[id] != nil else { throw ThreadSendFailure("That explainer isn't Fjord's anymore") }
         try await env.dispatch(.messageDispatch(threadId: id, messageId: UUID().uuidString.lowercased(), text: words,
                                                 dispatch: .startImmediately(intent: .steer)))
+        // Read again: a final may have landed while T3 took the words.
+        guard var run = runs[id] else { return }
         run.failed = nil
         runs[id] = run
         save(run)
@@ -239,9 +288,16 @@ final class ExplainerEngine: ExplainerRenderHost {
 
     /// A shell item (or nil: the shell as a whole changed): turns that ended, explainers that finished, launches to make.
     func shell(_ item: T3ShellItem?) {
-        guard started, project != nil else { return }
+        guard started, loaded, project != nil else { return }
         let hidden = env.hidden()
         guard hidden.answered else { return }
+        if let id = projectID {
+            if hidden.projects[id] != nil { projectSeen = true } else if projectSeen {
+                // T3 lost the project (deleted there): make it again rather than launch into nothing.
+                projectID = nil; projectSeen = false
+                ensure()
+            }
+        }
         if !evaluated {
             evaluated = true
             // A request whose thread exists was launched before the app last quit.
@@ -255,12 +311,10 @@ final class ExplainerEngine: ExplainerRenderHost {
         for (r, why) in queue.advance(shell: env.shell(), now: env.now()) { dropped[r.id] = (r, why) }
         if queue != before { saveQueue() }
         for run in runs.values {
-            // A run that stopped may carry no completion time: its row's last change stands for it.
-            let stopped = [T3Status.interrupted, .failed, .cancelled].contains(hidden.threads[run.id]?.status ?? .idle)
+            // Each of the thread's runs is read once, when it ends: a later change to the row (a rename, a visit) isn't one.
             guard let row = hidden.threads[run.id], row.activeRunId == nil, !row.status.isLive,
-                  let done = row.latestRunCompletedAt ?? (stopped ? row.updatedAt : nil),
-                  run.completedThrough.map({ $0 < done.text }) ?? true else { continue }
-            finalize(run.id, through: done.text)
+                  let done = row.latestRunId ?? row.latestRunCompletedAt?.text, run.finalizedRun != done else { continue }
+            finalize(run.id, through: done)
         }
         pump()
         publish()
@@ -289,7 +343,7 @@ final class ExplainerEngine: ExplainerRenderHost {
 
     /// Every ready request starts its creator now: creators run in parallel (§13).
     private func pump() {
-        guard projectID != nil else { return }
+        guard projectID != nil, serving else { return }
         for r in queue.ready where !launching.contains(r.id) {
             launching.insert(r.id)
             Task { [weak self] in await self?.launch(r) }
@@ -309,6 +363,13 @@ final class ExplainerEngine: ExplainerRenderHost {
         }
         guard let source = await env.snapshot(r.source) else { return fail("Fjord couldn't read the thread") }
         let shell = env.shell()
+        // A turn that ended before the send landed, or a steer queued as the next run, isn't the one asked about: wait for
+        // the next completion.
+        if let ask = r.ask, !ExplainerQueue.answered(source, ask: ask) {
+            queue.notYet(r.id, after: shell.threads[r.source]?.latestRunCompletedAt?.date ?? r.sentAt)
+            saveQueue()
+            return publish()
+        }
         let projectName = shell.projects[source.thread.projectId].map { $0.title.isEmpty ? URL(fileURLWithPath: $0.workspaceRoot).lastPathComponent : $0.title } ?? "no project"
         guard let input = ExplainerInput.make(source, project: projectName, ask: r.ask, zone: env.zone, user: env.user) else {
             return fail("There's no answer to explain yet")
@@ -317,6 +378,7 @@ final class ExplainerEngine: ExplainerRenderHost {
             return fail("T3 doesn't offer Opus 5.5")
         }
         let title = shell.threads[r.source]?.title ?? source.thread.title
+        env.hideThreads([r.id])
         let run = ExplainerRun(id: r.id, ticket: Self.mintTicket(), source: r.source, sourceTitle: title, ask: r.ask,
                                askText: input.askText, createdAt: env.now().toMilliseconds)
         let text = Self.message(ticket: run.ticket, input: input)
@@ -367,7 +429,7 @@ final class ExplainerEngine: ExplainerRenderHost {
     private func finalize(_ id: String, through done: String) {
         guard !finalizing.contains(id), var run = runs[id] else { return }
         finalizing.insert(id)
-        run.completedThrough = done
+        run.finalizedRun = done
         runs[id] = run
         save(run)
         Task { [weak self] in await self?.finish(id) }
@@ -376,7 +438,8 @@ final class ExplainerEngine: ExplainerRenderHost {
     func finish(_ id: String) async {
         defer { finalizing.remove(id) }
         guard var run = runs[id] else { return }
-        let reply = await env.snapshot(id)?.messages.last(where: { $0.role == "assistant" })?.text
+        let before = (run.final, run.draft)
+        let reply = await env.snapshot(id).flatMap(Self.lastReply)
         let saved = versions[id] ?? []
         switch ExplainerFinal.decide(lastReply: reply, versions: saved) {
         case .version(let n): run.final = n; run.draft = false; run.failed = nil
@@ -392,12 +455,23 @@ final class ExplainerEngine: ExplainerRenderHost {
                 run.failed = "The explainer didn't finish"
             }
         }
-        if run.final != nil { run.finalAt = env.now().toMilliseconds }
+        // Only a new final is news: the same one read again keeps its time (and whether it was seen).
+        if run.final != nil, (run.final, run.draft) != before { run.finalAt = env.now().toMilliseconds }
         // A follow-up that ran meanwhile keeps the newer state.
-        if let current = runs[id] { run.watchedAt = current.watchedAt; run.completedThrough = current.completedThrough }
+        if let current = runs[id] { run.watchedAt = current.watchedAt; run.finalizedRun = current.finalizedRun }
         runs[id] = run
         save(run)
         publish()
+    }
+
+    /// The reply of the thread's latest run: the agent's last message after the last of yours. A follow-up that stopped
+    /// before replying has none, so an earlier reply's code isn't taken for its final.
+    static func lastReply(_ p: T3Projection) -> String? {
+        let messages = p.messages.enumerated().sorted {
+            ($0.element.createdAt?.date ?? .distantPast, $0.offset) < ($1.element.createdAt?.date ?? .distantPast, $1.offset)
+        }.map(\.element)
+        let after = messages.lastIndex { $0.role == "user" }.map { $0 + 1 } ?? 0
+        return messages[after...].last { $0.role == "assistant" }?.text
     }
 
     // MARK: The renderer's host
@@ -426,7 +500,8 @@ final class ExplainerEngine: ExplainerRenderHost {
     func list() -> [ExplainerItem] {
         let shell = env.shell(), hidden = env.hidden()
         var out: [ExplainerItem] = []
-        for r in queue.requests {
+        // A request being launched is a run already: it's listed once, as the run.
+        for r in queue.requests where runs[r.id] == nil {
             out.append(ExplainerItem(id: r.id, title: "Show me", thread: shell.threads[r.source]?.title ?? "", source: r.source,
                                      answer: "", captions: [], since: r.sentAt, stage: .queued, length: 0))
         }
@@ -463,7 +538,7 @@ final class ExplainerEngine: ExplainerRenderHost {
     }
 
     /// T3 has the project: Show me can be asked for (the page's toggle and dock show only then).
-    var ready: Bool { projectID != nil }
+    var ready: Bool { projectID != nil && serving }
     private var publishedReady = false
 
     private func publish() {
@@ -509,7 +584,8 @@ extension ExplainerEngine {
                 guard let store else { throw ThreadLaunchFailure("Fjord is closing") }
                 try await store.dispatch(command)
             },
-            mutate: { body in try await ExplainerProject.liveMutate(body) })
+            mutate: { body in try await ExplainerProject.liveMutate(body) },
+            hideThreads: { [weak store] ids in store?.t3.store.hide(threads: ids) })
         return ExplainerEngine(project: project, renderer: renderer, env: env)
     }
 }

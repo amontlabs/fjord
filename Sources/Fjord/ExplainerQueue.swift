@@ -24,6 +24,9 @@ struct ExplainerRequest: Codable, Equatable, Identifiable, Sendable {
     /// The source thread has been in the shell since the request: a new thread's row arrives after T3 took the send, so
     /// only a row that was there and left means the thread is gone.
     var seen: Bool? = nil
+    /// The source's completion that turned out not to answer the message (it ended before the send landed, or the message
+    /// went to a queued run): the request waits for a later one.
+    var after: Date? = nil
 }
 
 struct ExplainerQueue: Codable, Equatable, Sendable {
@@ -56,6 +59,26 @@ struct ExplainerQueue: Codable, Equatable, Sendable {
 
     mutating func remove(_ id: String) { requests.removeAll { $0.id == id } }
 
+    /// The request was ready by the clock, but its message has no answer yet: wait for a completion later than `after`.
+    mutating func notYet(_ id: String, after: Date) {
+        guard let i = requests.firstIndex(where: { $0.id == id }) else { return }
+        requests[i].state = .waitingForTurn
+        requests[i].after = after.toMilliseconds
+    }
+
+    /// Whether the source thread answered your message `ask`: the run it went into (started or steered) has ended, or, when
+    /// T3 names no run for it, the agent replied after it. A message not in the thread yet isn't answered.
+    static func answered(_ p: T3Projection, ask: String) -> Bool {
+        guard let message = p.messages.first(where: { $0.id == ask }) else { return false }
+        if let run = p.runs.first(where: { ($0.id == message.runId && message.runId != nil) || $0.userMessageId == ask }) {
+            // A run that stopped may carry no completion time.
+            return !run.status.isLive && !run.isQueued
+                && (run.completedAt != nil || [.completed, .interrupted, .failed, .cancelled].contains(run.status))
+        }
+        let at = message.createdAt?.date ?? .distantPast
+        return p.messages.contains { $0.role == "assistant" && !$0.streaming && ($0.createdAt?.date ?? .distantPast) >= at }
+    }
+
     /// The requests waiting for a turn, read against the Router's shell: a turn over (no run live, its latest run completed
     /// at or after the send) makes the request ready; a turn that stopped, or a thread that's gone, drops it. Old requests
     /// expire. Returns the dropped ones, with why.
@@ -72,7 +95,7 @@ struct ExplainerQueue: Codable, Equatable, Sendable {
             var r = r
             r.seen = true
             guard row.activeRunId == nil, !row.status.isLive, let done = row.latestRunCompletedAt?.date,
-                  done >= r.sentAt else { return r }
+                  done >= r.sentAt, r.after.map({ done > $0 }) ?? true else { return r }
             if [.interrupted, .failed, .cancelled].contains(row.status) { dropped.append((r, .turnStopped)); return nil }
             var next = r
             next.state = .waitingForCreator

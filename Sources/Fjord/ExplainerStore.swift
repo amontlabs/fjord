@@ -76,14 +76,26 @@ struct ExplainerVersions: Sendable {
         try encoder.encode(meta).write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
     }
 
+    /// Whose code `versions(of:code:)` reads: every version's, or only the latest's (the others get "").
+    enum Code { case all, latest }
+
     /// The run's versions, oldest first, read back from disk. A version whose code is gone is skipped.
-    func versions(of run: String) -> [ExplainerVersion] {
-        meta(run).versions.compactMap { entry in
-            guard let codeURL = try? code(run, entry.number), let code = try? String(contentsOf: codeURL, encoding: .utf8),
+    func versions(of run: String, code which: Code = .all) -> [ExplainerVersion] {
+        let entries = meta(run).versions
+        let fm = FileManager.default
+        return entries.enumerated().compactMap { i, entry in
+            guard let codeURL = try? code(run, entry.number), fm.fileExists(atPath: codeURL.path),
                   let dir = try? page(run, entry.number) else { return nil }
+            let code: String
+            if which == .all || i == entries.count - 1 {
+                guard let text = try? String(contentsOf: codeURL, encoding: .utf8) else { return nil }
+                code = text
+            } else {
+                code = ""
+            }
             func file(_ name: String) -> URL? {
                 let url = dir.appendingPathComponent(name)
-                return FileManager.default.fileExists(atPath: url.path) ? url : nil
+                return fm.fileExists(atPath: url.path) ? url : nil
             }
             return ExplainerVersion(run: run, number: entry.number, code: code, broken: entry.broken, note: entry.note,
                                     title: entry.title, answer: entry.answer, captions: entry.captions, length: entry.length,

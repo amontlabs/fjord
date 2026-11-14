@@ -33,26 +33,67 @@ import Testing
         let p = try project(dir)
         #expect(try p.sync())
         let fm = FileManager.default
-        for path in ["CLAUDE.md", ".claude/settings.json", ".fjord/guard.sh", ".fjord/stamp", "kit/kit.js", "kit/player.html",
-                     "kit/player.css", "kit/vendor/gsap.min.js", "kit/fonts/geist-regular.otf", "kit/fonts/geist-mono.ttf"] {
+        let stamp = ExplainerProject.folder(try p.stamp())
+        #expect(p.kit == p.kits.appendingPathComponent(stamp, isDirectory: true))
+        for path in ["CLAUDE.md", ".claude/settings.json", ".fjord/guard.sh", ".fjord/stamp", "kit/\(stamp)/kit.js",
+                     "kit/\(stamp)/player.html", "kit/\(stamp)/player.css", "kit/\(stamp)/vendor/gsap.min.js",
+                     "kit/\(stamp)/fonts/geist-regular.otf", "kit/\(stamp)/fonts/geist-mono.ttf"] {
             #expect(fm.fileExists(atPath: p.root.appendingPathComponent(path).path), "\(path)")
         }
         #expect(mode(p.root.appendingPathComponent(".fjord/guard.sh")) == 0o755)
         #expect(try p.sync() == false)
 
-        // The owner's runs and queue stay; an update rewrites the managed files and drops what the kit no longer has.
+        // The owner's runs and queue stay; an update rewrites the managed files into a new kit, and the old kit stays.
         try fm.createDirectory(at: p.runs.appendingPathComponent("t1"), withIntermediateDirectories: true)
         try Data("v1".utf8).write(to: p.runs.appendingPathComponent("t1/v1.js"))
         try Data("[]".utf8).write(to: p.queue)
-        try Data("old".utf8).write(to: p.kit.appendingPathComponent("stale.js"))
+        let old = p.kit
         try ExplainerProject.Server(port: 4321, token: "tok").write(p)
         try Data("# New instructions\n".utf8).write(to: p.resources.appendingPathComponent("CLAUDE.md"))
         #expect(try p.sync())
         #expect(try String(contentsOf: p.root.appendingPathComponent("CLAUDE.md"), encoding: .utf8) == "# New instructions\n")
         #expect(try String(contentsOf: p.runs.appendingPathComponent("t1/v1.js"), encoding: .utf8) == "v1")
         #expect(fm.fileExists(atPath: p.queue.path) && p.server() == ExplainerProject.Server(port: 4321, token: "tok"))
-        #expect(!fm.fileExists(atPath: p.kit.appendingPathComponent("stale.js").path))
+        #expect(p.kit != old && fm.fileExists(atPath: old.appendingPathComponent("kit.js").path))
         #expect(!fm.fileExists(atPath: p.root.appendingPathComponent(".fjord/kit.new").path))
+        #expect(try p.sync() == false)
+    }
+
+    @Test func aPageLinksTheKitItWasMadeWith() throws {
+        let dir = TempDir()
+        let p = try project(dir)
+        try p.sync()
+        let stamp = p.kit.lastPathComponent
+        let player = try String(contentsOf: p.kit.appendingPathComponent("player.html"), encoding: .utf8)
+        let page = ExplainerRenderer.page(player: player, ask: "Why?")
+        #expect(page.contains("\"../../../kit/\(stamp)/player.css\"") && page.contains("\"../../../kit/\(stamp)/kit.js\""))
+        #expect(!page.contains("\"../../../kit/player.css\""))
+        // From runs/<run>/v<n>/, that link is this kit's file.
+        let version = p.runs.appendingPathComponent("r/v1/index.html")
+        let css = URL(fileURLWithPath: "../../../kit/\(stamp)/player.css", relativeTo: version).standardizedFileURL
+        #expect(css.path == p.kit.appendingPathComponent("player.css").standardizedFileURL.path)
+    }
+
+    @Test func aGuardThatWasDeletedOrLostItsModeIsRestored() throws {
+        let dir = TempDir()
+        let p = try project(dir)
+        try p.sync()
+        let fm = FileManager.default
+        let guardFile = p.root.appendingPathComponent(".fjord/guard.sh")
+        try fm.removeItem(at: guardFile)
+        #expect(try p.sync())
+        #expect(fm.fileExists(atPath: guardFile.path) && mode(guardFile) == 0o755)
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: guardFile.path)
+        #expect(try p.sync())
+        #expect(mode(guardFile) == 0o755)
+        try Data("exit 0\n".utf8).write(to: guardFile)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: guardFile.path)
+        #expect(try p.sync())
+        #expect(try Data(contentsOf: guardFile) == Data(contentsOf: p.resources.appendingPathComponent("guard.sh")))
+        // A kit file changed by hand is put back too.
+        try Data("broken".utf8).write(to: p.kit.appendingPathComponent("kit.js"))
+        #expect(try p.sync())
+        #expect(try Data(contentsOf: p.kit.appendingPathComponent("kit.js")) == Data(contentsOf: p.resources.appendingPathComponent("kit/kit.js")))
         #expect(try p.sync() == false)
     }
 
