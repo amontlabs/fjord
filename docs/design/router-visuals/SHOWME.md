@@ -528,3 +528,26 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
   explainer, and `watched(_:)` when the panel shows one with the window key. `start()` runs in `startServices` before
   `t3.start()` (not in tests or demos); `routerShellChanged` calls `explainers.shell(item)`, and `routerThreadChanged`
   ignores hidden ids.
+
+### P4 (2026-11-14)
+- **`ExplainerStage(page:posterLight:posterDark:draft:ready:)` takes plain values, not `RouterExplainer`**, so P5 can map
+  whichever model it lands on. `ExplainerStage.mode(page:ready:)` is `.web(page)` only for a ready explainer with a page,
+  outside demos and shots; otherwise it's `.still`. In `.web` the page draws its own answer, caption, scene bar, time and
+  Sources, so the panel must drop its SwiftUI answer, caption and controls (`RouterExplainerPlayer`) and keep only the
+  title row and "Open in T3". `.still` is the 16:9 stage alone: the poster at full opacity for the current appearance
+  (light falls back to dark and back), with the "Draft N · correcting" tag while `draft` is set.
+- **One web view per panel.** `ExplainerWebView` keeps an `ExplainerWebHost` as its coordinator: a new page is a `load` on
+  the same view, the same page only changes `appearance`, and `dismantleNSView` lets the view go when the panel closes. Keep
+  the `ExplainerStage` at one place in the panel's view tree, or SwiftUI makes a new view per selection. The height comes
+  from the width: `ExplainerWebView.height(width:)` = 16:9 + `chrome` (132 pt: two answer lines, the caption and the bar).
+  If the panel's widths make the page wrap more, retune `chrome` against a live panel.
+- **Embed and theme.** The page loads as `index.html?embed=1` with read access to the project folder (for `../../../kit/`).
+  The view's `appearance` follows SwiftUI's `colorScheme`, and the kit follows `prefers-color-scheme`; no theme parameter
+  is sent, so the poster and the page always match Fjord's look.
+- **`ExplainerWebHost.loaded()`** waits for the current page to finish loading. P5 can use it to fade the page in over its
+  poster.
+- **What an offscreen check can't show:** a window that's never ordered in gets no rendering updates, so the kit's rebuild
+  on a live appearance change, timers and a blocked `fetch` never settle there. `ExplainerPlayerLive` checks embed, the
+  dark load, the media query turning to light without a reload, and the sandbox configuration. The rebuild in place needs a
+  look in the live panel (P5).
+- **Live check:** `FJORD_EXPLAINER_LIVE=1 swift test --filter ExplainerPlayerLive` (offscreen, about 1 s).
