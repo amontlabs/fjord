@@ -26,7 +26,7 @@ struct T3AttachmentLiveTests {
             text.draw(at: NSPoint(x: (rect.width - s.width) / 2, y: (rect.height - s.height) / 2))
             return true
         }
-        return RouterAttachments.png(image)!
+        return image.testPNG
     }
 
     @MainActor @Test(.enabled(if: ProcessInfo.processInfo.environment["FJORD_T3_LIVE"] == "1"))

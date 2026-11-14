@@ -66,21 +66,21 @@ enum RouterShots {
     private static func composeAttachments(_ model: RouterComposerModel, _ store: Store) {
         let a = store.attachments
         a.put(RouterAttachment(id: "image_shot1", kind: .image, name: "Screenshot 2026-11-14 at 10.42.png", mimeType: "image/png",
-                               sizeBytes: 482_113, thumbnail: RouterAttachments.thumbnail(samplePicture(.systemBlue))),
+                               sizeBytes: 482_113, thumbnail: samplePicture(.systemBlue)),
               state: .ready("att-1"))
         a.put(RouterAttachment(id: "file_log1", kind: .file, name: "crash-report.txt", mimeType: "text/plain", sizeBytes: 12_408),
               state: .ready("att-2"))
         a.put(RouterAttachment(id: "image_paste1", kind: .image, name: "Pasted image.png", mimeType: "image/png", sizeBytes: 90_210,
-                               thumbnail: RouterAttachments.thumbnail(samplePicture(.systemOrange))), state: .uploading)
+                               thumbnail: samplePicture(.systemOrange)), state: .uploading)
         a.put(RouterAttachment(id: "file_trace1", kind: .file, name: "trace.json", mimeType: "application/json", sizeBytes: 2_201_004),
               state: .failed("T3 refused the upload (500)"))
         model.pointers = attachmentNames.map { .attachment($0.0) }
         model.draft = attachmentDraft
     }
 
-    /// A stand-in screenshot: a window's chrome and a few rows on a ground of `tint`.
-    private static func samplePicture(_ tint: NSColor) -> NSImage {
-        NSImage(size: NSSize(width: 160, height: 100), flipped: false) { rect in
+    /// A stand-in screenshot's pill picture: a window's chrome and a few rows on a ground of `tint`.
+    private static func samplePicture(_ tint: NSColor) -> NSImage? {
+        let picture = NSImage(size: NSSize(width: 160, height: 100), flipped: false) { rect in
             tint.withAlphaComponent(0.35).setFill()
             rect.fill()
             NSColor.white.setFill()
@@ -89,6 +89,7 @@ enum RouterShots {
             for row in 0..<3 { NSRect(x: 30, y: 26 + CGFloat(row) * 18, width: 70 + CGFloat(row) * 15, height: 8).fill() }
             return true
         }
+        return picture.tiffRepresentation.flatMap(RouterAttachments.pillPicture)
     }
 
     private struct State {

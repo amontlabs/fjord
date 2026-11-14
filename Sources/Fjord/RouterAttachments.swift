@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 import Observation
 
 // A picture or a file put in the Router composer (pasted, dropped): a pill where the caret was, uploaded to T3 at once
@@ -77,6 +78,10 @@ final class RouterAttachments {
     @ObservationIgnored private var held: [String: Set<String>] = [:]
     /// Sent with a message (`sent`): their uploads are a thread's now and are never deleted.
     @ObservationIgnored private(set) var sentIDs: Set<String> = []
+    /// The picture's work under way (a conversion, its thumbnail), off the main thread: its upload waits for it.
+    @ObservationIgnored private var preparing: [String: Task<Void, Never>] = [:]
+    /// Pictures that couldn't be made one T3 takes: they don't upload.
+    @ObservationIgnored private var unreadable: Set<String> = []
     /// When each upload finished: T3 sweeps a pending upload a day after it was posted (`PENDING_ATTACHMENT_MAX_AGE_MS`).
     @ObservationIgnored private var uploadedAt: [String: Date] = [:]
     /// The clock the uploads' age is read on (a test's own).
@@ -89,32 +94,62 @@ final class RouterAttachments {
 
     init(uploader: Uploader? = nil) { self.uploader = uploader }
 
-    /// A pasted or dropped thing made an attachment, its upload started: the pill's pointer. A picture T3 doesn't take as
-    /// one (TIFF, HEIC) is made a PNG first; anything else goes as a file. Too big for T3: the pill shows it failed.
+    /// A pasted or dropped thing made an attachment: the pill's pointer, at once. Only what its type says is worked out
+    /// here (what it goes as, its name); the picture's work (a TIFF or HEIC made one T3 takes, its thumbnail) is done off
+    /// the main thread, the pill showing it posting meanwhile, and then its upload starts. A picture T3 doesn't take as
+    /// one goes as a PNG (a photo, HEIC or HEIF: a JPEG), made smaller if it is over T3's 10 MB; one ImageIO can't read,
+    /// and anything else, goes as a file. Too big or empty: the pill shows it failed.
     func add(name: String, mimeType: String, data: Data) -> RouterPointer {
-        var name = name
-        var mime = mimeType.lowercased()
-        var data = data
-        let picture = NSImage(data: data)
-        if mime.hasPrefix("image/"), !RouterAttachment.imageTypes.contains(mime), let png = picture.flatMap(Self.png) {
-            data = png
-            mime = "image/png"
-            name = (name as NSString).deletingPathExtension + ".png"
-        }
-        let kind: RouterAttachment.Kind = RouterAttachment.imageTypes.contains(mime) && data.count <= RouterAttachment.maxImageBytes
-            ? .image : .file
+        let given = mimeType.lowercased()
+        let target = Self.target(mime: given, data: data)
+        let mime = target?.mime ?? (given.isEmpty ? "application/octet-stream" : given)
+        let kind: RouterAttachment.Kind = target != nil
+            || (RouterAttachment.imageTypes.contains(mime) && data.count <= RouterAttachment.maxImageBytes) ? .image : .file
+        let named = target.map { (name as NSString).deletingPathExtension + "." + $0.ext } ?? name
         let id = kind.rawValue + "_" + UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(16)
-        let item = RouterAttachment(id: id, kind: kind, name: unique(Self.cleanName(name, kind: kind)), mimeType: mime.isEmpty ? "application/octet-stream" : mime,
-                                    sizeBytes: data.count, data: data,
-                                    thumbnail: kind == .image ? picture.flatMap { Self.thumbnail($0) } : nil)
-        items[id] = item
-        if data.isEmpty || data.count > RouterAttachment.maxFileBytes {
-            states[id] = .failed(data.isEmpty ? "It's empty" : "Over T3's 50 MB")
+        items[id] = RouterAttachment(id: id, kind: kind, name: unique(Self.cleanName(named, kind: kind)), mimeType: mime,
+                                     sizeBytes: data.count, data: data)
+        if kind == .image, !data.isEmpty {
+            preparing[id] = Task { @MainActor [weak self] in
+                let made = await Task.detached(priority: .userInitiated) {
+                    Self.prepare(data, as: target, maxBytes: RouterAttachment.maxImageBytes)
+                }.value
+                self?.prepared(id, made, converting: target != nil)
+            }
+        }
+        if let why = refusal(id) {
+            states[id] = .failed(why)
             revision &+= 1
         } else {
             start(id)
         }
         return .attachment(id)
+    }
+
+    /// The picture's work is done: its bytes as T3 takes them, its thumbnail.
+    private func prepared(_ id: String, _ made: Prepared, converting: Bool) {
+        preparing[id] = nil
+        guard items[id] != nil else { return }
+        if converting {
+            if let data = made.data {
+                items[id]?.data = data
+                items[id]?.sizeBytes = data.count
+            } else {
+                unreadable.insert(id)
+            }
+        }
+        items[id]?.thumbnail = made.thumbnail.map { NSImage(cgImage: $0, size: NSSize(width: Self.thumbnailSide, height: Self.thumbnailSide)) }
+        revision &+= 1
+    }
+
+    /// Why it can't upload, if it can't: empty, over T3's size, a picture that couldn't be made one T3 takes.
+    private func refusal(_ id: String) -> String? {
+        guard let item = items[id] else { return "It's gone" }
+        if unreadable.contains(id) { return "Fjord couldn't read the picture" }
+        guard let data = item.data else { return "Its bytes are gone" }
+        if data.isEmpty { return "It's empty" }
+        if data.count > RouterAttachment.maxFileBytes { return "Over T3's 50 MB" }
+        return nil
     }
 
     /// Adds an attachment as it is, its state given: a shot's, a test's.
@@ -202,6 +237,8 @@ final class RouterAttachments {
 
     /// Nothing of it is kept: its bytes, its picture, its state.
     private func forget(_ id: String) {
+        preparing.removeValue(forKey: id)?.cancel()
+        unreadable.remove(id)
         tasks.removeValue(forKey: id)?.cancel()
         tokens[id] = nil
         minted[id] = nil
@@ -289,18 +326,16 @@ final class RouterAttachments {
     }
 
     /// Its bytes are here and T3 takes their size: an upload can be tried (again).
-    private func canUpload(_ id: String) -> Bool {
-        guard let item = items[id], let data = item.data else { return false }
-        return !data.isEmpty && data.count <= RouterAttachment.maxFileBytes
-    }
+    private func canUpload(_ id: String) -> Bool { refusal(id) == nil }
 
     private func start(_ id: String) {
-        guard let item = items[id] else { return }
+        guard items[id] != nil else { return }
         tasks[id]?.cancel()
         tokens[id] = nil
         states[id] = .uploading
         revision &+= 1
-        guard let uploader else {
+        let picture = preparing[id]
+        guard uploader != nil || picture != nil else {
             // Nothing to upload to (a demo): done at once, under its own id.
             states[id] = .ready(id)
             revision &+= 1
@@ -310,16 +345,27 @@ final class RouterAttachments {
         let token = UUID()
         tokens[id] = token
         tasks[id] = Task { @MainActor [weak self] in
+            // The picture's work first (off the main thread): the upload posts the bytes it made.
+            await picture?.value
+            guard let self, self.tokens[id] == token, let item = self.items[id] else { throw CancellationError() }
+            if let why = self.refusal(id) {
+                self.finish(id, token, .failed(why))
+                throw ThreadSendFailure(why)
+            }
+            guard let uploader = self.uploader else {
+                self.finish(id, token, .ready(id))
+                return id
+            }
             do {
-                let attachmentId = try await uploader.upload(item) { minted in
+                let attachmentId = try await uploader.upload(item) { [weak self] minted in
                     // Minted after the pill left (or a retry took over): nothing will use it.
                     guard self?.tokens[id] == token else { Task { await uploader.delete(minted) }; return }
                     self?.minted[id] = minted
                 }
-                self?.finish(id, token, .ready(attachmentId))
+                self.finish(id, token, .ready(attachmentId))
                 return attachmentId
             } catch {
-                self?.finish(id, token, .failed(Self.words(error)))
+                self.finish(id, token, .failed(Self.words(error)))
                 throw error
             }
         }
@@ -348,23 +394,93 @@ final class RouterAttachments {
         return cut.isEmpty ? (kind == .image ? "image.png" : "file") : cut
     }
 
-    /// A picture's bytes as a PNG.
-    static func png(_ image: NSImage) -> Data? {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+    // MARK: The picture's work, off the main thread
+
+    /// A thumbnail's side, in points (the pill draws it smaller), and in pixels (two a point).
+    static let thumbnailSide: CGFloat = 28
+
+    /// What a picture T3 doesn't take is made: a PNG, or a JPEG for a photo.
+    struct Target: Equatable, Sendable {
+        var type: String
+        var mime: String
+        var ext: String
+        static let png = Target(type: "public.png", mime: "image/png", ext: "png")
+        static let jpeg = Target(type: "public.jpeg", mime: "image/jpeg", ext: "jpg")
     }
 
-    /// A picture cut to a square of `side` points, drawn once.
-    static func thumbnail(_ image: NSImage, side: CGFloat = 28) -> NSImage? {
-        let size = image.size
-        guard size.width > 0, size.height > 0 else { return nil }
-        let scale = side / min(size.width, size.height)
-        let drawn = NSSize(width: size.width * scale, height: size.height * scale)
-        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            image.draw(in: NSRect(x: (rect.width - drawn.width) / 2, y: (rect.height - drawn.height) / 2,
-                                  width: drawn.width, height: drawn.height))
-            return true
+    /// What a pasted thing of type `mime` is made before it goes: nil when it goes as it is (a picture T3 takes, anything
+    /// that isn't a picture, a picture ImageIO can't read). Reads only the bytes' header: cheap on the main thread.
+    nonisolated static func target(mime: String, data: Data) -> Target? {
+        guard mime.hasPrefix("image/"), !RouterAttachment.imageTypes.contains(mime), !data.isEmpty,
+              let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0,
+              CGImageSourceGetType(source) != nil else { return nil }
+        return mime == "image/heic" || mime == "image/heif" ? .jpeg : .png
+    }
+
+    /// A picture's work, done off the main thread: its bytes made `target`'s (nil: kept as they are), smaller until they
+    /// fit `maxBytes`; and a small square thumbnail of its own (no copy of the whole picture is kept).
+    struct Prepared: @unchecked Sendable {
+        var data: Data?
+        var thumbnail: CGImage?
+    }
+
+    nonisolated static func prepare(_ data: Data, as target: Target?, maxBytes: Int) -> Prepared {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0 else {
+            return Prepared(data: nil, thumbnail: nil)
         }
+        return Prepared(data: target.flatMap { encode(source, as: $0, maxBytes: maxBytes) }, thumbnail: thumbnail(source))
+    }
+
+    /// The picture as `target`, upright, at its own size or as much smaller as it takes to fit `maxBytes` (a few tries).
+    nonisolated static func encode(_ source: CGImageSource, as target: Target, maxBytes: Int) -> Data? {
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let width = (props?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+        let height = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
+        var side = max(width, height)
+        guard side > 0 else { return nil }
+        for _ in 0..<5 {
+            // Drawn from the source at that size, its orientation applied: the bytes need no EXIF to show upright.
+            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                            kCGImageSourceCreateThumbnailWithTransform: true,
+                                            kCGImageSourceThumbnailMaxPixelSize: side]
+            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            let out = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(out, target.type as CFString, 1, nil) else { return nil }
+            let quality: [CFString: Any] = target == .jpeg ? [kCGImageDestinationLossyCompressionQuality: 0.85] : [:]
+            CGImageDestinationAddImage(dest, image, quality as CFDictionary)
+            guard CGImageDestinationFinalize(dest) else { return nil }
+            if out.length <= maxBytes { return out as Data }
+            // Smaller by the area it is over, and a tenth more.
+            side = Int(Double(side) * (Double(maxBytes) / Double(out.length)).squareRoot() * 0.9)
+            guard side > 16 else { return nil }
+        }
+        return nil
+    }
+
+    /// A square of the picture's middle, `thumbnailSide` points at two pixels a point: a bitmap of its own.
+    nonisolated static func thumbnail(_ source: CGImageSource) -> CGImage? {
+        let pixels = Int(thumbnailSide * 2)
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceCreateThumbnailWithTransform: true,
+                                        kCGImageSourceShouldCacheImmediately: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: pixels * 4]
+        guard let small = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              small.width > 0, small.height > 0,
+              let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let scale = CGFloat(pixels) / CGFloat(min(small.width, small.height))
+        let drawn = CGSize(width: CGFloat(small.width) * scale, height: CGFloat(small.height) * scale)
+        context.interpolationQuality = .high
+        context.draw(small, in: CGRect(x: (CGFloat(pixels) - drawn.width) / 2, y: (CGFloat(pixels) - drawn.height) / 2,
+                                       width: drawn.width, height: drawn.height))
+        return context.makeImage()
+    }
+
+    /// A pill's thumbnail for a picture's bytes, made here (a shot's).
+    static func pillPicture(_ data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), let image = thumbnail(source) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: thumbnailSide, height: thumbnailSide))
     }
 }
 

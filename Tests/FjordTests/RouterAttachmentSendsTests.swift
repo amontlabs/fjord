@@ -36,7 +36,7 @@ import Testing
             rect.fill()
             return true
         }
-        return RouterAttachments.png(image)!
+        return image.testPNG
     }
 
     // MARK: A split

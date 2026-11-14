@@ -1,11 +1,17 @@
 import AppKit
 import Foundation
+import ImageIO
 import Testing
 @testable import Fjord
 
 /// Pictures and files pasted in the Router composer: what T3 gets for one (its reference where the pill sat, a record bound
 /// to the upload, the upload in `attachments`), the upload's requests, a pill taken out deleting its upload, and a send
 /// waiting for an upload still posting. All on stubs: nothing reaches T3.
+extension NSImage {
+    /// The picture as PNG bytes, for a test's paste.
+    var testPNG: Data { NSBitmapImageRep(data: tiffRepresentation!)!.representation(using: .png, properties: [:])! }
+}
+
 @MainActor
 @Suite struct RouterAttachmentsTests {
     typealias F = T3Fixture
@@ -35,7 +41,7 @@ import Testing
             rect.fill()
             return true
         }
-        return RouterAttachments.png(image)!
+        return image.testPNG
     }
 
     // MARK: What T3 gets
@@ -142,18 +148,68 @@ import Testing
         #expect(posted?.1.count == attachments.items[id]?.sizeBytes)
     }
 
-    @Test func aPictureT3DoesntTakeIsMadeAPNGAndAnythingElseIsAFile() {
+    /// A picture of `side` pixels of noise (a photo's worth of detail: it doesn't compress), as `type` ("public.heic").
+    private func noise(_ side: Int, as type: String) -> Data {
+        let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let bytes = context.data!.assumingMemoryBound(to: UInt8.self)
+        var seed: UInt32 = 7
+        for i in 0..<(context.bytesPerRow * side) {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            bytes[i] = UInt8(truncatingIfNeeded: seed >> 24)
+        }
+        let out = NSMutableData()
+        let dest = CGImageDestinationCreateWithData(out, type as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, context.makeImage()!, nil)
+        #expect(CGImageDestinationFinalize(dest))
+        return out as Data
+    }
+
+    @Test func aPictureT3DoesntTakeIsMadeAPNGOffTheMainThreadAndAnythingElseIsAFile() async throws {
         let attachments = RouterAttachments()
         let tiff = NSImage(data: png())!.tiffRepresentation!
         guard case .attachment(let picture) = attachments.add(name: "Pasted image.tiff", mimeType: "image/tiff", data: tiff),
               case .attachment(let file) = attachments.add(name: "notes.pdf", mimeType: "application/pdf", data: Data(count: 10)) else {
             Issue.record("no pills"); return
         }
+        // The pill is there at once, posting, its name and type what it will go as; the picture's work isn't done yet.
         #expect(attachments.items[picture]?.mimeType == "image/png" && attachments.items[picture]?.name == "Pasted image.png")
-        #expect(attachments.items[picture]?.thumbnail != nil && picture.hasPrefix("image_"))
+        #expect(attachments.states[picture] == .uploading && attachments.items[picture]?.thumbnail == nil)
+        #expect(attachments.items[picture]?.data == tiff && picture.hasPrefix("image_"))
         #expect(file.hasPrefix("file_") && attachments.items[file]?.thumbnail == nil)
-        // No uploader (a demo): done at once.
+        // No uploader (a demo): a file is done at once, a picture once its work is.
         #expect(attachments.states[file] == .ready(file))
+        _ = try await attachments.uploads([picture])
+        #expect(attachments.states[picture] == .ready(picture))
+        let item = try #require(attachments.items[picture])
+        #expect(item.data?.prefix(4) == Data([0x89, 0x50, 0x4E, 0x47]) && item.sizeBytes == item.data?.count)
+        // Its thumbnail is a small bitmap of its own, not a drawing of the whole picture done again at each redraw.
+        let thumbnail = try #require(item.thumbnail)
+        #expect(thumbnail.size == NSSize(width: 28, height: 28))
+        #expect(!thumbnail.representations.contains { $0 is NSCustomImageRep })
+        #expect(thumbnail.representations.allSatisfy { $0.pixelsWide <= 56 && $0.pixelsHigh <= 56 })
+    }
+
+    @Test func aPhotoGoesAsAJPEGPicture() async throws {
+        let attachments = RouterAttachments()
+        let heic = noise(64, as: "public.heic")
+        guard case .attachment(let id) = attachments.add(name: "IMG_0042.HEIC", mimeType: "image/heic", data: heic) else { return }
+        #expect(id.hasPrefix("image_"))
+        #expect(attachments.items[id]?.mimeType == "image/jpeg" && attachments.items[id]?.name == "IMG_0042.jpg")
+        _ = try await attachments.uploads([id])
+        #expect(attachments.items[id]?.data?.prefix(2) == Data([0xFF, 0xD8]))
+    }
+
+    @Test func aPictureOverT3sSizeIsMadeSmallerUntilItFits() throws {
+        // 600 px of noise: well over 40 KB as a JPEG; made smaller, it fits.
+        let data = noise(600, as: "public.png")
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let full = try #require(RouterAttachments.encode(source, as: .jpeg, maxBytes: .max))
+        #expect(full.count > 40_000)
+        let made = try #require(RouterAttachments.prepare(data, as: .jpeg, maxBytes: 40_000).data)
+        #expect(made.count <= 40_000 && made.prefix(2) == Data([0xFF, 0xD8]))
+        let props = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithData(made as CFData, nil)!, 0, nil) as? [CFString: Any]
+        #expect(((props?[kCGImagePropertyPixelWidth] as? Int) ?? 600) < 600)
     }
 
     @Test func tooBigFailsAtOnce() {
