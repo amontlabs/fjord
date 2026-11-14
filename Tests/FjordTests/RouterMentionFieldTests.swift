@@ -225,6 +225,20 @@ import Testing
         #expect(made == ["Pasted image.png"] && v.string == "see this" + MentionText.markString + " ")
     }
 
+    @Test func aPillTheFieldRefusesLetsItsAttachmentGo() {
+        let v = view()
+        v.isEditable = false
+        var detached: [RouterPointer] = []
+        v.attach = { _, _, _ in .attachment("image_1") }
+        v.detach = { detached.append($0) }
+        let board = NSPasteboard(name: .init("fjord-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.setData(png(), forType: .png)
+        _ = v.insertAttachments(from: board, replacing: NSRange(location: 0, length: 0))
+        #expect(v.string.isEmpty && detached == [.attachment("image_1")])
+    }
+
     @Test func aMarkThatComesInAsTextIsNoPill() {
         let v = view()
         let m = MentionText.markString

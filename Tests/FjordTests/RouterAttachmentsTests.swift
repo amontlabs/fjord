@@ -221,6 +221,20 @@ import Testing
         #expect(try await attachments.uploads([id])[id]?.id == "att-1")
     }
 
+    @Test func anAttachmentWhosePillNeverWentInIsDeletedAndForgotten() async throws {
+        let (open, minted, deleted) = (Signal(), Signal(), Signal())
+        var deletes: [String] = []
+        let attachments = RouterAttachments(uploader: gated(open: open, minted: minted, deleted: deleted,
+                                                            deletes: { deletes.append($0) }, events: { _ in }))
+        guard case .attachment(let id) = attachments.add(name: "dot.png", mimeType: "image/png", data: png()) else { return }
+        await minted.wait()
+        attachments.discard(id)
+        await deleted.wait()
+        #expect(deletes == ["att-1"])
+        #expect(attachments.items[id] == nil && attachments.states[id] == nil)
+        open.fire()
+    }
+
     @Test func aFailedUploadSaysSoAndAClickTriesAgain() async throws {
         var tries = 0
         let attachments = RouterAttachments(uploader: RouterAttachments.Uploader(upload: { _, _ in

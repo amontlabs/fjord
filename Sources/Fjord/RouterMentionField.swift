@@ -77,6 +77,8 @@ final class MentionTextView: NSTextView {
     var attach: ((_ name: String, _ mimeType: String, _ data: Data) -> RouterPointer?)? {
         didSet { if (attach == nil) != (oldValue == nil) { updateDragTypeRegistration() } }
     }
+    /// An attachment made for a pill that didn't go in (the change was refused): it is let go, its upload deleted.
+    var detach: ((RouterPointer) -> Void)?
     /// A click on an attachment's pill (a failed one tries again).
     var onAttachment: ((String) -> Void)?
     /// A click on a pill that opens something (an item's, an answer's: their card). Nil: a pill is clicked as text.
@@ -179,12 +181,19 @@ final class MentionTextView: NSTextView {
         }
         guard !found.isEmpty, let storage = textStorage else { return false }
         let out = NSMutableAttributedString()
+        var made: [RouterPointer] = []
         for f in found {
-            guard let pointer = attach(f.name, f.mime, f.data), let pill = makePill(pointer) else { continue }
+            guard let pointer = attach(f.name, f.mime, f.data) else { continue }
+            made.append(pointer)
+            guard let pill = makePill(pointer) else { continue }
             out.append(NSAttributedString(attachment: pill))
             out.append(NSAttributedString(string: " ", attributes: base))
         }
-        guard out.length > 0, shouldChangeText(in: range, replacementString: out.string) else { return !found.isEmpty }
+        guard out.length > 0, shouldChangeText(in: range, replacementString: out.string) else {
+            // Not put in: what was made for them goes (an upload started is deleted), nothing is left behind.
+            made.forEach { detach?($0) }
+            return !found.isEmpty
+        }
         storage.replaceCharacters(in: range, with: out)
         setSelectedRange(NSRange(location: range.location + out.length, length: 0))
         didChangeText()
@@ -338,10 +347,12 @@ struct MentionField: NSViewRepresentable {
             if view.attach == nil {
                 view.attach = { [weak attachments] name, mime, data in attachments?.add(name: name, mimeType: mime, data: data) }
                 view.onAttachment = { [weak attachments] id in attachments?.retry(id) }
+                view.detach = { [weak attachments] pointer in pointer.attachment.map { attachments?.discard($0) } }
             }
         } else if view.attach != nil {
             view.attach = nil
             view.onAttachment = nil
+            view.detach = nil
         }
         c.view = view
         c.follow(model)

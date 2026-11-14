@@ -192,6 +192,27 @@ final class RouterAttachments {
         if let uploaded, let uploader { Task { await uploader.delete(uploaded) } }
     }
 
+    /// An attachment made for a pill that never went in (the field refused the change): its upload stops, what T3 minted
+    /// for it is deleted, and nothing of it is kept. One some holder has is left alone.
+    func discard(_ id: String) {
+        guard items[id] != nil, !held.values.contains(where: { $0.contains(id) }) else { return }
+        remove(id)
+        forget(id)
+    }
+
+    /// Nothing of it is kept: its bytes, its picture, its state.
+    private func forget(_ id: String) {
+        tasks.removeValue(forKey: id)?.cancel()
+        tokens[id] = nil
+        minted[id] = nil
+        uploadedAt[id] = nil
+        removed.remove(id)
+        sentIDs.remove(id)
+        items[id] = nil
+        states[id] = nil
+        revision &+= 1
+    }
+
     /// The pill came back (an undo): uploaded again.
     func restore(_ id: String) {
         guard removed.remove(id) != nil else { return }
