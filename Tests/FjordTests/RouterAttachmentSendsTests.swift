@@ -217,6 +217,17 @@ import Testing
         #expect(val.hold.map { attachments.held(by: $0) } == [id] && attachments.states[id] == .ready("att-1"))
     }
 
+    @Test func aPictureInAPartTheRouterAnswersItselfGoesWithTheSendingPartBeforeIt() async throws {
+        let (model, source, attachments, id, counted) = await countedSplit(["keep the sidebar icons", "see [image: shot.png] please"],
+                                                                           second: .here)
+        model.send()
+        await settle()
+        let settings = try #require(source.sends.first { $0.thread == ID.settings })
+        #expect(settings.words == "keep the sidebar icons [image: shot.png]")
+        #expect(settings.attached.map(\.pointer) == [.attachment(id)])
+        #expect(counted.deletes.isEmpty && settings.hold.map { attachments.held(by: $0) } == [id])
+    }
+
     @Test func twoSendsToOneThreadEachKeepTheirOwnPicturesWhenOneIsRefused() async throws {
         let attachments = RouterAttachments()
         let a = attachments.add(name: "a.png", mimeType: "image/png", data: png()).attachment!

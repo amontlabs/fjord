@@ -123,10 +123,15 @@ extension RouterModel {
     func sendSplit(_ sends: [RouterSend], queue: Bool = false) {
         // The answers lead the sends (`split`): the rest are the words' parts.
         let wordSends = Array(sends.dropFirst(hasAnswers ? answerSends.count : 0))
-        // Each pasted picture or file goes in the part that says it ("[image: name]"); one no part says, with the part
-        // before it. A part that carries one goes as words, not as a structured answer (which takes none).
+        // Each pasted picture or file goes in the part that says it ("[image: name]"); one no part that sends says (a part
+        // the Router answers itself sends nothing), with the sending part before it. A part that carries one goes as words,
+        // not as a structured answer (which takes none).
         let pills = RouterMentions.plain(draft, marks: mentions).mentions.filter { $0.pointer.attachment != nil }
-        let words = RouterAttachments.placed(wordSends.map(\.words), draft: plainDraft, pills: pills)
+        let sending = wordSends.indices.filter { wordSends[$0].place != .here }
+        var words = wordSends.map(\.words)
+        for (at, placed) in zip(sending, RouterAttachments.placed(sending.map { wordSends[$0].words }, draft: plainDraft, pills: pills)) {
+            words[at] = placed
+        }
         let parts = zip(wordSends, words).map { send, words in
             (words: words, place: send.place,
              kind: RouterAttachments.pills(in: words, of: pills).isEmpty ? requestAnswer(send) : nil)
