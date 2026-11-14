@@ -191,7 +191,7 @@ extension RouterModel {
         func label(_ n: Int) -> String? { numbered.indices.contains(n - 1) ? numbered[n - 1].label : nil }
         let questions = t.form.isEmpty ? [0] : Array(t.form.indices)
         let parts = questions.compactMap { q -> String? in
-            if let words = typed[t.id]?[q], !words.isEmpty { return words }
+            if let words = typedWords(t.id, q), !words.isEmpty { return words }
             return picks[t.id]?[q].flatMap(label).map(RouterModel.spoken)
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -358,7 +358,7 @@ extension RouterModel {
         // Requests first, structured.
         for a in answers where a.request {
             guard let t = thread(a.thread) else { continue }
-            dispatch(a.answer ?? "", to: t, kind: .answer(picks: a.picks, typed: a.typed))
+            dispatch(a.answer ?? "", to: t, kind: .answer(picks: a.picks, typed: a.typed, attached: typedAttachments(a.thread)))
         }
         var items: [String: [RouterPillContext]] = [:]
         var order: [String] = []

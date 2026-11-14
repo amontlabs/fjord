@@ -164,7 +164,12 @@ final class RouterModel {
     /// Each card's answer is a pill in the draft (`RouterAnswerPills`).
     var picks: [String: [Int: Int]] = [:] { didSet { if picks != oldValue { answersChanged() } } }
     /// A form's typed answers, per question; a card's Other.
-    var typed: [String: [Int: String]] = [:] { didSet { if typed != oldValue { answersChanged() } } }
+    var typed: [String: [Int: String]] = [:] { didSet { if typed != oldValue { answersChanged(); answersHoldAttachments() } } }
+    /// The pictures and files pasted with a form's typed answer, per question, with the words they went with: they go with
+    /// the answer only while it is still those words (`RouterAnswerAttachments`).
+    @ObservationIgnored var typedAttached: [String: [Int: (words: String, pills: [RouterMention])]] = [:] {
+        didSet { answersHoldAttachments() }
+    }
     /// A form's current question.
     var formAt: [String: Int] = [:]
     /// The cards whose long text (plan, last lines) is open.
@@ -934,7 +939,7 @@ final class RouterModel {
         // A pick the card no longer has (its ask changed under it) says nothing.
         func label(_ n: Int) -> String? { options.indices.contains(n - 1) ? options[n - 1].label : nil }
         if t.form.isEmpty { return mine[0].flatMap(label) }
-        let parts = t.form.indices.compactMap { q in typed[t.id]?[q] ?? mine[q].flatMap(label) }
+        let parts = t.form.indices.compactMap { q in typedWords(t.id, q) ?? mine[q].flatMap(label) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

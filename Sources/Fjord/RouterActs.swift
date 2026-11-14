@@ -132,7 +132,7 @@ extension RouterActsRecords {
         records?.began(send: send)
         switch out.kind {
         case .words: words(out, send)
-        case .answer(let picks, let typed): answer(out, send, picks: picks, typed: typed)
+        case .answer(let picks, let typed, let attached): answer(out, send, picks: picks, typed: typed, attached: attached)
         case .continuing: continuing(send)
         }
     }
@@ -148,11 +148,11 @@ extension RouterActsRecords {
         entries[entry] = send
     }
 
-    private func answer(_ out: RouterOutgoing, _ send: Send, picks: [Int: Int], typed: [Int: String]) {
+    private func answer(_ out: RouterOutgoing, _ send: Send, picks: [Int: Int], typed: [Int: String], attached: [Int: [String]]) {
         // What the thread holds now is what the picks are read against, in this turn.
         guard let request = env.request(out.thread) else { return refuse(send, "That isn't waiting anymore") }
         let resolved: ThreadAnswers.Answer
-        do { resolved = try ThreadAnswers.resolve(request, picks: picks, typed: typed) } catch {
+        do { resolved = try ThreadAnswers.resolve(request, picks: picks, typed: typed, attached: attached) } catch {
             return refuse(send, Self.words(error))
         }
         let snapshot = RequestSnapshot(target: ThreadTarget(project: "", thread: out.thread), request: request)

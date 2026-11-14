@@ -70,15 +70,26 @@ extension Store {
     }
 
     /// The answer to a question (`runtime-request.respond`): an option's value, several for a multiple choice, or the
-    /// words of a custom answer. Only while the thread still holds that request, checked again right before it is sent.
-    func answerQuestion(_ request: ThreadRequest, _ answers: [String: T3Answer], target: ThreadTarget,
-                        snapshot: RequestSnapshot? = nil, alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
+    /// words of a custom answer. `attachments`: by question id, the pictures and files pasted with its answer (their pill
+    /// ids), only where the question takes a custom answer (else nothing goes, and the failure says why); the send waits for
+    /// those still uploading and goes without any that failed or were taken out. Only while the thread still holds that
+    /// request, checked again right before it is sent (after the uploads).
+    func answerQuestion(_ request: ThreadRequest, _ answers: [String: T3Answer], attachments attached: [String: [String]] = [:],
+                        target: ThreadTarget, snapshot: RequestSnapshot? = nil,
+                        alsoValid: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         do {
-            let checked = try request.validate(answers)
+            let attached = attached.filter { !$0.value.isEmpty }
+            let checked = try request.validate(answers, attached: Set(attached.keys))
             guard request.live else { throw RequestFailure.notLive }
+            var uploads: [String: [T3Attachment]] = [:]
+            if !attached.isEmpty {
+                let done = try await attachments.uploads(attached.values.flatMap { $0 })
+                uploads = attached.mapValues { ids in ids.compactMap { done[$0] } }
+            }
             guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
             else { throw RequestFailure.moved }
-            try await sendCommands([.respondAnswers(threadId: target.thread, requestId: request.id, answers: checked)])
+            try await sendCommands([.respondAnswers(threadId: target.thread, requestId: request.id, answers: checked,
+                                                    attachments: uploads)])
             logEntryAction("Answered the question", target: target)
             return .success(())
         } catch {

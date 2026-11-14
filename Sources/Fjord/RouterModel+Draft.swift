@@ -378,8 +378,10 @@ extension RouterModel {
             if case .thread(let id) = place, let t = thread(id), !t.form.isEmpty, selection == .line(id) {
                 // Typed on a form: the words answer the current question; they go with the rest of the form.
                 let at = min(formAt[id] ?? 0, t.form.count - 1)
+                let (words, pills) = Self.answerWithoutAttachments(draft, marks: mentions)
+                typedAttached[id, default: [:]][at] = pills.isEmpty ? nil : (words, pills)
                 animate(.spatial) {
-                    typed[id, default: [:]][at] = plainDraft
+                    typed[id, default: [:]][at] = words
                     picks[id]?[at] = nil
                     if let open = t.form.indices.first(where: { $0 != at && !answered(t, $0) }) { formAt[id] = open }
                 }
@@ -407,7 +409,7 @@ extension RouterModel {
     /// What a picked answer is: options on a T3 request, else plain words.
     private func answerKind(_ t: RouterThread) -> RouterOutgoing.Kind {
         switch t.state {
-        case .needsYou: return .answer(picks: picks[t.id] ?? [:], typed: typed[t.id] ?? [:])
+        case .needsYou: return .answer(picks: picks[t.id] ?? [:], typed: typed[t.id] ?? [:], attached: typedAttachments(t.id))
         default: return .words
         }
     }
@@ -433,6 +435,8 @@ extension RouterModel {
         switch place {
         case .thread(let id):
             guard let t = thread(id) else { return }
+            // Pictures or files in words to a T3 request's card go as its answer, which says plainly if it can't take them.
+            let kind = kind == .words ? attachedAnswer(words, to: t, attached: attached) ?? kind : kind
             if (queue || !t.steers), t.state == .working {
                 animate(.spatial) { update(id) { $0.queued = words } }
                 lastSends[id] = (words, .words)
@@ -462,6 +466,8 @@ extension RouterModel {
     func dispatch(_ words: String, to t: RouterThread, kind: RouterOutgoing.Kind, read shown: RouterRead? = nil,
                   attached: [RouterMention] = []) {
         let id = t.id
+        // An answer's pictures and files are its thread's now: nothing deletes their uploads.
+        if case .answer(_, _, let attached) = kind { attachments?.sent(attached.values.joined()) }
         // Into a run only when one is under way: a line still Sent has no run yet, and the words go as a message.
         let steering = t.state == .working
         backups[id] = (t, picks[id], kind)
@@ -486,6 +492,7 @@ extension RouterModel {
             }
             self.picks[id] = nil
             self.typed[id] = nil
+            self.typedAttached[id] = nil
             self.formAt[id] = nil
             self.expanded.remove(id)
             if let next {

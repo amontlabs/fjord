@@ -844,7 +844,9 @@ enum T3Command: Equatable, Sendable {
     /// Links a pull request to a thread so T3 polls and pushes its state (`thread.pull-request.link`, source `agent`).
     case pullRequestLink(threadId: String, url: String)
     case respondDecision(threadId: String, requestId: String, decision: T3Decision, feedback: String? = nil)
-    case respondAnswers(threadId: String, requestId: String, answers: [String: T3Answer])
+    /// `attachments`: by question id, the uploads that go with its answer (`attachmentsByQuestionId`); T3 adds their paths to
+    /// the answer the agent gets.
+    case respondAnswers(threadId: String, requestId: String, answers: [String: T3Answer], attachments: [String: [T3Attachment]] = [:])
     case runInterrupt(threadId: String, runId: String, reason: String? = nil, holdQueue: Bool = false)
     case queuedRunCancel(threadId: String, runId: String)
     case queuedRunEdit(threadId: String, runId: String, text: String)
@@ -902,11 +904,15 @@ enum T3Command: Equatable, Sendable {
             var e: [String: T3JSON] = ["requestId": .string(request), "decision": .string(decision.rawValue)]
             if let feedback { e["feedback"] = .string(feedback) }
             return cmd("runtime-request.respond", thread, e)
-        case .respondAnswers(let thread, let request, let answers):
+        case .respondAnswers(let thread, let request, let answers, let attachments):
             let a = answers.mapValues { v -> T3JSON in
                 switch v { case .one(let s): .string(s); case .many(let m): .array(m.map(T3JSON.string)) }
             }
-            return cmd("runtime-request.respond", thread, ["requestId": .string(request), "answers": .object(a)])
+            var e: [String: T3JSON] = ["requestId": .string(request), "answers": .object(a)]
+            // As T3's web client sends them: only the questions that have some, the answer's text left without references.
+            let byQuestion = attachments.filter { !$0.value.isEmpty }
+            if !byQuestion.isEmpty { e["attachmentsByQuestionId"] = .object(byQuestion.mapValues { .array($0.map(\.json)) }) }
+            return cmd("runtime-request.respond", thread, e)
         case .runInterrupt(let thread, let run, let reason, let hold):
             var e: [String: T3JSON] = ["runId": .string(run)]
             if let reason { e["reason"] = .string(reason) }

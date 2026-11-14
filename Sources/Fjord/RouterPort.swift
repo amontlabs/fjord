@@ -47,7 +47,8 @@ struct RouterOutgoing: Equatable {
         /// Options picked on a T3 request (question, form, plan, permission), by question (0 for a single question)
         /// the option's number through the card (`RouterThread.numbered`), and a form's typed answers by question.
         /// `words` is what the line shows. A step's options (the model's) go as `.words`.
-        case answer(picks: [Int: Int], typed: [Int: String])
+        /// `attached`: by question, the pictures and files pasted with its typed answer (their pill ids, out of `typed`).
+        case answer(picks: [Int: Int], typed: [Int: String], attached: [Int: [String]] = [:])
         /// Continue on a Stopped card: T3's "Continue where you left off.", with the run's id when it allows.
         case continuing
     }

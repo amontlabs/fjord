@@ -102,6 +102,8 @@ struct RequestSnapshot: Equatable, Sendable {
 /// What can go wrong sending an answer.
 enum RequestFailure: LocalizedError, Equatable {
     case notLive, incomplete, unknownOption(String), notAPlan, notAQuestion, notAPermission, noFeedback, moved
+    /// Pictures or files with an answer that can't carry them: a question with only its options, a permission, a plan.
+    case noAttachments(String)
     var errorDescription: String? {
         switch self {
         case .notLive: "T3 restarted since it asked: answer it in T3, or send words instead."
@@ -112,18 +114,28 @@ enum RequestFailure: LocalizedError, Equatable {
         case .notAPermission: "That isn't a permission."
         case .noFeedback: "This permission can't take words: use its buttons, or answer in T3."
         case .moved: RequestSnapshot.changedWords
+        case .noAttachments(let why): why + ": nothing was sent. Take the pictures and files out, or answer in T3."
         }
     }
+
+    static let optionsOnly = noAttachments("This question only takes its options, not pictures or files")
+    static let permissionTakesNone = noAttachments("A permission's answer can't carry pictures or files")
+    static let planTakesNone = noAttachments("A plan's answer here can't carry pictures or files")
 }
 
 extension ThreadRequest {
     /// The answers to a question, checked: every question that is required has one, and an option's value is one it offers
     /// (else it is a custom answer, only where the question takes one).
-    func validate(_ answers: [String: T3Answer]) throws -> [String: T3Answer] {
+    /// `attached`: the questions that have pictures or files, an answer even without words (T3 sends them alone), and only
+    /// where the question takes a custom answer.
+    func validate(_ answers: [String: T3Answer], attached: Set<String> = []) throws -> [String: T3Answer] {
         guard case .question(let questions) = body else { throw RequestFailure.notAQuestion }
+        let ids = Set(questions.map(\.id))
+        guard attached.isSubset(of: ids) else { throw RequestFailure.incomplete }
         for q in questions {
+            if attached.contains(q.id), !q.allowCustomAnswer { throw RequestFailure.optionsOnly }
             guard let a = answers[q.id] else {
-                if q.required { throw RequestFailure.incomplete }
+                if q.required, !attached.contains(q.id) { throw RequestFailure.incomplete }
                 continue
             }
             let values: [String]

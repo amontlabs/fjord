@@ -8,8 +8,9 @@ import Foundation
 enum ThreadAnswers {
     /// What to do on the request.
     enum Answer: Equatable {
-        /// A question or form: its answers by question id (`runtime-request.respond`).
-        case answers([String: T3Answer])
+        /// A question or form: its answers by question id (`runtime-request.respond`), and the pictures and files pasted
+        /// with them (their pill ids) by question id.
+        case answers([String: T3Answer], attachments: [String: [String]] = [:])
         /// A permission: a button's decision, or a decline carrying your words.
         case decision(T3Decision, feedback: String?)
         /// A plan's yes, in the runtime mode picked.
@@ -20,18 +21,27 @@ enum ThreadAnswers {
 
     /// The answer for what was picked and typed. `picks`: per question (0 for a single question or a permission or a plan)
     /// the option's number, 1-based through the card (`RouterThread.numbered`: a form's questions one after the other).
-    /// `typed`: per question, words in place of an option. Throws why it can't be read (`RequestFailure`).
-    static func resolve(_ request: ThreadRequest, picks: [Int: Int], typed: [Int: String]) throws -> Answer {
+    /// `typed`: per question, words in place of an option. `attached`: per question, the pictures and files pasted with its
+    /// answer (pill ids), only where it takes a custom answer; a permission or a plan takes none. Throws why it can't be read
+    /// (`RequestFailure`).
+    static func resolve(_ request: ThreadRequest, picks: [Int: Int], typed: [Int: String],
+                        attached: [Int: [String]] = [:]) throws -> Answer {
         let typed = typed.compactMapValues { text -> String? in
             let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return t.isEmpty ? nil : t
         }
+        let attached = attached.filter { !$0.value.isEmpty }
         switch request.body {
         case .question(let questions):
             var answers: [String: T3Answer] = [:]
+            var files: [String: [String]] = [:]
             var first = 0
             for (index, q) in questions.enumerated() {
                 defer { first += q.options.count }
+                if let ids = attached[index] {
+                    guard q.allowCustomAnswer else { throw RequestFailure.optionsOnly }
+                    files[q.id] = ids
+                }
                 if let words = typed[index] {
                     // Where the question takes a custom answer: the words themselves.
                     guard q.allowCustomAnswer else { throw RequestFailure.unknownOption(words) }
@@ -41,12 +51,15 @@ enum ThreadAnswers {
                     guard q.options.indices.contains(at) else { throw RequestFailure.unknownOption(String(number)) }
                     let value = q.options[at].value
                     answers[q.id] = q.multiSelect ? .many([value]) : .one(value)
-                } else if q.required {
+                } else if q.required, files[q.id] == nil {
                     throw RequestFailure.incomplete
                 }
             }
-            return .answers(try request.validate(answers))
+            guard attached.keys.allSatisfy(questions.indices.contains) else { throw RequestFailure.incomplete }
+            return .answers(try request.validate(answers, attached: Set(files.keys)), attachments: files)
         case .approval(_, _, let decisions):
+            // T3 takes pictures and files only with a question's answer.
+            guard attached.isEmpty else { throw RequestFailure.permissionTakesNone }
             if let number = picks[0] {
                 guard decisions.indices.contains(number - 1) else { throw RequestFailure.unknownOption(String(number)) }
                 return .decision(decisions[number - 1], feedback: nil)
@@ -56,6 +69,7 @@ enum ThreadAnswers {
             guard request.supportsFeedback else { throw RequestFailure.noFeedback }
             return .decision(.decline, feedback: words)
         case .plan:
+            guard attached.isEmpty else { throw RequestFailure.planTakesNone }
             if let number = picks[0] {
                 guard ThreadRequest.planModes.indices.contains(number - 1) else { throw RequestFailure.unknownOption(String(number)) }
                 return .implement(ThreadRequest.planModes[number - 1])
@@ -73,8 +87,8 @@ extension Store {
     func perform(_ answer: ThreadAnswers.Answer, on request: ThreadRequest, snapshot: RequestSnapshot) async -> Result<Void, Error> {
         let target = snapshot.target
         switch answer {
-        case .answers(let answers):
-            return await answerQuestion(request, answers, target: target, snapshot: snapshot)
+        case .answers(let answers, let attachments):
+            return await answerQuestion(request, answers, attachments: attachments, target: target, snapshot: snapshot)
         case .decision(let decision, let feedback):
             return await answerPermission(request, decision, feedback: feedback, target: target, snapshot: snapshot)
         case .implement(let mode):
