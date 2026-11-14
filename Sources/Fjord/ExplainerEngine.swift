@@ -185,6 +185,8 @@ final class ExplainerEngine: ExplainerRenderHost {
     private var ensuring = false
     private var launching: Set<String> = []
     private var finalizing: Set<String> = []
+    /// Explainer threads whose `thread.settle` is on its way.
+    private var settling: Set<String> = []
     private(set) var items: [ExplainerItem] = []
 
     init(project: ExplainerProject?, renderer: ExplainerRendering?, env: Env) {
@@ -462,6 +464,20 @@ final class ExplainerEngine: ExplainerRenderHost {
         runs[id] = run
         save(run)
         publish()
+        await settleThread(id)
+    }
+
+    /// A finalized explainer's thread is settled in T3: it's Fjord's own, done, and nothing in it needs the owner. Only once:
+    /// a thread T3 already has settled, or one a follow-up has running again (its next finalize settles it), is left as it is.
+    func settleThread(_ id: String) async {
+        guard let row = env.hidden().threads[id], row.settledAt == nil, row.activeRunId == nil, !row.status.isLive,
+              settling.insert(id).inserted else { return }
+        defer { settling.remove(id) }
+        do {
+            try await env.dispatch(.threadSettle(threadId: id))
+        } catch {
+            Self.log.error("Couldn't settle explainer \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// The reply of the thread's latest run: the agent's last message after the last of yours. A follow-up that stopped

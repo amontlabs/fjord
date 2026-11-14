@@ -129,6 +129,45 @@ import Testing
         #expect(rig.renderer.rendered.isEmpty && rig.engine.runs[id]?.final == 2 && rig.engine.runs[id]?.draft == true)
     }
 
+    private func settles(_ rig: Rig) -> [String] {
+        rig.commands.compactMap { if case .threadSettle(let id) = $0 { id } else { nil } }
+    }
+
+    @Test func aFinalizedRunSettlesItsThreadOnceAndAFollowUpsRunSettlesItAgain() async throws {
+        let rig = Rig()
+        defer { rig.clean() }
+        let id = try await launched(rig)
+        save(rig, ExplainerVersion(run: id, number: 1, code: "a()", broken: false))
+        rig.replies[id] = "```js\na()\n```"
+        func row(_ run: String, status: String = "completed", active: String? = nil, settled: Bool) {
+            var extra: [String: T3JSON] = ["latestRunId": .string(run),
+                                           "updatedAt": .string(T3Timestamp.format(ExplainerQueueTests.sent + 10))]
+            if let active { extra["activeRunId"] = .string(active) }
+            if settled { extra["settledAt"] = .string(T3Timestamp.format(ExplainerQueueTests.sent + 20)) }
+            rig.whole = T3Fixture.state([ExplainerQueueTests.row("t1", completed: ExplainerQueueTests.sent - 60),
+                                         T3Fixture.thread(id, status: status, project: "px", extra: extra)],
+                                        projects: rig.projects + [T3Fixture.project("px", root: rig.project.root.path)])
+            rig.engine.shell(nil)
+        }
+        row("r1", settled: false)
+        await settle()
+        #expect(settles(rig) == [id])
+        // Settled in T3 now: asking again, or the same run read again, sends nothing.
+        row("r1", settled: true)
+        await settle()
+        await rig.engine.settleThread(id)
+        #expect(settles(rig) == [id])
+        // A follow-up runs: T3 has it unsettled and live, and it isn't settled under it.
+        row("r2", status: "running", active: "r2", settled: false)
+        await settle()
+        await rig.engine.settleThread(id)
+        #expect(settles(rig) == [id])
+        // Its run ends: finalized again, settled again.
+        row("r2", settled: false)
+        await settle()
+        #expect(settles(rig) == [id, id])
+    }
+
     @Test func aRunWithNothingToShowFails() async throws {
         let rig = Rig()
         defer { rig.clean() }

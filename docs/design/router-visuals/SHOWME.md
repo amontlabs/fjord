@@ -648,3 +648,9 @@ no room on a wide screen, no way to make it bigger.
   page's own keys do nothing, and a malformed message is dropped.
 - Not seen yet (needs the live app): the web view's hover and clicks inside the panel, the shield over real rows, native
   full screen with the stage, the theme rebuilding in place.
+
+### Settled explainer threads (2026-11-14)
+- When a run is finalized, the engine sends T3 `thread.settle` for its thread (`ExplainerEngine.settleThread`), through its
+  own `env.dispatch`, not `RouterPort.settle`: that path logs a History change with Revert, and explainer threads are
+  hidden from the Router. It sends nothing when T3 already has the thread settled, while a follow-up's run is live (its next
+  finalize settles it), or while a settle for it is on its way. A failed settle is logged and left alone.
