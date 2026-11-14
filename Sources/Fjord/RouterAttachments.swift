@@ -166,8 +166,7 @@ final class RouterAttachments {
 
     /// A click on a failed pill: its upload again.
     func retry(_ id: String) {
-        guard case .failed? = states[id], items[id]?.data != nil, let size = items[id]?.sizeBytes,
-              size > 0, size <= RouterAttachment.maxFileBytes else { return }
+        guard case .failed? = states[id], !removed.contains(id), canUpload(id) else { return }
         start(id)
     }
 
@@ -188,20 +187,28 @@ final class RouterAttachments {
         start(id)
     }
 
-    /// The uploads of a message's attachments, by id, once each is done: waits only for those still posting. Throws for
-    /// one that failed, was taken out or isn't known, saying which. The bytes stay until T3 takes the send (`sent`): a
+    /// The uploads of a message's attachments, by id, once each is done: waits only for those still posting. One that
+    /// failed and still has its bytes is uploaded again here and waited for (a Send again recovers it). Throws for one
+    /// that failed again, was taken out or isn't known, saying which. The bytes stay until T3 takes the send (`sent`): a
     /// refused one may be sent again, or its pill put back and taken out and back again.
     func uploads(_ ids: [String]) async throws -> [String: T3Attachment] {
         var out: [String: T3Attachment] = [:]
         for id in ids where out[id] == nil {
             guard let item = items[id] else { throw ThreadSendFailure("An attachment is gone: nothing was sent") }
+            if case .failed(let why)? = states[id] {
+                guard !removed.contains(id), canUpload(id) else {
+                    throw ThreadSendFailure("\(item.name) didn't upload (\(why)): nothing was sent")
+                }
+                start(id)
+            }
             let attachmentId: String
             switch states[id] {
             case .ready(let a)?: attachmentId = a
             case .uploading?:
                 guard let task = tasks[id] else { throw ThreadSendFailure("\(item.name) didn't upload: nothing was sent") }
                 do { attachmentId = try await task.value } catch {
-                    throw ThreadSendFailure("\(item.name) didn't upload: nothing was sent")
+                    let why = if case .failed(let why)? = states[id] { " (\(why))" } else { "" }
+                    throw ThreadSendFailure("\(item.name) didn't upload\(why): nothing was sent")
                 }
             case .failed(let why)?: throw ThreadSendFailure("\(item.name) didn't upload (\(why)): nothing was sent")
             case nil: throw ThreadSendFailure("An attachment is gone: nothing was sent")
@@ -209,6 +216,12 @@ final class RouterAttachments {
             out[id] = item.t3(attachmentId)
         }
         return out
+    }
+
+    /// Its bytes are here and T3 takes their size: an upload can be tried (again).
+    private func canUpload(_ id: String) -> Bool {
+        guard let item = items[id], let data = item.data else { return false }
+        return !data.isEmpty && data.count <= RouterAttachment.maxFileBytes
     }
 
     private func start(_ id: String) {

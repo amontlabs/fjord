@@ -235,4 +235,25 @@ import Testing
         attachments.retry(id)
         #expect(try await attachments.uploads([id])[id]?.id == "att-9")
     }
+
+    @Test func aSendAgainUploadsAFailedOneAgainAndThrowsOnlyIfThatFailsToo() async throws {
+        var tries = 0
+        var failing = 2
+        let attachments = RouterAttachments(uploader: RouterAttachments.Uploader(upload: { _, _ in
+            tries += 1
+            if tries <= failing { throw ThreadSendFailure("T3 refused the upload (500)") }
+            return "att-\(tries)"
+        }, delete: { _ in }))
+        guard case .attachment(let id) = attachments.add(name: "n.txt", mimeType: "text/plain", data: Data("hi".utf8)) else { return }
+        // The first send: the upload posting fails.
+        await #expect(throws: ThreadSendFailure.self) { try await attachments.uploads([id]) }
+        #expect(attachments.states[id] == .failed("T3 refused the upload (500)"))
+        // Send again: uploaded again, and that fails too: refused, saying why.
+        await #expect(throws: ThreadSendFailure.self) { try await attachments.uploads([id]) }
+        #expect(tries == 2)
+        // Send again once more: this time it goes, no click on the pill needed.
+        failing = 0
+        #expect(try await attachments.uploads([id])[id]?.id == "att-3")
+        #expect(attachments.states[id] == .ready("att-3"))
+    }
 }
