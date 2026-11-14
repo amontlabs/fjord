@@ -77,6 +77,15 @@ final class RouterAttachments {
     @ObservationIgnored private var held: [String: Set<String>] = [:]
     /// Sent with a message (`sent`): their uploads are a thread's now and are never deleted.
     @ObservationIgnored private(set) var sentIDs: Set<String> = []
+    /// When each upload finished: T3 sweeps a pending upload a day after it was posted (`PENDING_ATTACHMENT_MAX_AGE_MS`).
+    @ObservationIgnored private var uploadedAt: [String: Date] = [:]
+    /// The clock the uploads' age is read on (a test's own).
+    @ObservationIgnored var now: () -> Date = Date.init
+
+    /// How long T3 keeps an upload no message has claimed yet (`attachmentStore.ts`), and the age past which a send uploads
+    /// the bytes again rather than risk the sweep (an hour's margin).
+    static let pendingLife: TimeInterval = 24 * 60 * 60
+    static let reuploadAge: TimeInterval = pendingLife - 60 * 60
 
     init(uploader: Uploader? = nil) { self.uploader = uploader }
 
@@ -112,6 +121,7 @@ final class RouterAttachments {
     func put(_ item: RouterAttachment, state: RouterAttachmentState) {
         items[item.id] = item
         states[item.id] = state
+        if case .ready = state { uploadedAt[item.id] = now() }
         revision &+= 1
     }
 
@@ -177,6 +187,7 @@ final class RouterAttachments {
         tokens[id] = nil
         let uploaded: String? = if case .ready(let a)? = states[id] { a } else { minted[id] }
         minted[id] = nil
+        uploadedAt[id] = nil
         states[id] = .failed("Taken out")
         if let uploaded, let uploader { Task { await uploader.delete(uploaded) } }
     }
@@ -202,6 +213,10 @@ final class RouterAttachments {
                 }
                 start(id)
             }
+            // Near T3's sweep (or swept: `sending`): the bytes go again, under a new upload; the old one T3 sweeps itself.
+            if case .ready? = states[id], let at = uploadedAt[id], now().timeIntervalSince(at) > Self.reuploadAge, canUpload(id) {
+                start(id)
+            }
             let attachmentId: String
             switch states[id] {
             case .ready(let a)?: attachmentId = a
@@ -217,6 +232,26 @@ final class RouterAttachments {
             out[id] = item.t3(attachmentId)
         }
         return out
+    }
+
+    /// A send carrying the uploads of `ids` (`body`, given them by id): when T3 refuses it because an upload is gone (its
+    /// sweep took it, or it was deleted: "attachment not found"), the bytes are uploaded again and the send made once more.
+    /// The one place every message, answer and new thread with attachments goes through.
+    func sending<T>(_ ids: [String], _ body: @MainActor ([String: T3Attachment]) async throws -> T) async throws -> T {
+        let uploads = try await self.uploads(ids)
+        do {
+            return try await body(uploads)
+        } catch where !uploads.isEmpty && Self.uploadGone(error) {
+            for id in uploads.keys { uploadedAt[id] = .distantPast }
+            return try await body(try await self.uploads(ids))
+        }
+    }
+
+    /// T3's refusal of a send whose upload it doesn't have (`AttachmentClaims`: "Attachment '…' cannot be sent: attachment
+    /// not found…").
+    static func uploadGone(_ error: Error) -> Bool {
+        let said = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        return said.lowercased().contains("attachment not found")
     }
 
     /// T3's limits for one message (`chatAttachment.ts`): at most 100 pictures and files, at most 80 MB of pictures. Over
@@ -276,6 +311,7 @@ final class RouterAttachments {
         tasks[id] = nil
         minted[id] = nil
         states[id] = state
+        if case .ready = state { uploadedAt[id] = now() } else { uploadedAt[id] = nil }
         revision &+= 1
     }
 

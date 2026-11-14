@@ -732,15 +732,16 @@ struct RouterAskBack: Identifiable, Equatable {
             }
             // The request moved on while it was read: nothing is answered on a read of another one, and the words go on as text.
         }
-        let uploads = try await uploads(job)
-        stage(job, "sending")
-        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
-                                                     uploads: uploads)
-        let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records,
-                                                                        attachments: words.attachments),
-                                body: words.words, original: words.original, rephrased: words.rephrased,
-                                mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
-        let sent = try await effects.send(job.tools, delivery)
+        let (delivery, sent) = try await withUploads(job) { uploads in
+            stage(job, "sending")
+            let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions,
+                                                         store: store, uploads: uploads)
+            let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records,
+                                                                            attachments: words.attachments),
+                                    body: words.words, original: words.original, rephrased: words.rephrased,
+                                    mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
+            return (delivery, try await effects.send(job.tools, delivery))
+        }
         note(job, .sent(to: title, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
              session: session, thread: t)
         store.updateDecision(job.id) {
@@ -761,13 +762,16 @@ struct RouterAskBack: Identifiable, Equatable {
         let title = store.lineTitle(t)
         switch request.body {
         case .plan:
-            let uploads = try await uploads(job)
-            stage(job, "sending it back")
-            let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions,
-                                                         store: store, uploads: uploads)
-            guard snapshot.holds(store) else { break }
-            _ = try await effects.answer(job.tools, t, .sendBack(ThreadMessage(text: words.text, records: words.records,
-                                                                                attachments: words.attachments)), snapshot)
+            let went = try await withUploads(job) { uploads in
+                stage(job, "sending it back")
+                let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions,
+                                                             store: store, uploads: uploads)
+                guard snapshot.holds(store) else { return false }
+                _ = try await effects.answer(job.tools, t, .sendBack(ThreadMessage(text: words.text, records: words.records,
+                                                                                    attachments: words.attachments)), snapshot)
+                return true
+            }
+            guard went else { break }
             note(job, .answered(thread: title), session: session, thread: t)
             report(job.id, .taken)
             return
@@ -795,15 +799,16 @@ struct RouterAskBack: Identifiable, Equatable {
             }
         }
         // The request moved on while it was read (or the words answer none of it): they go on as a message, with the pictures.
-        let uploads = try await uploads(job)
-        stage(job, "sending")
-        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
-                                                     uploads: uploads)
-        let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records,
-                                                                        attachments: words.attachments),
-                                body: words.words, original: words.original, rephrased: words.rephrased,
-                                mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
-        let sent = try await effects.send(job.tools, delivery)
+        let (delivery, sent) = try await withUploads(job) { uploads in
+            stage(job, "sending")
+            let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions,
+                                                         store: store, uploads: uploads)
+            let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records,
+                                                                            attachments: words.attachments),
+                                    body: words.words, original: words.original, rephrased: words.rephrased,
+                                    mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
+            return (delivery, try await effects.send(job.tools, delivery))
+        }
         note(job, .sent(to: title, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
              session: session, thread: t)
         store.updateDecision(job.id) {

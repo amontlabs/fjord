@@ -236,6 +236,66 @@ import Testing
         #expect(try await attachments.uploads([id])[id]?.id == "att-9")
     }
 
+    /// An uploader that answers at once with "att-1", "att-2", … and counts.
+    private func counting(_ uploads: @escaping () -> Void = {}) -> RouterAttachments.Uploader {
+        var n = 0
+        return RouterAttachments.Uploader(upload: { _, minted in
+            n += 1
+            uploads()
+            minted("att-\(n)")
+            return "att-\(n)"
+        }, delete: { _ in })
+    }
+
+    @Test func anUploadNearT3sDailySweepIsUploadedAgainAtSend() async throws {
+        var uploads = 0
+        let attachments = RouterAttachments(uploader: counting { uploads += 1 })
+        var clock = Date(timeIntervalSince1970: 1_000_000)
+        attachments.now = { clock }
+        let id = attachments.add(name: "n.txt", mimeType: "text/plain", data: Data("hi".utf8)).attachment!
+        #expect(try await attachments.uploads([id])[id]?.id == "att-1")
+        // 22 hours on: T3 still has it, the same upload goes.
+        clock += 22 * 3600
+        #expect(try await attachments.uploads([id])[id]?.id == "att-1")
+        // 23 and a half: within the hour's margin of T3's 24 h sweep, the bytes go again.
+        clock += 1.5 * 3600
+        #expect(try await attachments.uploads([id])[id]?.id == "att-2")
+        #expect(uploads == 2)
+        // And that new one is fresh.
+        #expect(try await attachments.uploads([id])[id]?.id == "att-2")
+    }
+
+    @Test func aSendT3RefusesForAnUploadItSweptIsMadeOnceMoreWithTheBytesUploadedAgain() async throws {
+        let attachments = RouterAttachments(uploader: counting())
+        let id = attachments.add(name: "shot.png", mimeType: "image/png", data: png()).attachment!
+        var tried: [String] = []
+        let went = try await attachments.sending([id]) { uploads in
+            tried.append(uploads[id]!.id)
+            if tried.count == 1 {
+                throw ThreadSendFailure("Attachment 'shot.png' cannot be sent: attachment not found (removed or expired).")
+            }
+            return "sent"
+        }
+        #expect(went == "sent" && tried == ["att-1", "att-2"])
+        // Only once, and only for that refusal.
+        var again = 0
+        await #expect(throws: ThreadSendFailure.self) {
+            try await attachments.sending([id]) { _ in
+                again += 1
+                throw ThreadSendFailure("Attachment 'shot.png' cannot be sent: attachment not found.")
+            }
+        }
+        #expect(again == 2)
+        var other = 0
+        await #expect(throws: ThreadSendFailure.self) {
+            try await attachments.sending([id]) { _ in
+                other += 1
+                throw ThreadSendFailure("That thread isn't in T3 anymore: nothing was sent")
+            }
+        }
+        #expect(other == 1)
+    }
+
     @Test func aMessageOverT3sLimitsIsRefusedPlainlyBeforeAnythingWaits() async throws {
         let attachments = RouterAttachments()
         // 101 files: one over T3's count.

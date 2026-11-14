@@ -81,15 +81,13 @@ extension Store {
             let attached = attached.filter { !$0.value.isEmpty }
             let checked = try request.validate(answers, attached: Set(attached.keys))
             guard request.live else { throw RequestFailure.notLive }
-            var uploads: [String: [T3Attachment]] = [:]
-            if !attached.isEmpty {
-                let done = try await attachments.uploads(attached.values.flatMap { $0 })
-                uploads = attached.mapValues { ids in ids.compactMap { done[$0] } }
+            try await attachments.sending(attached.values.flatMap { $0 }) { done in
+                let uploads = attached.mapValues { ids in ids.compactMap { done[$0] } }
+                guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
+                else { throw RequestFailure.moved }
+                try await sendCommands([.respondAnswers(threadId: target.thread, requestId: request.id, answers: checked,
+                                                        attachments: uploads)])
             }
-            guard answerStillValid(request, target: target, snapshot: snapshot, alsoValid: alsoValid)
-            else { throw RequestFailure.moved }
-            try await sendCommands([.respondAnswers(threadId: target.thread, requestId: request.id, answers: checked,
-                                                    attachments: uploads)])
             logEntryAction("Answered the question", target: target)
             return .success(())
         } catch {

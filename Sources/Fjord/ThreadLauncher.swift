@@ -293,14 +293,15 @@ extension Store {
 }
 
 extension RouterDispatcher {
-    /// The uploads of the message's pictures and files: those still posting are waited for (the stage says so), and
-    /// nothing goes when one failed or was taken out.
-    func uploads(_ job: Job) async throws -> [String: T3Attachment] {
-        guard let store else { return [:] }
+    /// A send with the message's pictures and files (`body`, given their uploads by id): those still posting are waited for
+    /// (the stage says so), nothing goes when one failed again or was taken out, and a send T3 refuses for an upload it
+    /// swept is made once more with the bytes uploaded again (`RouterAttachments.sending`).
+    func withUploads<T>(_ job: Job, _ body: @MainActor ([String: T3Attachment]) async throws -> T) async throws -> T {
+        guard let store else { return try await body([:]) }
         let ids = job.context.mentions.compactMap(\.pointer.attachment)
-        guard !ids.isEmpty else { return [:] }
+        guard !ids.isEmpty else { return try await body([:]) }
         if ids.contains(where: { store.attachments.states[$0] == .uploading }) { stage(job, "uploading") }
-        do { return try await store.attachments.uploads(ids) } catch { throw RouterTools.Failure(error.localizedDescription) }
+        return try await store.attachments.sending(ids, body)
     }
 
     /// "New thread in <project>" (or in a folder T3 has no project for yet): your words start a thread, in one
@@ -318,18 +319,20 @@ extension RouterDispatcher {
         } else {
             throw RouterTools.Failure("That project isn't in T3 anymore: nothing was started")
         }
-        let uploads = try await uploads(job)
-        stage(job, "starting a thread")
-        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
-                                                     uploads: uploads)
-        let message = ThreadMessage(text: words.text, records: words.records, attachments: words.attachments)
-        try job.tools.live(job.tools.ticket())
-        let launched: LaunchedThread
-        do {
-            launched = try await store.launchThread(in: project.id, message: message, origin: job.context.action?.origin, run: job.id,
-                                                    thread: job.context.launch?.thread, settings: job.context.launch?.settings)
-        } catch {
-            throw RouterTools.Failure(error.localizedDescription)
+        let (words, message, launched) = try await withUploads(job) { uploads in
+            stage(job, "starting a thread")
+            let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
+                                                         uploads: uploads)
+            let message = ThreadMessage(text: words.text, records: words.records, attachments: words.attachments)
+            try job.tools.live(job.tools.ticket())
+            do {
+                let launched = try await store.launchThread(in: project.id, message: message, origin: job.context.action?.origin,
+                                                            run: job.id, thread: job.context.launch?.thread,
+                                                            settings: job.context.launch?.settings)
+                return (words, message, launched)
+            } catch {
+                throw RouterTools.Failure(error.localizedDescription)
+            }
         }
         store.updateDecision(job.id) {
             $0.decision.target = "a new thread in \(project.title)"
