@@ -596,4 +596,7 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
 - ⌥Return with Show me: the request waits until its queued run was delivered and ended, and the input orders a queued
   message by its run's `startedAt` (T3 stamps `createdAt` at the send, mid-turn), so the answer is its own run's reply,
   not the tail of the turn it waited behind.
-- Open: old kit stamps are never deleted; explainers made before 0d2d6bb6 load the shared `kit/`.
+- Old kits are pruned: each sync (off the main thread) deletes the `kit/<stamp>/` folders that no saved version's
+  `index.html` links and that aren't the current stamp; if any page can't be read it deletes nothing, and the shared
+  `kit/` files stay.
+- Open: explainers made before 0d2d6bb6 load the shared `kit/`.

@@ -111,7 +111,8 @@ struct ExplainerProject: Sendable {
     /// mode) every launch: a guard that was deleted or lost its execute bit would let every tool through, since a hook that
     /// errors doesn't block. `runs/`, `queue.json` and `.mcp.json` are never touched. The kit goes into `kit/<stamp>/`, built
     /// aside and moved in whole, so a film never loads a half-copied kit; older stamps' kits stay for the versions made on
-    /// them. The kit's `player.html` links `KIT/<stamp>/`, so a page made from it keeps that kit. The stamp is written last.
+    /// them, and the stamps no version links are deleted (`pruneKits`). The kit's `player.html` links `KIT/<stamp>/`, so a
+    /// page made from it keeps that kit. The stamp is written last.
     /// Returns whether it wrote anything. Blocking file work: call it off the main actor.
     @discardableResult
     func sync() throws -> Bool {
@@ -160,7 +161,46 @@ struct ExplainerProject: Sendable {
             try Data(stamp.utf8).write(to: stampFile, options: .atomic)
             wrote = true
         }
+        pruneKits(keeping: folder)
         return wrote
+    }
+
+    /// Deletes the kit folders (`kit/<stamp>/`) that no saved version's page links and that aren't `current`. Only folders
+    /// named like a stamp go: the shared kit of versions made before stamps (`kit/player.html`, `kit/vendor/`, `kit/fonts/`)
+    /// stays. If any page can't be read, nothing is deleted. Blocking file work: `sync()` runs it off the main actor.
+    func pruneKits(keeping current: String) {
+        let fm = FileManager.default
+        guard let referenced = kitsReferenced(),
+              let names = try? fm.contentsOfDirectory(atPath: kits.path) else { return }
+        for name in names where name != current && Self.isStampFolder(name) && !referenced.contains(name) {
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: kits.appendingPathComponent(name).path, isDirectory: &isDirectory), isDirectory.boolValue
+            else { continue }
+            try? fm.removeItem(at: kits.appendingPathComponent(name, isDirectory: true))
+        }
+    }
+
+    /// The kit folders the saved versions' pages link (`../../../kit/<stamp>/` in `runs/<run>/v<n>/index.html`); nil when
+    /// a page couldn't be read, so nothing a version needs is ever taken for unused.
+    func kitsReferenced() -> Set<String>? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: runs.path) else { return [] }
+        guard let walk = fm.enumerator(at: runs, includingPropertiesForKeys: [.isRegularFileKey]) else { return nil }
+        var out: Set<String> = []
+        for case let url as URL in walk where url.lastPathComponent == "index.html" {
+            guard let page = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            let range = NSRange(page.startIndex..., in: page)
+            for match in Self.kitLink.matches(in: page, range: range) {
+                if let r = Range(match.range(at: 1), in: page) { out.insert(String(page[r])) }
+            }
+        }
+        return out
+    }
+
+    private static let kitLink = try! NSRegularExpression(pattern: "kit/([0-9a-f]{12})/")
+    /// A stamp's folder name: `folder(stamp)` of a SHA256 hex digest.
+    static func isStampFolder(_ name: String) -> Bool {
+        name.count == 12 && name.allSatisfy { $0.isHexDigit && !$0.isUppercase }
     }
 
     // MARK: The preview server's address

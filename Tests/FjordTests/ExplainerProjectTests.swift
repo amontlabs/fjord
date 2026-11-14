@@ -28,6 +28,50 @@ import Testing
         #expect(shipped.contains(ExplainerProject.previewTool) && shipped.contains("ticket") && shipped.contains("Later messages"))
     }
 
+    /// A version's page as the renderer writes it, from the current kit's player.
+    private func page(_ p: ExplainerProject, run: String, version: Int) throws {
+        let dir = p.runs.appendingPathComponent("\(run)/v\(version)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let player = try String(contentsOf: p.kit.appendingPathComponent("player.html"), encoding: .utf8)
+        try Data(ExplainerRenderer.page(player: player, ask: "Why?").utf8).write(to: dir.appendingPathComponent("index.html"))
+    }
+
+    @Test func syncDeletesOnlyTheKitsNoVersionLinks() throws {
+        let dir = TempDir()
+        let p = try project(dir)
+        let fm = FileManager.default
+        try p.sync()
+        // Before stamps: a shared kit at `kit/` itself, which versions of then still link.
+        try Data("legacy".utf8).write(to: p.kits.appendingPathComponent("player.css"))
+        try fm.createDirectory(at: p.kits.appendingPathComponent("vendor"), withIntermediateDirectories: true)
+        let first = p.kit
+        try page(p, run: "r1", version: 1)
+        func update(_ text: String) throws -> URL {
+            try Data(text.utf8).write(to: p.resources.appendingPathComponent("CLAUDE.md"))
+            try p.sync()
+            return p.kit
+        }
+        // A kit nobody made a version on, then the current one.
+        let unused = try update("# Two\n")
+        let current = try update("# Three\n")
+        #expect(Set([first, unused, current].map(\.lastPathComponent)).count == 3)
+        #expect(fm.fileExists(atPath: first.path), "linked by r1's v1")
+        #expect(!fm.fileExists(atPath: unused.path), "linked by nothing")
+        #expect(fm.fileExists(atPath: current.appendingPathComponent("kit.js").path))
+        #expect(fm.fileExists(atPath: p.kits.appendingPathComponent("player.css").path)
+                && fm.fileExists(atPath: p.kits.appendingPathComponent("vendor").path))
+        // A page that can't be read: nothing is deleted. Once r1 is gone, its kit goes too.
+        try fm.removeItem(at: p.runs.appendingPathComponent("r1"))
+        let broken = p.runs.appendingPathComponent("r2/v1/index.html")
+        try fm.createDirectory(at: broken.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0xff, 0xfe, 0xfd]).write(to: broken)
+        p.pruneKits(keeping: current.lastPathComponent)
+        #expect(fm.fileExists(atPath: first.path))
+        try fm.removeItem(at: p.runs.appendingPathComponent("r2"))
+        p.pruneKits(keeping: current.lastPathComponent)
+        #expect(!fm.fileExists(atPath: first.path) && fm.fileExists(atPath: current.path))
+    }
+
     @Test func syncCopiesWhatShipsOnceAndAgainOnlyWhenItChanges() throws {
         let dir = TempDir()
         let p = try project(dir)
@@ -43,9 +87,11 @@ import Testing
         #expect(mode(p.root.appendingPathComponent(".fjord/guard.sh")) == 0o755)
         #expect(try p.sync() == false)
 
-        // The owner's runs and queue stay; an update rewrites the managed files into a new kit, and the old kit stays.
+        // The owner's runs and queue stay; an update rewrites the managed files into a new kit, and the old kit stays for
+        // the version made on it.
         try fm.createDirectory(at: p.runs.appendingPathComponent("t1"), withIntermediateDirectories: true)
         try Data("v1".utf8).write(to: p.runs.appendingPathComponent("t1/v1.js"))
+        try page(p, run: "t1", version: 1)
         try Data("[]".utf8).write(to: p.queue)
         let old = p.kit
         try ExplainerProject.Server(port: 4321, token: "tok").write(p)
