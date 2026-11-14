@@ -342,17 +342,20 @@ extension NSImage {
         let went = try await attachments.sending([id]) { uploads in
             tried.append(uploads[id]!.id)
             if tried.count == 1 {
-                throw ThreadSendFailure("Attachment 'shot.png' cannot be sent: attachment not found (removed or expired).")
+                // As it comes over the socket (seen live): a T3Error tagged with the launch's or the dispatch's error.
+                throw T3Error(kind: .server, message: "Attachment 'shot.png' cannot be sent: attachment not found (removed or expired).",
+                              tag: "OrchestrationV2ThreadLaunchError")
             }
             return "sent"
         }
         #expect(went == "sent" && tried == ["att-1", "att-2"])
         // Only once, and only for that refusal.
         var again = 0
-        await #expect(throws: ThreadSendFailure.self) {
+        await #expect(throws: T3Error.self) {
             try await attachments.sending([id]) { _ in
                 again += 1
-                throw ThreadSendFailure("Attachment 'shot.png' cannot be sent: attachment not found.")
+                throw T3Error(kind: .server, message: "Attachment 'shot.png' cannot be sent: attachment not found.",
+                              tag: "OrchestrationV2DispatchCommandError")
             }
         }
         #expect(again == 2)
@@ -364,6 +367,10 @@ extension NSImage {
             }
         }
         #expect(other == 1)
+        // The launch path words its failure again from the error's description: T3's own words survive it.
+        let wrapped = RouterTools.Failure(T3Error(kind: .server, message: "Attachment 'shot.png' cannot be sent: attachment not found (removed or expired).",
+                                                  tag: "OrchestrationV2ThreadLaunchError").localizedDescription)
+        #expect(RouterAttachments.uploadGone(wrapped))
     }
 
     @Test func aMessageOverT3sLimitsIsRefusedPlainlyBeforeAnythingWaits() async throws {

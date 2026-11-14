@@ -957,8 +957,10 @@ struct T3DispatchResult: Equatable, Sendable {
     var raw: T3JSON
 }
 
-/// A failed command: the server's typed error (`OrchestrationV2DispatchCommandError`) or a transport problem.
-struct T3Error: Error, Equatable, Sendable, CustomStringConvertible {
+/// A failed command: the server's typed error (`OrchestrationV2DispatchCommandError`) or a transport problem. Its
+/// description is T3's own words (`message`), so a wrapper that words a failure
+/// again from `localizedDescription` keeps them, and a refusal is recognised by them (`RouterAttachments.uploadGone`).
+struct T3Error: LocalizedError, Equatable, Sendable, CustomStringConvertible {
     enum Kind: Equatable, Sendable { case server, disconnected, timedOut, incompatible, noToken, noServer, tokenRejected, interrupted, malformed }
     var kind: Kind
     var message: String
@@ -966,6 +968,7 @@ struct T3Error: Error, Equatable, Sendable, CustomStringConvertible {
     var commandType: String? = nil
     var tag: String? = nil
     var description: String { "T3 \(kind)\(tag.map { " (\($0))" } ?? ""): \(message)" }
+    var errorDescription: String? { message }
 }
 
 /// One turn's checkpoint (`OrchestrationV2Checkpoint`): the files it changed. `filesTotal` is sent only when `files` is a

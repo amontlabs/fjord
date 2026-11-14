@@ -320,7 +320,8 @@ final class RouterAttachments {
     }
 
     /// T3's refusal of a send whose upload it doesn't have (`AttachmentClaims`: "Attachment '…' cannot be sent: attachment
-    /// not found…").
+    /// not found (removed or expired)."). Read from T3's words: the socket carries no tag of its own for it, only the
+    /// launch's or the dispatch's error (`OrchestrationV2ThreadLaunchError`) around that message.
     static func uploadGone(_ error: Error) -> Bool {
         let said = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         return said.lowercased().contains("attachment not found")
