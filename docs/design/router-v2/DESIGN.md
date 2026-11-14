@@ -312,7 +312,7 @@ quote and link buttons, the footers' Open in T3, the clock times) says otherwise
 - **Wide windows: an open item has its thread's card above it.** The thread's card (no ground, no footer: Open in T3 is
   a small muted ↗ in its name row, "Open in T3 ⌘O" under the pointer), 12 pt, then the item's row and card on the
   selected ground. The thread's history takes all the room the pane has left over the whole item's card (2026-11-14:
-  the four-row cap left the pane empty), two rows at the least and 420 pt at the most, so the item is never pushed off (shots
+  the four-row cap left the pane empty), two rows at the least; it starts at 420 pt and a grip in the gap under it (a short bar under the pointer, resize cursor) drags it taller or shorter, kept across launches, double click back to 420, so the item is never pushed off (shots
   `v2-wide-1650-working-item[-short]`). With the header selected, the pane is the thread's card as before.
   Narrow windows open no second card (the item sits under its header line already).
 - **A working card lists its activity** (2026-11-14, R5 back): under the steps and before the history, each subagent

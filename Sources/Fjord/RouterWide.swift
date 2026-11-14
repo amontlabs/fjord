@@ -273,23 +273,34 @@ struct RouterWidePane: View {
     @State private var itemHeight: CGFloat = 0
     @State private var threadHeight: CGFloat = 0
     @State private var historyShown: CGFloat = 0
+    /// The history's height as you last dragged it (its grip, under the thread's card), kept across launches.
+    @AppStorage("router.wideHistoryHeight") private var historyChosen: Double = Double(Self.historyDefault)
+    /// The chosen height when the drag started; nil while not dragging.
+    @State private var dragFrom: CGFloat?
+    @State private var gripHot = false
 
     private typealias L = Router.Line
     private typealias I = Router.Items
 
     /// The thread card's history over an open item, at its shortest: two rows (19 tall, 3 apart).
     static let historyFloor: CGFloat = 2 * 19 + 3
-    /// …and at its tallest, however much room is left.
-    static let historyCeiling: CGFloat = 420
+    /// …and as tall as it starts, until you drag its grip.
+    static let historyDefault: CGFloat = 420
     /// Between the thread's card and the item's ground.
     static let itemGap: CGFloat = 12
 
-    /// The thread card's history over an open item: all the room the pane has left over the whole item's card, never
-    /// under `historyFloor` nor over `historyCeiling`. Not measured yet: its usual height.
-    private var historyCap: CGFloat {
-        guard paneHeight > 0, itemHeight > 0 else { return Router.Work.timelineHeight }
+    /// The room the pane has left for the history over the whole item's card, never under `historyFloor`.
+    private var historyRoom: CGFloat? {
+        guard paneHeight > 0, itemHeight > 0 else { return nil }
         let room = paneHeight - Self.itemGap - itemHeight - (threadHeight - historyShown)
-        return min(Self.historyCeiling, max(Self.historyFloor, room.rounded(.down)))
+        return max(Self.historyFloor, room.rounded(.down))
+    }
+
+    /// The thread card's history over an open item: the height you chose with its grip, within the room the pane has
+    /// left (so the item is never pushed off). Not measured yet: its usual height.
+    private var historyCap: CGFloat {
+        guard let room = historyRoom else { return Router.Work.timelineHeight }
+        return min(room, max(Self.historyFloor, CGFloat(historyChosen)))
     }
 
     var body: some View {
@@ -309,6 +320,7 @@ struct RouterWidePane: View {
                     }
                     .onPreferenceChange(RouterTimelineShown.self) { historyShown = $0 }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { threadHeight = $0 }
+                    grip
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(alignment: .top, spacing: L.markGap) {
                             Image(systemName: item.kind.symbol).font(.system(size: I.mark, weight: .semibold))
@@ -324,7 +336,6 @@ struct RouterWidePane: View {
                     }
                     .background(RoundedRectangle(cornerRadius: L.selectedRadius, style: .continuous).fill(Router.Surface.quiet))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { itemHeight = $0 }
-                    .padding(.top, Self.itemGap)
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         head(thread)
@@ -337,6 +348,43 @@ struct RouterWidePane: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(thread.name), open")
+    }
+
+    /// The history's grip: the gap between the thread's card and the item, a short bar under the pointer. Dragging it
+    /// sets how tall the history shows (kept across launches); a double click puts it back to `historyDefault`.
+    private var grip: some View {
+        Capsule()
+            .fill(CDS.Text.muted)
+            .frame(width: 36, height: 4)
+            .opacity(gripHot || dragFrom != nil ? 0.6 : 0)
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.itemGap)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                guard inside != gripHot else { return }
+                gripHot = inside
+                if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+            }
+            .onDisappear { if gripHot { NSCursor.pop(); gripHot = false } }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { drag in
+                        let from = dragFrom ?? historyCap
+                        if dragFrom == nil { dragFrom = from }
+                        let top = historyRoom ?? .greatestFiniteMagnitude
+                        historyChosen = Double(min(top, max(Self.historyFloor, (from + drag.translation.height).rounded())))
+                    }
+                    .onEnded { _ in dragFrom = nil }
+            )
+            .onTapGesture(count: 2) { historyChosen = Double(Self.historyDefault) }
+            .animation(.easeOut(duration: 0.15), value: gripHot)
+            .accessibilityElement()
+            .accessibilityLabel("History height")
+            .accessibilityValue("\(Int(historyCap)) points")
+            .accessibilityAdjustableAction { direction in
+                let step: CGFloat = direction == .increment ? 40 : -40
+                historyChosen = Double(min(historyRoom ?? .greatestFiniteMagnitude, max(Self.historyFloor, historyCap + step)))
+            }
     }
 
     /// The thread's line as the list has it, then its own words in the primary ink.
