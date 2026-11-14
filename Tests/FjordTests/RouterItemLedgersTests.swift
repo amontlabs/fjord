@@ -916,10 +916,29 @@ import Testing
         #expect(old == item)
     }
 
+    @Test func aDetailKeepsTheReplysLinksOnItsWordsWholeAndNoneMadeUp() {
+        let page = "https://github.com/amontlabs/lastdrop/releases/tag/v0.8.13"
+        let reply = "Released as lastdrop 0.8.13: \(page)"
+        // An address the reply gives stays a link; one it doesn't keeps only its words.
+        let d = RouterItemsReading.detail("Shipped as [0.8.13](\(page)); notes at [the docs](https://example.com/made-up).",
+                                          sentence: "x", source: reply)
+        #expect(d == "Shipped as [0.8.13](\(page)); notes at the docs.")
+        // Counted as read (the label, not the address), and never cut inside a link: before it, at a word.
+        let words = String(repeating: "word ", count: 78)
+        let long = words + "[0.8.13](\(page)) ok"
+        #expect(RouterItemsReading.detail(long, sentence: "x") == long)
+        let over = words + "four [the 0.8.13 release](\(page)) and more"
+        #expect(RouterItemsReading.detail(over, sentence: "x") == words + "four…")
+        // The card's buttons: only the links its detail doesn't carry on its words.
+        let item = RouterItem(id: "i", kind: .do, sentence: "install", since: .now, detail: "Ships in [0.8.13](\(page)).",
+                              quote: "Released: \(page)\nCI: https://github.com/amontlabs/lastdrop/actions/runs/1")
+        #expect(item.links.map(\.absoluteString) == ["https://github.com/amontlabs/lastdrop/actions/runs/1"])
+    }
+
     @Test func theAppSendsTheEvalsV2Prompts() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map(String.init) }
-        for (name, prompt) in [("turn-v4", RouterItemsPrompt.turn), ("message-v2", RouterItemsPrompt.message), ("said-v3", RouterItemsPrompt.said)] {
+        for (name, prompt) in [("turn-v7", RouterItemsPrompt.turn), ("message-v3", RouterItemsPrompt.message), ("said-v5", RouterItemsPrompt.said)] {
             let v = try String(contentsOf: root.appendingPathComponent("evals/router/items/prompts/system-\(name).txt"), encoding: .utf8)
             #expect(words(prompt) == words(v), "the \(name) prompt is EVAL-items.md's")
         }

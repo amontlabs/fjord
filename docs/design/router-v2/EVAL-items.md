@@ -138,6 +138,46 @@ python3 evals/router/items/outcome.py run v3 --system evals/router/items/prompts
 python3 evals/router/items/outcome.py judge v4 v3 && python3 evals/router/items/outcome.py score v4 v3
 ```
 
+## Links in details, plain facts (2026-11-14)
+
+The change: `detail` (items' and the outcome's) puts a link the reply gives on the words that name it (`[0.8.13](url)`,
+only an address in the reply verbatim; the app drops any other to its words), the line and sentences stay plain; and in
+the turn prompt, a fact chip reads on its own (what was checked and its result, no jargon). Old = turn v4, said v3,
+message v2; new = turn **v6**, said **v4**, message **v3**. Same real data: the held-out set (45 sequences) and held-said
+(15), the inputs as dumped, with the app's current schemas (`data/held-v6`, `data/held-said-v6`); the outcome set's 30
+turns; Sonnet, as the app reads.
+
+| set, config | reads | added | precision | missed | recall | false | dup | wrong closes | missed closes | bad sentences |
+|---|---|---|---|---|---|---|---|---|---|---|
+| held, old | 230 | 121 | 0.93 | 2 | 0.98 | 8 | 0 | 2 / 41 | 10 | 1 |
+| held, **new** | 225 | 103 | **0.98** | 1 | 0.99 | 2 | 0 | 0 / 43 | 8 | 0 |
+| held-said, old | 82 | 32 | 0.91 | 1 | 0.97 | 3 | 0 | 0 / 11 | 1 | 2 |
+| held-said, **new** | 80 | 26 | 0.92 | 0 | 1.00 | 2 | 0 | 1 / 9 | 0 | 0 |
+
+- **No regression** on items: as good or better on every count (the gaps are within run-to-run variance; the item rules
+  didn't change). Outcome (30 turns, blind Opus): accurate 30/30 both, useful 4.13 against 4.27, preferred 10 / 14 / 6
+  ties: noise, the lines vary run to run and the line rule is unchanged.
+- **Links, v6's wording: too rare.** 29 of 164 reads have a URL in the reply; their 52 details name 24 things the reply
+  gives an address for (Opus link judge); **3 linked** (12 %), all on the right words and the right address. None
+  invented, no bare address, no markdown in a line or sentence (backticks around a command in 3 sentences, as before).
+- **Adjusted wording (turn v7, said v5, `prompts/`)**, on the 15 sequences with URLs: **12 of 33 linked (36 %)**, all on
+  the right words and address, none invented; one bare `localhost` address; items as good (false 1, missed 0, wrong
+  closes 0, missed closes 3, against v6's 0 / 0 / 0 / 4 and old's 3 / 1 / 2 / 3). Still missed: sign-in URLs (the
+  reply's is redacted mid-address), "that branch" for a PR, a site named loosely. Some links are tacked on at the end
+  ("… [PR #83](…)").
+- **Facts: plainer.** Blind Opus on 40 turns whose chips changed: new preferred 25, old 11, 4 ties; plain 3.75 → 3.90;
+  accurate 35 / 35. 194 chips against 177. Before → after:
+  "routing test confirmed · model must be set explicitly" → "child ran on Pro account · model defaults to Opus";
+  "15 of 15 test cases right" → "15 of 15 made-up cases right · 1 of 100 real allows blocked";
+  "test process crashed" → "full suite crashed"; "Fable review: no blockers" → "review: no blocker or major";
+  "~$0.35–0.55 per run · hard stop at $95" → "$0.35–0.55 per run estimated · hard cap at $95";
+  "7 required checks pass" → "PR #87: 7 required checks pass"; "Antigravity sign-in errors in log" → "log:
+  'Antigravity needs sign-in'"; "get_usage returned cedar_ember null" → "get_usage: cedar_ember null" (no plainer);
+  "cargo check silo-ui passes" → "cargo check -p silo-ui passes" (more jargon); "key press 25 ms · send 49–62 ms" →
+  "Send 49–62 ms, budget 8 · Window open/close within budget".
+- **Cost**: $0.0095 a read against $0.0092 (+3 %), same latency (p50 6.3 s against 6.1 s, a busy machine). This eval:
+  about $7 of reads and about $8 of Opus judging.
+
 ## What it still gets wrong
 
 - **Missed closes** (12 of about 70 that should close, held out): mostly your words settling more than the item they
