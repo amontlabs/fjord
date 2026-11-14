@@ -67,6 +67,7 @@ extension Store {
         // The real clock, not the demo's 14:02.
         page.clockStart = page.made
         page.source = routerActs
+        page.attachments = attachments
         page.apply(routerRecords.snapshot())
         return page
     }

@@ -122,7 +122,15 @@ extension RouterModel {
     /// it as any send) or a new thread started with the settings the row showed. One decision log entry for all of it.
     func sendSplit(_ sends: [RouterSend], queue: Bool = false) {
         // The answers lead the sends (`split`): the rest are the words' parts.
-        let parts = sends.dropFirst(hasAnswers ? answerSends.count : 0).map { (words: $0.words, place: $0.place, kind: requestAnswer($0)) }
+        let wordSends = Array(sends.dropFirst(hasAnswers ? answerSends.count : 0))
+        // Each pasted picture or file goes in the part that says it ("[image: name]"); one no part says, with the part
+        // before it. A part that carries one goes as words, not as a structured answer (which takes none).
+        let pills = RouterMentions.plain(draft, marks: mentions).mentions.filter { $0.pointer.attachment != nil }
+        let words = RouterAttachments.placed(wordSends.map(\.words), draft: plainDraft, pills: pills)
+        let parts = zip(wordSends, words).map { send, words in
+            (words: words, place: send.place,
+             kind: RouterAttachments.pills(in: words, of: pills).isEmpty ? requestAnswer(send) : nil)
+        }
         source?.logSplit(plainDraft, sends: sends)
         // The parts go without the read: it was the whole message's (a new thread takes its first words for a name), and
         // the log has it once.

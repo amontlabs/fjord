@@ -420,8 +420,14 @@ extension RouterModel {
         // What the row showed, for the decision log.
         let shown = read
         let launch = launch ?? self.launch
-        // The pictures and files pasted in the draft go with its words (none with other words: a picked answer's).
-        let attached = words == plainDraft ? RouterMentions.plain(draft, marks: mentions).mentions.filter { $0.pointer.attachment != nil } : []
+        // The pictures and files pasted in the draft go with the words where they read in them: the draft's own words
+        // carry its pills where they sat; other words (a split's part, words led by a card's answer) carry those whose
+        // "[image: name]" they hold. The draft's are kept for the parts sent after it empties.
+        let plain = RouterMentions.plain(draft, marks: mentions)
+        if !draft.isEmpty { returnPills = plain.mentions.filter { $0.pointer.attachment != nil } }
+        let attached = !draft.isEmpty && words == plain.text ? returnPills : RouterAttachments.pills(in: words, of: returnPills)
+        // Sent: the draft emptying doesn't delete their uploads.
+        attachments?.sent(attached.compactMap(\.pointer.attachment))
         // The composer empties first: the row leaves saying what it said at Return, not what the send made of the thread.
         setDraft("")
         switch place {

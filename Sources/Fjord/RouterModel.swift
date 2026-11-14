@@ -246,6 +246,11 @@ final class RouterModel {
     // MARK: Plumbing
 
     @ObservationIgnored weak var source: RouterSource?
+    /// The pasted pictures and files: Return marks those it takes as sent, so the draft emptying never deletes them.
+    @ObservationIgnored weak var attachments: RouterAttachments?
+    /// The draft's pictures and files at the Return under way (their ranges in its words as the Router read them): the
+    /// parts of a split, sent after the draft emptied, take theirs from these.
+    @ObservationIgnored var returnPills: [RouterMention] = []
     @ObservationIgnored let targets = RouterTargets()
     /// The curve the list's rows glide on, for the change being made now (`RouterGlides`).
     @ObservationIgnored let glides = RouterGlides()

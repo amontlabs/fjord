@@ -221,6 +221,8 @@ final class AppWindowController: NSObject, NSWindowDelegate {
     init(store: Store, routerModel: RouterComposerModel? = nil, remembers: Bool = true, checksClaudeCode: Bool = true) {
         self.store = store
         self.routerModel = routerModel ?? RouterComposerModel()
+        // The draft's pills keep the uploads of what was pasted in it: one that leaves unsent is deleted on T3.
+        self.routerModel.attachments = store.attachments
         self.checksClaudeCode = checksClaudeCode
         self.remembers = remembers
         navigator = AppNavigator(fallback: store.firstPlace, defaults: remembers ? .standard : nil)

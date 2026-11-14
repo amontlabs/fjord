@@ -73,6 +73,10 @@ final class RouterAttachments {
     @ObservationIgnored private var minted: [String: String] = [:]
     /// Taken out of the draft: their uploads are deleted, their bytes kept for an undo that brings the pill back.
     @ObservationIgnored private var removed: Set<String> = []
+    /// What holds each pill now, by holder: the draft (`draftHolds`), a card's typed answers waiting to go.
+    @ObservationIgnored private var held: [String: Set<String>] = [:]
+    /// Sent with a message (`sent`): their uploads are a thread's now and are never deleted.
+    @ObservationIgnored private(set) var sentIDs: Set<String> = []
 
     init(uploader: Uploader? = nil) { self.uploader = uploader }
 
@@ -91,7 +95,7 @@ final class RouterAttachments {
         let kind: RouterAttachment.Kind = RouterAttachment.imageTypes.contains(mime) && data.count <= RouterAttachment.maxImageBytes
             ? .image : .file
         let id = kind.rawValue + "_" + UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(16)
-        let item = RouterAttachment(id: id, kind: kind, name: Self.cleanName(name, kind: kind), mimeType: mime.isEmpty ? "application/octet-stream" : mime,
+        let item = RouterAttachment(id: id, kind: kind, name: unique(Self.cleanName(name, kind: kind)), mimeType: mime.isEmpty ? "application/octet-stream" : mime,
                                     sizeBytes: data.count, data: data,
                                     thumbnail: kind == .image ? picture.flatMap { Self.thumbnail($0) } : nil)
         items[id] = item
@@ -111,6 +115,43 @@ final class RouterAttachments {
         revision &+= 1
     }
 
+    /// A name no other attachment has ("image.png", then "image 2.png"): each pill reads as its own words
+    /// (`RouterPointer.said`), so a split's part says which picture it carries.
+    private func unique(_ name: String) -> String {
+        let taken = Set(items.values.map(\.name))
+        guard taken.contains(name) else { return name }
+        let ext = (name as NSString).pathExtension
+        let stem = ext.isEmpty ? name : (name as NSString).deletingPathExtension
+        var n = 2
+        while true {
+            let next = "\(stem) \(n)" + (ext.isEmpty ? "" : "." + ext)
+            if !taken.contains(next) { return next }
+            n += 1
+        }
+    }
+
+    // MARK: The one rule: a pill that leaves the draft unsent is deleted on T3
+
+    /// The draft's pills now, whatever changed them (typing, a cut, an undo, Return or Esc emptying it, a prefill
+    /// replacing it): a pill gone that wasn't sent has its upload deleted, once; one back (an undo) is uploaded again.
+    func draftHolds(_ ids: Set<String>) { holds(ids, by: "draft") }
+
+    /// The pills `holder` keeps now (the draft, answers typed on a card waiting to go). A pill no holder keeps any more
+    /// and that wasn't sent has its upload deleted, once; one kept again (an undo) is uploaded again.
+    func holds(_ ids: Set<String>, by holder: String) {
+        let before = Set(held.values.joined())
+        held[holder] = ids.isEmpty ? nil : ids
+        let after = Set(held.values.joined())
+        for id in before.subtracting(after) where !sentIDs.contains(id) { remove(id) }
+        for id in after.subtracting(before) { restore(id) }
+    }
+
+    /// Return took these pills with a message: their uploads go to its thread (or threads: T3 copies a pending upload
+    /// into each thread it is sent to and keeps it until its own sweep), and nothing deletes them.
+    func sent(_ ids: some Sequence<String>) {
+        sentIDs.formUnion(ids)
+    }
+
     /// A click on a failed pill: its upload again.
     func retry(_ id: String) {
         guard case .failed? = states[id], items[id]?.data != nil, let size = items[id]?.sizeBytes,
@@ -120,7 +161,7 @@ final class RouterAttachments {
 
     /// The pill was taken out of the draft (typed away, cut): its upload stops and T3 deletes it.
     func remove(_ id: String) {
-        guard items[id] != nil, removed.insert(id).inserted else { return }
+        guard items[id] != nil, !sentIDs.contains(id), removed.insert(id).inserted else { return }
         tasks.removeValue(forKey: id)?.cancel()
         tokens[id] = nil
         let uploaded: String? = if case .ready(let a)? = states[id] { a } else { minted[id] }
@@ -177,7 +218,9 @@ final class RouterAttachments {
         tasks[id] = Task { @MainActor [weak self] in
             do {
                 let attachmentId = try await uploader.upload(item) { minted in
-                    if self?.tokens[id] == token { self?.minted[id] = minted }
+                    // Minted after the pill left (or a retry took over): nothing will use it.
+                    guard self?.tokens[id] == token else { Task { await uploader.delete(minted) }; return }
+                    self?.minted[id] = minted
                 }
                 self?.finish(id, token, .ready(attachmentId))
                 return attachmentId
@@ -227,6 +270,66 @@ final class RouterAttachments {
                                   width: drawn.width, height: drawn.height))
             return true
         }
+    }
+}
+
+// MARK: - Pills in a split's parts
+
+extension RouterAttachments {
+    /// The pills of `pills` (a draft's pictures and files) that stand in `words` as they read ("[image: name]"), where
+    /// they stand: the Router writes a split's part from the draft's words, the pills' among them. Each at every place
+    /// it reads, left to right, none overlapping.
+    static func pills(in words: String, of pills: [RouterMention]) -> [RouterMention] {
+        let chars = Array(words)
+        var found: [RouterMention] = []
+        var seen = Set<RouterPointer>()
+        for m in pills where m.pointer.attachment != nil && seen.insert(m.pointer).inserted {
+            let said = Array(m.pointer.said(m.name))
+            guard !said.isEmpty, said.count <= chars.count else { continue }
+            var at = 0
+            while at + said.count <= chars.count {
+                if chars[at..<(at + said.count)].elementsEqual(said) {
+                    found.append(RouterMention(range: at..<(at + said.count), pointer: m.pointer, name: m.name))
+                    at += said.count
+                } else {
+                    at += 1
+                }
+            }
+        }
+        var end = 0
+        return found.sorted { $0.range.lowerBound < $1.range.lowerBound }.filter { m in
+            guard m.range.lowerBound >= end else { return false }
+            end = m.range.upperBound
+            return true
+        }
+    }
+
+    /// A split's parts with every one of the draft's pills in some part: a pill the Router left out of all of them goes
+    /// at the end of the part whose words come last before it in the draft (the first part when none does), so nothing
+    /// pasted is dropped. `draft`: the words as the Router read them, the pills' ranges in it.
+    static func placed(_ parts: [String], draft: String, pills: [RouterMention]) -> [String] {
+        var parts = parts
+        guard !parts.isEmpty else { return parts }
+        let chars = Array(draft)
+        // Where each part's words start in the draft: the most of its first words (up to a pill, at most five) found there.
+        let starts: [Int?] = parts.map { part in
+            let words = part.prefix { $0 != "[" }.split(whereSeparator: \.isWhitespace).prefix(5)
+            for n in stride(from: words.count, through: 1, by: -1) {
+                if let r = draft.range(of: words.prefix(n).joined(separator: " ")) {
+                    return draft.distance(from: draft.startIndex, to: r.lowerBound)
+                }
+            }
+            return nil
+        }
+        for m in pills where m.pointer.attachment != nil {
+            guard !parts.contains(where: { !Self.pills(in: $0, of: [m]).isEmpty }) else { continue }
+            let at = m.range.lowerBound <= chars.count ? m.range.lowerBound : chars.count
+            let before = starts.indices.filter { (starts[$0] ?? .max) <= at }.max { starts[$0]! < starts[$1]! } ?? 0
+            let said = m.pointer.said(m.name)
+            parts[before] = parts[before].isEmpty ? said
+                : parts[before] + (parts[before].last?.isWhitespace == true ? "" : " ") + said
+        }
+        return parts
     }
 }
 

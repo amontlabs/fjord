@@ -11,8 +11,20 @@ final class RouterComposerModel {
     var draft = "" {
         didSet { if draft != oldValue { mentionChanged() } }
     }
-    /// What the pills in the draft point to, one for each `MentionText.mark` in it, in order.
-    var pointers: [RouterPointer] = []
+    /// What the pills in the draft point to, one for each `MentionText.mark` in it, in order. Whatever changes them (an
+    /// edit, an undo, Return or Esc emptying the draft, a prefill), the attachments hear which pills it holds: one that
+    /// left unsent has its upload deleted, one back is uploaded again (`RouterAttachments.draftHolds`).
+    var pointers: [RouterPointer] = [] {
+        didSet { if pointers != oldValue { attachmentsFollow() } }
+    }
+    /// The pasted pictures and files the draft's pills are (the app's; none for a composer that takes none).
+    @ObservationIgnored weak var attachments: RouterAttachments? {
+        didSet { attachmentsFollow() }
+    }
+
+    private func attachmentsFollow() {
+        attachments?.draftHolds(Set(pointers.compactMap(\.attachment)))
+    }
     /// Local projects tagged with @ (their folders), in the order they stand in the draft: context for the Router.
     var projects: [String] {
         var seen = Set<String>()

@@ -342,7 +342,6 @@ struct MentionField: NSViewRepresentable {
             view.attach = nil
             view.onAttachment = nil
         }
-        c.attachments = attachments
         c.view = view
         c.follow(model)
         // An upload's state changed (read here, so the field updates with it): its pill is drawn again.
@@ -409,7 +408,6 @@ struct MentionField: NSViewRepresentable {
         var onCommand: ((Selector) -> Bool)?
         var onSelection: ((NSTextView) -> Void)?
         var onEdit: ((String, [RouterPointer]) -> Void)?
-        weak var attachments: RouterAttachments?
         var attachmentRevision = -1
         /// The text's height at a width, for the text it had then (a pill is one character of it; pills made anew clear it).
         var fits: [Fit: CGFloat] = [:]
@@ -504,16 +502,6 @@ struct MentionField: NSViewRepresentable {
             }
         }
 
-        /// Your edit took attachments' pills out (typed away, cut) or brought them back (an undo): their uploads are deleted,
-        /// or made again. A change of the model's (a send emptying the draft) never deletes one.
-        private func edited(from old: [RouterPointer], to new: [RouterPointer]) {
-            guard let attachments, old != new else { return }
-            let before = Set(old.compactMap(\.attachment))
-            let after = Set(new.compactMap(\.attachment))
-            for id in before.subtracting(after) { attachments.remove(id) }
-            for id in after.subtracting(before) { attachments.restore(id) }
-        }
-
         /// Every attachment's pill made again, its look now (uploading, done, failed); the text and the caret as they were.
         func redrawAttachments(in view: MentionTextView) {
             guard let storage = view.textStorage, storage.length > 0 else { return }
@@ -548,7 +536,6 @@ struct MentionField: NSViewRepresentable {
                 guard !syncing, let model, view?.undoManager?.isUndoing == true || view?.undoManager?.isRedoing == true
                 else { return }
                 let (draft, pointers) = MentionText.serialize(textStorage)
-                edited(from: model.pointers, to: pointers)
                 told = (draft, pointers)
                 if model.pointers != pointers { model.pointers = pointers }
                 if model.draft != draft { model.draft = draft }
@@ -570,7 +557,6 @@ struct MentionField: NSViewRepresentable {
                 composing = (draft, pointers)
                 (draft, pointers) = Self.merge(view: (draft, pointers), base: base, model: (model.draft, model.pointers))
             }
-            edited(from: model.pointers, to: pointers)
             told = (draft, pointers)
             if model.pointers != pointers { model.pointers = pointers }
             if model.draft != draft { model.draft = draft }
