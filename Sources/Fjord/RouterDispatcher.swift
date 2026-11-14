@@ -144,9 +144,15 @@ struct RouterAskBack: Identifiable, Equatable {
         var run: @MainActor (RouterTools, RouterRun.Intent, _ input: String) async throws -> RouterRun.Answer
     }
 
-    /// What a message to a thread's waiting request does: answers to its questions, a plan decided, or a permission declined
-    /// with your words.
-    enum RequestAnswer: Sendable { case answers([String: T3Answer]), plan(PlanDecision), decline(String) }
+    /// What a message to a thread's waiting request does: answers to its questions (with the pictures and files pasted in
+    /// it, their pill ids by question id), a plan decided, a permission declined with your words, or a plan sent back with
+    /// pictures or files (your message as it goes to the thread, as T3's composer sends it then).
+    enum RequestAnswer: Sendable {
+        case answers([String: T3Answer], attachments: [String: [String]] = [:])
+        case plan(PlanDecision)
+        case decline(String)
+        case sendBack(ThreadMessage)
+    }
 
     /// What a send to a thread came to.
     enum SendEvent: Equatable {
@@ -675,10 +681,16 @@ struct RouterAskBack: Identifiable, Equatable {
         // What the session would get, its addressing taken out ("@router no rush"), is what answers its form.
         let said = (try? Addressing.edit(job.text, pills: job.context.pills).text) ?? job.text
         let title = store.lineTitle(t)
+        // The pictures and files pasted in the words: never left behind by an answer (`attachedReply`).
+        let pills = job.context.mentions.filter { $0.pointer.attachment != nil }
         if let request = store.heldRequest(t), request.live {
             // An answer is given only while the thread still holds that very request (it may have moved on while it was
             // read), and at the send itself once more.
             let snapshot = RequestSnapshot(target: t, request: request)
+            if !pills.isEmpty {
+                return try await attachedReply(job, to: t, session: session, request: request, snapshot: snapshot, said: said,
+                                               pills: pills)
+            }
             switch request.body {
             case .plan:
                 // A plan is approved or sent back, never sent as text it stays pending under. Never a yes without Jev's.
@@ -736,6 +748,85 @@ struct RouterAskBack: Identifiable, Equatable {
             if let why = sent.note { $0.note = why }
         }
         report(job.id, .taken)
+    }
+
+    /// Words with pictures or files to a thread that holds a request. A plan is sent back with them, as T3's own composer
+    /// does with attachments in the draft (a normal message, the thread left in plan mode, no read of a yes). A question
+    /// takes them with a custom answer (`attachmentsByQuestionId`), on the one question they can go with. A permission, a
+    /// question with only its options, or a form where it isn't clear which question they go with: the send is refused
+    /// plainly, nothing goes. Words that answer none of the questions go on as a message, carrying them.
+    private func attachedReply(_ job: Job, to t: ThreadTarget, session: String, request: ThreadRequest, snapshot: RequestSnapshot,
+                               said: String, pills: [RouterMention]) async throws {
+        guard let store else { return }
+        let title = store.lineTitle(t)
+        switch request.body {
+        case .plan:
+            let uploads = try await uploads(job)
+            stage(job, "sending it back")
+            let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions,
+                                                         store: store, uploads: uploads)
+            guard snapshot.holds(store) else { break }
+            _ = try await effects.answer(job.tools, t, .sendBack(ThreadMessage(text: words.text, records: words.records,
+                                                                                attachments: words.attachments)), snapshot)
+            note(job, .answered(thread: title), session: session, thread: t)
+            report(job.id, .taken)
+            return
+        case .approval:
+            throw RouterTools.Failure(RequestFailure.permissionTakesNone.errorDescription ?? "")
+        case .question(let questions):
+            // Jev reads the words without the pills' names; a custom answer is those words.
+            let bare = RouterModel.withoutPills(said, RouterAttachments.pills(in: said, of: pills))
+            stage(job, "reading your answer")
+            var answers = await Self.askFormAnswers(request, message: bare, ask: jev(job.tools))
+            try Task.checkCancellation()
+            if answers == nil, questions.count == 1, questions[0].allowCustomAnswer, !questions[0].multiSelect {
+                answers = bare.isEmpty ? [:] : [questions[0].id: .one(bare)]
+            }
+            if let answers {
+                let question = try Self.attachmentsQuestion(questions, answers: answers)
+                if snapshot.holds(store) {
+                    stage(job, "answering")
+                    let ids = pills.compactMap(\.pointer.attachment)
+                    _ = try await effects.answer(job.tools, t, .answers(answers, attachments: [question: ids]), snapshot)
+                    note(job, .answered(thread: title), session: session, thread: t)
+                    report(job.id, .taken)
+                    return
+                }
+            }
+        }
+        // The request moved on while it was read (or the words answer none of it): they go on as a message, with the pictures.
+        let uploads = try await uploads(job)
+        stage(job, "sending")
+        let words = try RouterPointers.threadMessage(job.text, pills: job.context.pills, mentions: job.context.mentions, store: store,
+                                                     uploads: uploads)
+        let delivery = Delivery(thread: session, message: ThreadMessage(text: words.text, records: words.records,
+                                                                        attachments: words.attachments),
+                                body: words.words, original: words.original, rephrased: words.rephrased,
+                                mode: job.context.queue ? .queue : .steer, unattended: job.context.action != nil)
+        let sent = try await effects.send(job.tools, delivery)
+        note(job, .sent(to: title, text: delivery.body, original: delivery.rephrased ? delivery.original : nil),
+             session: session, thread: t)
+        store.updateDecision(job.id) {
+            $0.delivered = sent
+            if let why = sent.note { $0.note = why }
+        }
+        report(job.id, .taken)
+    }
+
+    /// The question of `questions` pictures and files pasted with words that answer them go with: the one whose answer is
+    /// the words themselves (a custom answer), else the only one that takes a custom answer. Throws, saying why, when none
+    /// takes them or more than one could.
+    static func attachmentsQuestion(_ questions: [T3Question], answers: [String: T3Answer]) throws -> String {
+        let takers = questions.filter(\.allowCustomAnswer)
+        guard !takers.isEmpty else { throw RouterTools.Failure(RequestFailure.optionsOnly.errorDescription ?? "") }
+        if takers.count == 1 { return takers[0].id }
+        let custom = takers.filter { q in
+            guard let a = answers[q.id] else { return false }
+            let values: [String] = switch a { case .one(let v): [v]; case .many(let m): m }
+            return values.contains { v in !q.options.contains { $0.value == v } }
+        }
+        if custom.count == 1 { return custom[0].id }
+        throw RouterTools.Failure(RequestFailure.unclearQuestion.errorDescription ?? "")
     }
 
     /// A wrong send to a thread: asked again with that place left out. What was sent there stays (take it back from its entry
@@ -955,8 +1046,9 @@ extension RouterDispatcher.Effects {
                 let ticket = tools.ticket()
                 let valid: @MainActor () -> Bool = { (try? tools.live(ticket)) != nil }
                 switch answer {
-                case .answers(let answers):
-                    switch await store.answerQuestion(request, answers, target: target, snapshot: snapshot, alsoValid: valid) {
+                case .answers(let answers, let attachments):
+                    switch await store.answerQuestion(request, answers, attachments: attachments, target: target, snapshot: snapshot,
+                                                      alsoValid: valid) {
                     case .success:
                         return "Answered “\(title)”: " + request.questions.map { q in
                             "\(q.question) = " + (answers[q.id].map { a in switch a { case .one(let v): v; case .many(let m): m.joined(separator: ", ") } } ?? "")
@@ -969,6 +1061,11 @@ extension RouterDispatcher.Effects {
                         : await store.sendBackPlan(request, words: decision.feedback ?? "", target: target, snapshot: snapshot)
                     switch result {
                     case .success: return decision.approve ? "Approved “\(title)”" : "Sent “\(title)” back"
+                    case .failure(let error): throw error
+                    }
+                case .sendBack(let message):
+                    switch await store.sendBackPlan(request, message: message, target: target, snapshot: snapshot) {
+                    case .success: return "Sent “\(title)” back"
                     case .failure(let error): throw error
                     }
                 case .decline(let words):

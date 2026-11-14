@@ -121,6 +121,7 @@ enum RequestFailure: LocalizedError, Equatable {
     static let optionsOnly = noAttachments("This question only takes its options, not pictures or files")
     static let permissionTakesNone = noAttachments("A permission's answer can't carry pictures or files")
     static let planTakesNone = noAttachments("A plan's answer here can't carry pictures or files")
+    static let unclearQuestion = noAttachments("Which of the form's questions the pictures and files go with isn't clear: type them on its question")
 }
 
 extension ThreadRequest {

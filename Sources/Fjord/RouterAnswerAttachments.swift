@@ -64,13 +64,14 @@ extension RouterModel {
         attachments?.holds(Set(typedAttached.keys.flatMap { typedAttachments($0).values.joined() }), by: "answers")
     }
 
-    /// Words with pictures or files to a card that holds a T3 question, permission or plan: its structured answer, so the
+    /// Words with pictures or files to a card that holds a T3 question or permission: its structured answer, so the
     /// attachments go with a custom answer or the send says why they can't (`ThreadAnswers.resolve`). The words naming one
-    /// of the question's options pick it. nil: no attachments, or a card with a form (its answers are typed question by
-    /// question) or no request.
+    /// of the question's options pick it. nil: no attachments, a plan (the words go as a message that sends it back, with
+    /// them where they sat: `RouterDispatcher.attachedReply`), a card with a form (the dispatcher finds the question they
+    /// go with) or no request.
     func attachedAnswer(_ words: String, to t: RouterThread, attached: [RouterMention]) -> RouterOutgoing.Kind? {
         let pills = attached.filter { $0.pointer.attachment != nil }
-        guard !pills.isEmpty, case .needsYou(let ask) = t.state, ask != .form, t.form.isEmpty else { return nil }
+        guard !pills.isEmpty, case .needsYou(let ask) = t.state, ask != .form, ask != .plan, t.form.isEmpty else { return nil }
         let ids = pills.compactMap(\.pointer.attachment)
         let said = Self.withoutPills(words, pills)
         func plain(_ s: String) -> String {

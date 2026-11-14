@@ -139,11 +139,20 @@ extension Store {
     /// "No" to a plan: your words as a normal message, the thread still in plan mode.
     func sendBackPlan(_ request: ThreadRequest, words: String, target: ThreadTarget,
                       snapshot: RequestSnapshot? = nil) async -> Result<Void, Error> {
+        await sendBackPlan(request, message: ThreadMessage(text: words), target: target, snapshot: snapshot)
+    }
+
+    /// The same with the message whole: with pictures or files, their references in its text, their records and their
+    /// uploads, as T3's own composer sends a draft with attachments while a plan waits (a normal message, not its
+    /// follow-up path, which takes none).
+    func sendBackPlan(_ request: ThreadRequest, message: ThreadMessage, target: ThreadTarget,
+                      snapshot: RequestSnapshot? = nil) async -> Result<Void, Error> {
         do {
             guard request.isPlan else { throw RequestFailure.notAPlan }
             guard answerStillValid(request, target: target, snapshot: snapshot) else { throw RequestFailure.moved }
-            try await sendCommands([.messageDispatch(threadId: target.thread, messageId: UUID().uuidString.lowercased(), text: words,
-                                                     dispatch: .startImmediately(intent: .auto))])
+            try await sendCommands([.messageDispatch(threadId: target.thread, messageId: message.messageID, text: message.text,
+                                                     dispatch: .startImmediately(intent: .auto), attachments: message.attachments,
+                                                     context: message.records)])
             logEntryAction("Sent the plan back", target: target)
             return .success(())
         } catch {
