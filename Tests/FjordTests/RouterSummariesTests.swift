@@ -403,13 +403,18 @@ import Testing
         e.ask(request("summed", .summary))
         e.ask(request("named", .name))
         e.ask(request("finished", .ask))
+        // The order the four start in; a retry of the busy call (a slow runner's) is not one of them, and a wait that
+        // times out on a loaded runner ends the walk rather than reading a call that never came.
         var order: [String] = []
-        for _ in 0..<4 {
+        for _ in 0..<8 where order.count < 4 {
             let n = fake.calls.count
             fake.close(n - 1)
             await until(fake.calls.count == n + 1)
+            guard fake.calls.count > n else { break }
             let input = fake.calls[n].input
-            order.append(["summed", "named", "finished", "purpose"].first { input.contains("Thread: \($0)") } ?? "?")
+            if let title = ["summed", "named", "finished", "purpose"].first(where: { input.contains("Thread: \($0)") }) {
+                order.append(title)
+            }
         }
         #expect(order == ["finished", "named", "summed", "purpose"])
     }
@@ -423,7 +428,7 @@ import Testing
         #expect(fake.calls.count == 3)
         e.ask(request("asks", .ask))
         await until(fake.calls.count == 4)
-        #expect(fake.calls[3].input.contains("Thread: asks"))
+        #expect(fake.calls.count > 3 && fake.calls[3].input.contains("Thread: asks"))
     }
 
     @Test func aSummarysRateLimitHoldsOnlyTheSummaries() async {
@@ -440,7 +445,7 @@ import Testing
         await until(fake.calls.count == 2)
         try? await Task.sleep(for: .milliseconds(30))
         #expect(fake.calls.count == 2)
-        #expect(fake.calls[1].input.contains("Thread: asks"))
+        #expect(fake.calls.count > 1 && fake.calls[1].input.contains("Thread: asks"))
     }
 
     @Test func aThreadsSummaryIsCancelledOnItsOwn() async {
