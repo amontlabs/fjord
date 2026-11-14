@@ -1,4 +1,5 @@
-"""MCP server: one tool, preview(code, at). Renders the explainer offscreen and returns frames.
+"""MCP server: one tool, preview(code, ticket, at), the shape of Fjord's (SF/ExplainerMCP.swift). The ticket is required, as in
+Fjord, so evals catch a creator that drops it; this server has one case, so any non-empty ticket is accepted. Renders the explainer offscreen and returns frames.
 Each previewed version is saved as v1.js, v2.js… in CASE_DIR: that's the live stream a viewer would watch."""
 import os, json, re, html, subprocess, pathlib, concurrent.futures as cf
 from mcp.server.fastmcp import FastMCP, Image
@@ -22,9 +23,13 @@ def shot(url: str, out: pathlib.Path):
     return out
 
 @mcp.tool()
-def preview(code: str, at: list[float] | None = None) -> list:
-    """Render your explainer and look at it. `code` is the full explainer({...}) call.
-    Returns timing, any errors, and the held frame at the end of every scene; `at` adds frames at those seconds."""
+def preview(code: str, ticket: str, at: list[float] | None = None) -> list:
+    """Render your explainer and look at it. `code` is the full explainer({...}) call. `ticket` is the ticket from your
+    input's <ticket> line, on every call. Returns timing, any errors, and the held frame at the end of every scene; `at` adds
+    frames at those seconds."""
+    if not (ticket or "").strip():
+        raise ValueError("Missing `ticket`. Call mcp__fjord__preview again with `code` and `ticket`: the ticket is the text "
+                         "inside the <ticket>…</ticket> line at the top of your input. Nothing was saved.")
     ver = len(list(CASE.glob("v*.js"))) + 1
     p = page(code, ver)
     dom = subprocess.run([SHELL, "--virtual-time-budget=4000", "--dump-dom", "--allow-file-access-from-files", p.as_uri() + "?scene=0"],

@@ -999,18 +999,30 @@
   const $ = s => document.querySelector(s);
   const query = new URLSearchParams(location.search);
   if (/^(dark|light)$/.test(query.get("theme") || "")) root.dataset.theme = query.get("theme");
+  // `?embed=1`: the page sits in Fjord's panel, which draws the question itself (player.css `.embed`).
+  if (query.has("embed")) root.classList.add("embed");
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   const themeNow = () => (/^(dark|light)$/.test(root.dataset.theme || "") ? root.dataset.theme : scheme.matches ? "dark" : "light");
   // Errors stop the film and show under it. Layout notes are for the creator's preview only: they stay in the page, unseen.
   const crashes = [];
   let failures = [];
-  function fail(e, build) { (build ? failures : crashes).push(e && (e.stack || e.message) || String(e)); report(); }
+  // WebKit's `stack` leaves out the message (Chromium's starts with it): keep both, once.
+  const said = e => !e ? "Unknown error" : typeof e !== "object" ? String(e)
+    : e.stack && e.message && e.stack.includes(e.message) ? e.stack
+    : [(e.name ? e.name + ": " : "") + (e.message || String(e)), e.stack].filter(Boolean).join("\n");
+  function fail(e, build) { (build ? failures : crashes).push(said(e)); report(); }
   function report() {
     $("#errors").textContent = [...crashes, ...failures, ...notes].join("\n");
     document.body.classList.toggle("broken", crashes.length + failures.length > 0);
   }
-  addEventListener("error", e => fail(e.error || e.message));
+  // A script from another file hides its error ("Script error."): name the file that threw it.
+  addEventListener("error", e => fail(e.error || (e.message === "Script error." ? "explainer.js threw an error before explainer() ran (" + e.message + ")" : e.message)));
   addEventListener("unhandledrejection", e => fail(e.reason));
+  // A host waits for `data-ready`: "1" once the film is built, "error" when it never will be (explainer.js didn't parse,
+  // threw before calling explainer(), never called it, or explainer() itself threw), so the wait always ends.
+  const unready = () => { if (!document.body.dataset.ready) document.body.dataset.ready = "error"; };
+  addEventListener("error", () => { if (!spec) unready(); });
+  addEventListener("load", () => { if (!spec) { fail(new Error("explainer.js never called explainer({...})")); unready(); } });
 
   let spec, theme, starts = [], ends = [], shown = -1;
   const sceneAt = t => { let k = 0; starts.forEach((s, i) => { if (t >= s - 0.001) k = i; }); return k; };
@@ -1071,8 +1083,11 @@
     return was;
   }
   window.__film = { get timeline() { return tl; } }; // for a host that scrubs, and for tests
-  window.explainer = async s => {
+  window.explainer = s => build(s).catch(e => fail(e, true)).finally(unready);
+  async function build(s) {
     spec = s;
+    // What a host reads back without parsing the code: the film's title, its answer and each scene's caption.
+    window.__spec = { title: s && s.title || "", answer: s && s.answer || "", captions: (s && s.scenes || []).map(x => x && x.caption || "") };
     $(".ask").textContent = spec.ask || window.ASK || "";
     $(".answer").textContent = spec.answer;
     document.title = spec.title || "Explainer";
@@ -1120,5 +1135,5 @@
     else tl.play();
     show();
     document.body.dataset.ready = "1";
-  };
+  }
 })();

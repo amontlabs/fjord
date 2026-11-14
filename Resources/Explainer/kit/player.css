@@ -42,3 +42,13 @@ nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .segs .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 6px; }
 #errors { display: none; color: var(--bad); white-space: pre-wrap; font: 12px "Geist Mono", ui-monospace, monospace; margin-top: 10px; }
 body.broken #errors { display: block; }
+/* Embedded in Fjord's Show me panel (`?embed=1`): the panel shows the question, so the page starts at the answer, edge to
+   edge, in the panel's sizes. */
+.embed #frame { max-width: none; padding: 0 1px 2px; }
+.embed .ask { display: none; }
+.embed .answer { font-size: 14px; font-weight: 500; letter-spacing: 0; line-height: 1.35; margin-bottom: 10px; }
+.embed .caption { font-size: 13px; margin-top: 10px; min-height: 18px; }
+.embed .source { font-size: 12px; }
+.embed nav { gap: 10px; margin-top: 8px; }
+.embed .pp { width: 24px; height: 24px; }
+.embed .src { font-size: 12px; padding: 2px 9px; }

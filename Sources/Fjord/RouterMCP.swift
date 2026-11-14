@@ -94,10 +94,29 @@ enum RouterRPC {
         var body: Data?
     }
 
-    /// What a tool says back: text for the model, flagged when the tool refused or failed.
+    /// What a tool says back: text for the model, flagged when the tool refused or failed, then any pictures, each after
+    /// its own label (Show me's `preview` sends the frames it rendered).
     struct ToolResult: Equatable {
         var text: String
         var isError = false
+        var images: [Image] = []
+
+        /// One picture as an MCP image block, base64 in `data`.
+        struct Image: Equatable {
+            var label: String?
+            var mime: String
+            var base64: String
+        }
+
+        /// The MCP `content` blocks: the text, then each image's label as text and the image.
+        var content: [[String: Any]] {
+            var out: [[String: Any]] = [["type": "text", "text": text]]
+            for image in images {
+                if let label = image.label { out.append(["type": "text", "text": label]) }
+                out.append(["type": "image", "data": image.base64, "mimeType": image.mime])
+            }
+            return out
+        }
 
         static func error(_ text: String) -> ToolResult { ToolResult(text: text, isError: true) }
     }
@@ -174,7 +193,7 @@ enum RouterRPC {
             guard let name = params["name"] as? String else { return error(id, invalidParams, "Missing tool name") }
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             guard let out = await call(name, arguments) else { return error(id, invalidParams, "Unknown tool: \(name)") }
-            return result(id, ["content": [["type": "text", "text": out.text]], "isError": out.isError])
+            return result(id, ["content": out.content, "isError": out.isError])
         default:
             return error(id, methodNotFound, "Method not found")
         }
@@ -196,7 +215,8 @@ enum RouterRPC {
 // MARK: - Server
 
 /// The Router's tools, served to its own Claude Code process only: on 127.0.0.1, at a port the system picks, behind a
-/// token made for each start and handed over in the 0600 config file. Bounded in every way a stuck or hostile client could
+/// token made for each start and handed over in the 0600 config file (Show me's preview server keeps its token and port
+/// across app runs instead: `token`, `preferredPort`, ExplainerMCP.swift). Bounded in every way a stuck or hostile client could
 /// use: connections, header and body size, and time to send a request or sit idle.
 final class RouterMCPServer: @unchecked Sendable {
     struct Limits {
@@ -209,6 +229,8 @@ final class RouterMCPServer: @unchecked Sendable {
 
     let token: String
     let limits: Limits
+    /// The port tried first; when it's taken, the system picks one.
+    let preferredPort: UInt16?
     private let queue = DispatchQueue(label: "fjord.router.mcp")
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: Connection] = [:]
@@ -219,12 +241,19 @@ final class RouterMCPServer: @unchecked Sendable {
     /// A connection closed by its deadline ("idle" or "request"): tests wait on it instead of timing it.
     var onDeadline: (@Sendable (String) -> Void)?
 
-    init(limits: Limits = Limits(), handle: @escaping @MainActor (Data) async -> RouterRPC.Reply) {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        token = bytes.map { String(format: "%02x", $0) }.joined()
+    init(limits: Limits = Limits(), token: String? = nil, preferredPort: UInt16? = nil,
+         handle: @escaping @MainActor (Data) async -> RouterRPC.Reply) {
+        self.token = token ?? Self.newToken()
+        self.preferredPort = preferredPort
         self.limits = limits
         self.handle = handle
+    }
+
+    /// 32 random bytes, hex.
+    static func newToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     /// What a request's head gets: the token, the path, the method and the body's size are checked before the body is read.
@@ -246,15 +275,21 @@ final class RouterMCPServer: @unchecked Sendable {
         return .accept
     }
 
-    /// Listens; `ready` gets the port (or why it couldn't), on the main thread.
+    /// Listens; `ready` gets the port (or why it couldn't), on the main thread. With a `preferredPort`, that port first, and
+    /// any port when it's taken.
     func start(ready: @escaping @MainActor (Result<UInt16, Error>) -> Void) {
+        listen(on: preferredPort.flatMap(NWEndpoint.Port.init(rawValue:)), ready: ready)
+    }
+
+    private func listen(on wanted: NWEndpoint.Port?, ready: @escaping @MainActor (Result<UInt16, Error>) -> Void) {
         let params = NWParameters.tcp
-        params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: wanted ?? .any)
         params.acceptLocalOnly = true
         let listener: NWListener
         do {
             listener = try NWListener(using: params)
         } catch {
+            if wanted != nil { return listen(on: nil, ready: ready) }
             DispatchQueue.main.async { MainActor.assumeIsolated { ready(.failure(error)) } }
             return
         }
@@ -264,12 +299,26 @@ final class RouterMCPServer: @unchecked Sendable {
             answered = true
             DispatchQueue.main.async { MainActor.assumeIsolated { ready(result) } }
         }
+        // The preferred port is taken (or can't be had): let it go and take any. Runs on `queue`.
+        let fallBack: (Error) -> Void = { [weak self, weak listener] error in
+            guard !answered else { return }
+            answered = true
+            listener?.stateUpdateHandler = nil
+            listener?.cancel()
+            guard let self, !self.stopped else {
+                return DispatchQueue.main.async { MainActor.assumeIsolated { ready(.failure(error)) } }
+            }
+            if self.listener === listener { self.listener = nil }
+            self.listen(on: nil, ready: ready)
+        }
         listener.stateUpdateHandler = { [weak listener] state in
             switch state {
             case .ready:
                 if let port = listener?.port?.rawValue { finish(.success(port)) }
+            case .waiting(let error) where wanted != nil:
+                fallBack(error)
             case .failed(let error):
-                finish(.failure(error))
+                if wanted != nil { fallBack(error) } else { finish(.failure(error)) }
             case .cancelled:
                 finish(.failure(CocoaError(.userCancelled)))
             default:

@@ -113,6 +113,19 @@ import Testing
         #expect((unknown["error"] as? [String: Any])?["code"] as? Int == -32602)
     }
 
+    @Test func aToolsPicturesGoAsImageBlocksEachAfterItsLabel() async throws {
+        let call: (String, [String: Any]) async -> RouterRPC.ToolResult? = { _, _ in
+            RouterRPC.ToolResult(text: "Version 1.", images: [.init(label: "End of scene 0 (3 s)", mime: "image/jpeg", base64: "AAA"),
+                                                              .init(label: nil, mime: "image/png", base64: "BBB")])
+        }
+        let result = try #require((json(await rpc(["jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                                   "params": ["name": "preview", "arguments": [:]]], call: call).body) as? [String: Any])?["result"] as? [String: Any])
+        let content = try #require(result["content"] as? [[String: String]])
+        #expect(content == [["type": "text", "text": "Version 1."], ["type": "text", "text": "End of scene 0 (3 s)"],
+                            ["type": "image", "data": "AAA", "mimeType": "image/jpeg"],
+                            ["type": "image", "data": "BBB", "mimeType": "image/png"]])
+    }
+
     @Test func batchesAndBadBodies() async throws {
         let batch = await rpc([["jsonrpc": "2.0", "id": 1, "method": "ping"], ["jsonrpc": "2.0", "method": "notifications/initialized"],
                                ["jsonrpc": "2.0", "id": 2, "method": "nope"]])

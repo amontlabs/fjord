@@ -474,3 +474,32 @@ The scripts are throwaway, in the session scratchpad (`spikes/b1`, `b4`, `b5`). 
   is one more reason P3 dispatches `.launchThread` directly.
 - **`.mcp.json` is P1's file to write.** `writeServer(_:)` writes it with mode 0600, and only when it changes. `server()`
   reads back the port and token, so P2 can bind the same port next launch.
+
+### P2 (2026-11-14)
+- **`ExplainerMCP` is P3's `ExplainerRendering`.** `start(project:host:)` binds the port `.mcp.json` names with its token
+  (`RouterMCPServer(token:preferredPort:)`), takes any port when that one is held, and rewrites `.mcp.json` through
+  `writeServer`. `preview(code, ticket, at?)` resolves the ticket with `host.ticket(_:)`; a missing or unknown ticket, missing
+  code or a bad `at` is an error that names the fix and saves nothing. `host.versionSaved` is called for `preview` saves only,
+  not for the engine's own `render(_:ticket:)`. Renders share one web view and run one after another, across runs.
+- **Files per version:** `runs/<run>/v<n>.js`, `v<n>/index.html`, `explainer.js`, `f-scene-<i>.jpg`, `f-t-<t>.jpg`,
+  `poster-light.jpg`, `poster-dark.jpg`, and one entry in `meta.json` (`{versions: [{number, broken, note, title, answer,
+  captions, length}]}`). `v<n>.js` is written before the render, so a crash mid-render never reuses its number.
+- **Frames for the model are 1000 px wide (1×), scaled down from the Retina snapshot.** Posters keep the screen's scale (2000
+  px on Retina), because the panel shows them.
+- **One load per render, then seeks.** The page loads with `?theme=light&scene=0`; each frame is `__film.timeline.time(t)`
+  (not `seek`, which skips the player's update, so the caption would lag), then a snapshot. No `requestAnimationFrame` wait:
+  a window that's never ordered in may not run frames, and `takeSnapshot(afterScreenUpdates:)` paints anyway. The example
+  (5 scenes, one `at`, both posters) takes about 1.0 s.
+- **Errors in WebKit.** WebKit's `Error.stack` leaves out the message, and an error thrown by another `file:` script reads
+  "Script error.". The kit's `fail` now keeps name, message and stack. Before loading, the renderer checks the code's syntax
+  with JavaScriptCore (`JSCheckScriptSyntax`), which names the error and its line. Stack paths are shortened to
+  `kit/kit.js:…` and `explainer.js:…`. A page that never gets ready in 20 s (an endless loop) is reported as broken, and the
+  web view is made again.
+- **Kit changes** (shipped kit only; `EX/kit` stays the eval copy and lacks them): `window.__spec`; `data-ready="error"` when
+  explainer.js doesn't parse, throws first, never calls `explainer()`, or `explainer()` throws; `?embed=1` → `.embed` on the
+  root, styled in `player.css` for the panel (no question, edge to edge, panel type sizes).
+- **`EX/preview_server.py` takes and requires `ticket`.** `EX/run.py` still names its server `explainer`, so its tool is
+  `mcp__explainer__preview` while the prompt says `mcp__fjord__preview`, and its inputs carry no `<ticket>` line. Both need
+  updating before evals run on the new prompt.
+- **Live check:** `FJORD_EXPLAINER_LIVE=1 swift test --filter ExplainerRenderLive` (offscreen, about 2 s);
+  `FJORD_EXPLAINER_KEEP=<dir>` keeps the frames. It isn't listed in DEVELOPMENT.md yet, because P2 doesn't own that file.
