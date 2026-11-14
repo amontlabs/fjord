@@ -239,6 +239,35 @@ import Testing
         #expect(v.string.isEmpty && detached == [.attachment("image_1")])
     }
 
+    /// Gives a text view its own undo manager (no window in a test).
+    final class Undoing: NSObject, NSTextViewDelegate {
+        let manager = UndoManager()
+        func undoManager(for view: NSTextView) -> UndoManager? { manager }
+    }
+
+    @Test func aSendThatEndsTheComposersUndoDropsTheFieldsOwnEditsOnly() {
+        let v = view()
+        let undoing = Undoing()
+        v.delegate = undoing
+        v.allowsUndo = true
+        undoing.manager.groupsByEvent = false
+        undoing.manager.beginUndoGrouping()
+        v.insertText("see this", replacementRange: v.selectedRange())
+        undoing.manager.endUndoGrouping()
+        // The page's Revert of an act, on the same manager.
+        let page = NSObject()
+        undoing.manager.beginUndoGrouping()
+        undoing.manager.registerUndo(withTarget: page) { _ in }
+        undoing.manager.endUndoGrouping()
+        let field = MentionField.Coordinator()
+        field.endUndo(0, in: v)
+        #expect(undoing.manager.canUndo)
+        field.endUndo(1, in: v)
+        // The Revert is still there; under it, none of the field's typing.
+        undoing.manager.undo()
+        #expect(!undoing.manager.canUndo && v.string == "see this")
+    }
+
     @Test func aMarkThatComesInAsTextIsNoPill() {
         let v = view()
         let m = MentionText.markString

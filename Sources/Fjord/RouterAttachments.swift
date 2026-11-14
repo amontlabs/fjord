@@ -67,6 +67,9 @@ final class RouterAttachments {
     private(set) var states: [String: RouterAttachmentState] = [:]
     /// Bumped when a pill's look changes (its state, its picture): the composer draws its pills again.
     private(set) var revision = 0
+    /// Bumped when a send ends the composer's undo (`undoEnded`): its field forgets its own, so no ⌘Z brings back a pill
+    /// whose bytes went.
+    private(set) var undoGeneration = 0
     @ObservationIgnored var uploader: Uploader?
     @ObservationIgnored private var tasks: [String: Task<String, Error>] = [:]
     /// Each upload's own token: the end of one superseded (a retry, a removal) changes nothing.
@@ -213,10 +216,11 @@ final class RouterAttachments {
     }
 
     /// The composer's undo can't bring back what was taken out of the draft any more (a send emptied it): the bytes of
-    /// those pills go, and nothing of them is kept.
+    /// those pills go, and nothing of them is kept. The composer's field drops its undo with them (`undoGeneration`).
     func undoEnded() {
         let gone = removed
         gone.forEach(forget)
+        undoGeneration &+= 1
     }
 
     /// A click on a failed pill: its upload again.

@@ -361,6 +361,7 @@ struct MentionField: NSViewRepresentable {
             c.attachmentRevision = revision
             c.redrawAttachments(in: view)
         }
+        if let generation = attachments?.undoGeneration { c.endUndo(generation, in: view) }
         if c.focusTick != focusTick {
             c.focusTick = focusTick
             DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
@@ -421,6 +422,8 @@ struct MentionField: NSViewRepresentable {
         var onSelection: ((NSTextView) -> Void)?
         var onEdit: ((String, [RouterPointer]) -> Void)?
         var attachmentRevision = -1
+        /// The attachments' undo generation the field's undo was last dropped for (`RouterAttachments.undoGeneration`).
+        var undoGeneration = 0
         /// The text's height at a width, for the text it had then (a pill is one character of it; pills made anew clear it).
         var fits: [Fit: CGFloat] = [:]
         /// While an input method composes and the model changed meanwhile (a prefill): the view's text as the model last
@@ -512,6 +515,14 @@ struct MentionField: NSViewRepresentable {
                 if model.pointers != now.pointers { model.pointers = now.pointers }
                 if model.draft != now.draft { model.draft = now.draft }
             }
+        }
+
+        /// A send ended the composer's undo (`RouterAttachments.undoEnded`): the field's own edits can't be undone any
+        /// more, so none brings back a pill whose bytes went. Other undo (the page's Reverts) is left alone.
+        func endUndo(_ generation: Int, in view: MentionTextView) {
+            guard generation != undoGeneration else { return }
+            undoGeneration = generation
+            if let storage = view.textStorage { view.undoManager?.removeAllActions(withTarget: storage) }
         }
 
         /// Every attachment's pill made again, its look now (uploading, done, failed); the text and the caret as they were.
