@@ -329,6 +329,9 @@ quote and link buttons, the footers' Open in T3, the clock times) says otherwise
   change; an item row has no glyphs, so the two never meet. Done still arms only on a pointer move over it. In the
   narrow layout both were already at the trailing side (Done takes the age column's place, the glyphs sit before the
   pill and the age) and stay so.
+- **Every hover hangs from the line the pointer is on** (2026-11-14): under it in the page's top half, over it in the
+  bottom half; a block header's under the header's line, over its first items, never under the whole block (shot
+  `v2-trail-block-header-hover`).
 - **The glyphs' peek** (R5 1.6, restored): the pointer on the activity glyphs shows their own peek, one row per subagent
   (title · model · age), background command (mono · age) and wait (what · age), hung from the glyphs' trailing edge
   (`RouterActivityPeek`). It wins over the line's own hover there, a working line's too; the rest of the row keeps the
@@ -666,8 +669,8 @@ Needs-you count and disappears at 0.
 
 **R7** (2026-11-13, owner-approved, [OPEN-ITEMS.md](OPEN-ITEMS.md); `RouterItems.swift`, `RouterItemLedgers.swift`,
 `RouterDemoItems.swift`, shots `v2-items`, `v2-items-card`, `v2-items-checking`, `v2-items-resolved`, `v2-items-hover`,
-beat 45). A running block's working peek hangs under the whole block (over it in the page's lower half), never over its
-items. A thread keeps a ledger of what is open with
+beat 45). A block header's hover hangs right under the header's line, over its first items, as any line's does
+(2026-11-14, owner: hung under the whole block it landed far from the pointer, over the next thread). A thread keeps a ledger of what is open with
 you (`RouterThread.ledger`): items of four kinds, each with an id, a sentence, an age, options if any, and a state (open,
 checking, closing with how, new).
 

@@ -4,7 +4,7 @@ import SwiftUI
 // What sits at a row's trailing end (docs/design/router-v2/DESIGN.md R11, 2026-11-14; `--window-shots <dir> v2-trail`):
 // an item row under the pointer with its quiet Done at the row's end and its age still after the words; a working
 // line's activity glyphs at the row's end; the pointer on them showing their peek (each subagent, background command
-// and wait), on a summed-up working line too, whose own hover gives way to it. Narrow and wide, light and dark (`-dark`).
+// and wait), on a summed-up working line too, whose own hover gives way to it; a block header's hover, under its line. Narrow and wide, light and dark (`-dark`).
 
 @MainActor
 enum RouterTrailShots {
@@ -27,6 +27,9 @@ enum RouterTrailShots {
         }),
         State(name: "v2-trail-narrow-item-done", width: 900, make: items, pointer: itemDone),
         State(name: "v2-trail-narrow-activity-peek", width: 900, make: items, pointer: glyphs),
+        // A block's header under the pointer: its hover right under the header's line, over its first items.
+        State(name: "v2-trail-block-header-hover", make: headed, pointer: header),
+        State(name: "v2-trail-narrow-block-header-hover", width: 900, make: headed, pointer: header),
         State(name: "v2-trail-activity", make: items),
         State(name: "v2-trail-wide-activity", width: wide, make: items),
         State(name: "v2-trail-activity-peek", make: items, pointer: glyphs),
@@ -61,6 +64,21 @@ enum RouterTrailShots {
         let key = RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.smaller)
         model.hoverRow = key
         model.hoverControl = .itemDone(key)
+    }
+
+    /// The items' page, Checkpoint boot's header with a detail and facts, so it has a hover.
+    private static func headed(_ model: RouterModel) {
+        items(model)
+        model.update(ID.checkpoint) { t in
+            t.summary = RouterSummary(sentence: t.sentence.text,
+                                      detail: "The base image is pushed; the boot waits for CI's green run before it starts the VM.",
+                                      facts: [.init(kind: .waits, text: "waiting on CI"), .init(kind: .waits, text: "image push")])
+        }
+    }
+
+    private static func header(_ model: RouterModel) {
+        model.hoverRow = ID.checkpoint
+        model.hoverName = ID.checkpoint
     }
 
     private static func glyphs(_ model: RouterModel) {

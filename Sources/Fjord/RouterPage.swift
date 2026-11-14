@@ -454,8 +454,9 @@ struct RouterFloating: View {
         ZStack(alignment: .topLeading) {
             if let id = model.peeked, let thread = model.thread(id), let frame = frames[.name(id)],
                RouterSummaryView.peeks(thread, nil) {
-                // The line's hover, hung from its name.
-                hung(from: blockFrame(thread, name: frame, frames: frames), width: Router.Peek.width) {
+                // The line's hover, hung from its name: right under the line the pointer is on, a block's header's
+                // too (over its first items, as any line's hover is over the lines under it).
+                hung(from: frame, width: Router.Peek.width) {
                     RouterSummaryView(model: model, thread: thread, item: nil, layer: .hover)
                 }
                     .id("peek-" + id)
@@ -514,19 +515,6 @@ struct RouterFloating: View {
         .motion(.fade, value: model.snoozeMenu != nil)
         .motion(.fade, value: model.placesMenu)
         .motion(.fade, value: model.launchMenu)
-    }
-
-    /// What a line's peek hangs from: its name; for a block, the name down to its last row, so a peek under it never
-    /// covers the block's own items (over it, it hangs from the name as any line's).
-    private func blockFrame(_ thread: RouterThread, name: CGRect, frames: [RouterHit: CGRect]) -> CGRect {
-        guard thread.ledger.block else { return name }
-        var bottom = name.maxY
-        for item in thread.ledger.items {
-            if let f = frames[.row(RouterModel.itemKey(thread.id, item.id))] { bottom = max(bottom, f.maxY) }
-        }
-        // Your words or the placeholder under the items: a row each, with no target of their own.
-        if thread.ledger.read != nil { bottom += Router.Items.rowHeight }
-        return CGRect(x: name.minX, y: name.minY, width: name.width, height: bottom - name.minY)
     }
 
     /// The quote mark's hover: its rail starts at the mark's x (clamped inside the page), under the mark when it fits,
