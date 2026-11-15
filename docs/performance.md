@@ -318,6 +318,26 @@ card's roll. Checked with `--select-check` and `--select-check few` (a long repl
 "Show all", shut by "Show less"): 0 rows missing in 2,399 and 2,195 frames; a row painted out in a gliding frame is
 found.
 
+## Window resize (November 2026)
+
+Resizing the window across the Router page stalled: a step of the drag took 30-60 ms, and each breakpoint crossed (the
+narrow list, the ledger, the pane) 230-670 ms, the page built again (`--router-v2-load resize`, sixty lines, release).
+What made it slow, and the fixes:
+
+- *The ledger measured every row at every width.* `RouterWidePage`'s body ran at each step (its frame's start moves) and
+  rebuilt the ledger inline, so SwiftUI measured every row again though the column's width hadn't changed. The ledger
+  is its own view (`RouterWideLedger`) on inputs a resize doesn't change; the page's width only pads it. 30 → 8 ms.
+- *The ledger and the pane were two structures.* The pane coming or going built the ledger, bar and composer again
+  (220 ms); one `HStack` now holds both, the pane a sibling.
+- *Breakpoints crossed mid-drag.* During a live resize `RouterScreen` holds the layout and the drawer's side it started
+  with (`RouterWide.frame(page:holding:)`, cut at the right edge if narrower) and switches once as the resize ends.
+- *Every hosted line laid out at every width* in the narrow list (the column shrinks under ~1065 pt). During a live
+  resize a line out of its scroll view's sight keeps its width and takes the new one as the resize ends
+  (`RouterLineSlotView.liveWidth`). 57 → 25 ms (debug).
+
+Sweep 640-1617 pt with a live drag: p50 36 → 6 ms a step, max 670 → 10 ms. Left: the switch between the narrow list and
+the ledger at the drag's end, 270-540 ms on sixty lines (the two layouts are separate views).
+
 ## Rules for new code
 
 1. Nothing synchronous and expensive between a user's action and the first frame that answers it. If it must happen, do it
@@ -332,7 +352,9 @@ found.
 7. Debounced writes must be flushed on disappear, on quit (`PendingEdits`), before undo/redo, and must address their target by
    id, not by index.
 8. Anything that holds work for a motion must also handle cancellation after the wait and re-check its fences.
-9. Measure before and after with `scripts/morph-timings.sh`, and paste the numbers in the commit message.
+9. A view whose inputs change with the window's width (a frame, a page width) must not hold rows inline: pass the rows'
+   view only what a resize doesn't change, and move it from outside.
+10. Measure before and after with `scripts/morph-timings.sh`, and paste the numbers in the commit message.
 
 ## Known open items
 

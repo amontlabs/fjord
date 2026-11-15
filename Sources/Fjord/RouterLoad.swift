@@ -29,6 +29,9 @@ enum RouterLoad {
     /// `--router-v2-load select`: the synthetic page with nothing coming from T3, a card opened after another (↓) every
     /// 300 ms for 24 s, for the Select gate (the demo script selects nine times).
     static var isSelect: Bool { variant == "select" }
+    /// `--router-v2-load resize`: the synthetic page's window narrowed and widened in 8 pt steps (crossing every
+    /// breakpoint), each step's layout and drawing timed as "Resize step".
+    static var isResize: Bool { variant == "resize" }
 
     private static var variant: String? {
         let args = CommandLine.arguments
@@ -83,6 +86,52 @@ enum RouterLoad {
             try? await Task.sleep(for: .seconds(0.6))
             let streams = Array(model.threads.filter { $0.state != .working }.map(\.id).prefix(streaming))
             let end = Date().addingTimeInterval(seconds)
+            if isResize, let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width >= 800 }) {
+                var times: [Double] = []
+                // `FJORD_RESIZE=640-1060`: only that band, back and forth, ten times.
+                let band = (ProcessInfo.processInfo.environment["FJORD_RESIZE"] ?? "640-1617").split(separator: "-").compactMap { Int($0) }
+                let (lo, hi) = (band.first ?? 640, band.last ?? 1617)
+                let widths = Array(stride(from: hi, through: lo, by: -8)) + Array(stride(from: lo, through: hi, by: 8))
+                // As in a live resize (`RouterLineSlotView.liveWidth`), ended after every pass.
+                let live = ProcessInfo.processInfo.environment["FJORD_RESIZE_LIVE"] != nil
+                for _ in 0..<(band.count == 2 && (lo, hi) != (640, 1617) ? 10 : 2) {
+                    RouterLineSlotView.liveResizing = live
+                    if live { NotificationCenter.default.post(name: NSWindow.willStartLiveResizeNotification, object: window) }
+                    defer {
+                        RouterLineSlotView.liveResizing = false
+                        if live {
+                            NotificationCenter.default.post(name: NSWindow.didEndLiveResizeNotification, object: window)
+                            let end = CACurrentMediaTime()
+                            window.contentView?.layoutSubtreeIfNeeded()
+                            window.displayIfNeeded()
+                            CATransaction.flush()
+                            print(String(format: "resize end at %d: %.0f ms", widths.last ?? 0, (CACurrentMediaTime() - end) * 1000))
+                        }
+                    }
+                    for w in widths {
+                        let t0 = CACurrentMediaTime()
+                        let step = RouterSignposts.begin("Resize step")
+                        window.setContentSize(NSSize(width: CGFloat(w), height: 1188))
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        window.displayIfNeeded()
+                        CATransaction.flush()
+                        RouterSignposts.end(step)
+                        times.append((CACurrentMediaTime() - t0) * 1000)
+                        if let dir = ProcessInfo.processInfo.environment["FJORD_RESIZE_SHOTS"], w % 200 == 0 || w == lo || w == hi,
+                           let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                            view.cacheDisplay(in: view.bounds, to: rep)
+                            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/w\(w).png"))
+                        }
+                        if times.last! > 25 { print(String(format: "slow step to %d: %.0f ms", w, times.last!)) }
+                        await Task.yield()
+                    }
+                }
+                let sorted = times.sorted()
+                func q(_ p: Double) -> Double { sorted[min(sorted.count - 1, Int(Double(sorted.count) * p))] }
+                print(String(format: "resize steps %d p50 %.1f p95 %.1f max %.1f total %.0f ms", times.count, q(0.5), q(0.95), sorted.last ?? 0, times.reduce(0, +)))
+                if CommandLine.arguments.contains("--quit-after") { NSApp.terminate(nil) }
+                return
+            }
             if isSelect {
                 while Date() < end {
                     model.step(down: true)

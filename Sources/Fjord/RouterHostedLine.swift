@@ -390,13 +390,44 @@ final class RouterLineSlotView: RouterGlideView {
         let o = Self.overflow
         let needed = max(height, box.built ? held : 0) + 2 * o
         if needed > room { room = (needed / Self.roomStep).rounded(.up) * Self.roomStep }
-        let frame = CGRect(x: 0, y: -o, width: bounds.width, height: room)
+        let frame = CGRect(x: 0, y: -o, width: liveWidth(), height: room)
         if hosting.frame != frame {
             hosting.frame = frame
         }
         fitTail()
         clip()
     }
+
+    /// While the window is resized live, a line out of sight keeps its width: laid out again at every step, a long page's
+    /// rows took ~60 ms a step (`--router-v2-load resize`). It takes the slot's width as the resize ends, or as soon as a
+    /// step finds it in sight.
+    private func liveWidth() -> CGFloat {
+        let width = bounds.width, was = hosting.frame.width
+        guard inLiveResize || Self.liveResizing, was > 0, was != width, !inSight, let window else {
+            if let resizeEnd { NotificationCenter.default.removeObserver(resizeEnd) }
+            resizeEnd = nil
+            return width
+        }
+        if resizeEnd == nil {
+            resizeEnd = NotificationCenter.default.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: window,
+                                                               queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.fit() }
+            }
+        }
+        return was
+    }
+
+    /// Some of the slot shows in its scroll view (`visibleRect` doesn't say: the scroll view doesn't clip its rows).
+    private var inSight: Bool {
+        guard let scroll = enclosingScrollView else { return true }
+        return convert(bounds, to: scroll).intersects(scroll.bounds)
+    }
+
+    /// The resize load's steps standing for a live resize (`RouterLoad`), which a program can't start.
+    static var liveResizing = false
+
+    /// Fits a line kept at its width (`liveWidth`) once the resize ends.
+    private var resizeEnd: NSObjectProtocol?
 
     /// The hosting view drawn down to the slot's bottom only: a card's roll is SwiftUI's, drawn on the main thread two or
     /// three frames behind the rows' glides on Core Animation, and as a card shut the line rising under it covered its

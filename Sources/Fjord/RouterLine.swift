@@ -468,14 +468,21 @@ struct RouterWidthCap: ViewModifier {
     private struct Cap: Layout {
         let cap: CGFloat
 
-        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        /// The content's ideal width, measured once until the content changes (`updateCache`), not at every width a
+        /// resize proposes.
+        func makeCache(subviews: Subviews) -> CGFloat? { nil }
+
+        func updateCache(_ cache: inout CGFloat?, subviews: Subviews) { cache = nil }
+
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat?) -> CGSize {
             guard let child = subviews.first else { return .zero }
-            let ideal = child.sizeThatFits(.unspecified)
-            let width = min(ideal.width, cap, proposal.width ?? .infinity)
+            let ideal = cache ?? child.sizeThatFits(.unspecified).width
+            cache = ideal
+            let width = min(ideal, cap, proposal.width ?? .infinity)
             return child.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
         }
 
-        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat?) {
             subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
         }
     }

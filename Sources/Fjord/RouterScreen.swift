@@ -18,6 +18,10 @@ struct RouterScreen: View {
     @State private var width: CGFloat = 0
     @State private var screenWidth: CGFloat = 0
     @State private var flags = RouterFlagsWatch()
+    /// The layout a live resize started in, kept until it ends: crossing a breakpoint builds the page again (a quarter to
+    /// two thirds of a second on a long page), so a drag across one doesn't stall at each crossing; the page takes the
+    /// layout its width calls for once, as the resize ends.
+    @State private var held: Held?
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.undoManager) private var undoManager
     @Environment(\.windowGlass) private var glass
@@ -29,7 +33,12 @@ struct RouterScreen: View {
     static let toggleRoom: CGFloat = toggleTrailing + CDS.TitleBar.button + 8
 
     private var drawerOpen: Bool { store?.routerDrawerOpen == true }
-    private var side: Bool { screenWidth >= Self.sideFrom }
+    private var side: Bool { held?.side ?? (screenWidth >= Self.sideFrom) }
+
+    struct Held: Equatable {
+        var wide: RouterWide.Layout?
+        var side: Bool
+    }
 
     /// The column's edges from the page's sides: the title, the headers, the names and the composer share them. With
     /// the drawer's toggle on the title line, the column's end stays clear of it.
@@ -45,7 +54,10 @@ struct RouterScreen: View {
     }
 
     /// The ledger, or the ledger and its pane, when the page has the room (without, the page is its own).
-    private var wide: (layout: RouterWide.Layout, frame: RouterWide.Frame)? { RouterWide.frame(page: width) }
+    private var wide: (layout: RouterWide.Layout, frame: RouterWide.Frame)? {
+        if let held { return RouterWide.frame(page: width, holding: held.wide) }
+        return RouterWide.frame(page: width)
+    }
 
     var body: some View {
         screen
@@ -136,6 +148,11 @@ struct RouterScreen: View {
             model.clock.stop()
         }
         .onChange(of: reduce) { _, now in model.reduce = now }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willStartLiveResizeNotification)) { note in
+            guard (note.object as? NSWindow)?.styleMask.contains(.resizable) == true, width > 0 else { return }
+            held = Held(wide: wide?.layout, side: side)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndLiveResizeNotification)) { _ in held = nil }
     }
 
     /// The 48 pt header: the title and, while a script plays, the beat's caption and the keys just pressed.
