@@ -82,33 +82,12 @@ enum RouterWide {
     }
 }
 
-/// The page under the title line, in one of the wide layouts.
-struct RouterWidePage: View {
+/// The selected row's card beside the ledger, level with its first row (the pane, `RouterList`).
+struct RouterWideSide: View {
     let model: RouterModel
-    let layout: RouterWide.Layout
     let frame: RouterWide.Frame
-    let page: CGFloat
-
-    private typealias L = Router.Line
-    private typealias M = Router.Margin
 
     var body: some View {
-        // One structure for both layouts: the ledger, its bar and its composer stay the same views as the pane comes or
-        // goes (a resize across `paneFrom`), only their widths change; built again, the switch took a fifth of a second.
-        let pane = layout == .pane
-        let split = pane ? frame.start + frame.column + frame.gap / 2 : page
-        HStack(alignment: .top, spacing: 0) {
-            // Alone, the ledger takes the page's width as proposed: a fixed width there held the page at it.
-            scroll(width: split) { ledger(cards: !pane) }
-                .frame(width: pane ? split : nil)
-            if pane { side }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .environment(\.routerPaneHoldsShowMe, pane)
-    }
-
-    /// The selected row's card beside the ledger, level with its first row.
-    private var side: some View {
         // Show me's panel, open, at the pane's bottom: level with the composer, the card above it.
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topLeading) {
@@ -128,161 +107,34 @@ struct RouterWidePage: View {
         .padding(.top, Router.Bar.control + 2 * Router.Bar.padY + Router.Header.firstTop)
         .padding(.bottom, Router.Dock.bottom)
     }
-
-    // MARK: The page's shell: the bar over the rows, the dock under them
-
-    private func scroll<Rows: View>(width: CGFloat, @ViewBuilder rows: () -> Rows) -> some View {
-        // The bar runs over the reading column, not the pane; so does the composer.
-        let barEnd = frame.start + frame.column
-        return ScrollView {
-            rows()
-                .padding(.bottom, 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        // No scroller, as the narrow page (RouterPage).
-        .scrollIndicators(.never)
-        .trackUnderBar(model)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            ZStack {
-                if model.hasThreads {
-                    RouterHostedBar(model: model)
-                        .padding(.leading, frame.start - CDS.Tabs.pad).padding(.trailing, width - barEnd - CDS.Tabs.pad)
-                        .transition(.opacity)
-                }
-            }
-            .frame(height: Router.Bar.control + 2 * Router.Bar.padY)
-            .frame(maxWidth: .infinity)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                Color.clear.frame(height: Router.Bar.fade).allowsHitTesting(false)
-                RouterDock(model: model)
-                    .padding(.leading, frame.start).padding(.trailing, width - frame.start - frame.column)
-                    .padding(.bottom, Router.Dock.bottom)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background {
-                        VStack(spacing: 0) {
-                            LinearGradient(colors: [CDS.Surface.s1.opacity(0), CDS.Surface.s1], startPoint: .top, endPoint: .bottom)
-                                .frame(height: Router.Bar.fade)
-                            CDS.Surface.s1
-                        }
-                        .padding(.top, -Router.Bar.fade)
-                        .allowsHitTesting(false)
-                    }
-            }
-        }
-    }
-
-    private func ledger(cards: Bool) -> some View {
-        // Its own view, on inputs a resize doesn't change: the page's width moves it, and the rows aren't measured again.
-        RouterWideLedger(model: model, rail: frame.rail, margin: frame.margin, column: frame.column, cards: cards)
-            .padding(.leading, frame.start - M.lead - frame.margin - frame.rail)
-    }
 }
 
-/// The ledger's rows by project, at its columns' widths (`RouterWidePage`).
-private struct RouterWideLedger: View {
+/// The project, once, beside its first thread in the ledger: its name (a click filters to it) and, with more than one
+/// thread, what it has in each state.
+struct RouterRail: View {
     let model: RouterModel
-    let rail: CGFloat
-    let margin: CGFloat
-    let column: CGFloat
-    let cards: Bool
+    let project: String
+    let lines: Int
+    let tally: [RouterSection: Int]
 
-    private typealias L = Router.Line
-    private typealias M = Router.Margin
-
-    var body: some View { ledger }
-
-    /// A row that isn't a thread: a section's header, the sentence in its place, the housekeeping line.
-    @ViewBuilder private func other(_ slot: RouterSlot, first: Bool) -> some View {
-        switch slot.kind {
-        case .header(let section, let count): RouterHeaderRow(model: model, section: section, count: count, first: first)
-        case .sentence(let words, let clear): RouterSentenceRow(model: model, words: words, clear: clear)
-        case .reading(let count): RouterReadingRow(count: count, first: first)
-        case .housekeeping(let count): RouterHousekeepingRow(model: model, count: count)
-        case .line, .ghost: EmptyView()
-        }
-    }
-
-    private func isLine(_ slot: RouterSlot?) -> Bool {
-        if case .line? = slot?.kind { true } else { false }
-    }
-
-    // MARK: The ledger by project
-
-
-    private struct Group: Identifiable {
-        var id: String
-        var lines: [String] = []
-        var tally: [RouterSection: Int] = [:]
-    }
-
-    /// The page's threads by project, in the page's order: the project of the most pressing thread first, a thread with
-    /// no project last.
-    private var groups: [Group] {
-        var groups: [Group] = []
-        for slot in model.layout {
-            guard case .line(let id) = slot.kind, let thread = model.thread(id) else { continue }
-            let project = thread.project ?? ""
-            let at = groups.firstIndex { $0.id == project } ?? {
-                groups.append(Group(id: project))
-                return groups.count - 1
-            }()
-            groups[at].lines.append(id)
-            groups[at].tally[thread.section, default: 0] += 1
-        }
-        return groups.filter { !$0.id.isEmpty } + groups.filter { $0.id.isEmpty }
-    }
-
-    private var ledger: some View {
-        let slots = model.layout.filter { !isLine($0) }
-        return VStack(alignment: .leading, spacing: 0) {
-            // With no thread: the sentence that says so.
-            ForEach(slots) { slot in
-                if case .sentence = slot.kind { other(slot, first: true).padding(.leading, lead) }
-                if case .reading = slot.kind { other(slot, first: true).padding(.leading, lead) }
-            }
-            ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                HStack(alignment: .top, spacing: 0) {
-                    railView(group).frame(width: rail, alignment: .leading)
-                    VStack(alignment: .leading, spacing: M.threadGap) {
-                        ForEach(group.lines, id: \.self) { id in
-                            RouterWideMarginThread(model: model, box: model.box(id), margin: margin, project: false, cards: cards)
-                        }
-                    }
-                }
-                .padding(.top, index == 0 ? Router.Header.firstTop : 18)
-            }
-            ForEach(slots) { slot in
-                if case .housekeeping = slot.kind { other(slot, first: false).padding(.leading, lead) }
-            }
-        }
-        .frame(width: rail + margin + M.lead + column + L.reach, alignment: .leading)
-    }
-
-    /// A page row's own leading in the ledger: its words on the marks' column.
-    private var lead: CGFloat { rail + margin + M.lead - L.nameLeading }
-
-    /// The project, once, beside its first thread: its name (a click filters to it) and, with more than one thread, what
-    /// it has in each state.
-    private func railView(_ group: Group) -> some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if group.id.isEmpty {
+            if project.isEmpty {
                 Text("no project").font(CDS.sans(12)).foregroundStyle(CDS.Text.disabled)
                     .frame(height: Router.Items.rowHeight)
             } else {
-                RouterButton(model: model, hit: .pill("rail:" + group.id), action: { model.toggle(project: group.id) }) { hot, _ in
-                    Text(group.id).font(CDS.sans(12, .semibold)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.secondary)
+                RouterButton(model: model, hit: .pill("rail:" + project), action: { model.toggle(project: project) }) { hot, _ in
+                    Text(project).font(CDS.sans(12, .semibold)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.secondary)
                         .lineLimit(1)
                         .frame(height: Router.Items.rowHeight)
                 }
                 .routerLink()
-                .accessibilityLabel("Project \(group.id)")
+                .accessibilityLabel("Project \(project)")
             }
-            if group.lines.count > 1 {
+            if lines > 1 {
                 HStack(spacing: 8) {
                     ForEach(RouterSection.allCases, id: \.self) { section in
-                        if let n = group.tally[section] {
+                        if let n = tally[section] {
                             HStack(spacing: 3) {
                                 Image(systemName: section.symbol).font(.system(size: 8.5, weight: .semibold)).foregroundStyle(section.tint)
                                 Text(verbatim: "\(n)").font(CDS.sans(11)).monospacedDigit().foregroundStyle(CDS.Text.muted)

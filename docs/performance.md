@@ -324,19 +324,26 @@ Resizing the window across the Router page stalled: a step of the drag took 30-6
 narrow list, the ledger, the pane) 230-670 ms, the page built again (`--router-v2-load resize`, sixty lines, release).
 What made it slow, and the fixes:
 
-- *The ledger measured every row at every width.* `RouterWidePage`'s body ran at each step (its frame's start moves) and
-  rebuilt the ledger inline, so SwiftUI measured every row again though the column's width hadn't changed. The ledger
-  is its own view (`RouterWideLedger`) on inputs a resize doesn't change; the page's width only pads it. 30 → 8 ms.
-- *The ledger and the pane were two structures.* The pane coming or going built the ledger, bar and composer again
-  (220 ms); one `HStack` now holds both, the pane a sibling.
+- *The ledger measured every row at every width.* The page's body ran at each step (its frame's start moves) and
+  rebuilt the rows inline, so SwiftUI measured every row again though the column's width hadn't changed. The rows are
+  their own view (`RouterRows`) on inputs a resize doesn't change; the page's width only pads them. 30 → 8 ms.
 - *Breakpoints crossed mid-drag.* During a live resize `RouterScreen` holds the layout and the drawer's side it started
   with (`RouterWide.frame(page:holding:)`, cut at the right edge if narrower) and switches once as the resize ends.
 - *Every hosted line laid out at every width* in the narrow list (the column shrinks under ~1065 pt). During a live
   resize a line out of its scroll view's sight keeps its width and takes the new one as the resize ends
   (`RouterLineSlotView.liveWidth`). 57 → 25 ms (debug).
+- *The state list and the ledger were two pages.* Crossing between them built the other one whole: sixty hosting
+  views made or dropped, the scroll view, bar and composer again (270-540 ms). Now one list (`RouterList`, `RouterRows`)
+  arranges the same rows either way (`RouterStack.Place`: by state under headers, or by project with the rail beside
+  each project's first thread), and the pane is a sibling of it. A line keeps one slot; its hosting view for the other
+  layout is kept out of the window once built (`RouterLineSlotView.flip`), so crossing back attaches it. A line out of
+  sight swaps when its turn comes, a few per main-loop turn within 6 ms (`RouterSwaps`); one placed in sight swaps at
+  once. Release, sixty lines: the first crossing in a run 140-290 ms (lines in sight build their other layout), later
+  ones 80-150 ms.
 
-Sweep 640-1617 pt with a live drag: p50 36 → 6 ms a step, max 670 → 10 ms. Left: the switch between the narrow list and
-the ledger at the drag's end, 270-540 ms on sixty lines (the two layouts are separate views).
+Sweep 640-1617 pt with a live drag: p50 36 → 6 ms a step, max 670 → 10 ms. Left: the crossing at the drag's end, above
+(the lines in sight re-render; the ledger's margin, which grows over the 22 pt after its breakpoint, gives every line a
+new root at each step there).
 
 ## Rules for new code
 

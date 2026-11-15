@@ -26,17 +26,23 @@ struct RouterHostedLine: View {
     @Environment(\.windowArrival) private var arrival
     @Environment(\.routerStill) private var still
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.routerWide) private var wide
 
     var body: some View {
+        // In the ledger (`wide`): the margin grammar's thread, as tall as it lays out (`RouterLineRoot`).
         // The line's height from what the model sets, at once: the rows under it glide on the change's own curve
         // (`RouterGlides`) while the card opens, shuts or grows inside on the same curve. The line's height as measured
         // until it has been laid out once.
         let open = box.selected && !box.moving
         let card = box.cardHeight
         let rest = box.rowHeight + box.queuedHeight + box.pendingHeight + box.tailHeight
-        let height: CGFloat? = box.rowHeight > 0 ? rest + (open ? card : 0) : nil
+        let height: CGFloat? = if wide != nil {
+            box.wideHeight > 0 ? box.wideHeight : nil
+        } else {
+            box.rowHeight > 0 ? rest + (open ? card : 0) : nil
+        }
         RouterLineHost(model: model, box: box, slot: slot, block: box.block,
-                       setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival))
+                       setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival, wide: wide))
             .frame(height: height, alignment: .top)
             .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Router.space)).origin } action: { [model, id = box.id] in
                 model.targets.origins[id] = $0
@@ -286,9 +292,11 @@ struct RouterLineSetup: Equatable {
     var still: Bool
     var scheme: ColorScheme
     var arrival: WindowArrival?
+    /// In the ledger: its columns, the line drawn in the margin grammar (`RouterWideMarginThread`).
+    var wide: RouterRows.Wide? = nil
 
     static func == (a: Self, b: Self) -> Bool {
-        a.reduce == b.reduce && a.still == b.still && a.scheme == b.scheme && a.arrival === b.arrival
+        a.reduce == b.reduce && a.still == b.still && a.scheme == b.scheme && a.arrival === b.arrival && a.wide == b.wide
     }
 }
 
@@ -300,7 +308,7 @@ struct RouterLineRoot: View {
 
     var body: some View {
         // Top first: while the slot is taller than the line (its card rolling shut), the line stays at its top.
-        let line = RouterLineView(model: model, box: box)
+        let line = content
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .coordinateSpace(.named(Router.rowSpace))
@@ -313,6 +321,16 @@ struct RouterLineRoot: View {
             .transformEnvironment(\._accessibilityReduceMotion) { if setup.reduce { $0 = true } }
         if let arrival = setup.arrival { line.windowArrival(arrival) } else { line }
     }
+
+    /// The page's line, or in the ledger the thread in the margin grammar, which the list sizes as it lays out.
+    @ViewBuilder private var content: some View {
+        if let wide = setup.wide {
+            RouterWideMarginThread(model: model, box: box, margin: wide.margin, project: false, cards: wide.cards)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { [box] in box.wideHeight = $0 }
+        } else {
+            RouterLineView(model: model, box: box)
+        }
+    }
 }
 
 /// A line's hosting view, measured by its controller (`sizeThatFits(in:)`).
@@ -322,7 +340,13 @@ typealias RouterLineHosting = NSHostingView<RouterLineRoot>
 /// shut (the card is still drawn below the slot's new bottom until its roll has ended: `box.built`). A block's rows under
 /// its card are in a second hosting view (`tail`), on a layer of their own.
 final class RouterLineSlotView: RouterGlideView {
-    let hosting: RouterLineHosting
+    /// The line's hosting view and its controller, for the page's layout now: the state list's line, or the ledger's
+    /// thread in the margin grammar (`RouterLineRoot`).
+    private(set) var hosting: RouterLineHosting
+    private(set) var controller: NSHostingController<RouterLineRoot>
+    /// The other layout's, once built: kept out of the window, so the page crossing back to it attaches it instead of
+    /// building the line again.
+    private var parked: NSHostingController<RouterLineRoot>?
     let box: RouterLineBox
     /// The slot's height while the card was last open: the hosting view keeps it until the card's body goes.
     private var held: CGFloat = 0
@@ -355,8 +379,9 @@ final class RouterLineSlotView: RouterGlideView {
     /// A line's card shutting has its landing on the way (`clip`).
     private var landingShut = false
 
-    init(hosting: RouterLineHosting, box: RouterLineBox) {
-        self.hosting = hosting
+    init(root: RouterLineRoot, box: RouterLineBox) {
+        controller = Self.make(root)
+        hosting = controller.view as! RouterLineHosting
         self.box = box
         super.init(frame: .zero)
         wantsLayer = true
@@ -367,6 +392,73 @@ final class RouterLineSlotView: RouterGlideView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The page changed layout (the state list, the ledger) while the line was out of sight: what it is to show, once it
+    /// is in sight or its turn in `RouterSwaps` comes. Each line building its other grammar at once took the switch a
+    /// quarter to half a second on a long page.
+    private var wanted: (root: RouterLineRoot, block: Bool)?
+
+    /// The line's root and whether its card's rows under it have their own view (a block on the page's list).
+    func want(_ root: RouterLineRoot, block: Bool) {
+        let switching = (hosting.rootView.setup.wide == nil) != (root.setup.wide == nil)
+        // Even in sight: where it shows in the new layout isn't known yet. Placed in sight there, it swaps then (`fit`).
+        if switching, hosting.frame.width > 0 {
+            wanted = (root, block)
+            RouterSwaps.shared.add(self)
+            return
+        }
+        wanted = nil
+        apply(root, block: block)
+    }
+
+    /// Shows the layout it waits for, if any (`want`).
+    func swapWanted() {
+        guard let wanted else { return }
+        self.wanted = nil
+        apply(wanted.root, block: wanted.block)
+    }
+
+    /// A line's hosting controller, sized by the list (`sizeThatFits`): no preferred size or constraints to keep up to
+    /// date on each change, and no safe area of the window's.
+    private static func make(_ root: RouterLineRoot) -> NSHostingController<RouterLineRoot> {
+        let controller = NSHostingController(rootView: root)
+        controller.sizingOptions = []
+        let hosting = controller.view as! RouterLineHosting
+        hosting.sizingOptions = []
+        hosting.safeAreaRegions = []
+        return controller
+    }
+
+    private func apply(_ root: RouterLineRoot, block: Bool) {
+        if (root.setup.wide != nil) != (hosting.rootView.setup.wide != nil) { flip(root) }
+        // A new root only when what it takes changed: setting one runs the line's whole body again.
+        let now = hosting.rootView
+        if now.box !== root.box || now.model !== root.model || now.setup != root.setup { hosting.rootView = root }
+        if root.setup.wide != nil {
+            // The ledger draws a block's rows itself: the tail waits out of the window for the page's list.
+            tailBox?.removeFromSuperview()
+        } else if !block {
+            dropTail()
+        } else {
+            if let tailBox, tailBox.superview == nil { addSubview(tailBox) }
+            makeTail()
+            setTail(root.setup, model: root.model)
+        }
+        fit()
+    }
+
+    /// The page crossed to the other layout: its hosting view, kept from the last time or made now, takes the current one's
+    /// place; the current one is kept out of the window.
+    private func flip(_ root: RouterLineRoot) {
+        let old = controller
+        controller = parked ?? Self.make(root)
+        parked = old
+        old.view.layer?.mask = nil
+        old.view.removeFromSuperview()
+        hosting = controller.view as! RouterLineHosting
+        if let tailBox, tailBox.superview === self { addSubview(hosting, positioned: .below, relativeTo: tailBox) } else { addSubview(hosting) }
+        clipped = nil
+    }
 
     // Its hosting views follow its size at once: nothing else lays them out (`RouterGlideView`).
     override func setFrameSize(_ newSize: NSSize) {
@@ -385,6 +477,8 @@ final class RouterLineSlotView: RouterGlideView {
     /// back up (the same, upwards, as it shut). So the hosting view is as tall as the slot could get (`room`), the line
     /// drawn at its top; only the slot is hit, and what is past it is empty. It grows only for a card taller than that.
     func fit() {
+        // Placed in sight in the page's new layout: it shows that layout now.
+        if wanted != nil, inSight { return swapWanted() }
         let height = bounds.height
         if box.selected, !box.moving { held = height } else if !box.built { held = 0 }
         let o = Self.overflow
@@ -418,7 +512,7 @@ final class RouterLineSlotView: RouterGlideView {
     }
 
     /// Some of the slot shows in its scroll view (`visibleRect` doesn't say: the scroll view doesn't clip its rows).
-    private var inSight: Bool {
+    var inSight: Bool {
         guard let scroll = enclosingScrollView else { return true }
         return convert(bounds, to: scroll).intersects(scroll.bounds)
     }
@@ -436,7 +530,8 @@ final class RouterLineSlotView: RouterGlideView {
     /// reaches past its row). In a block, the mask ends where the rows under the card start (`placeTail` rolls it).
     private func clip() {
         guard let host = hosting.layer else { return }
-        guard !box.moving else {
+        // In the ledger the line is as tall as it lays out, its card inside it: nothing to cut.
+        guard !box.moving, hosting.rootView.setup.wide == nil else {
             if host.mask != nil { host.mask = nil }
             clipped = nil
             return
@@ -676,43 +771,19 @@ private struct RouterLineHost: NSViewRepresentable {
     let block: Bool
     let setup: RouterLineSetup
 
-    final class Coordinator {
-        var controller: NSHostingController<RouterLineRoot>?
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
     func makeNSView(context: Context) -> RouterLineSlotView {
-        let controller = NSHostingController(rootView: RouterLineRoot(model: model, box: box, setup: setup))
-        // The list sizes it (`sizeThatFits`): no preferred size or constraints to keep up to date on each change, and no
-        // safe area of the window's.
-        controller.sizingOptions = []
-        context.coordinator.controller = controller
-        let hosting = controller.view as! RouterLineHosting
-        hosting.sizingOptions = []
-        hosting.safeAreaRegions = []
-        let view = RouterLineSlotView(hosting: hosting, box: box)
+        let view = RouterLineSlotView(root: RouterLineRoot(model: model, box: box, setup: setup), box: box)
         model.glides.register(slot, view)
         return view
     }
 
     func updateNSView(_ view: RouterLineSlotView, context: Context) {
-        // A new root only when what it takes changed: setting one runs the line's whole body again.
-        let root = view.hosting.rootView
-        if root.box !== box || root.model !== model || root.setup != setup {
-            view.hosting.rootView = RouterLineRoot(model: model, box: box, setup: setup)
-        }
-        if !block {
-            view.dropTail()
-        } else {
-            view.makeTail()
-            view.setTail(setup, model: model)
-        }
-        view.fit()
+        view.want(RouterLineRoot(model: model, box: box, setup: setup), block: block)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: RouterLineSlotView, context: Context) -> CGSize? {
-        guard let width = proposal.width, width.isFinite, width > 0, let controller = context.coordinator.controller else { return nil }
+        guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
+        let controller = view.controller
         // The slot's height is the list's, from the model (`RouterHostedLine`): measured here, a card that had just shut
         // still came back at its open height (the hosting view not updated yet), and the slot stayed that tall under the
         // rows after it, taking their clicks.
@@ -720,5 +791,55 @@ private struct RouterLineHost: NSViewRepresentable {
         // A zero height: the root's flexible frame comes back at the line's own height.
         let size = controller.sizeThatFits(in: CGSize(width: width, height: 0))
         return CGSize(width: width, height: max(0, size.height - 2 * RouterLineSlotView.overflow))
+    }
+}
+
+/// Lines waiting to show the page's new layout (`RouterLineSlotView.want`), a few each turn of the main loop: those in
+/// sight first, then the others, within a few milliseconds a turn, so a breakpoint crossed doesn't hold the page.
+@MainActor
+final class RouterSwaps {
+    static let shared = RouterSwaps()
+
+    private var waiting: [Weak] = []
+    private struct Weak { weak var view: RouterLineSlotView? }
+    private var observer: CFRunLoopObserver?
+    /// A turn's budget.
+    private static let budget: CFTimeInterval = 0.006
+
+    func add(_ view: RouterLineSlotView) {
+        if !waiting.contains(where: { $0.view === view }) { waiting.append(Weak(view: view)) }
+        guard observer == nil else { return }
+        // Before AppKit's display cycle and Core Animation's commit: the lines it swaps are laid out and drawn this turn.
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 1_000_000) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.turn() }
+        }
+        self.observer = observer
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    private func turn() {
+        waiting.removeAll { $0.view == nil }
+        let start = CACurrentMediaTime()
+        let order = waiting.indices.sorted { (waiting[$0].view?.inSight == true ? 0 : 1) < (waiting[$1].view?.inSight == true ? 0 : 1) }
+        var done = Set<Int>()
+        for i in order {
+            // Those in sight whatever the time; the others while the turn has time.
+            if waiting[i].view?.inSight != true, CACurrentMediaTime() - start > Self.budget { break }
+            if let view = waiting[i].view {
+                view.swapWanted()
+                // Its cost in this turn's budget, not all at once in the display cycle after.
+                view.layoutSubtreeIfNeeded()
+            }
+            done.insert(i)
+        }
+        waiting = waiting.indices.filter { !done.contains($0) }.map { waiting[$0] }
+        if RouterLoad.isResize { print(String(format: "swap turn: %d lines, %.0f ms", done.count, (CACurrentMediaTime() - start) * 1000)) }
+        if waiting.isEmpty, let observer {
+            CFRunLoopObserverInvalidate(observer)
+            self.observer = nil
+        } else {
+            // Nothing else may wake the loop: one more turn.
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
     }
 }

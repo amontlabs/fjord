@@ -105,10 +105,8 @@ struct RouterScreen: View {
                 // Before the page knows its width: neither layout, so the composer (and its keyboard and caret) is made
                 // once, in the layout the width calls for, not in the narrow one and again in the wide one.
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let wide {
-                RouterWidePage(model: model, layout: wide.layout, frame: wide.frame, page: width)
             } else {
-                RouterList(model: model, edges: edges)
+                RouterList(model: model, edges: edges, wide: wide, page: width)
             }
             if let store, drawerOpen, !side {
                 RouterDrawer(store: store)

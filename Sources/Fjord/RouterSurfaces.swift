@@ -143,19 +143,33 @@ struct RouterVeil: View {
 
 // MARK: - The list's layout
 
-/// The list's rows, top to bottom in the order each one carries (`RouterStack.Order`), not in the order they are
-/// declared. The rows are declared in an order that never changes (by id), so a line that changes section is the same
-/// view at another place and glides there; in a plain stack a reordered row is taken out and put back in.
+/// The list's rows, top to bottom in the order each one carries (`RouterStack.Place`), not in the order they are
+/// declared. The rows are declared in an order that never changes (by id), so a line that changes section, or the page
+/// that changes layout (the state list, the ledger by project), keeps each row's view: it is placed elsewhere and glides
+/// there. In a plain stack a reordered row is taken out and put back in.
 struct RouterStack: Layout {
-    struct Order: LayoutValueKey {
-        static let defaultValue = 0
+    /// Where a row goes: its order, the room above it, its column (from the list's leading edge, as wide as the rest of
+    /// the list when `width` is nil). A row `beside` the next one (a project's name in the ledger's rail) is placed level
+    /// with it and takes no room; a row that `clears` starts under it.
+    struct Place: Equatable {
+        var order = 0
+        var gap: CGFloat = 0
+        var x: CGFloat = 0
+        var width: CGFloat?
+        var beside = false
+        var clears = false
     }
 
-    /// The rows' heights at a width and their order, measured once per pass: `placeSubviews` takes them from
+    struct Key: LayoutValueKey {
+        static let defaultValue = Place()
+    }
+
+    /// The rows' heights at a width and their places, measured once per pass: `placeSubviews` takes them from
     /// `sizeThatFits` instead of measuring every row again. Cleared whenever the rows or their inputs change.
     struct Cache {
         var width: CGFloat?
         var heights: [CGFloat] = []
+        var places: [Place] = []
         var order: [Int] = []
     }
 
@@ -166,25 +180,41 @@ struct RouterStack: Layout {
     private func measure(_ width: CGFloat, _ subviews: Subviews, _ cache: inout Cache) {
         guard cache.width != width || cache.heights.count != subviews.count else { return }
         cache.width = width
-        cache.heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
-        // Each row's order read once (a layout value's lookup is not free), then its rows sorted by it.
-        let orders = subviews.map { $0[Order.self] }
-        cache.order = subviews.indices.sorted { orders[$0] < orders[$1] }
+        // Each row's place read once (a layout value's lookup is not free), then its rows sorted by it.
+        cache.places = subviews.map { $0[Key.self] }
+        cache.heights = subviews.indices.map { i in
+            let place = cache.places[i]
+            return subviews[i].sizeThatFits(ProposedViewSize(width: place.width ?? max(0, width - place.x), height: nil)).height
+        }
+        let places = cache.places
+        cache.order = subviews.indices.sorted { places[$0].order < places[$1].order }
+    }
+
+    /// Each row's top, in order, and the list's height.
+    private func walk(_ cache: Cache, _ visit: (Int, CGFloat) -> Void) -> CGFloat {
+        var y: CGFloat = 0, floor: CGFloat = 0
+        for i in cache.order {
+            let place = cache.places[i], height = cache.heights[i]
+            if place.clears || place.beside { y = max(y, floor) }
+            y += place.gap
+            visit(i, y)
+            if place.beside { floor = y + height } else { y += height }
+        }
+        return max(y, floor)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
         measure(width, subviews, &cache)
-        return CGSize(width: width, height: cache.heights.reduce(0, +))
+        return CGSize(width: width, height: walk(cache) { _, _ in })
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         measure(bounds.width, subviews, &cache)
-        var y = bounds.minY
-        for i in cache.order {
-            let height = cache.heights[i]
-            subviews[i].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: height))
-            y += height
+        _ = walk(cache) { i, y in
+            let place = cache.places[i]
+            subviews[i].place(at: CGPoint(x: bounds.minX + place.x, y: bounds.minY + y), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: place.width ?? max(0, bounds.width - place.x), height: cache.heights[i]))
         }
     }
 

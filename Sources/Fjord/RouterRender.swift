@@ -78,6 +78,8 @@ final class RouterLineBox {
     var queuedHeight: CGFloat = 0
     /// Its pending words' height as laid out (a split message, SPLIT.md; 0 with none).
     var pendingHeight: CGFloat = 0
+    /// In the ledger: the thread's height as laid out in the margin grammar (0 before it is).
+    var wideHeight: CGFloat = 0
 
     /// The state choice the page is under: `shown` is the record cut to it (`RouterFilter`).
     var filter: RouterSection? { didSet { if filter != oldValue { revision &+= 1; refreshShown() } } }

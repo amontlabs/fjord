@@ -123,7 +123,8 @@ enum RouterLoad {
                             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/w\(w).png"))
                         }
                         if times.last! > 25 { print(String(format: "slow step to %d: %.0f ms", w, times.last!)) }
-                        await Task.yield()
+                        // A frame between steps, as a drag gives: what waits for a turn (`RouterSwaps`) gets one.
+                        try? await Task.sleep(for: .milliseconds(16))
                     }
                 }
                 let sorted = times.sorted()

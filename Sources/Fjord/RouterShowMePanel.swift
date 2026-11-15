@@ -3,7 +3,7 @@ import SwiftUI
 
 // The Show me dock open (RouterShowMe.swift): a floating panel over the page, its bottom right on the dock's, above the
 // destination row so what Return does stays in sight; in a wide page with a pane, the panel sits at the pane's bottom
-// instead (`RouterWidePage`). The explainers first, then the selected one's player. While one plays the list folds to its
+// instead (`RouterWideSide`). The explainers first, then the selected one's player. While one plays the list folds to its
 // row and "N more". The panel has no field: a follow-up is typed in the composer, whose row then targets the explainer.
 //
 // The player is native but for its stage: the answer, the caption, play, the scene bar, the time and Sources are SwiftUI,

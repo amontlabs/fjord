@@ -12,43 +12,45 @@ import SwiftUI
 struct RouterList: View {
     let model: RouterModel
     let edges: RouterEdges
-    @Environment(\.accessibilityReduceMotion) private var reduce
-    @Environment(\.windowArrival) private var arrival
+    /// The wide layouts (`RouterWide`): the ledger by project, and the pane beside it. Nil: the state list.
+    var wide: (layout: RouterWide.Layout, frame: RouterWide.Frame)?
+    /// The page's width.
+    var page: CGFloat = 0
 
     var body: some View {
-        // The stored layout: this body runs when the order or a count changes, not when a line's fields do.
-        let rows = model.layout
-        let _ = RouterBodies.count("list", of: model)
-        // Each row's place on the page. The rows themselves are declared by id, an order no change of section moves:
-        // a reordered `ForEach` takes the row out and puts it back in, and then nothing glides.
-        let places = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let declared = rows.sorted { $0.id < $1.id }
-        let leading = edges.leading - Router.Line.nameLeading
-        let trailing = edges.trailing - Router.Line.reach
-        ScrollViewReader { proxy in
+        // One structure at every width: the rows, the bar, the composer and the pane's place stay the same views as the
+        // page crosses a breakpoint; only where the rows go changes (`RouterRows`). Built again, a crossing took a quarter
+        // to two thirds of a second on a long page.
+        let pane = wide?.layout == .pane
+        let frame = wide?.frame
+        let split = frame.map { pane ? $0.start + $0.column + $0.gap / 2 : page } ?? page
+        HStack(alignment: .top, spacing: 0) {
+            // Without the pane the list takes the page's width as proposed: a fixed width there held the page at it.
+            list(frame: frame, scroll: split)
+                .frame(width: pane ? split : nil)
+            if pane, let frame { RouterWideSide(model: model, frame: frame) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .environment(\.routerPaneHoldsShowMe, pane)
+    }
+
+    private func list(frame: RouterWide.Frame?, scroll width: CGFloat) -> some View {
+        // The reading column's edges in the scroll view: the bar and the composer run over it (never over the pane).
+        let column = frame.map { RouterEdges(leading: $0.start, trailing: width - $0.start - $0.column) } ?? edges
+        let rows = frame.map { f in
+            RouterRows.Wide(rail: f.rail, margin: f.margin, column: f.column, cards: wide?.layout != .pane)
+        }
+        return ScrollViewReader { proxy in
             ScrollView {
-                RouterStack {
-                    ForEach(declared) { row in
-                        view(row, first: row.id == rows.first?.id)
-                            .layoutValue(key: RouterStack.Order.self, value: places[row.id] ?? 0)
-                            // Read top to bottom, whatever the order they are declared in.
-                            .accessibilitySortPriority(Double(rows.count - (places[row.id] ?? 0)))
-                            .transition(.routerFold(reduce: reduce))
-                    }
-                }
-                // Every change but one where rows come or go (a card opening or shutting, a line moving, a count): every
-                // row is placed where it goes at once and glides there on Core Animation (`RouterGlides`). Animated here,
-                // the stack moved each row's container on every frame of the change's curve while its hosting view, placed
-                // at once, sat at its new place inside it, outside the container's clip: the rows under a card that opened
-                // or shut were blank until the curve ended, and AppKit told every hosting view below that its place in
-                // the window had changed, each line laying out on every frame. Rows that come or go keep the change's
-                // animation, for their fold.
-                .transaction { [model] in if !model.folding { $0.animation = nil } }
-                .coordinateSpace(.named(Router.listSpace))
-                .padding(.leading, leading).padding(.trailing, trailing)
-                .padding(.bottom, 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .allowsHitTesting(ProcessInfo.processInfo.environment["FJORD_E1"] == nil)
+                // Its own view, on inputs a resize doesn't change: the page's width moves the rows, and they aren't
+                // measured again (the column's own width aside).
+                RouterRows(model: model, wide: rows)
+                    .padding(.leading, frame.map { $0.start - Router.Margin.lead - $0.margin - $0.rail }
+                             ?? edges.leading - Router.Line.nameLeading)
+                    .padding(.trailing, frame == nil ? edges.trailing - Router.Line.reach : 0)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .allowsHitTesting(ProcessInfo.processInfo.environment["FJORD_E1"] == nil)
             }
             // No scroller, whatever the Mac's "Show scroll bars" setting: with a mouse, "Automatic" means legacy scrollers,
             // and the overlay style forced on the scroll view didn't stay. The wheel, the trackpad and the keys scroll it.
@@ -59,7 +61,7 @@ struct RouterList: View {
                 ZStack {
                     if model.hasThreads {
                         RouterHostedBar(model: model)
-                            .padding(.leading, edges.leading - CDS.Tabs.pad).padding(.trailing, edges.trailing - CDS.Tabs.pad)
+                            .padding(.leading, column.leading - CDS.Tabs.pad).padding(.trailing, column.trailing - CDS.Tabs.pad)
                             .transition(.opacity)
                     }
                 }
@@ -72,7 +74,7 @@ struct RouterList: View {
                 // line, a ghost) stops above the fade, never under the destination rows or half faded.
                 Color.clear.frame(height: Router.Bar.fade).allowsHitTesting(false)
                 RouterDock(model: model)
-                    .padding(.leading, edges.leading).padding(.trailing, edges.trailing)
+                    .padding(.leading, column.leading).padding(.trailing, column.trailing)
                     .padding(.bottom, Router.Dock.bottom)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // The page's ground, solid from the dock's top edge down, and a fade above it: lines scroll out under
@@ -91,15 +93,151 @@ struct RouterList: View {
             .background { RouterReveal(model: model, proxy: proxy) }
         }
     }
+}
 
-    @ViewBuilder private func view(_ row: RouterSlot, first: Bool) -> some View {
-        // Every row in a hosting view of its own, gliding on Core Animation (`RouterGlides`).
-        if case .line(let id) = row.kind {
-            RouterHostedLine(model: model, box: model.box(id), slot: row.id)
-        } else {
-            RouterHostedRow(model: model, slot: row, first: first)
+/// The list's rows: by state under their headers (the page's own), or by project with each project's name in a rail
+/// beside its first thread (the ledger, `RouterWide`). Either way the same views, by id, placed by `RouterStack`.
+struct RouterRows: View {
+    let model: RouterModel
+    var wide: Wide?
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    /// The ledger's columns: the rail, the names' margin and the reading column; and whether the open row's card is
+    /// under it (false: in the pane beside the list).
+    struct Wide: Equatable {
+        var rail: CGFloat
+        var margin: CGFloat
+        var column: CGFloat
+        var cards: Bool
+    }
+
+    private typealias M = Router.Margin
+
+    /// A row of the list: one of the model's (a line, a header, the sentence…), or a project's name in the rail.
+    private enum Entry: Identifiable {
+        case slot(RouterSlot)
+        case rail(Group)
+
+        var id: String {
+            switch self {
+            case .slot(let slot): slot.id
+            case .rail(let group): "rail:" + group.id
+            }
         }
     }
+
+    struct Group: Equatable {
+        var id: String
+        var lines: [String] = []
+        var tally: [RouterSection: Int] = [:]
+    }
+
+    var body: some View {
+        // The stored layout: this body runs when the order or a count changes, not when a line's fields do (by project,
+        // also when a line's project or state does).
+        let rows = model.layout
+        let _ = RouterBodies.count("list", of: model)
+        let (entries, places) = wide.map { arrange(rows, $0) } ?? state(rows)
+        // Each row is declared by id, an order no change of section or layout moves: a reordered `ForEach` takes the row
+        // out and puts it back in, and then nothing glides.
+        let declared = entries.sorted { $0.id < $1.id }
+        RouterStack {
+            ForEach(declared) { entry in
+                let place = places[entry.id] ?? RouterStack.Place()
+                view(entry, first: entry.id == rows.first?.id)
+                    .layoutValue(key: RouterStack.Key.self, value: place)
+                    // Read top to bottom, whatever the order they are declared in.
+                    .accessibilitySortPriority(Double(entries.count - place.order))
+                    .transition(.routerFold(reduce: reduce))
+            }
+        }
+        // Every change but one where rows come or go (a card opening or shutting, a line moving, a count): every row is
+        // placed where it goes at once and glides there on Core Animation (`RouterGlides`). Animated here, the stack
+        // moved each row's container on every frame of the change's curve while its hosting view, placed at once, sat
+        // at its new place inside it, outside the container's clip: the rows under a card that opened or shut were blank
+        // until the curve ended, and AppKit told every hosting view below that its place in the window had changed, each
+        // line laying out on every frame. Rows that come or go keep the change's animation, for their fold.
+        .transaction { [model] in if !model.folding { $0.animation = nil } }
+        .coordinateSpace(.named(Router.listSpace))
+        .frame(width: wide.map { $0.rail + $0.margin + M.lead + $0.column + Router.Line.reach })
+        .environment(\.routerWide, wide)
+    }
+
+    /// The page's own: the model's rows in its order.
+    private func state(_ rows: [RouterSlot]) -> ([Entry], [String: RouterStack.Place]) {
+        var places: [String: RouterStack.Place] = [:]
+        for (i, row) in rows.enumerated() where places[row.id] == nil { places[row.id] = RouterStack.Place(order: i) }
+        return (rows.map { .slot($0) }, places)
+    }
+
+    /// The ledger: the sentence in its place first, then the threads by project in the page's order (the project of the
+    /// most pressing thread first, a thread with no project last), each project's name beside its first thread, then the
+    /// housekeeping line. No headers: the rail says what each project has in each state.
+    private func arrange(_ rows: [RouterSlot], _ wide: Wide) -> ([Entry], [String: RouterStack.Place]) {
+        var groups: [Group] = []
+        var others: [RouterSlot] = [], last: [RouterSlot] = []
+        for slot in rows {
+            switch slot.kind {
+            case .line(let id):
+                guard let head = model.thread(id) else { continue }
+                let project = head.project ?? ""
+                let at = groups.firstIndex { $0.id == project } ?? {
+                    groups.append(Group(id: project))
+                    return groups.count - 1
+                }()
+                groups[at].lines.append(slot.id)
+                groups[at].tally[head.section, default: 0] += 1
+            case .sentence, .reading: others.append(slot)
+            case .housekeeping: last.append(slot)
+            case .header, .ghost: break
+            }
+        }
+        groups = groups.filter { !$0.id.isEmpty } + groups.filter { $0.id.isEmpty }
+        let lead = wide.rail + wide.margin + M.lead - Router.Line.nameLeading
+        var entries: [Entry] = [], places: [String: RouterStack.Place] = [:]
+        var order = 0
+        func add(_ entry: Entry, _ place: RouterStack.Place) {
+            var place = place
+            place.order = order
+            order += 1
+            entries.append(entry)
+            places[entry.id] = place
+        }
+        for slot in others { add(.slot(slot), RouterStack.Place(x: lead)) }
+        let byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for (index, group) in groups.enumerated() {
+            add(.rail(group), RouterStack.Place(gap: index == 0 ? Router.Header.firstTop : 18, width: wide.rail, beside: true))
+            for (n, id) in group.lines.enumerated() {
+                guard let slot = byID[id] else { continue }
+                add(.slot(slot), RouterStack.Place(gap: n == 0 ? 0 : M.threadGap, x: wide.rail))
+            }
+        }
+        for slot in last { add(.slot(slot), RouterStack.Place(x: lead, clears: true)) }
+        return (entries, places)
+    }
+
+    @ViewBuilder private func view(_ entry: Entry, first: Bool) -> some View {
+        switch entry {
+        case .rail(let group):
+            RouterRail(model: model, project: group.id, lines: group.lines.count, tally: group.tally)
+        case .slot(let row):
+            // Every row in a hosting view of its own, gliding on Core Animation (`RouterGlides`).
+            if case .line(let id) = row.kind {
+                RouterHostedLine(model: model, box: model.box(id), slot: row.id)
+            } else {
+                RouterHostedRow(model: model, slot: row, first: wide == nil ? first : !isHousekeeping(row))
+            }
+        }
+    }
+
+    private func isHousekeeping(_ row: RouterSlot) -> Bool {
+        if case .housekeeping = row.kind { true } else { false }
+    }
+}
+
+extension EnvironmentValues {
+    /// The ledger's columns, for its lines (`RouterHostedLine`); nil on the page's own list.
+    @Entry var routerWide: RouterRows.Wide? = nil
 }
 
 /// Brings the selection's line into view as it moves: the model calls it (`RouterModel.revealer`), so a reveal neither
