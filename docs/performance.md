@@ -342,8 +342,10 @@ What made it slow, and the fixes:
   ones 80-150 ms.
 
 Sweep 640-1617 pt with a live drag: p50 36 → 6 ms a step, max 670 → 10 ms. Left: the crossing at the drag's end, above
-(the lines in sight re-render; the ledger's margin, which grows over the 22 pt after its breakpoint, gives every line a
-new root at each step there).
+(the lines in sight re-render, and the page around the list). The ledger's names' margin, which grows over the 22 pt
+after its breakpoint, takes what the line's slot leaves beside its fixed cell (`RouterWideMarginThread.cellWidth`), so a
+step there lays the lines out again without new roots: 30 → 10 ms a step in a live drag (debug). Building a line costs
+5-7 ms, spread over SwiftUI's modifiers (hover regions, geometry actions, accessibility, backgrounds), no one hotspot.
 
 ## Rules for new code
 

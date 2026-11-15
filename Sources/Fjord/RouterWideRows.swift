@@ -34,7 +34,9 @@ extension Router {
 struct RouterWideMarginThread: View {
     let model: RouterModel
     let box: RouterLineBox
-    let margin: CGFloat
+    /// The cell's width (the reading column and the marks' room before it): the name's margin takes what is left, so a
+    /// margin growing with the page lays the row out again without building it again.
+    let cellWidth: CGFloat
     /// The project beside the name (the ledger's rail says it instead).
     var project = true
     /// The open row's card under it (false: it is in a pane beside the list).
@@ -65,9 +67,10 @@ struct RouterWideMarginThread: View {
                     ZStack(alignment: .topTrailing) {
                         if index == 0 { RouterWideMarginName(model: model, thread: thread, project: project) }
                     }
-                    .frame(width: margin, alignment: .trailing)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
                     .frame(minHeight: I.rowHeight, alignment: .top)
                     cell(row, thread: thread, open: open)
+                        .frame(width: cellWidth, alignment: .leading)
                 }
             }
         }

@@ -42,7 +42,8 @@ struct RouterHostedLine: View {
             box.rowHeight > 0 ? rest + (open ? card : 0) : nil
         }
         RouterLineHost(model: model, box: box, slot: slot, block: box.block,
-                       setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival, wide: wide))
+                       setup: .init(reduce: reduce, still: still, scheme: scheme, arrival: arrival,
+                                    wide: wide.map { .init(cell: Router.Margin.mark + $0.column + Router.Line.reach, cards: $0.cards) }))
             .frame(height: height, alignment: .top)
             .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Router.space)).origin } action: { [model, id = box.id] in
                 model.targets.origins[id] = $0
@@ -292,8 +293,14 @@ struct RouterLineSetup: Equatable {
     var still: Bool
     var scheme: ColorScheme
     var arrival: WindowArrival?
-    /// In the ledger: its columns, the line drawn in the margin grammar (`RouterWideMarginThread`).
-    var wide: RouterRows.Wide? = nil
+    /// In the ledger: the line drawn in the margin grammar (`RouterWideMarginThread`), its cell's width and whether its
+    /// card is under it. Not the names' margin, which grows with the page: the slot's width gives it.
+    var wide: Ledger? = nil
+
+    struct Ledger: Equatable {
+        var cell: CGFloat
+        var cards: Bool
+    }
 
     static func == (a: Self, b: Self) -> Bool {
         a.reduce == b.reduce && a.still == b.still && a.scheme == b.scheme && a.arrival === b.arrival && a.wide == b.wide
@@ -325,7 +332,7 @@ struct RouterLineRoot: View {
     /// The page's line, or in the ledger the thread in the margin grammar, which the list sizes as it lays out.
     @ViewBuilder private var content: some View {
         if let wide = setup.wide {
-            RouterWideMarginThread(model: model, box: box, margin: wide.margin, project: false, cards: wide.cards)
+            RouterWideMarginThread(model: model, box: box, cellWidth: wide.cell, project: false, cards: wide.cards)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { [box] in box.wideHeight = $0 }
         } else {
             RouterLineView(model: model, box: box)
