@@ -294,29 +294,40 @@ struct RouterWideItemWords: View {
         } trail: {
             EmptyView()
         } end: {
-            if done, let held {
-                Text(Router.Items.Copy.done).font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).opacity(0.45)
-                    .lineLimit(1).fixedSize()
-                    .frame(height: Router.Items.lineHeight)
-                    .help(held)
-                    .accessibilityLabel("Done is off: \(held)")
-            } else if done {
-                RouterButton(model: model, hit: hit, removes: true, action: { model.itemDone(thread, item.id) }) { hot, pressed in
-                    Text(Router.Items.Copy.done).font(CDS.sans(12)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.muted)
-                        .lineLimit(1).fixedSize()
-                        .padding(.horizontal, 6)
-                        .frame(height: Router.Items.lineHeight)
-                        .background(RoundedRectangle(cornerRadius: Router.Surface.token, style: .continuous)
-                            .fill(hot ? Router.Surface.chosen : .clear))
-                        .opacity(pressed ? 0.7 : 1)
+            // An icon in a slot always kept, so the words never rewrap as the pointer comes and goes.
+            ZStack {
+                if done, let held {
+                    RouterDoneIcon(hot: false).opacity(0.45)
+                        .help(held)
+                        .accessibilityLabel("Done is off: \(held)")
+                } else if done {
+                    RouterButton(model: model, hit: hit, removes: true, action: { model.itemDone(thread, item.id) }) { hot, pressed in
+                        RouterDoneIcon(hot: hot).opacity(pressed ? 0.7 : 1)
+                    }
+                    .help("Mark done")
+                    .accessibilityLabel("Mark done")
                 }
-                // Its word's end on the row's words' edge, its ground around it.
-                .padding(.trailing, -6)
-                .accessibilityLabel("Mark done")
             }
+            .frame(width: RouterDoneIcon.side, height: Router.Items.lineHeight)
+            // Its ground's edge on the row's words' edge.
+            .padding(.trailing, -(RouterDoneIcon.side - 12) / 2)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.kind.word): \(item.sentence)")
+    }
+}
+
+/// An item's Done under the pointer: a check on a quiet ground, one size whatever its state.
+struct RouterDoneIcon: View {
+    static let side: CGFloat = 20
+    let hot: Bool
+
+    var body: some View {
+        Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(hot ? CDS.Text.primary : CDS.Text.muted)
+            .frame(width: Self.side, height: Self.side)
+            .background(RoundedRectangle(cornerRadius: Router.Surface.token, style: .continuous)
+                .fill(hot ? Router.Surface.chosen : .clear))
     }
 }
 

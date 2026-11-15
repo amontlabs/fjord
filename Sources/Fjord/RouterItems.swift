@@ -543,29 +543,20 @@ private struct RouterItemDoneSwap: ViewModifier {
             .opacity(shown ? 0 : 1)
             .overlay(alignment: .trailing) {
                 if can, let held {
-                    Text(Router.Items.Copy.done).font(CDS.sans(12)).foregroundStyle(CDS.Text.muted).opacity(0.45)
-                        .lineLimit(1).fixedSize()
-                        .padding(.horizontal, 6)
-                        .frame(height: 20)
-                        .offset(x: 6)
+                    RouterDoneIcon(hot: false).opacity(0.45)
+                        .offset(x: (RouterDoneIcon.side - 12) / 2)
                         .opacity(shown ? 1 : 0)
                         .help(held)
                         .accessibilityLabel("Done is off: \(held)")
                 } else if can {
                     RouterButton(model: model, hit: hit, removes: true, action: { model.itemDone(thread, item.id) }) { hot, pressed in
-                        Text(Router.Items.Copy.done).font(CDS.sans(12)).foregroundStyle(hot ? CDS.Text.primary : CDS.Text.muted)
-                            .lineLimit(1).fixedSize()
-                            .padding(.horizontal, 6)
-                            .frame(height: 20)
-                            .background(RoundedRectangle(cornerRadius: Router.Surface.token, style: .continuous)
-                                .fill(hot ? Router.Surface.chosen : .clear))
-                            .opacity(pressed ? 0.7 : 1)
-                            .hoverMotion(hot)
+                        RouterDoneIcon(hot: hot).opacity(pressed ? 0.7 : 1).hoverMotion(hot)
                     }
-                    // Its word's end on the age's.
-                    .offset(x: 6)
+                    // Its glyph's end on the age's.
+                    .offset(x: (RouterDoneIcon.side - 12) / 2)
                     .opacity(shown ? 1 : 0)
                     .allowsHitTesting(shown)
+                    .help("Mark done")
                     .accessibilityLabel("Mark done")
                 }
             }

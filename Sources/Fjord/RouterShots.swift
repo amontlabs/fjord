@@ -363,6 +363,12 @@ enum RouterShots {
         ]
     } + [
         // An item open on a laptop-tall wide window: the thread's card over it, the item's options above the fold.
+        // An item row under the pointer: its Done check at the row's end, the words not moved from the row at rest.
+        State(name: "v2-wide-1650-item-hover", make: { model in
+            model.select(nil)
+            RouterDemo.items(model)
+        }, pointer: { $0.hover(.row(RouterModel.itemKey(ID.checkpoint, RouterDemo.Item.keep)), true) },
+              size: CGSize(width: 1650, height: 1000)),
         State(name: "v2-wide-1650-item-short", make: { model in
             RouterDemo.items(model)
             model.select(.line(ID.checkpoint))
