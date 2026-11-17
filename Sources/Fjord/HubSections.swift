@@ -152,8 +152,9 @@ extension FjordHub {
         .padding(.vertical, 5)
     }
 
-    func itemRow(_ entry: InboxEntry) -> some View {
-        EntryRow(entry: entry, store: store, hub: hub).capEdge()
+    /// `marked`: the row is one of the list's first (`CappedScrollSpace.measuredRows`), whose edges the cap's cut is found from.
+    @ViewBuilder func itemRow(_ entry: InboxEntry, marked: Bool) -> some View {
+        if marked { EntryRow(entry: entry, store: store, hub: hub).capEdge() } else { EntryRow(entry: entry, store: store, hub: hub) }
     }
 
     /// A line of text with a link after it, padded like a row ("No CI shown  Choose repositories").

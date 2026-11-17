@@ -74,6 +74,7 @@ For release window timings, run `scripts/morph-timings.sh --scenario router --st
 | `--window-shots <dir> [name…]` | Renders the window's pages as PNGs, offscreen (`window-<name>.png`); given names, only shots containing one of them. |
 | `--playground` | The bar on a fake desktop, demo data, every edge. |
 | `--playground-shots <dir> [name…]` | Renders the bar's states as PNGs, offscreen: every edge, every demo scenario, Reduce Motion / Increase Contrast / Differentiate Without Color variants, and a 1280×720 screen. Shots are named `<edge>-<state>` (`right-open`, `top-rest-signed-out`…); given names, only shots containing one of them are rendered. |
+| `--scroll-timing` | Scrolls the bar's inbox list through 300+ demo rows (`inboxLong`, 40 more added three times near the end) offscreen and prints the main thread's time per step; the floor of an empty step is printed too. Debug build is enough to compare before and after. |
 
 `FJORD_THEME=dark|light|claude` pins the look: Fjord light, Fjord dark, or Claude's own. The default is Fjord, following the Mac's appearance live.
 

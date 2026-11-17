@@ -358,8 +358,12 @@ extension FjordHub {
         if items.isEmpty {
             emptyInbox
         } else {
-            CappedScroll(cap: 360, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
-                AdaptiveStack(count: items.count, spacing: 1) { ForEach(items) { e in itemRow(e).id("i:" + e.id).onAppear { store.rowAppeared(e.id, in: items) } } }
+            let rows = items
+            let marked = Set(rows.prefix(CappedScrollSpace.measuredRows).map(\.id))
+            CappedScroll(cap: 360, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.count)) {
+                AdaptiveStack(count: rows.count, spacing: 1) {
+                    ForEach(rows) { e in itemRow(e, marked: marked.contains(e.id)).id("i:" + e.id).onAppear { store.rowAppeared(e.id, in: rows) } }
+                }
                     .motion(.fade, value: listKey)
             }
         }

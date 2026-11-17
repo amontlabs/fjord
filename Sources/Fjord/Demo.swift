@@ -12,7 +12,7 @@ enum Demo {
         // Inbox and sync causes.
         case signedOut, inboxFailed, rateLimited, contributionsEmpty, botChatterEmpty, doneEmpty, firstSync, syncFault
         // An inbox longer than any list shows; a category hidden; Jev's own category on top.
-        case inboxMany, hiddenCategory, jev, sections
+        case inboxMany, inboxLong, hiddenCategory, jev, sections
         // CI.
         case noCI, allPassing, manyCI, ciRunning
         // The update tile.
@@ -129,6 +129,9 @@ enum Demo {
                                   checks: .passing, greptileScore: 3 + index % 3)
                 store.things[thing.id] = thing
             }
+        case .inboxLong:
+            agents(store, now)
+            addLongInbox(store, now, count: 300, from: 100)
         case .noCI:
             agents(store, now)
             store.things = store.things.filter { $0.value.kind != .workflow }
@@ -158,6 +161,23 @@ enum Demo {
             router(store, now)
         case .routerOff:
             agents(store, now)
+        }
+    }
+
+    /// `count` more PRs of mine with a review comment each, numbered from `from`: a list longer than any peek shows (`--scroll-timing`
+    /// adds more while it scrolls, as reading on past the caps does).
+    static func addLongInbox(_ store: Store, _ now: Date, count: Int, from: Int) {
+        let me = person("0xpolarzero")
+        for index in 0..<count {
+            let n = from + index
+            let reviewer = person(["kylef", "mattt", "allevato"][index % 3])
+            let at = now.addingTimeInterval(-Double(130 + index * 7) * 60)
+            let thing = Thing(id: "pr:amontlabs/fjord#\(n)", kind: .pr, repo: "amontlabs/fjord", number: n, title: "Change number \(n): a title long enough to fill the row",
+                              url: URL(string: "https://github.com/amontlabs/fjord/pull/\(n)")!, author: me,
+                              createdAt: now.addingTimeInterval(-86400), updatedAt: at,
+                              comments: [ThingComment(id: "long-\(n)", author: reviewer, at: at, snippet: "Looks good, one nit.")],
+                              checks: .passing, greptileScore: 3 + index % 3)
+            store.things[thing.id] = thing
         }
     }
 

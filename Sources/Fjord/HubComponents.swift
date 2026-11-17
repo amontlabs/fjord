@@ -3,7 +3,7 @@ import SwiftUI
 
 // Building blocks of the hub.
 
-/// The bottom edges of the rows that mark themselves with `.capEdge()`, in the scrolled content's own space.
+/// The bottom edges of the rows that mark themselves with `.capEdge()` (a list's first, `CappedScrollSpace.measuredRows`), in the scrolled content's own space.
 struct CapEdges: PreferenceKey {
     static let defaultValue: [CGFloat] = []
     static func reduce(value: inout [CGFloat], nextValue: () -> [CGFloat]) { value += nextValue() }
@@ -22,6 +22,10 @@ extension View {
 
 enum CappedScrollSpace {
     static let name = "capped-content"
+
+    /// How many of a list's first rows mark their edges: the cut falls within the first screenful, so the rows below it (a
+    /// list of hundreds) pay for no measuring while they are laid out and scrolled through.
+    static let measuredRows = 16
 
     /// CDS `scroll-fade-y`: 28pt, alpha 1 → .85 → .70 → .50 → .30 → .15 → .05 at 0 / 13 / 25 / 40 / 55 / 70 / 85%.
     static let fade: CGFloat = 28

@@ -527,6 +527,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PlaygroundShots.run(to: CommandLine.arguments[i + 1])
             return
         }
+        if CommandLine.arguments.contains("--scroll-timing") {
+            ScrollTiming.run()
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--window-shots"), i + 1 < CommandLine.arguments.count {
             AppWindowShots.run(to: CommandLine.arguments[i + 1])
             return
