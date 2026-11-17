@@ -152,7 +152,7 @@ final class FakeClaude: @unchecked Sendable {
         e.ask(items("older", at: 10))
         e.ask(items("newer", at: 20))
         e.ask(request("asks", .ask))
-        // The order the four start in; a retry of the busy call (a slow runner's) is not one of them.
+        // The order the four start in; a retry (a slow runner's, of the busy call or of one of the four) is not one of them.
         var order: [String] = []
         var named: Int?
         for _ in 0..<8 where order.count < 4 {
@@ -160,7 +160,7 @@ final class FakeClaude: @unchecked Sendable {
             fake.close(n - 1)
             await until(fake.calls.count == n + 1)
             guard let input = fake.call(n)?.input else { break }
-            if let title = ["named", "older", "newer", "asks"].first(where: { input.contains("Thread: \($0)") }) {
+            if let title = ["named", "older", "newer", "asks"].first(where: { input.contains("Thread: \($0)") }), !order.contains(title) {
                 order.append(title)
                 if title == "named" { named = n }
             }
