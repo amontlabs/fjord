@@ -54,7 +54,7 @@ struct InboxListView: View {
                     ScrollView {
                         LazyVStack(spacing: 1) {
                             ForEach(entries) { e in
-                                EntryRow(entry: e, store: store, hub: hub).id(e.id).onAppear { store.rowAppeared(e.id, in: entries) }
+                                EntryRow(entry: e, store: store, hub: hub).equatable().id(e.id).onAppear { store.rowAppeared(e.id, in: entries) }
                             }
                         }
                         .frame(maxWidth: Self.column)

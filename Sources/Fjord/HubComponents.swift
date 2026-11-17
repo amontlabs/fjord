@@ -183,7 +183,7 @@ extension Thing {
 /// facts: 13/16 title over a 12/16 muted `repo#number · @author`, over the facts as compact chips; Claude's Avatar (sm, 20) in a
 /// 24 slot, the unread dot cut into its corner (a workflow has its state's glyph instead); its actions (Claude's 24pt row
 /// controls) show on hover or when picked with the keys.
-struct EntryRow: View {
+struct EntryRow: View, Equatable {
     let entry: InboxEntry
     let store: Store
     let hub: HubState
@@ -199,6 +199,10 @@ struct EntryRow: View {
 
     static let avatar: CGFloat = 20
     static let line: CGFloat = 16
+
+    /// A row is redrawn for another entry; what it reads of the store and the hub it is redrawn for by itself. Compared, a
+    /// list gaining rows (reading on past the caps) rebuilds none of the ones already laid out.
+    nonisolated static func == (a: EntryRow, b: EntryRow) -> Bool { a.entry == b.entry && a.store === b.store && a.hub === b.hub }
 
     var body: some View {
         // Worked out once per redraw: the subtitle and the avatar both name who acted; the chips are drawn and read out.

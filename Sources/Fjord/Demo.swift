@@ -168,16 +168,20 @@ enum Demo {
     /// adds more while it scrolls, as reading on past the caps does).
     static func addLongInbox(_ store: Store, _ now: Date, count: Int, from: Int) {
         let me = person("0xpolarzero")
+        // Taken in at once, as a refresh or a read on past the caps takes its things in.
+        var next = store.things
+        defer { store.things = next }
         for index in 0..<count {
             let n = from + index
             let reviewer = person(["kylef", "mattt", "allevato"][index % 3])
-            let at = now.addingTimeInterval(-Double(130 + index * 7) * 60)
+            // Older as the number grows, as the rows a read on past the caps brings come after the ones listed.
+            let at = now.addingTimeInterval(-Double(130 + n * 7) * 60)
             let thing = Thing(id: "pr:amontlabs/fjord#\(n)", kind: .pr, repo: "amontlabs/fjord", number: n, title: "Change number \(n): a title long enough to fill the row",
                               url: URL(string: "https://github.com/amontlabs/fjord/pull/\(n)")!, author: me,
                               createdAt: now.addingTimeInterval(-86400), updatedAt: at,
                               comments: [ThingComment(id: "long-\(n)", author: reviewer, at: at, snippet: "Looks good, one nit.")],
                               checks: .passing, greptileScore: 3 + index % 3)
-            store.things[thing.id] = thing
+            next[thing.id] = thing
         }
     }
 

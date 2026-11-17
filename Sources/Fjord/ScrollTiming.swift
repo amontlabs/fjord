@@ -29,10 +29,17 @@ enum ScrollTiming {
             guard let scroll = largestScrollView(in: hosting), let clip = Optional(scroll.contentView), let document = scroll.documentView else {
                 print("no scroll view"); exit(1)
             }
+            let phase = ContinuousClock()
+            var phases = [0.0, 0.0, 0.0]
+            func lap(_ i: Int, _ t: ContinuousClock.Instant) {
+                let d = phase.now - t
+                phases[i] = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+            }
             func spin() {
-                hosting.layoutSubtreeIfNeeded()
-                hosting.displayIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.002))
+                var t = phase.now
+                hosting.layoutSubtreeIfNeeded(); lap(0, t); t = phase.now
+                hosting.displayIfNeeded(); lap(1, t); t = phase.now
+                RunLoop.main.run(until: Date().addingTimeInterval(0.002)); lap(2, t)
             }
             let items = hub.tab.map { store.entries(in: $0).count } ?? 0
             print("rows: \(items), document \(Int(document.frame.height)) pt, viewport \(Int(clip.bounds.height)) pt")
@@ -53,14 +60,20 @@ enum ScrollTiming {
                 // Near the end of what is listed, more arrives.
                 if added < 3, offset + clip.bounds.height > document.frame.height - 400 {
                     added += 1
-                    Demo.addLongInbox(store, Date(), count: 40, from: 1000 + added * 100)
-                    // What the store alone costs (its lists made again), apart from the views.
+                    func since(_ t: ContinuousClock.Instant) -> String {
+                        let d = clock.now - t
+                        return String(format: "%.1f", Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+                    }
                     let c0 = clock.now
+                    Demo.addLongInbox(store, Date(), count: 40, from: 1000 + added * 100)
+                    let setMs = since(c0)
+                    // What the store alone costs (its lists made again), apart from the views.
+                    let c1 = clock.now
                     _ = hub.tab.map { store.entries(in: $0).count }
-                    let c = clock.now - c0
-                    print("store recompute ms: \(Double(c.components.attoseconds) / 1e15)")
+                    print("append \(added): things set \(setMs) ms, lists made \(since(c1)) ms")
                 }
                 spin()
+                if added > 0, steps.count % 1 == 0, phases[0] > 8 { print("  slow append step, phases layout/display/runloop \(phases.map { String(format: "%.1f", $0) })") }
                 let d = clock.now - t0
                 steps.append(Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
                 if offset > document.frame.height - clip.bounds.height, added >= 3 { break }
