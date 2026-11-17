@@ -2157,3 +2157,155 @@ extension InboxSyncMapping {
         #expect(s.inboxContext.myTeams == ["acme/core"] && s.inboxContext.contributedRepos.contains("o/open"))
     }
 }
+
+/// Past the caps, the list reads on as it is scrolled to its end: what comes stays, and is never announced.
+@MainActor
+@Suite(.serialized) struct InboxSyncLoadMore {
+    final class Log: @unchecked Sendable {
+        var searches: [(first: Int, after: Int)] = []
+        var total = 100
+        var remaining = 4000
+    }
+
+    /// A search with `log.total` PRs, `#1` newest, each with a Greptile score of 3; cursors are offsets (`c60`).
+    private func store(_ log: Log) -> (Store, UUID) {
+        let s = Store()
+        s.persists = false
+        s.settings.triage = true
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.gh.session = StubbedGitHub.session { request in
+            let text = InboxSyncRefresh.body(request)
+            let rate: [String: Any] = ["cost": 1, "remaining": log.remaining, "resetAt": "2030-01-01T00:00:00Z"]
+            func number(after marker: String) -> Int? {
+                guard let range = text.range(of: marker) else { return nil }
+                return Int(text[range.upperBound...].prefix { $0.isNumber })
+            }
+            var data: [String: Any] = ["rateLimit": rate]
+            if text.contains("s0: search") {
+                let first = number(after: "first: ") ?? 0
+                let after = number(after: "after: \\\"c") ?? 0
+                log.searches.append((first, after))
+                let end = min(log.total, after + first)
+                let nodes = (after..<end).map { i in
+                    node(["id": "PR_\(i + 1)", "number": i + 1, "url": "https://github.com/o/r/pull/\(i + 1)",
+                          "updatedAt": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 2_000_000_000 - Double(i) * 60))])
+                }
+                data["s0"] = ["pageInfo": ["hasNextPage": end < log.total, "endCursor": "c\(end)"], "nodes": nodes]
+            } else {
+                // Things kept unseen, looked at again: none answered, so none changed.
+                data["nodes"] = []
+            }
+            return StubbedGitHub.Reply(200, String(decoding: try JSONSerialization.data(withJSONObject: ["data": data]), as: UTF8.self))
+        }
+        var category = InboxCategory(name: "Mine", symbol: "star", color: .blue)
+        category.rules = [Rule(scope: Scope(kinds: [.pr], by: Pick(include: [.me])), conditions: [.greptileBelow(5)])]
+        s.categories = [category]
+        return (s, category.id)
+    }
+
+    private func loadMore(_ s: Store) async {
+        s.loadMoreInbox()
+        await s.inboxSyncState.loadingMore?.value
+    }
+
+    @Test func theListReadsOnPastTheCapsKeepsWhatItReadAndAnnouncesNothing() async {
+        let log = Log()
+        var posted: [String] = []
+        let (s, category) = store(log)
+        s.notifier.onPost = { posted.append($0.identifier) }
+        await s.syncInbox()
+        // The refresh stops at its caps: three pages of twenty.
+        #expect(s.things.count == 60 && log.searches.map(\.after) == [0, 20, 40])
+        #expect(s.inboxSyncState.more.values.map(\.read) == [60])
+        // A second refresh, past the baseline: what is there is old.
+        await s.syncInbox()
+        log.searches = []
+        await loadMore(s)
+        #expect(log.searches.map(\.after) == [60] && log.searches[0].first == InboxSync.pageSize)
+        #expect(s.things.count == 80 && s.entries(in: category).count == 80)
+        #expect(posted.isEmpty)
+        #expect(s.marks["pr:o/r#70"]?.notified == ["greptile:3"])
+        // The next refresh reads its sixty again: the twenty past them stay, and nothing is announced.
+        log.searches = []
+        await s.syncInbox()
+        #expect(log.searches.map(\.after) == [0, 20, 40])
+        #expect(s.things.count == 80 && posted.isEmpty)
+        // Reading on goes from where the list was read to, not where the refresh stopped, until GitHub has no more.
+        log.searches = []
+        await loadMore(s)
+        #expect(log.searches.map(\.after) == [80] && s.things.count == 100)
+        #expect(s.inboxSyncState.more.isEmpty)
+        await loadMore(s)
+        #expect(log.searches.count == 1)
+        await s.syncInbox()
+        #expect(s.things.count == 100 && posted.isEmpty)
+    }
+
+    @Test func noReadingOnWithPointsLowNorDuringARefresh() async {
+        let log = Log()
+        let (s, _) = store(log)
+        await s.syncInbox()
+        log.searches = []
+        log.remaining = InboxSync.tailPoints - 1
+        // The answer said the points are low: the list's end reads nothing.
+        await s.syncInbox()
+        log.searches = []
+        await loadMore(s)
+        #expect(log.searches.isEmpty && s.things.count == 60)
+        log.remaining = 4000
+        await s.syncInbox()
+        log.searches = []
+        // Reached during a refresh: read on once it is done.
+        s.inboxSyncState.refreshing = 1
+        s.loadMoreInbox()
+        #expect(s.inboxSyncState.loadingMore == nil && s.inboxSyncState.loadMoreAfterRefresh)
+        s.inboxSyncState.refreshing = 0
+        await s.syncInbox()
+        await s.inboxSyncState.loadingMore?.value
+        #expect(log.searches.map(\.after) == [0, 20, 40, 60] && s.things.count == 80)
+    }
+
+    @Test func onlyOneOfTheLastRowsReadsOn() async {
+        let log = Log()
+        let (s, category) = store(log)
+        await s.syncInbox()
+        log.searches = []
+        let rows = s.entries(in: category)
+        s.rowAppeared(rows[0].id, in: rows)
+        #expect(s.inboxSyncState.loadingMore == nil)
+        s.rowAppeared(rows[rows.count - 3].id, in: rows)
+        await s.inboxSyncState.loadingMore?.value
+        #expect(log.searches.map(\.after) == [60])
+    }
+
+    @Test func whereSearchesStandAfterARefreshAndAfterReadingOn() {
+        typealias M = InboxSync.SearchMore
+        let stored = ["a": M(cursor: "c120", read: 120), "b": M(cursor: "c60", read: 60), "c": M(cursor: "c60", read: 60),
+                      "gone": M(cursor: "c60", read: 60), "notRun": M(cursor: "c80", read: 80)]
+        let fetched = ["a": M(cursor: "c60", read: 60), "b": M(cursor: "c60", read: 60), "new": M(cursor: "c60", read: 60)]
+        let refreshed = InboxSync.refreshedMore(stored, fetched: fetched, ran: ["a", "b", "c", "new"], complete: ["c"],
+                                                all: ["a", "b", "c", "new", "notRun"])
+        // Read further already: stays further. Read whole: no more. No longer asked: gone. Not run: where it was.
+        #expect(refreshed == ["a": M(cursor: "c120", read: 120), "b": M(cursor: "c60", read: 60),
+                              "new": M(cursor: "c60", read: 60), "notRun": M(cursor: "c80", read: 80)])
+        let advanced = InboxSync.advancedMore(refreshed, asked: ["a", "b", "new"], fetched: ["a": M(cursor: "c140", read: 20)],
+                                              complete: ["b"], failed: ["new"])
+        #expect(advanced == ["a": M(cursor: "c140", read: 140), "new": M(cursor: "c60", read: 60), "notRun": M(cursor: "c80", read: 80)])
+    }
+
+    @Test func entriesReadOnAreOldForTheActions() {
+        var category = InboxFixture.category()
+        let action = CategoryAction.make(.askRouter(prompt: "Look"))
+        category.actions = ActionList([action])
+        let entries = InboxEngine.evaluate(things: [InboxFixture.pr(1)], categories: [category], marks: [:],
+                                           context: InboxFixture.store([]).inboxContext)
+        #expect(!entries.isEmpty)
+        var ledger = ActionLedger()
+        InboxActions.takeAsOld(entries, categories: [category], ledger: &ledger)
+        #expect(!ledger.runs.isEmpty && ledger.runs.values.allSatisfy { $0.state == .baselined })
+        #expect(ledger.run(category.id, entries[0].id, action.id, "enter") != nil)
+        var held = ActionLedger()
+        InboxActions.takeAsOld(entries, categories: [category], ledger: &held, held: { _ in true })
+        #expect(held.runs.isEmpty)
+    }
+}

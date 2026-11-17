@@ -420,6 +420,23 @@ enum InboxActions {
         return out.sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
+    /// Entries that came by reading on past the caps (`Store.takeMore`) were there all along: their entering and their facts
+    /// are taken as old for the actions of their categories (held ones aside, as at a baseline), so none runs for them.
+    static func takeAsOld(_ entries: [InboxEntry], categories: [InboxCategory], ledger: inout ActionLedger,
+                          held: (CategoryAction) -> Bool = { _ in false }, now: Date = Date()) {
+        let byCategory = Dictionary(grouping: entries, by: \.categoryID)
+        for category in categories {
+            for action in category.actions.items where !held(action) {
+                for entry in byCategory[category.id] ?? [] where action.applies(to: entry.thing.kind) {
+                    for key in ["enter"] + entry.facts.map(\.key) where ledger.run(category.id, entry.id, action.id, key) == nil {
+                        ledger.set(ActionRun(category: category.id, thing: entry.id, action: action.id, trigger: key,
+                                             state: .baselined, at: now))
+                    }
+                }
+            }
+        }
+    }
+
     /// Brings the ledger up to date with the categories (a category, rule set or action seen for the first time takes what
     /// is there as old; runs of what is gone are forgotten) and returns the runs that are due, in the order of the
     /// categories, newest things first.

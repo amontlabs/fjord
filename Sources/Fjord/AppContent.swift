@@ -53,7 +53,9 @@ struct InboxListView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 1) {
-                            ForEach(entries) { EntryRow(entry: $0, store: store, hub: hub).id($0.id) }
+                            ForEach(entries) { e in
+                                EntryRow(entry: e, store: store, hub: hub).id(e.id).onAppear { store.rowAppeared(e.id, in: entries) }
+                            }
                         }
                         .frame(maxWidth: Self.column)
                         .padding(.horizontal, 20)

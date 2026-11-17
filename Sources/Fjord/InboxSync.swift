@@ -35,6 +35,50 @@ enum InboxSync {
     static let closedDays = 14
     /// Marks of things gone this long are forgotten.
     static let marksDays = 30
+    /// Past the caps, the list reads on as it is scrolled to its end (`Store.loadMoreInbox`): a page of each search with
+    /// more, again while a page brings nothing new to the list, up to `loadMoreRounds`; never with GitHub's points below
+    /// `tailPoints`, which stay for the polls.
+    static let loadMoreRounds = 3
+    /// The list reads on once one of its last rows this many comes into view.
+    static let loadMoreLead = 5
+
+    // MARK: - Reading on past the caps
+
+    /// Where a search cut short stopped (GitHub's cursor) and how many of its results were read to there.
+    struct SearchMore: Equatable {
+        var cursor: String
+        var read: Int
+    }
+
+    /// Whether the list may read on now, with GitHub's GraphQL points as last said.
+    static func loadsMore(remaining: Int?) -> Bool { (remaining ?? tailPoints) >= tailPoints }
+
+    /// Where each search stands after a refresh: one it read whole has no more; one it cut short reads on from where it
+    /// stopped, unless the list was read further already (scrolled past the caps); one it didn't run, or couldn't read,
+    /// stays where it was; one no rule asks for any more goes.
+    static func refreshedMore(_ stored: [String: SearchMore], fetched: [String: SearchMore], ran: Set<String>,
+                              complete: Set<String>, all: Set<String>) -> [String: SearchMore] {
+        var out = stored.filter { all.contains($0.key) && !complete.contains($0.key) }
+        for (search, at) in fetched where ran.contains(search) && all.contains(search) {
+            if (out[search]?.read ?? -1) < at.read { out[search] = at }
+        }
+        return out
+    }
+
+    /// Where the searches read on stand after a page of each (`asked`): one read to its end goes, one with more stops
+    /// further, one GitHub couldn't answer stays where it was to be asked again.
+    static func advancedMore(_ stored: [String: SearchMore], asked: [String], fetched: [String: SearchMore],
+                             complete: Set<String>, failed: Set<String>) -> [String: SearchMore] {
+        var out = stored
+        for search in asked where !failed.contains(search) {
+            if let at = fetched[search], !complete.contains(search) {
+                out[search] = SearchMore(cursor: at.cursor, read: (stored[search]?.read ?? 0) + at.read)
+            } else {
+                out[search] = nil
+            }
+        }
+        return out
+    }
 
     // MARK: - Searches
 
@@ -1136,6 +1180,13 @@ struct InboxSyncState {
     var workflowCursor = 0
     /// Where the next look at things kept unseen starts (`Store.recheck`).
     var recheckCursor = 0
+    /// By search cut short at the caps, where the list reads on from when scrolled to its end (`Store.loadMoreInbox`).
+    var more: [String: InboxSync.SearchMore] = [:]
+    /// Refreshes under way: a load waits for their end, and a refresh for a load's.
+    var refreshing = 0
+    var loadingMore: Task<Void, Never>?
+    /// The list's end was reached during a refresh: read on once it is done.
+    var loadMoreAfterRefresh = false
 }
 
 // MARK: - Repos that moved
@@ -1233,6 +1284,16 @@ extension Store {
     /// is a refresh asked for by hand: it searches even when the points looked spent.
     func syncInbox(manual: Bool = false) async {
         guard let me = me?.login else { return }
+        // A load past the caps and a refresh don't overlap: each takes in the things as the other left them.
+        inboxSyncState.refreshing += 1
+        defer {
+            inboxSyncState.refreshing = max(0, inboxSyncState.refreshing - 1)
+            if inboxSyncState.refreshing == 0, inboxSyncState.loadMoreAfterRefresh {
+                inboxSyncState.loadMoreAfterRefresh = false
+                loadMoreInbox()
+            }
+        }
+        if let load = inboxSyncState.loadingMore { await load.value }
         // Signed in as someone else, or with other credentials, while it waits (suggestions sign in too): what it was
         // answered is about the last sign-in, and nothing of it is taken, said or acted on.
         let fence = inboxFence
@@ -1403,7 +1464,12 @@ extension Store {
         await motionGate.still()
         guard current() else { return }
         inboxError = error
-        if !searchesKept { inboxSyncState.searchCursor = plan.next }
+        if !searchesKept {
+            inboxSyncState.searchCursor = plan.next
+            inboxSyncState.more = InboxSync.refreshedMore(inboxSyncState.more, fetched: fetched.more,
+                                                          ran: Set(searches).subtracting(fetched.failed),
+                                                          complete: fetched.complete, all: plan.all)
+        }
         for (id, thing) in workflows { next[id] = thing }
         if !failedRepos.isEmpty {
             let kept = things.filter { $0.value.kind == .workflow && failedRepos.contains($0.value.repo) && next[$0.key] == nil }
@@ -1456,12 +1522,16 @@ extension Store {
         var failed: Set<String> = []
         /// The searches read to their last page, whole: what they didn't return, they don't find.
         var complete: Set<String> = []
+        /// By search cut short at the caps (GitHub has more pages), where it stopped and how many results it read.
+        var more: [String: InboxSync.SearchMore] = [:]
     }
 
     /// Searches, a page at a time for those with more, until the caps: what a round asks for is shared out of the things
     /// left before it is asked, so a refresh never takes in more than `maxThings`. An answer with no data at all throws;
     /// one with data and errors (a node GitHub couldn't give, a part of one) is taken for what it has, and says so.
-    func fetchThings(_ searches: [String]) async throws -> Fetched {
+    /// `from`: by search, the cursor to read on from (a load past the caps, `loadMoreInbox`); the others start at the top.
+    func fetchThings(_ searches: [String], from start: [String: String] = [:], maxPages: Int = InboxSync.maxPages,
+                     maxThings: Int = InboxSync.maxThings) async throws -> Fetched {
         var found: [String: Thing] = [:]
         var partial = Set<String>()
         var error: String?
@@ -1472,14 +1542,21 @@ extension Store {
         // before stands (`keepsTail`).
         var moreThreads: [String: (node: String, cursor: String, total: Int)] = [:]
         let now = Date()
-        var cursors: [Int: String?] = Dictionary(uniqueKeysWithValues: searches.indices.map { ($0, String?.none) })
+        var cursors: [Int: String?] = Dictionary(uniqueKeysWithValues: searches.indices.map { ($0, start[searches[$0]]) })
+        // Results each search read, and where those left at the caps stopped.
+        var read: [Int: Int] = [:]
+        var more: [String: InboxSync.SearchMore] = [:]
         var pages = 0
-        while !cursors.isEmpty, pages < InboxSync.maxPages, found.count < InboxSync.maxThings {
+        while !cursors.isEmpty, pages < maxPages, found.count < maxThings {
             pages += 1
             var next: [Int: String?] = [:]
-            let left = InboxSync.maxThings - found.count
+            let left = maxThings - found.count
             // More searches than things left: the first of them, one each.
             let active = Array(cursors.keys.sorted().prefix(left))
+            // Those left out of this round stop where they were.
+            for (i, cursor) in cursors where !active.contains(i) {
+                if let cursor { more[searches[i]] = InboxSync.SearchMore(cursor: cursor, read: read[i] ?? 0) }
+            }
             let first = InboxSync.pageSizes(searches: active.count, budget: left)
             for start in stride(from: 0, to: active.count, by: InboxSync.searchesPerRequest) {
                 let batch = active[start..<min(start + InboxSync.searchesPerRequest, active.count)]
@@ -1503,6 +1580,7 @@ extension Store {
                 for i in batch {
                     if missing.contains("s\(i)") { failed.insert(searches[i]) }
                     guard let result = data["s\(i)"] as? [String: Any] else { failed.insert(searches[i]); continue }
+                    read[i, default: 0] += (result["nodes"] as? [Any])?.count ?? 0
                     // A node GitHub couldn't give is null: the others are still things.
                     for page in pages["s\(i)"] ?? [] {
                         let n = page.index
@@ -1535,11 +1613,15 @@ extension Store {
             }
             cursors = next
         }
+        for (i, cursor) in cursors {
+            if let cursor { more[searches[i]] = InboxSync.SearchMore(cursor: cursor, read: read[i] ?? 0) }
+        }
         // The rest of their review threads, a page at a time up to the cap: an unresolved one past the first page is there.
         // One that can't be read is a thing given in part.
         if let failure = await readThreadTails(moreThreads, into: &found, partial: &partial, now: now) { error = error ?? failure }
         return Fetched(things: Array(found.values), partial: partial, error: error, foundBy: foundBy, failed: failed,
-                       complete: complete.subtracting(failed))
+                       complete: complete.subtracting(failed),
+                       more: more.filter { !failed.contains($0.key) && !complete.contains($0.key) })
     }
 
     /// Reads on the review threads of PRs that have more than came with them (`moreThreads`), a page at a time up to the
@@ -1691,6 +1773,79 @@ extension Store {
         state.foundBy = foundBy
         inboxSyncState = state
         return kept
+    }
+
+    /// The list was scrolled to its end: the searches cut short at the caps read on, a page each, and what they bring is
+    /// added (`takeMore`). Again while a page brings nothing new to the list, up to `InboxSync.loadMoreRounds`; the next
+    /// end reached reads on from there, until GitHub has no more. Never alongside a refresh (one under way reads on once it
+    /// is done), nor with GitHub's points low.
+    func loadMoreInbox() {
+        guard triageOn, me != nil, inboxSyncState.loadingMore == nil else { return }
+        guard inboxSyncState.refreshing == 0 else { inboxSyncState.loadMoreAfterRefresh = true; return }
+        guard !inboxSyncState.more.isEmpty, InboxSync.loadsMore(remaining: gh.graphqlRemaining) else { return }
+        let account = inboxSyncState.account
+        inboxSyncState.loadingMore = Task { @MainActor [weak self] in
+            await self?.readOn()
+            if self?.inboxSyncState.account == account { self?.inboxSyncState.loadingMore = nil }
+        }
+    }
+
+    /// A row of a list came into view: one of its last few reads on (`loadMoreInbox`).
+    func rowAppeared(_ id: String, in rows: [InboxEntry]) {
+        guard rows.suffix(InboxSync.loadMoreLead).contains(where: { $0.id == id }) else { return }
+        loadMoreInbox()
+    }
+
+    private func readOn() async {
+        guard let me = me?.login else { return }
+        let fence = inboxFence
+        func current() -> Bool { inboxFence == fence && !Task.isCancelled }
+        for _ in 0..<InboxSync.loadMoreRounds {
+            let all = InboxSync.searchPlan(categories: categories, groups: groups, me: me, contributed: contributedRepos,
+                                           myTeams: myTeams).all
+            let more = inboxSyncState.more.filter { all.contains($0.key) }
+            guard !more.isEmpty, InboxSync.loadsMore(remaining: gh.graphqlRemaining) else { return }
+            let asked = more.keys.sorted()
+            let fetched: Fetched
+            do {
+                fetched = try await fetchThings(asked, from: more.mapValues(\.cursor), maxPages: 1,
+                                                maxThings: asked.count * InboxSync.pageSize)
+            } catch { return }
+            guard current() else { return }
+            // Taken in once the window's morph has played (`MotionGate`), as a refresh's results are.
+            await motionGate.still()
+            guard current() else { return }
+            inboxSyncState.more = InboxSync.advancedMore(inboxSyncState.more, asked: asked, fetched: fetched.more,
+                                                         complete: fetched.complete, failed: fetched.failed)
+            if takeMore(fetched, me: me) { return }
+        }
+    }
+
+    /// Adds what reading on past the caps brought, as old news: things already there stay as the refreshes keep them,
+    /// the new ones are kept by the searches that found them (`keepingUnvisited`), and what they bring to the list is
+    /// noted, never announced, and taken as old for the actions. Whether the list has new entries.
+    @discardableResult
+    func takeMore(_ fetched: Fetched, me: String) -> Bool {
+        for (id, by) in fetched.foundBy { inboxSyncState.foundBy[id, default: []].formUnion(by) }
+        var next = things
+        var added = Set<String>()
+        for var thing in fetched.things where next[thing.id] == nil {
+            InboxSync.markInvolved(&thing, foundBy: fetched.foundBy[thing.id] ?? [], complete: fetched.complete, me: me)
+            InboxSync.markMentioned(&thing, foundBy: fetched.foundBy[thing.id] ?? [], complete: fetched.complete)
+            next[thing.id] = thing
+            added.insert(thing.id)
+        }
+        guard !added.isEmpty else { return false }
+        applyThings(next)
+        let arrived = entries.filter { added.contains($0.thing.id) }
+        guard !arrived.isEmpty else { return false }
+        var updated = marks
+        for entry in arrived { updated[entry.id, default: EntryMarks()].notified.formUnion(entry.facts.map(\.key)) }
+        if updated != marks { marks = updated }
+        var ledger = actionLedger
+        InboxActions.takeAsOld(arrived, categories: categories, ledger: &ledger, held: heldActions)
+        if ledger != actionLedger { actionLedger = ledger }
+        return true
     }
 
     private func workflowThings(_ repo: String, _ requested: String?) async throws -> [Thing] {
